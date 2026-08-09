@@ -504,6 +504,12 @@ body.onboarding{padding-bottom:24px}
 .ob-prog>i{display:block;height:100%;background:var(--acc);border-radius:2px;transition:width .3s cubic-bezier(.4,0,.2,1)}
 .ob-prog-n{font:11px var(--mono);color:var(--faint);text-transform:uppercase;letter-spacing:.08em;margin:0 2px 20px}
 .ob-card{margin-bottom:20px}
+/* The welcome screen leads with the TILE only. The card's own h1 immediately below it
+   is already the wordmark, and printing the name twice, two sizes apart, reads as a
+   layout mistake rather than as emphasis. */
+.ob-mark{margin:4px 0 22px}
+.ob-mark .e26-tile{width:62px;height:62px}
+.ob-mark .e26-name{display:none}
 .ob-kick{font:11px var(--mono);color:var(--faint);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
 .ob-h{font-family:var(--disp);font-size:25px;font-weight:600;line-height:1.16;letter-spacing:.04em;text-transform:uppercase;margin:0 0 13px}
 .ob-sub{color:var(--dim);font-size:15px;line-height:1.5}
@@ -855,15 +861,32 @@ body.cele-open{overflow:hidden}
 /* ================= ELEMENT 26 BRAND =================
    The wordmark is the periodic tile shrunk to a chip plus the name. It appears once per
    screen, in the header, at a size that reads as an identifier rather than a banner. */
-.e26{display:inline-flex;align-items:center;gap:8px}
+/* The header mark is the SPLASH TILE, not a separate small-size design.
+
+   It was two stacked lines of text centred in a 24px box — "26" over "Fe", both tiny,
+   both fighting for the same middle. At that size centred stacking has nowhere to go:
+   the number has to shrink until it is texture rather than a number, and the result
+   reads as a smudge that happens to be near the wordmark.
+
+   Drawn as SVG instead, with the real periodic-table layout the splash uses: the atomic
+   number sits in its own top-left corner and Fe takes the space below it, so the two
+   never compete. SVG also means the glyphs scale by geometry rather than by font
+   hinting, which is what keeps it crisp at 30px and identical to the 190px version. */
+.e26{display:inline-flex;align-items:center;gap:10px}
 .e26-tile{
-  display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
-  width:24px;height:24px;border:1.5px solid var(--acc);border-radius:5px;
-  font-family:var(--mono);line-height:1;flex-shrink:0;
+  width:31px;height:31px;flex-shrink:0;display:block;overflow:visible;
+  filter:drop-shadow(0 0 7px rgba(198,93,58,.28));
+  /* The h1 rule uppercases everything inside it, and it reaches SVG <text> too — which
+     turned the mark into "FE". Fe is a chemical symbol: the capital is the element, the
+     lowercase is what distinguishes it from F. Getting that wrong in the logo of an app
+     named after the element is not a styling detail. */
+  text-transform:none;letter-spacing:0;
 }
-.e26-tile i{font-style:normal;font-size:6.5px;color:var(--dim);margin-top:1px}
-.e26-tile b{font-size:11px;font-weight:600;color:var(--text);margin-top:-1px}
-.e26-name{font-family:var(--disp);font-weight:600;letter-spacing:.15em}
+.e26-tile .tile-box{stroke:var(--acc)}
+.e26-tile .tile-z{fill:var(--dim)}
+.e26-tile .tile-sym{fill:var(--text)}
+.e26-name{font-family:var(--disp);font-weight:600;letter-spacing:.15em;line-height:1}
+.e26-name em{font-style:normal;color:var(--acc)}
 
 /* A section label: hairline rule, small caps mono, the way a table names a column. */
 .rule-h{
@@ -4811,9 +4834,10 @@ function obProgress(){
 function viewOnboarding(){
   const step = OB_STEPS[OB.step];
   let h = `<div class="ob-wrap">${obProgress()}`;
+  if(step === "welcome") h += `<div class="ob-mark">${brandMark()}</div>`;
 
   if(step === "welcome"){
-    h += obCardOpen("", "Iron Log",
+    h += obCardOpen("", "Element 26",
       `<p>A training log that reads what you lift and tells you what to change.</p>
        <p>It tracks every set, grades each session, watches the volume each muscle
        actually receives, and tells you when a load is ready to go up. Setup takes about
@@ -5241,6 +5265,21 @@ function profColor(id){
   String(id).split("").forEach(c=>{ hs = (hs*31 + c.charCodeAt(0)) >>> 0; });
   return pal[hs % pal.length];
 }
+/* The Element 26 mark: the periodic tile plus the wordmark. One definition, used by
+   the header on every tab, so the mark can never drift between screens. */
+function brandMark(){
+  return `<span class="e26">
+    <svg class="e26-tile" viewBox="0 0 64 64" aria-hidden="true">
+      <rect class="tile-box" x="1.6" y="1.6" width="60.8" height="60.8" rx="7"
+            fill="none" stroke-width="2.8"/>
+      <text class="tile-z"   x="10.5" y="22" font-family="'IBM Plex Mono',ui-monospace,monospace"
+            font-size="13">26</text>
+      <text class="tile-sym" x="33"   y="51" font-family="'IBM Plex Mono',ui-monospace,monospace"
+            font-size="27" font-weight="600" text-anchor="middle">Fe</text>
+    </svg>
+    <span class="e26-name">Element&nbsp;<em>26</em></span>
+  </span>`;
+}
 function profileBar(){
   const p = activeProfile();
   const n = PROF.list.length;
@@ -5488,7 +5527,7 @@ function inlineTipHTML(a, seen){
 function viewToday(){
   const wid = todaysWorkoutId();
   const m = dayMeta(wid);
-  let h = `<div class="hdr"><h1><span class="e26"><span class="e26-tile"><i>26</i><b>Fe</b></span><span class="e26-name">Element 26</span></span>${syncDot()}</h1><span class="date num">${fmtDate(todayStr())}</span></div>`;
+  let h = `<div class="hdr"><h1>${brandMark()}${syncDot()}</h1><span class="date num">${fmtDate(todayStr())}</span></div>`;
   h += profileBar();
 
   // fresh install / new home-screen app: data lives safely in the gist, guide them to restore it
