@@ -29,7 +29,7 @@
    anyone who found the URL, so it is not allowed to be empty — see the guard in
    fetch(). Use the exact scheme+host you serve the app from. */
 const ALLOWED_ORIGINS = [
-  // "https://brother12334.github.io",
+  // "https://brother12334.github.io/ShowcaseE26/index.html",
   // "https://element26.example.com",
 ];
 
