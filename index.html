@@ -5301,8 +5301,22 @@ async function aiCall(parts){
       throw new Error("The plan reader isn't switched on for this copy of the app — no key reached Google. That's ours to fix, not yours.");
     if((res.status === 400 && /api key/i.test(msg)) || res.status === 403)
       throw new Error("The plan reader isn't working right now — that's a problem at our end, not yours. Try again later, or build your plan in the Program tab in the meantime.");
-    if(res.status === 404)
-      throw new Error("The plan reader is misconfigured (no model called \"" + AI_MODEL + "\"). That's ours to fix.");
+    /* A 404 has two completely different causes and the old message asserted one of
+       them, which sent whoever read it to check a model name that was usually fine.
+
+       Google answers with JSON and says exactly what it could not find, so `msg` is a
+       real sentence: "models/... is not found for API version v1beta". The proxy's own
+       host answers with an HTML error page instead, which leaves `msg` as the bare
+       "HTTP 404" — and that is the tell that the request never reached Google at all,
+       because the Worker has no code path that returns 404. Passing the upstream text
+       through is what makes those two distinguishable at a glance, so it is passed
+       through rather than replaced. */
+    if(res.status === 404){
+      const reached = /HTTP 404/.test(msg);
+      throw new Error(reached
+        ? "The plan reader's address isn't answering (404, no detail). The proxy is probably not deployed. That's ours to fix."
+        : "The plan reader is misconfigured. Google said: " + msg + " (asked for \"" + AI_MODEL + "\"). That's ours to fix.");
+    }
     if(res.status === 429)
       throw new Error("The plan reader is busy — it's had a lot of use today. Wait a few minutes and try again.");
     if(res.status >= 500)
