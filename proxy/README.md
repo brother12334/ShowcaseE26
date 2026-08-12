@@ -7,7 +7,10 @@ This Worker fixes that properly: it holds the key, the app calls the Worker, and
 requests leaving the browser carry no credential at all.
 
 **Free tier is enough.** Cloudflare Workers gives 100,000 requests/day at no cost and
-asks for no card. A plan import is one request.
+asks for no card. A plan import is two requests: a small screening call that decides
+whether the document is a usable training plan at all, then the extraction itself. A
+document the screening call rejects never reaches the extraction, so an unreadable scan
+or a nutrition sheet costs one cheap request rather than a full read.
 
 ---
 

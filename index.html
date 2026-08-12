@@ -583,6 +583,51 @@ body.onboarding{padding-bottom:24px}
 }
 .ai-note b{color:var(--text)}
 
+/* The importer runs as a sequence of named stages — check, read, questions, review —
+   and the strip says which one you are on. It is not decoration: the single most common
+   confusion with a one-shot importer is not knowing whether the thing on screen is a
+   guess, a question, or the finished plan. */
+.ai-steps{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 14px}
+.ai-step{
+  font:10.5px var(--mono);text-transform:uppercase;letter-spacing:.07em;
+  padding:4px 8px;border-radius:20px;border:1px solid var(--line);color:var(--faint);
+}
+.ai-step.on{border-color:var(--acc-line);color:var(--text);background:var(--card2)}
+.ai-step.done{color:var(--dim)}
+/* The review screen's headline numbers: what was detected, counted, in one glance. */
+.ai-stats{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.ai-stat{
+  flex:1 1 88px;background:var(--card2);border:1px solid var(--line);border-radius:12px;
+  padding:9px 10px;min-width:88px;
+}
+.ai-stat b{display:block;font-family:var(--disp);font-size:19px;line-height:1.1}
+.ai-stat span{font:10.5px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
+/* Anything detected that carries an instruction — a deload, a superset, a dropset — is
+   listed rather than counted, because the point is that it survived the import. */
+.ai-flags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.ai-flag{
+  font:11.5px var(--mono);padding:4px 9px;border-radius:20px;
+  border:1px solid var(--line);background:var(--card2);color:var(--dim);
+}
+.ai-flag b{color:var(--text);font-weight:600}
+.ai-q{margin:0 0 20px}
+.ai-q-h{font-family:var(--disp);font-size:15px;font-weight:600;letter-spacing:.02em;margin-bottom:4px}
+.ai-q-why{color:var(--dim);font-size:13.5px;line-height:1.5;margin-bottom:10px}
+.ai-q-src{
+  display:inline-block;font:10.5px var(--mono);text-transform:uppercase;letter-spacing:.06em;
+  padding:2px 7px;border-radius:20px;border:1px solid var(--line);color:var(--faint);margin-bottom:8px;
+}
+/* An exercise the database could not match exactly, with somewhere to fix it. */
+.ai-match{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;
+  border-top:1px solid var(--line);font-size:13.5px;
+}
+.ai-match select{
+  flex:1 1 160px;background:var(--card2);border:1px solid var(--line);color:var(--text);
+  border-radius:10px;padding:7px 9px;font-size:13px;font-family:inherit;
+}
+.ai-src{font:10.5px var(--mono);color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+
 /* ================= TAB BAR =================
    Fixed to the bottom and drawn on its own compositor layer. The old bar used
    `backdrop-filter:blur()`, which forces Safari to re-rasterise the blur against the
@@ -1449,7 +1494,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "1.2";
+const APP_VERSION = "1.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -1488,9 +1533,11 @@ const APP_VERSION = "1.2";
    and anything committed stays in the git history. A leaked key is spent — replace it.
 
    Whichever route you take, free-tier limits are per KEY, so they are shared by
-   everyone using the app. Fine for normal use — a plan import is one request, and
-   people import a plan once — but a busy day ends in "you've hit the rate limit" until
-   the quota resets.
+   everyone using the app. Fine for normal use — a plan import is one small screening
+   request plus one extraction request, and people import a plan once — but a busy day
+   ends in "you've hit the rate limit" until the quota resets. A document rejected by the
+   screening pass costs the screening request only and never reaches the extraction,
+   which is the cheap half of why the importer checks first.
    ===================================================================== */
 const AI_PROXY = "https://element26-gemini.ferbyablon.workers.dev";
 const AI_KEY   = "";     // local testing only — see above before publishing this set
@@ -2222,12 +2269,50 @@ function isSingleArm(e){
   const s = (e.name||"") + " " + (e.note||"");
   return /\b(single|one)[- ]?arm\b|\b(single|one)[- ]?leg\b|\bper (arm|leg|side)\b|\beach (arm|leg|side)\b|\bl\s*\/\s*r\b|\bunilateral\b|\balternating\b|alternat[a-z]*\s+(l\/r|arms?|legs?|left|right|side)/i.test(s);
 }
+/* =====================================================================
+   TRAINING PREFERENCES, as opposed to facts about a programme
+
+   Three behaviours in this app are decisions ABOUT a person rather than statements
+   about their plan: how sides are handled on one-limb movements, whether warm-up sets
+   are generated for them, and whether the app volunteers a deload. They were all
+   hard-coded to the author's own answers, which is fine while there is one user and
+   wrong the moment somebody imports a programme of their own — an imported plan would
+   silently arrive with somebody else's warm-up ramp, somebody else's weaker-side rule
+   and somebody else's six-week deload clock stapled to it.
+
+   So they live here as preferences with the historical defaults, which keeps a
+   generated plan behaving exactly as it always did, and the importer ASKS rather than
+   assumes. A plan that states one of these itself always wins over the preference: see
+   `sideMode` and `warmups` on an exercise, both written only from the document.
+   ===================================================================== */
+const PREF_DEFAULTS = {
+  sides: "matchWeaker",   // separate | matchWeaker | both  (see sideModeFor)
+  startSideFlip: true,    // flip the opening limb every session of that day
+  warmups: "auto",        // auto | planOnly | manual
+  deloads: "auto"         // auto | planOnly
+};
+function trainPrefs(){
+  if(typeof S === "undefined" || !S) return PREF_DEFAULTS;
+  if(!S.prefs || typeof S.prefs !== "object") S.prefs = Object.assign({}, PREF_DEFAULTS);
+  return S.prefs;
+}
+/* How this particular movement's sides are handled. An exercise carries `sideMode` only
+   when the source document said so in as many words — "alternate arms every rep, rest
+   after both arms" is a fact about the programme and outranks any preference. */
+function sideModeFor(e){
+  if(e && e.sideMode) return e.sideMode;
+  return trainPrefs().sides || PREF_DEFAULTS.sides;
+}
 /* Which alternating scheme an exercise uses, if any:
      "side"  → one limb at a time, R then L then R…
      "cross" → both at once, alternating which arm is on top
    Crossover wins, because a rear delt fly reads as "alternating" to the text fallback
-   but isn't done one arm at a time.                                                */
+   but isn't done one arm at a time.
+
+   "both" short-circuits the whole thing: the person has said a set of this movement is
+   one set covering both limbs, so there is no side to mark and no L/R sequence to run. */
 function altStyle(e){
+  if(sideModeFor(e) === "both") return null;
   if(isCrossover(e)) return "cross";
   if(isSingleArm(e)) return "side";
   return null;
@@ -2790,6 +2875,11 @@ function migrate(){
     let noted = false;
     const stamp = e=>{
       if(!e || !e.name) return;
+      /* An imported movement is left alone. Its note is what the source document said
+         about it, and stamping "single arm, alternate L/R each set" on top of "alternate
+         arms every rep, rest after both arms" replaces a fact from somebody's programme
+         with this app's own habit. `sideMode` marks the ones the document spoke for. */
+      if(e.sideMode) return;
       const style = altStyle(e);
       if(!style) return;
       const n = String(e.note||"").trim();
@@ -2811,6 +2901,16 @@ function migrate(){
     S.cycleV2 = true;
     saveQuiet();
   }
+  /* Training preferences. An existing profile gets the historical defaults, so nothing
+     about how their plan already behaves changes on the day this shipped; only an
+     import (or the Setup screen) ever moves them off it. */
+  if(!S.prefs || typeof S.prefs !== "object"){ S.prefs = Object.assign({}, PREF_DEFAULTS); saveQuiet(); }
+  else {
+    let filled = false;
+    Object.keys(PREF_DEFAULTS).forEach(k=>{ if(S.prefs[k] == null){ S.prefs[k] = PREF_DEFAULTS[k]; filled = true; } });
+    if(filled) saveQuiet();
+  }
+  if(S.importMeta === undefined) S.importMeta = null;
   if(!S.viewMode) S.viewMode = "regular";
   if(!S.checkins) S.checkins = {};
   if(!Array.isArray(S.restLog)) S.restLog = [];
@@ -3603,7 +3703,12 @@ function altIndex(wid){
 // (UNILATERAL + isSingleArm live near the top of the file, migrate() needs them.)
 // Which arm to START with this session. Flips every session of that day:
 // session 0,2,4 → Right first; 1,3,5 → Left first.
-function startSideFor(wid){ return altIndex(wid) === 0 ? "R" : "L"; }
+function startSideFor(wid){
+  // Flipping is a preference, not a law: somebody who always wants to open on their
+  // right (a coach's plan often says so) can turn it off, and then it never moves.
+  if(!trainPrefs().startSideFlip) return "R";
+  return altIndex(wid) === 0 ? "R" : "L";
+}
 function sideWord(side){ return side === "L" ? "LEFT" : "RIGHT"; }
 function activeVariant(wid, e){
   if(!e.alt) return e;
@@ -4824,6 +4929,7 @@ function finishOnboarding(){
   } else {
     S.program = buildProgram(o.splitId, o.gear, o.level);
     applyGoalReps(S.program, o.goal);
+    S.importMeta = null;         // a generated plan carries no document's instructions
   }
   S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = [];
   if(o.name){
@@ -4886,6 +4992,12 @@ function adoptImportedPlan(d){
   if(Array.isArray(d.sessions) && d.sessions.length) S.sessions = d.sessions;
   if(d.checkins) S.checkins = d.checkins;
   if(d.restLog) S.restLog = d.restLog;
+  /* The preferences the import settled — how sides are handled, whether warm-ups are
+     generated, whether deloads are volunteered — travel with the plan. Without this the
+     answers somebody gave the importer during onboarding would be collected and then
+     thrown away, and their plan would run on this app's defaults instead of theirs. */
+  if(d.prefs) aiApplyPrefs(d.prefs);
+  if(d.meta !== undefined) S.importMeta = d.meta || null;
   applySplit();
   return true;
 }
@@ -5107,6 +5219,43 @@ function bindOnboarding(){
    plan would have to be taught to every screen in the app, and would be wrong in one of
    them within a month.
 
+   THE IMPORT IS DOCUMENT-DRIVEN, AND THAT IS THE WHOLE DESIGN.
+
+   Two categories, kept apart on purpose:
+
+     FACTS      things the document states. Exercises, sets, reps, rep ranges, RIR/RPE,
+                rest, tempo, warm-up sets, supersets, circuits, dropsets, rest-pause,
+                failure instructions, unilateral and alternating instructions,
+                progression rules, weekly changes, phases, deloads, test weeks. These are
+                transcribed and preserved exactly. Nothing here is improved, rebalanced
+                or "corrected", and nothing is invented to fill a gap.
+
+     PREFERENCES things Element 26 needs to know that the document cannot answer. How
+                sides are handled, whether warm-ups are generated, whether the app
+                volunteers a deload, what to do with kilos, what to do when no effort
+                target was written down. These are ASKED, once, and only when the
+                document has actually left them open. See aiBuildQuestions().
+
+   What this replaced: an importer that quietly stamped one particular person's habits
+   onto everybody else's programme — their warm-up ramp before the first working set,
+   their match-the-weaker-side rule, their rest bands, their invented RPE ramps, their
+   deload clock. All of that is now either read from the document or asked for. If you
+   are adding to this file, the test is: could this document have said it? If yes, read
+   it. If no, ask.
+
+   FOUR STAGES, in this order, and a document can stop at any of them:
+
+     1 CHECK    a small, cheap, separate call whose only job is to decide whether this
+                is a readable training plan at all. A blank scan, a corrupted file, a
+                menu, a nutrition sheet or an unreadable photo is rejected HERE, with a
+                reason, and never reaches stage 2. A rejected document therefore costs
+                one screening call and never consumes the extraction request, and it is
+                never counted or presented as a successful import.
+     2 READ     the extraction proper, against the schema below.
+     3 ASK      only the questions this document actually left open.
+     4 REVIEW   everything detected, laid out and correctable, before anything is
+                written to the plan.
+
    NOBODY IS ASKED TO SET ANYTHING UP. The key is the one at the top of this file, and
    it belongs to whoever publishes the app. That is the whole point: a person who opens
    this to log a workout should never meet a screen asking them for an API key, and most
@@ -5147,9 +5296,14 @@ function aiNameIndex(){
   AI_NAME_INDEX = o;
   return o;
 }
+function aiCleanName(n){
+  return String(n==null?"":n).replace(/\s+/g," ").trim().slice(0,48);
+}
+// Is this a movement the app's own database knows, exactly?
+function aiKnownName(n){ return !!aiNameIndex()[canonEx(aiCleanName(n))]; }
 // Snap a returned name onto the app's spelling of the same movement, if it is one.
 function aiSnapName(n){
-  const clean = String(n==null?"":n).replace(/\s+/g," ").trim().slice(0,48);
+  const clean = aiCleanName(n);
   if(!clean) return "";
   const hit = aiNameIndex()[canonEx(clean)];
   if(hit) return hit;
@@ -5159,29 +5313,123 @@ function aiSnapName(n){
      already is left alone, because "DB" and "RDL" are not "Db" and "Rdl". */
   return /[A-Z]/.test(clean) ? clean : clean.replace(/\b[a-z]/g, c=>c.toUpperCase());
 }
+/* The closest things in the database to a name it does not know, so the review screen
+   can offer them rather than making somebody retype the movement. Word overlap, not
+   fuzzy string distance: "Seated DB Shoulder Press" and "Dumbbell Shoulder Press" share
+   the words that matter and differ by half their characters. */
+function aiCandidates(n, limit){
+  const words = canonEx(aiCleanName(n)).split(/\s+/).filter(w=> w.length > 2);
+  if(!words.length) return [];
+  const scored = [];
+  aiVocabulary().forEach(v=>{
+    const vw = canonEx(v).split(/\s+/);
+    let hit = 0;
+    words.forEach(w=>{
+      if(vw.some(x=> x === w || x.indexOf(w) === 0 || w.indexOf(x) === 0)) hit++;
+    });
+    if(hit) scored.push({v, s: hit / Math.max(words.length, vw.length)});
+  });
+  scored.sort((a,b)=> b.s - a.s);
+  return scored.filter(x=> x.s >= 0.34).slice(0, limit || 6).map(x=> x.v);
+}
 
+/* ---------- stage 1: is this even a training plan? ----------
+
+   A separate, deliberately small call. It exists because the old importer's only defence
+   against a bank statement was a boolean buried in the extraction response, which meant
+   every unusable document still paid for a full extraction and still had a chance of
+   coming back as a confidently hallucinated three-day split. Screening first is both
+   cheaper and safer: nothing that fails here is ever extracted, and a document that is
+   merely doubtful is handed to the person to decide on rather than guessed at. */
+function aiCheckPrompt(){
+  return [
+"You are screening a document for a training-log app. You are NOT extracting anything and you must not transcribe the plan. Your only job is to decide whether this document is a readable, usable weight-training programme.",
+"",
+"Answer these, honestly and conservatively:",
+"• readable — can the text actually be read? A blank page, a scan with no recoverable text, a corrupted file, a photo too dark or too blurred to read, or a document in which you can make out fewer than half the words is NOT readable.",
+"• isTrainingPlan — is this a training programme, as opposed to a nutrition sheet, an invoice, a class timetable, a medical form, an article about training, a race schedule, a blank template with no content, or anything else?",
+"• hasExercises — are actual exercises named?",
+"• hasSetsOrReps — are sets, reps, times, distances, RIR/RPE or equivalent training instructions given?",
+"• hasStructure — is there enough structure to build a plan from: at least one identifiable session or day with a list of movements in it?",
+"• workoutsSeen — how many distinct training sessions or days you can see. 0 if none.",
+"• exerciseSamples — up to five exercise names exactly as written, as evidence. Empty if none.",
+"",
+"VERDICT",
+"'reject'       — not usable. Use this for anything unreadable, blank, corrupted, not a training plan, or a training document with no exercises, no sets/reps and no structure to work from. Also use it when the quality is so poor that anything extracted would be guesswork.",
+"'questionable' — might be usable, but something is materially wrong: only part of it is legible, it is a fragment of a larger programme, the structure is unclear, exercises are named without any sets or reps, or it mixes a plan with a lot of unrelated material. Say precisely what is wrong.",
+"'ok'           — a readable training plan with exercises and enough structure to import.",
+"",
+"'summary' is one plain sentence describing what the document actually is, written to the person who uploaded it. 'problems' lists what is wrong, one short sentence each, empty if nothing is. 'needed' says what you would need instead, and is only used when the verdict is not 'ok'.",
+"",
+"Never be polite at the cost of being accurate. Rejecting a document costs somebody one upload; accepting a bad one costs them a training plan invented out of nothing."
+  ].join("\n");
+}
+const AI_CHECK_SCHEMA = {
+  type:"OBJECT",
+  properties:{
+    verdict:        {type:"STRING", enum:["ok","questionable","reject"]},
+    readable:       {type:"BOOLEAN"},
+    isTrainingPlan: {type:"BOOLEAN"},
+    hasExercises:   {type:"BOOLEAN"},
+    hasSetsOrReps:  {type:"BOOLEAN"},
+    hasStructure:   {type:"BOOLEAN"},
+    workoutsSeen:   {type:"INTEGER"},
+    documentType:   {type:"STRING"},
+    exerciseSamples:{type:"ARRAY", items:{type:"STRING"}},
+    summary:        {type:"STRING"},
+    problems:       {type:"ARRAY", items:{type:"STRING"}},
+    needed:         {type:"STRING"}
+  },
+  required:["verdict","readable","isTrainingPlan","summary"],
+  propertyOrdering:["verdict","readable","isTrainingPlan","hasExercises","hasSetsOrReps",
+                    "hasStructure","workoutsSeen","documentType","exerciseSamples",
+                    "summary","problems","needed"]
+};
+
+/* ---------- stage 2: reading the plan ---------- */
 function aiSystemPrompt(){
   return [
-"You convert a person's existing weight-training programme into structured JSON for a training-log app called Element 26. The input may be pasted text, a spreadsheet, a coach's PDF, a screenshot, or a photograph of a handwritten sheet. Read whatever you are given and transcribe the plan that is actually in it.",
+"You transcribe a person's existing weight-training programme into structured JSON for a training-log app called Element 26. The input may be pasted text, a spreadsheet, a coach's PDF, a screenshot, or a photograph of a handwritten sheet.",
 "",
-"RULES",
-"1. One entry in 'days' is ONE TRAINING SESSION in the rotation, in the order it is performed. Do not create a day for rest. If the source names its days (Push, Pull, Upper A, Chest and Triceps), keep those names.",
-"2. 'restDaysPerCycle' is how many rest days one full pass through those sessions contains. If the plan is a weekly one, that is 7 minus the number of training days. If it says nothing, use your best reading of it.",
-"3. 'sets' is the number of working sets, as a whole number. Warm-up sets are not working sets — leave them out. For a one-limb-at-a-time movement, give the TOTAL number of sets, not sets per side (this app alternates sides set by set): '3 sets each arm' is 6.",
-"4. 'reps' is a short string exactly as prescribed: '8', '6-10', '12-15', 'AMRAP', or a number of seconds for a timed hold. Never a sentence.",
-"5. 'rpe' is one target per set, in order, length equal to 'sets'. If the source gives RPE or RIR, convert it (RPE = 10 minus RIR) and use it. If it gives none, write a sensible ramp for the movement rather than repeating one number: heavy compounds ramp like 7,8,8,9 and isolation sits at 8-9 throughout.",
-"6. 'kind' classifies the job the movement does in that session: 'heavy' for the main barbell or machine compound it opens with, 'second' for a secondary compound, 'iso' for single-joint or isolation work, 'abs' for direct core work.",
-"7. 'weight' is a working load in POUNDS, and only when the source states an actual number for it. Convert kilos to pounds (1 kg = 2.20462 lb) and round to the nearest 5, and say so in that exercise's note. If the source gives a percentage of 1RM, a band colour, 'moderate', or nothing at all, leave weight out entirely — the app will set the load from the user's own first set.",
-"8. 'note' is at most one short sentence: a tempo, a form cue, a rest instruction, a conversion you made. Leave it empty if the source has nothing to say. Never invent coaching.",
-"9. Keep the source's exercise order within each day.",
-"10. Transcribe, do not improve. Do not add exercises the plan does not contain, do not drop ones it does, do not rebalance it, and do not correct it even if you think it is a poor programme.",
+"YOUR ONE JOB IS TRANSCRIPTION. Everything you output must be traceable to something the document says. You are not writing a programme, improving one, or filling in what a good coach would have written. Where the document is silent, SAY NOTHING — leave the field out, leave the array empty, and set the matching flag in 'stated' to false. The app asks the person about anything you leave open, which is always better than you guessing on their behalf.",
 "",
-"EXERCISE NAMES. Where a movement matches one in this list, use the list's exact spelling. Where it does not, keep the plan's own name, tidied to title case.",
+"STRUCTURE",
+"1. One entry in 'days' is ONE TRAINING SESSION in the rotation, in the order it is performed. Do not create a day for rest. If the source names its sessions (Push, Pull, Upper A, Chest and Triceps, Day 1), keep those names exactly.",
+"2. If the programme repeats the same sessions every week, describe those sessions once. Put week-to-week differences in 'weeklyChanges' rather than inventing extra days.",
+"3. 'restDaysPerCycle' only when the document actually says how the week is laid out. Otherwise leave it null and set stated.schedule false.",
+"4. 'weeks' is how many weeks the programme runs, if it says.",
+"",
+"EXERCISES",
+"5. 'sets' is the number of working sets as the document writes them. If it prescribes sets PER SIDE ('3 sets each arm'), put 3 and set setsArePerSide true. Do not double it yourself — the app doubles it or not depending on how the person chooses to track sides.",
+"6. 'reps' is exactly as prescribed, as a short string: '8', '6-10', '12-15', 'AMRAP', '30s', '20 each leg'. Never a sentence. If the document gives no rep target at all, use an empty string.",
+"7. 'rpe' or 'rir' ONLY if the document gives them, one per set in order. Never invent effort targets and never convert one into a guess. If the document says 'last set to failure' or 'leave 2 in the tank on the top set', put that in effortNote and leave the numeric arrays empty.",
+"8. 'restSeconds' only if a rest period is stated. A range like '2-3 min' gives restSeconds 120 and restNote '2-3 min'. Otherwise omit both.",
+"9. 'tempo' exactly as written ('3-1-1', '4s eccentric').",
+"10. 'weight' only when an actual load is stated. Give the number as written and set the document's unit in 'unit' at the top level; put percentages of 1RM, band colours or 'moderate' in weightNote instead, with weight null.",
+"11. 'warmupSets' are the warm-up sets THIS DOCUMENT prescribes for this exercise: label them as written ('bar', '50%', '95 lb'), with percent as a fraction (0.5) where it is a percentage, and reps if given. 'warmupNote' is any warm-up instruction in words. If the document prescribes no warm-ups, leave the array empty and set stated.warmups false. The app has its own warm-up behaviour and it must not be applied to a plan that specifies its own.",
+"12. Techniques, each only when the document says so: 'supersetGroup' and 'circuitGroup' are a shared label for movements performed together (use the same label on each member, in the order performed); 'dropset', 'restPause', 'toFailure' are booleans; 'progression' is any progression instruction attached to this exercise, in the document's own words.",
+"13. Sides. 'unilateral' true when the movement trains one limb at a time. 'alternating' is what the document says: 'perRep' for alternating every rep, 'perSet' for one side then the other set by set, 'perRound' for a whole round each side, 'none' if it does not say. 'sideInstruction' is the document's exact instruction, e.g. 'alternate arms every rep, rest after both arms are done'. If it says nothing about how sides are handled, leave alternating 'none' and sideInstruction empty and set stated.sideHandling false.",
+"14. 'kind' classifies the job the movement does in that session: 'heavy' for the main barbell or machine compound it opens with, 'second' for a secondary compound, 'iso' for single-joint or isolation work, 'abs' for direct core work. This is a classification of the movement, not an instruction.",
+"15. 'note' is anything else the document says about that exercise, in one short sentence, in its own words. Never invent coaching cues.",
+"16. Keep the source's exercise order within each session, and keep every exercise it contains. Do not add, drop, rebalance or correct anything, even if you think the programme is poor.",
+"",
+"PROGRAMME-LEVEL INSTRUCTIONS, all of them only if present:",
+"• 'phases' — named blocks (hypertrophy block, strength block) with the weeks they cover.",
+"• 'deloadWeeks' — which weeks are deloads and exactly what the document says to do in them.",
+"• 'testingWeeks' — max-testing or re-test weeks and their instruction.",
+"• 'weeklyChanges' — what changes week to week (sets added, intensity raised, reps dropped).",
+"• 'progressionRules' — how to add load or reps, in the document's words, with 'increment' as a number when it names one.",
+"• 'specialInstructions' — anything else that governs how the plan is run and does not belong to one exercise.",
+"• 'planNotes' — the document's own framing notes worth keeping.",
+"",
+"'stated' is how the app knows what to ask about. Set each flag true ONLY if the document really addresses that topic anywhere: warmups, rest, effort (RPE/RIR/failure targets), progression, schedule (which days, how many rest days), deload, sideHandling, tempo.",
+"",
+"EXERCISE NAMES. Where a movement matches one in this list, use the list's exact spelling. Where it does not, keep the document's own name, tidied to title case. Never substitute a similar movement for one that isn't in the list.",
 aiVocabulary().join(", "),
 "",
-"IF IT IS NOT A TRAINING PLAN, or it is too unclear to transcribe — a blurred photo, a nutrition sheet, a single sentence — set 'understood' to false and put one plain sentence in 'problem' saying what you would need instead. Do not guess a plan into existence. Otherwise set 'understood' to true.",
+"If the input turns out not to be a readable training plan after all, set 'understood' to false and put one plain sentence in 'problem'. Do not guess a plan into existence.",
 "",
-"Put anything you had to assume, could not read, or deliberately dropped into 'warnings', one short sentence each. An empty list is fine."
+"'warnings' is anything you had to assume, could not read, or deliberately left out, one short sentence each. Be specific: 'week 3 column was cut off', not 'some parts unclear'."
   ].join("\n");
 }
 
@@ -5193,40 +5441,99 @@ const AI_PLAN_SCHEMA = {
   properties:{
     understood:      {type:"BOOLEAN", description:"false if the input is not a readable training plan"},
     problem:         {type:"STRING",  description:"why it could not be read, if understood is false"},
-    splitName:       {type:"STRING",  description:"a short name for the whole programme, eg. Push Pull Legs"},
-    restDaysPerCycle:{type:"INTEGER"},
-    warnings:        {type:"ARRAY", items:{type:"STRING"}},
+    planName:        {type:"STRING",  description:"a short name for the whole programme, eg. Push Pull Legs"},
+    weeks:           {type:"INTEGER", nullable:true},
+    unit:            {type:"STRING",  enum:["lb","kg","percent","none"]},
+    restDaysPerCycle:{type:"INTEGER", nullable:true},
+    stated:{
+      type:"OBJECT",
+      properties:{
+        warmups:     {type:"BOOLEAN"},
+        rest:        {type:"BOOLEAN"},
+        effort:      {type:"BOOLEAN"},
+        progression: {type:"BOOLEAN"},
+        schedule:    {type:"BOOLEAN"},
+        deload:      {type:"BOOLEAN"},
+        sideHandling:{type:"BOOLEAN"},
+        tempo:       {type:"BOOLEAN"}
+      },
+      propertyOrdering:["warmups","rest","effort","progression","schedule","deload","sideHandling","tempo"]
+    },
+    phases:{type:"ARRAY", items:{type:"OBJECT",
+      properties:{name:{type:"STRING"}, weeks:{type:"STRING"}, focus:{type:"STRING"}},
+      required:["name"], propertyOrdering:["name","weeks","focus"]}},
+    deloadWeeks:{type:"ARRAY", items:{type:"OBJECT",
+      properties:{week:{type:"STRING"}, instruction:{type:"STRING"}},
+      required:["week"], propertyOrdering:["week","instruction"]}},
+    testingWeeks:{type:"ARRAY", items:{type:"OBJECT",
+      properties:{week:{type:"STRING"}, instruction:{type:"STRING"}},
+      required:["week"], propertyOrdering:["week","instruction"]}},
+    weeklyChanges:{type:"ARRAY", items:{type:"OBJECT",
+      properties:{week:{type:"STRING"}, change:{type:"STRING"}},
+      required:["change"], propertyOrdering:["week","change"]}},
+    progressionRules:{type:"ARRAY", items:{type:"OBJECT",
+      properties:{applies:{type:"STRING"}, rule:{type:"STRING"}, increment:{type:"NUMBER", nullable:true}},
+      required:["rule"], propertyOrdering:["applies","rule","increment"]}},
+    specialInstructions:{type:"ARRAY", items:{type:"STRING"}},
+    planNotes:      {type:"ARRAY", items:{type:"STRING"}},
+    warnings:       {type:"ARRAY", items:{type:"STRING"}},
     days:{
       type:"ARRAY",
       items:{
         type:"OBJECT",
         properties:{
-          name:{type:"STRING"},
+          name: {type:"STRING"},
+          notes:{type:"STRING"},
           exercises:{
             type:"ARRAY",
             items:{
               type:"OBJECT",
               properties:{
-                name:  {type:"STRING"},
-                sets:  {type:"INTEGER"},
-                reps:  {type:"STRING"},
-                rpe:   {type:"ARRAY", items:{type:"NUMBER"}},
-                kind:  {type:"STRING", enum:["heavy","second","iso","abs"]},
-                weight:{type:"NUMBER", nullable:true},
-                note:  {type:"STRING"}
+                name:           {type:"STRING"},
+                sets:           {type:"INTEGER"},
+                setsArePerSide: {type:"BOOLEAN"},
+                reps:           {type:"STRING"},
+                rpe:            {type:"ARRAY", items:{type:"NUMBER"}},
+                rir:            {type:"ARRAY", items:{type:"NUMBER"}},
+                effortNote:     {type:"STRING"},
+                kind:           {type:"STRING", enum:["heavy","second","iso","abs"]},
+                restSeconds:    {type:"INTEGER", nullable:true},
+                restNote:       {type:"STRING"},
+                tempo:          {type:"STRING"},
+                weight:         {type:"NUMBER", nullable:true},
+                weightNote:     {type:"STRING"},
+                warmupSets:{type:"ARRAY", items:{type:"OBJECT",
+                  properties:{label:{type:"STRING"}, percent:{type:"NUMBER", nullable:true}, reps:{type:"STRING"}},
+                  required:["label"], propertyOrdering:["label","percent","reps"]}},
+                warmupNote:     {type:"STRING"},
+                unilateral:     {type:"BOOLEAN"},
+                alternating:    {type:"STRING", enum:["none","perRep","perSet","perRound"]},
+                sideInstruction:{type:"STRING"},
+                supersetGroup:  {type:"STRING"},
+                circuitGroup:   {type:"STRING"},
+                dropset:        {type:"BOOLEAN"},
+                restPause:      {type:"BOOLEAN"},
+                toFailure:      {type:"BOOLEAN"},
+                progression:    {type:"STRING"},
+                note:           {type:"STRING"}
               },
               required:["name","sets","reps","kind"],
-              propertyOrdering:["name","sets","reps","rpe","kind","weight","note"]
+              propertyOrdering:["name","sets","setsArePerSide","reps","rpe","rir","effortNote","kind",
+                                "restSeconds","restNote","tempo","weight","weightNote","warmupSets",
+                                "warmupNote","unilateral","alternating","sideInstruction","supersetGroup",
+                                "circuitGroup","dropset","restPause","toFailure","progression","note"]
             }
           }
         },
         required:["name","exercises"],
-        propertyOrdering:["name","exercises"]
+        propertyOrdering:["name","notes","exercises"]
       }
     }
   },
   required:["understood","days"],
-  propertyOrdering:["understood","problem","splitName","restDaysPerCycle","warnings","days"]
+  propertyOrdering:["understood","problem","planName","weeks","unit","restDaysPerCycle","stated",
+                    "phases","deloadWeeks","testingWeeks","weeklyChanges","progressionRules",
+                    "specialInstructions","planNotes","warnings","days"]
 };
 
 /* One file, as one part of the request. Text-ish files go in as text because that is
@@ -5257,12 +5564,16 @@ function aiFilePart(file){
   });
 }
 
-async function aiCall(parts){
+/* One call to the model. `spec` carries the system prompt and the response schema, so
+   the screening pass and the extraction pass share every line of transport and error
+   handling and can never drift apart in how they report a failure. */
+async function aiCall(parts, spec){
   if(!aiReady()) throw new Error("The plan reader isn't switched on for this copy of the app.");
   const body = {
     contents:[{role:"user", parts}],
-    systemInstruction:{parts:[{text: aiSystemPrompt()}]},
-    generationConfig:{temperature:0.15, responseMimeType:"application/json", responseSchema:AI_PLAN_SCHEMA}
+    systemInstruction:{parts:[{text: spec.system}]},
+    generationConfig:{temperature: spec.temperature == null ? 0.15 : spec.temperature,
+                      responseMimeType:"application/json", responseSchema: spec.schema}
   };
   /* Two routes to the same API. Through the proxy the request carries NO credential at
      all — the Worker attaches the key on its side — which is the whole point of it. The
@@ -5344,56 +5655,401 @@ async function aiCall(parts){
 /* ---------- turning the answer into a programme ----------
    Everything here is defensive. The schema guarantees the shape; these guard the values,
    because a set count of 0, an RPE of 47 or a forty-word exercise name would all be
-   valid JSON and would all break a screen somewhere downstream. */
-function aiExercise(x){
+   valid JSON and would all break a screen somewhere downstream.
+
+   It also draws the line this file exists to draw. Facts from the document are written
+   through unchanged. Anything the document did not say is either left off the exercise
+   entirely — so the app's own generic fallbacks handle it, the same ones every custom
+   exercise already uses — or comes from an answer the person gave on the questions
+   screen. Nothing here reaches for the author's own programme for a default. */
+function aiTrim(s, n){ return String(s == null ? "" : s).replace(/\s+/g," ").trim().slice(0, n || 120); }
+function aiNoteJoin(bits){
+  const seen = new Set(), out = [];
+  bits.map(b=> aiTrim(b, 90)).filter(Boolean).forEach(b=>{
+    const k = b.toLowerCase();
+    if(seen.has(k)) return;
+    seen.add(k); out.push(b);
+  });
+  return out.join(" · ").slice(0, 220);
+}
+// Every exercise in the document, flattened, for the detectors and the question builder.
+function aiAllExercises(doc){
+  const out = [];
+  ((doc && doc.days) || []).forEach(d=> ((d && d.exercises) || []).forEach(x=>{ if(x) out.push(x); }));
+  return out;
+}
+function aiIsUnilateral(x){
+  if(!x) return false;
+  if(x.unilateral === true) return true;
+  const alt = String(x.alternating || "none");
+  if(alt !== "none") return true;
+  if(x.setsArePerSide) return true;
+  return isSingleArm({name: x.name, note: aiTrim((x.sideInstruction||"") + " " + (x.note||""), 200)});
+}
+/* Where a document states how sides are run, that is a fact and it wins. Everything else
+   is left for the person's own preference to answer. */
+function aiSideModeFrom(x){
+  const alt = String((x && x.alternating) || "none");
+  const said = aiTrim(x && x.sideInstruction, 160);
+  if(alt === "perRep") return "both";          // one set, arms alternating inside it
+  if(alt === "perRound") return "both";         // a round covers both sides
+  if(alt === "perSet") return "separate";       // one side per set, which is what the app does
+  if(/both (arms|legs|sides) (at once|together)|same weight (and|&) reps on both/i.test(said)) return "both";
+  return null;                                  // document did not say
+}
+function aiExercise(x, ctx){
   if(!x) return null;
+  const given = aiCleanName(x.name);
   const name = aiSnapName(x.name);
   if(!name) return null;
+  const ans = ctx.answers || {};
   const kind = ["heavy","second","iso","abs"].indexOf(x.kind) > -1 ? x.kind : "second";
-  const sets = Math.max(1, Math.min(10, Math.round(Number(x.sets)) || 3));
+
+  /* SETS. Written as the document writes them. The only adjustment is the one the app's
+     own set model forces: when sides are tracked one per set, "3 sets each arm" is six
+     app sets. That conversion is stated out loud rather than done quietly, and it does
+     not happen at all when the person tracks a set as covering both limbs. */
+  const docSideMode = aiSideModeFrom(x);
+  const effectiveSide = docSideMode || ans.sides || trainPrefs().sides;
+  let sets = Math.max(1, Math.min(12, Math.round(Number(x.sets)) || 1));
+  if(x.setsArePerSide && effectiveSide !== "both"){
+    const doubled = Math.min(12, sets * 2);
+    ctx.attention.push(name + ": your plan says " + sets + " sets each side, recorded as "
+      + doubled + " sets alternating side by side.");
+    sets = doubled;
+  }
+
+  /* EFFORT. RPE if the document gave RPE, converted from RIR if it gave RIR, and
+     otherwise whatever the person chose on the questions screen. The old importer wrote
+     "a sensible ramp for the movement" when the document said nothing, which is an
+     invented prescription wearing a transcription's clothes. */
   let rpes = (Array.isArray(x.rpe) ? x.rpe : [])
     .map(n=> Math.round(Number(n) * 2) / 2)
     .filter(n=> n >= 5 && n <= 10);
-  if(!rpes.length) rpes = (SLOT_RPES[kind] || SLOT_RPES.second).slice(0, sets);
+  if(!rpes.length){
+    rpes = (Array.isArray(x.rir) ? x.rir : [])
+      .map(n=> Math.round((10 - Number(n)) * 2) / 2)
+      .filter(n=> n >= 5 && n <= 10);
+  }
+  const rpeFromPlan = rpes.length > 0;
+  if(!rpeFromPlan){
+    rpes = ans.effort === "suggest"
+      ? (SLOT_RPES[kind] || SLOT_RPES.second).slice(0, sets)
+      : [8];
+  }
   while(rpes.length < sets) rpes.push(rpes[rpes.length-1] || 8);
   rpes = rpes.slice(0, sets);
-  const reps = String(x.reps == null ? "" : x.reps).trim().slice(0,14) || SLOT_REPS[kind] || "8-12";
-  const rest = kind === "heavy" ? REST_HEAVY : kind === "second" ? REST_SECOND : REST_ISO;
+
+  /* REPS, as written. A document with no rep target at all is rare and worth saying out
+     loud rather than papering over with a range nobody asked for. */
+  let reps = aiTrim(x.reps, 14);
+  if(!reps){
+    reps = SLOT_REPS[kind] || "8-12";
+    ctx.attention.push(name + ": no rep target in your plan, set to " + reps + " — edit it in the Program tab.");
+  }
+
+  /* REST. Declared only when the document declares it. Left off otherwise, which routes
+     the movement through restTargetFor()'s generic bands — the same ones every custom
+     exercise gets — instead of the rest windows written for one particular programme. */
+  const rs = Math.round(Number(x.restSeconds));
+  const rest = isFinite(rs) && rs >= 20 && rs <= 900 ? [rs, Math.min(900, rs + 30)] : null;
+
+  /* LOAD. Only a stated number. Kilos are converted only if the person asked for it. */
+  let weight = null, unitNote = "";
   const w = Number(x.weight);
-  const weight = (x.weight == null || !isFinite(w) || w <= 0) ? null : Math.round(w * 2) / 2;
-  return exr(name, rpes, reps, weight, String(x.note || "").trim().slice(0,120), {rest, slotKind:kind});
+  if(x.weight != null && isFinite(w) && w > 0){
+    if(ctx.unit === "kg"){
+      if(ans.units === "convert"){
+        weight = Math.round(w * 2.20462 / 5) * 5;
+        unitNote = w + " kg converted to " + weight + " lb";
+      }
+    } else if(ctx.unit === "lb" || ctx.unit === "none"){
+      weight = Math.round(w * 2) / 2;
+    }
+  }
+
+  const warmups = (Array.isArray(x.warmupSets) ? x.warmupSets : [])
+    .map(ws=>{
+      if(!ws) return null;
+      const pct = Number(ws.percent);
+      return {label: aiTrim(ws.label, 24), reps: aiTrim(ws.reps, 10),
+              pct: isFinite(pct) && pct > 0 && pct < 1 ? pct : undefined};
+    })
+    .filter(ws=> ws && (ws.label || ws.pct));
+
+  const note = aiNoteJoin([
+    x.tempo ? "tempo " + aiTrim(x.tempo, 20) : "",
+    x.effortNote,
+    x.restNote ? "rest " + aiTrim(x.restNote, 24) : "",
+    x.toFailure ? "last set to failure" : "",
+    x.dropset ? "dropset" : "",
+    x.restPause ? "rest-pause" : "",
+    x.circuitGroup ? "part of circuit " + aiTrim(x.circuitGroup, 16) : "",
+    x.sideInstruction,
+    x.progression,
+    x.weightNote,
+    unitNote,
+    x.note
+  ]);
+
+  const extra = {slotKind: kind, imported: true};
+  if(rest) extra.rest = rest;
+  if(warmups.length) extra.warmups = warmups.slice(0, 6);
+  if(aiTrim(x.warmupNote, 90)) extra.warmupNote = aiTrim(x.warmupNote, 90);
+  if(docSideMode) extra.sideMode = docSideMode;
+  else if(aiIsUnilateral(x) && ans.sides) extra.sideMode = ans.sides;
+  if(x.unilateral === true) extra.uni = true;
+  /* An increment the document names for this movement is a fact about the programme, and
+     progressionStep() already honours a per-exercise one, so it lands where the app will
+     actually use it rather than in a note nobody reads mid-session. */
+  const inc = ctx.increments && ctx.increments[canonEx(name)];
+  if(isFinite(inc) && inc > 0 && inc <= 50) extra.incr = inc;
+  if(!rpeFromPlan) extra.rpeAssumed = true;
+
+  const e = exr(name, rpes, reps, weight, note, extra);
+  ctx.matches.push({
+    dayId: ctx.dayId, idx: ctx.idx, given, name,
+    matched: aiKnownName(name),
+    candidates: aiKnownName(name) ? [] : aiCandidates(given, 6)
+  });
+  return e;
 }
-function aiPlanToProgram(data){
-  const days = (data.days || [])
+/* Supersets and circuits, as the document grouped them. The app's own model is a pair:
+   the first member carries `superset` and the rest of the round follows it, so a group
+   of three chains rather than needing a new concept taught to every screen. */
+function aiApplyGroups(list, raws){
+  for(let i = 0; i < list.length - 1; i++){
+    const g = aiTrim(raws[i] && (raws[i].supersetGroup || raws[i].circuitGroup), 24);
+    if(!g) continue;
+    const next = aiTrim(raws[i+1] && (raws[i+1].supersetGroup || raws[i+1].circuitGroup), 24);
+    if(next && next.toLowerCase() === g.toLowerCase()) list[i].superset = true;
+  }
+}
+function aiPlanToProgram(doc, answers){
+  const ans = answers || {};
+  const days = (doc.days || [])
     .filter(d=> d && d.name != null && Array.isArray(d.exercises) && d.exercises.length)
     .slice(0, 8);
   if(!days.length) throw new Error("There were no training days in that.");
-  const names = days.map((d,i)=> String(d.name).replace(/\s+/g," ").trim().slice(0,28) || ("Day " + (i+1)));
-  /* Rest days are a budget, not a schedule (see the note on the split), so all the
-     import has to get right is HOW MANY. A plan that says nothing gets the remainder of
-     a seven-day week, which is what almost every written programme means. */
-  const asked = Number(data.restDaysPerCycle);
-  const rests = Math.max(0, Math.min(5, isFinite(asked) && asked >= 0 ? Math.round(asked)
-                                                                     : Math.max(0, 7 - days.length)));
+  const names = days.map((d,i)=> aiTrim(d.name, 28) || ("Day " + (i+1)));
+
+  /* Rest days are a budget, not a schedule (see the note on the split). The document's
+     own figure wins; where it did not give one the person was asked, and only if they
+     had nothing to say does it fall back to the remainder of a seven-day week. */
+  let rests;
+  // `== null` deliberately, not a truthiness test and not Number() on its own: the
+  // document declining to say gives null, and Number(null) is a perfectly finite 0,
+  // which would silently turn "didn't say" into "no rest days at all".
+  const asked = doc.restDaysPerCycle == null || doc.restDaysPerCycle === "" ? NaN : Number(doc.restDaysPerCycle);
+  if(isFinite(asked) && asked >= 0) rests = Math.round(asked);
+  else if(ans.restDays != null && ans.restDays !== "auto") rests = parseInt(ans.restDays, 10);
+  else rests = Math.max(0, 7 - days.length);
+  rests = Math.max(0, Math.min(5, isFinite(rests) ? rests : 1));
+
   const split = buildCustomSplit(days.length, rests, names);
-  split.name = String(data.splitName || "My plan").replace(/\s+/g," ").trim().slice(0,32) || "My plan";
+  split.name = aiTrim(doc.planName, 32) || "My plan";
   split.tag = days.length + " days a week";
   split.imported = true;
+
+  const attention = [], matches = [];
+  const unit = ["lb","kg","percent","none"].indexOf(doc.unit) > -1 ? doc.unit : "none";
+  /* A progression rule that names both a movement and a number is the one piece of
+     periodisation the app can honour directly, through progressionStep(). Indexed by
+     movement here so the exercise builder can pick its own up. */
+  const increments = {};
+  (Array.isArray(doc.progressionRules) ? doc.progressionRules : []).forEach(p=>{
+    if(!p || !p.applies) return;
+    const n = Number(p.increment);
+    if(isFinite(n) && n > 0) increments[canonEx(aiCleanName(p.applies))] = n;
+  });
   const program = {finisher: []};
   days.forEach((d, i)=>{
-    program[split.days[i].id] = d.exercises.slice(0, 16).map(aiExercise).filter(Boolean);
+    const dayId = split.days[i].id;
+    const raws = d.exercises.slice(0, 20);
+    const list = [], kept = [];
+    raws.forEach(x=>{
+      const e = aiExercise(x, {answers: ans, attention, matches, dayId, idx: list.length, unit, increments});
+      if(e){ list.push(e); kept.push(x); }
+    });
+    aiApplyGroups(list, kept);
+    program[dayId] = list;
   });
   const empty = split.days.filter(d=> !program[d.id].length);
   if(empty.length === split.days.length) throw new Error("None of those days had exercises we could read.");
-  const warnings = (Array.isArray(data.warnings) ? data.warnings : [])
-    .map(w=> String(w).trim().slice(0,160)).filter(Boolean).slice(0, 6);
-  return {program, customSplit:split, warnings, splitId:null};
+
+  const warnings = (Array.isArray(doc.warnings) ? doc.warnings : [])
+    .map(w=> aiTrim(w, 160)).filter(Boolean).slice(0, 8);
+
+  const arr = (v, fn)=> (Array.isArray(v) ? v : []).map(fn).filter(Boolean).slice(0, 12);
+  const meta = {
+    name: split.name,
+    at: Date.now(),
+    weeks: (isFinite(Number(doc.weeks)) && Number(doc.weeks) > 0) ? Math.min(104, Math.round(Number(doc.weeks))) : null,
+    unit,
+    phases:        arr(doc.phases, p=> p && p.name ? {name: aiTrim(p.name,40), weeks: aiTrim(p.weeks,24), focus: aiTrim(p.focus,120)} : null),
+    deloadWeeks:   arr(doc.deloadWeeks, p=> p && p.week ? {week: aiTrim(p.week,24), instruction: aiTrim(p.instruction,160)} : null),
+    testingWeeks:  arr(doc.testingWeeks, p=> p && p.week ? {week: aiTrim(p.week,24), instruction: aiTrim(p.instruction,160)} : null),
+    weeklyChanges: arr(doc.weeklyChanges, p=> p && p.change ? {week: aiTrim(p.week,24), change: aiTrim(p.change,160)} : null),
+    progression:   arr(doc.progressionRules, p=> p && p.rule ? {applies: aiTrim(p.applies,40), rule: aiTrim(p.rule,180)} : null),
+    special:       arr(doc.specialInstructions, s=> aiTrim(s, 180)),
+    notes:         arr(doc.planNotes, s=> aiTrim(s, 180))
+  };
+
+  /* The preferences this import will write, and where each one came from. A topic the
+     document settled is marked "plan"; a topic the person answered is theirs. Nothing
+     here is inherited from whatever plan happened to be in the app before. */
+  const stated = doc.stated || {};
+  const anyPlanWarmups = aiAllExercises(doc).some(x=> Array.isArray(x.warmupSets) && x.warmupSets.length);
+  const prefs = {};
+  if(ans.sides) prefs.sides = ans.sides;
+  if(ans.startSide) prefs.startSideFlip = ans.startSide === "flip";
+  if(ans.warmups) prefs.warmups = ans.warmups;
+  else if(anyPlanWarmups || stated.warmups) prefs.warmups = "planOnly";
+  if(meta.deloadWeeks.length || stated.deload) prefs.deloads = "planOnly";
+  else if(ans.deloads) prefs.deloads = ans.deloads;
+
+  return {program, customSplit: split, splitId: null, warnings, attention, matches, meta, prefs, stated};
+}
+
+/* ---------- stage 3: the questions this document actually leaves open ----------
+
+   Not a questionnaire. Every entry here is generated because something specific was
+   detected in THIS document, and each one names what was detected so the answer is
+   given in context rather than in the abstract. A plan with no one-limb work is never
+   asked about sides; a plan that prescribes its own warm-ups is never asked about
+   warm-ups; a plan with RPE on every set is never asked about effort. A document that
+   settles everything produces no questions at all and goes straight to review. */
+function aiBuildQuestions(doc){
+  const qs = [];
+  const stated = doc.stated || {};
+  const ex = aiAllExercises(doc);
+
+  const uni = ex.filter(aiIsUnilateral);
+  const undecided = uni.filter(x=> !aiSideModeFrom(x));
+  if(undecided.length){
+    const names = undecided.map(x=> aiSnapName(x.name)).filter(Boolean);
+    const shown = names.slice(0, 3).join(", ") + (names.length > 3 ? " and " + (names.length - 3) + " more" : "");
+    qs.push({
+      id:"sides",
+      q:"How should Element 26 handle sides on these movements?",
+      why:"Your plan has " + undecided.length + " one-limb movement" + (undecided.length===1?"":"s")
+        + " (" + esc(shown) + ") and doesn't say how each side should be handled. It changes how sets are counted and graded, so it's yours to choose.",
+      src:"not in your document",
+      def:"separate",
+      options:[
+        {v:"separate",   t:"Track each side separately", s:"Each set is one limb, marked L or R, alternating side by side."},
+        {v:"matchWeaker",t:"Match the weaker side",      s:"Same L/R tracking, and both sides are held to whatever the weaker one manages."},
+        {v:"both",       t:"Same weight and reps on both sides", s:"A set covers both limbs. No L/R marking, sets counted as written."}
+      ]
+    });
+    qs.push({
+      id:"startSide",
+      q:"Which side should you start with?",
+      why:"Whoever goes first is the fresher one. Alternating evens that out over a cycle; a fixed side keeps every session identical.",
+      src:"not in your document",
+      def:"fixed",
+      when: a=> a.sides !== "both",
+      options:[
+        {v:"fixed", t:"Always start on the right", s:"Every session opens the same way."},
+        {v:"flip",  t:"Swap the starting side each cycle", s:"Right first this session, left first the next, so neither side always gets the fresh set."}
+      ]
+    });
+  }
+
+  const planWarmups = ex.some(x=> Array.isArray(x.warmupSets) && x.warmupSets.length);
+  if(!planWarmups && !stated.warmups){
+    qs.push({
+      id:"warmups",
+      q:"How would you like warm-ups handled?",
+      why:"Your plan lists working sets only — it doesn't prescribe warm-up sets. Element 26 can build a ramp before the first working set of a session, but that's a preference, not something your plan asked for.",
+      src:"not in your document",
+      def:"manual",
+      options:[
+        {v:"auto",     t:"Add warm-ups for me", s:"A ramp before the first compound of a session, and one light set before the second. Never counted as working volume."},
+        {v:"planOnly", t:"Only where the plan says so", s:"Nothing generated. Warm-ups appear only if a plan prescribes them."},
+        {v:"manual",   t:"I'll handle warm-ups myself", s:"Element 26 stays out of it entirely."}
+      ]
+    });
+  }
+
+  const anyEffort = ex.some(x=> (Array.isArray(x.rpe) && x.rpe.length) || (Array.isArray(x.rir) && x.rir.length));
+  if(!anyEffort && !stated.effort){
+    qs.push({
+      id:"effort",
+      q:"Your plan doesn't give effort targets. What should the app aim at?",
+      why:"No RPE or RIR was written on any set. Element 26 grades each set against a target, so it needs one — but it isn't going to invent a ramp and present it as your coach's.",
+      src:"not in your document",
+      def:"neutral",
+      options:[
+        {v:"neutral", t:"Keep it neutral", s:"RPE 8 on every set — a placeholder, not a prescription. Edit any of it in the Program tab."},
+        {v:"suggest", t:"Suggest targets by movement type", s:"Compounds ramp 7-8-8-9, isolation sits at 8-9. Element 26's own defaults, clearly marked as ours."}
+      ]
+    });
+  }
+
+  if(doc.restDaysPerCycle == null && !stated.schedule){
+    const n = (doc.days || []).length;
+    const week = Math.max(0, 7 - n);
+    const opts = [{v:"auto", t:"Fit it into a normal week", s:n + " training day" + (n===1?"":"s") + " and " + week + " rest day" + (week===1?"":"s") + " a cycle."}];
+    [1,2,3].forEach(k=>{ if(k !== week) opts.push({v:String(k), t:k + " rest day" + (k===1?"":"s") + " a cycle", s:"A " + (n+k) + "-day cycle that drifts across the week."}); });
+    qs.push({
+      id:"restDays",
+      q:"How many rest days between the sessions?",
+      why:"Your plan lists " + n + " session" + (n===1?"":"s") + " but doesn't say how they sit in the week. Rest days are a budget here, not fixed weekdays — you take them when you need them.",
+      src:"not in your document",
+      def:"auto",
+      options: opts.slice(0, 4)
+    });
+  }
+
+  if(!(doc.deloadWeeks || []).length && !stated.deload){
+    qs.push({
+      id:"deloads",
+      q:"Should Element 26 suggest deload weeks?",
+      why:"Your plan doesn't schedule any deloads. Element 26 can watch for one being due and offer it, or stay quiet and leave recovery weeks entirely to you.",
+      src:"not in your document",
+      def:"planOnly",
+      options:[
+        {v:"auto",     t:"Suggest one when it's due", s:"Prompted after " + DELOAD_EVERY_WEEKS + " weeks, or earlier if fatigue signals stack up. Always your call to start."},
+        {v:"planOnly", t:"Don't suggest deloads", s:"Nothing prompted. You can still start one any time from Setup."}
+      ]
+    });
+  }
+
+  if(doc.unit === "kg" && ex.some(x=> x.weight != null && Number(x.weight) > 0)){
+    qs.push({
+      id:"units",
+      q:"Your plan's loads are in kilos. Convert them?",
+      why:"Element 26 logs in pounds. It can convert every stated load once, on the way in, or leave loads off and set them from your first working set.",
+      src:"a fact in your document",
+      def:"convert",
+      options:[
+        {v:"convert", t:"Convert to pounds", s:"Rounded to the nearest 5 lb, and each converted load says so in its note."},
+        {v:"drop",    t:"Leave the loads out", s:"You set each one from a feeler set the first time you meet the movement."}
+      ]
+    });
+  }
+  return qs;
+}
+function aiVisibleQuestions(){
+  const a = AI_IMP;
+  if(!a || !a.questions) return [];
+  return a.questions.filter(q=> !q.when || q.when(a.answers || {}));
 }
 
 /* ---------- the importer ---------- */
 let AI_IMP = null;
+const AI_STAGES = [
+  {id:"collect",  label:"Upload"},
+  {id:"check",    label:"Check"},
+  {id:"read",     label:"Read"},
+  {id:"questions",label:"Questions"},
+  {id:"review",   label:"Review"}
+];
 function openAIImport(fromOnboarding){
-  AI_IMP = {ob: !!fromOnboarding, text:"", files:[], busy:false, err:"", result:null};
+  AI_IMP = {ob: !!fromOnboarding, stage:"collect", text:"", files:[], parts:null,
+            busy:false, busyMsg:"", err:"", check:null, doc:null,
+            questions:[], answers:{}, result:null};
   showModal("");
   renderAIImport();
 }
@@ -5402,6 +6058,14 @@ function renderAIImport(){
   if(!m || !AI_IMP) return;
   m.innerHTML = aiImportHTML();
   bindAIImport();
+}
+function aiStageStripHTML(){
+  const a = AI_IMP;
+  const at = a.stage === "blocked" || a.stage === "caution" ? "check" : a.stage;
+  const i = Math.max(0, AI_STAGES.findIndex(s=> s.id === at));
+  return `<div class="ai-steps">` + AI_STAGES.map((s, k)=>
+    `<span class="ai-step${k === i ? " on" : k < i ? " done" : ""}">${k+1}. ${esc(s.label)}</span>`
+  ).join("") + `</div>`;
 }
 function aiImportHTML(){
   const a = AI_IMP;
@@ -5421,39 +6085,22 @@ function aiImportHTML(){
       <button class="btn" id="closeModal">Close</button>`;
   }
 
-  if(a.result){
-    const r = a.result;
-    const total = r.customSplit.days.reduce((t,d)=> t + (r.program[d.id]||[]).length, 0);
-    let h = `<h3>Here's your plan</h3>
-      <div class="ai-note"><b>${esc(r.customSplit.name)}</b> — ${r.customSplit.days.length} training
-        day${r.customSplit.days.length===1?"":"s"}, ${total} exercise${total===1?"":"s"},
-        ${r.customSplit.layout.filter(x=>x==="rest").length} rest day${r.customSplit.layout.filter(x=>x==="rest").length===1?"":"s"} a cycle.
-        Check it over — everything here is editable afterwards in the Program tab.</div>`;
-    if(r.warnings && r.warnings.length){
-      h += `<div class="ai-err" style="border-color:var(--arms);background:rgba(201,154,52,.09)">
-        <b>Worth checking:</b><br>${r.warnings.map(w=>esc(w)).join("<br>")}</div>`;
-    }
-    h += `<div class="ob-plan" style="margin-top:14px">`;
-    r.customSplit.days.forEach((d, i)=>{
-      const list = r.program[d.id] || [];
-      h += `<div class="ob-day">
-        <div class="ob-day-h"><span class="dot" style="background:${DAY_COLORS[i%DAY_COLORS.length]}"></span>${esc(d.name)}
-          <i>${list.length} exercises &middot; ${list.reduce((t,e)=>t+e.sets,0)} sets</i></div>
-        ${list.length
-          ? list.map(e=>`<div class="ob-ex"><span>${esc(e.name)}${e.weight!=null?` <i style="color:var(--faint)">${e.weight} lb</i>`:""}</span><i class="num">${e.sets}×${esc(e.reps)}</i></div>`).join("")
-          : `<div class="ob-ex"><span style="color:var(--faint)">Nothing readable on this day</span></div>`}
-      </div>`;
-    });
-    h += `</div>
-      <div class="btn-row"><button class="btn small" id="aiUse" style="flex:1">Use this plan</button></div>
-      <div class="btn-row"><button class="btn ghost small" id="aiAgain" style="flex:1">Start over</button></div>
-      <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`;
-    return h;
-  }
+  if(a.stage === "blocked")   return aiBlockedHTML();
+  if(a.stage === "caution")   return aiCautionHTML();
+  if(a.stage === "questions") return aiQuestionsHTML();
+  if(a.stage === "review")    return aiReviewHTML();
+  return aiCollectHTML();
+}
 
-  let h = `<h3>Import your plan</h3>
+/* The upload face. */
+function aiCollectHTML(){
+  const a = AI_IMP;
+  let h = `<h3>Import your plan</h3>` + aiStageStripHTML() + `
     <p>Paste your programme below, attach a photo of it, or both. Any format — a coach's
     PDF, a spreadsheet, a screenshot, notes on your phone, a photo of a sheet of paper.</p>
+    <div class="ai-note">Element 26 reads what your document says and keeps it: sets, rep ranges,
+      RIR, rest, tempo, warm-ups, supersets, alternating work, deloads and progression rules.
+      Where your plan doesn't say something, it asks you rather than guessing.</div>
     <div class="field"><label>Your plan</label>
       <textarea id="aiText" rows="7" spellcheck="false" placeholder="e.g.&#10;Mon — Push: Bench 4x6-8, Incline DB 3x10, Lateral raise 4x15, Pushdowns 3x12&#10;Wed — Pull: Deadlift 3x5, Pull-ups 4xAMRAP, Barbell row 3x10, Curls 3x12&#10;Fri — Legs: Squat 4x6, RDL 3x10, Leg press 3x12, Calves 4x15">${esc(a.text)}</textarea></div>
     <button class="ai-drop" id="aiPick">📎 Attach a photo, screenshot, PDF or file</button>`;
@@ -5464,7 +6111,7 @@ function aiImportHTML(){
   }
   if(a.err) h += `<div class="ai-err">${esc(a.err)}</div>`;
   if(a.busy){
-    h += `<div class="ai-busy"><span class="ai-spin"></span><span>Reading your plan…<br>
+    h += `<div class="ai-busy"><span class="ai-spin"></span><span>${esc(a.busyMsg || "Working…")}<br>
       <i style="color:var(--faint);font-style:normal;font-size:12.5px">Usually five to fifteen seconds.</i></span></div>`;
   } else {
     h += `<div class="btn-row"><button class="btn small" id="aiGo" style="flex:1">Read my plan</button></div>
@@ -5472,6 +6119,222 @@ function aiImportHTML(){
   }
   return h;
 }
+
+/* Stage 1 said no. Nothing was extracted, no plan exists, and the screen's job is to
+   say why in a way that tells somebody what to do about it. */
+function aiBlockedHTML(){
+  const a = AI_IMP, c = a.check || {};
+  const problems = (c.problems || []).map(p=> aiTrim(p, 160)).filter(Boolean);
+  let h = `<h3>That doesn't look like a training plan</h3>` + aiStageStripHTML();
+  h += `<div class="ai-err"><b>${esc(c.summary || "Element 26 couldn't read a training plan out of that.")}</b>${
+    problems.length ? "<br>" + problems.map(p=> "• " + esc(p)).join("<br>") : ""}</div>`;
+  const checks = [
+    ["Readable", c.readable],
+    ["A training plan", c.isTrainingPlan],
+    ["Exercises named", c.hasExercises],
+    ["Sets or reps given", c.hasSetsOrReps],
+    ["Enough structure", c.hasStructure]
+  ];
+  h += `<div class="ai-flags" style="margin-top:12px">` + checks.map(([k, v])=>
+    `<span class="ai-flag">${v ? "✓" : "✕"} <b>${esc(k)}</b></span>`).join("") + `</div>`;
+  if(c.needed) h += `<div class="ai-note"><b>What would work:</b> ${esc(aiTrim(c.needed, 240))}</div>`;
+  h += `<div class="ai-note">Nothing was imported and your current plan is untouched. This didn't
+    count as an import — the document was stopped before the plan reader ran on it.</div>`;
+  h += `<div class="btn-row"><button class="btn small" id="aiAgain" style="flex:1">Try another document</button></div>
+    <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Close</button></div>`;
+  return h;
+}
+
+/* Stage 1 said maybe. The decision belongs to the person holding the document, because
+   they know whether the missing half matters. */
+function aiCautionHTML(){
+  const a = AI_IMP, c = a.check || {};
+  const problems = (c.problems || []).map(p=> aiTrim(p, 160)).filter(Boolean);
+  let h = `<h3>Worth a look before we read it</h3>` + aiStageStripHTML();
+  h += `<div class="ai-err" style="border-color:var(--arms);background:rgba(201,154,52,.09)">
+    <b>${esc(c.summary || "Some of this document is unclear.")}</b>${
+    problems.length ? "<br>" + problems.map(p=> "• " + esc(p)).join("<br>") : ""}</div>`;
+  if((c.exerciseSamples || []).length){
+    h += `<div class="ai-note"><b>What it could make out:</b> ${
+      esc((c.exerciseSamples || []).slice(0,5).map(s=> aiTrim(s, 40)).join(", "))}${
+      c.workoutsSeen ? " · " + c.workoutsSeen + " session" + (c.workoutsSeen===1?"":"s") : ""}</div>`;
+  }
+  h += `<div class="ai-note">You can carry on — anything unreadable is flagged before the plan is
+    created, and you get to check every exercise first. Or attach a clearer copy.</div>`;
+  if(a.err) h += `<div class="ai-err">${esc(a.err)}</div>`;
+  if(a.busy){
+    h += `<div class="ai-busy"><span class="ai-spin"></span><span>${esc(a.busyMsg || "Working…")}</span></div>`;
+  } else {
+    h += `<div class="btn-row"><button class="btn small" id="aiForce" style="flex:1">Read it anyway</button></div>
+      <div class="btn-row"><button class="btn ghost small" id="aiAgain" style="flex:1">Use a different document</button></div>
+      <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`;
+  }
+  return h;
+}
+
+/* Stage 3. Only what this document left open, each one saying what was detected. */
+function aiQuestionsHTML(){
+  const a = AI_IMP;
+  const qs = aiVisibleQuestions();
+  let h = `<h3>A few things your plan doesn't say</h3>` + aiStageStripHTML();
+  h += `<div class="ai-note">Everything your document does say has been kept exactly as written.
+    These are the ${qs.length} decision${qs.length===1?"":"s"} it leaves to you — Element 26 needs
+    them and won't decide them on your behalf.</div>`;
+  qs.forEach(q=>{
+    const val = a.answers[q.id] == null ? q.def : a.answers[q.id];
+    h += `<div class="ai-q">
+      <div class="ai-q-h">${esc(q.q)}</div>
+      ${q.src ? `<span class="ai-q-src">${esc(q.src)}</span>` : ""}
+      <div class="ai-q-why">${q.why}</div>
+      <div class="ob-opts">` +
+      q.options.map(o=>`<button class="ob-opt${val === o.v ? " on" : ""}" data-aiq="${esc(q.id)}" data-aiv="${esc(o.v)}">
+        <span class="ob-opt-t">${esc(o.t)}</span>
+        <span class="ob-opt-s">${esc(o.s)}</span>
+        <span class="ob-tick">✓</span>
+      </button>`).join("") +
+      `</div></div>`;
+  });
+  if(a.err) h += `<div class="ai-err">${esc(a.err)}</div>`;
+  h += `<div class="btn-row"><button class="btn small" id="aiToReview" style="flex:1">See the plan</button></div>
+    <div class="btn-row"><button class="btn ghost small" id="aiAgain" style="flex:1">Start over</button></div>
+    <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`;
+  return h;
+}
+
+/* Stage 4. What was detected, what was carried over, what needs a second look. */
+function aiReviewHTML(){
+  const a = AI_IMP, r = a.result;
+  const m = r.meta || {};
+  const days = r.customSplit.days;
+  const all = days.reduce((t,d)=> t.concat(r.program[d.id] || []), []);
+  const total = all.length;
+  const sets = all.reduce((t,e)=> t + (e.sets||0), 0);
+  const supersets = days.reduce((t,d)=> t + (r.program[d.id]||[]).filter(e=> e.superset).length, 0);
+  const unilat = all.filter(e=> altStyle(e) || e.sideMode === "both").length;
+  const warmed = all.filter(e=> Array.isArray(e.warmups) && e.warmups.length).length;
+  const unmatched = (r.matches || []).filter(x=> !x.matched);
+
+  let h = `<h3>Here's what Element 26 read</h3>` + aiStageStripHTML();
+  h += `<div class="ai-note"><b>${esc(r.customSplit.name)}</b> — read from your document.
+    Nothing has been created yet. Everything below is editable afterwards in the Program tab.</div>`;
+
+  const stat = (n, label)=> `<div class="ai-stat"><b>${n}</b><span>${esc(label)}</span></div>`;
+  h += `<div class="ai-stats">` +
+    (m.weeks ? stat(m.weeks, "weeks") : "") +
+    stat(days.length, "workouts") +
+    stat(total, "exercises") +
+    stat(sets, "working sets") +
+    stat(r.customSplit.layout.filter(x=> x === "rest").length, "rest days") +
+    `</div>`;
+
+  const flags = [];
+  if((m.deloadWeeks||[]).length)   flags.push(["deload week" + (m.deloadWeeks.length===1?"":"s"), m.deloadWeeks.length]);
+  if((m.testingWeeks||[]).length)  flags.push(["testing week" + (m.testingWeeks.length===1?"":"s"), m.testingWeeks.length]);
+  if((m.phases||[]).length)        flags.push(["training phase" + (m.phases.length===1?"":"s"), m.phases.length]);
+  if(supersets)                    flags.push(["superset" + (supersets===1?"":"s"), supersets]);
+  if(unilat)                       flags.push(["alternating / one-limb", unilat]);
+  if(warmed)                       flags.push(["warm-ups from your plan", warmed]);
+  if((m.progression||[]).length)   flags.push(["progression rule" + (m.progression.length===1?"":"s"), m.progression.length]);
+  if((m.weeklyChanges||[]).length) flags.push(["weekly change" + (m.weeklyChanges.length===1?"":"s"), m.weeklyChanges.length]);
+  if((m.special||[]).length)       flags.push(["special instruction" + (m.special.length===1?"":"s"), m.special.length]);
+  if(flags.length){
+    h += `<div class="ai-flags">` + flags.map(([k,v])=>
+      `<span class="ai-flag"><b>${v}</b> ${esc(k)}</span>`).join("") + `</div>`;
+  }
+
+  const attention = (r.attention || []).concat(r.warnings || []);
+  if(attention.length){
+    h += `<div class="ai-err" style="border-color:var(--arms);background:rgba(201,154,52,.09)">
+      <b>Worth checking:</b><br>${attention.slice(0,10).map(w=> esc(w)).join("<br>")}</div>`;
+  }
+
+  /* The exercise names the database did not recognise. They still work — the muscle map
+     places them from their name — but a wrong match is much easier to fix here than
+     after a month of history has been logged under it. */
+  if(unmatched.length){
+    h += `<div class="ai-note" style="margin-top:14px"><b>${unmatched.length} exercise${unmatched.length===1?" isn't":"s aren't"} in Element 26's database.</b>
+      They'll be kept exactly as your plan names them, which is fine. If one of them is really a
+      movement below, picking it here means the muscle map and the volume analysis can see it.</div>`;
+    unmatched.forEach(x=>{
+      h += `<div class="ai-match">
+        <span style="flex:1 1 130px"><b>${esc(x.name)}</b><br><span class="ai-src">as written in your plan</span></span>
+        <select data-aifix="${esc(x.dayId)}:${x.idx}">
+          <option value="">Keep “${esc(x.name)}”</option>
+          ${x.candidates.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("")}
+        </select>
+      </div>`;
+    });
+  }
+
+  /* What was decided, and by whom. The point of the whole rewrite is on this line: a
+     person can see which settings came out of their document and which are theirs. */
+  const decided = [];
+  const p = r.prefs || {};
+  if(p.sides === "separate")    decided.push("Each side tracked separately");
+  if(p.sides === "matchWeaker") decided.push("Both sides held to the weaker one");
+  if(p.sides === "both")        decided.push("A set covers both limbs");
+  if(p.startSideFlip === true)  decided.push("Starting side swaps each cycle");
+  if(p.startSideFlip === false) decided.push("Always starts on the right");
+  if(p.warmups === "auto")      decided.push("Warm-ups added for you");
+  if(p.warmups === "planOnly")  decided.push(warmed ? "Warm-ups exactly as your plan prescribes" : "No warm-ups generated");
+  if(p.warmups === "manual")    decided.push("Warm-ups left to you");
+  if(p.deloads === "auto")      decided.push("Deloads suggested when due");
+  if(p.deloads === "planOnly")  decided.push((m.deloadWeeks||[]).length ? "Deloads follow your plan" : "No deloads suggested");
+  if(a.answers.effort === "suggest") decided.push("Effort targets suggested by Element 26");
+  if(a.answers.effort === "neutral") decided.push("Effort targets left neutral");
+  if(a.answers.units === "convert")  decided.push("Loads converted from kg");
+  if(a.answers.units === "drop")     decided.push("Loads left out");
+  if(decided.length){
+    h += `<div class="ai-flags" style="margin-top:12px">` +
+      decided.map(d=>`<span class="ai-flag">${esc(d)}</span>`).join("") + `</div>`;
+  }
+
+  h += `<div class="ob-plan" style="margin-top:14px">`;
+  days.forEach((d, i)=>{
+    const list = r.program[d.id] || [];
+    h += `<div class="ob-day">
+      <div class="ob-day-h"><span class="dot" style="background:${DAY_COLORS[i%DAY_COLORS.length]}"></span>${esc(d.name)}
+        <i>${list.length} exercises &middot; ${list.reduce((t,e)=>t+e.sets,0)} sets</i></div>
+      ${list.length
+        ? list.map((e, xi)=>{
+            const bits = [];
+            if(e.superset) bits.push("superset");
+            if(Array.isArray(e.warmups) && e.warmups.length) bits.push("warm-ups");
+            if(e.sideMode === "both") bits.push("both sides per set");
+            else if(altStyle(e)) bits.push("L / R");
+            if(e.rest) bits.push(e.rest[0] >= 60 ? Math.round(e.rest[0]/60) + " min rest" : e.rest[0] + "s rest");
+            return `<div class="ob-ex"><span>${esc(e.name)}${e.weight!=null?` <i style="color:var(--faint)">${e.weight} lb</i>`:""}${
+              bits.length?`<br><span class="ai-src">${esc(bits.join(" · "))}</span>`:""}</span>
+              <i class="num">${e.sets}×${esc(e.reps)}${e.rpe && !e.rpeAssumed ? " @" + esc(String(e.rpe)) : ""}</i></div>`;
+          }).join("")
+        : `<div class="ob-ex"><span style="color:var(--faint)">Nothing readable on this day</span></div>`}
+    </div>`;
+  });
+  h += `</div>`;
+
+  const rules = []
+    .concat((m.phases||[]).map(x=> "Phase — " + x.name + (x.weeks ? " (" + x.weeks + ")" : "") + (x.focus ? ": " + x.focus : "")))
+    .concat((m.deloadWeeks||[]).map(x=> "Deload — week " + x.week + (x.instruction ? ": " + x.instruction : "")))
+    .concat((m.testingWeeks||[]).map(x=> "Testing — week " + x.week + (x.instruction ? ": " + x.instruction : "")))
+    .concat((m.weeklyChanges||[]).map(x=> (x.week ? "Week " + x.week + " — " : "Weekly — ") + x.change))
+    .concat((m.progression||[]).map(x=> "Progression" + (x.applies ? " (" + x.applies + ")" : "") + " — " + x.rule))
+    .concat((m.special||[]).map(x=> x))
+    .concat((m.notes||[]).map(x=> x));
+  if(rules.length){
+    h += `<div class="ai-note"><b>Programme rules kept from your document</b><br>${
+      rules.slice(0, 14).map(x=> "• " + esc(x)).join("<br>")}
+      <br><br>These stay with your plan and appear in the Program tab. Element 26 doesn't run
+      your weeks for you — it keeps what your programme says so you can follow it.</div>`;
+  }
+
+  h += `<div class="btn-row"><button class="btn small" id="aiUse" style="flex:1">Create this plan</button></div>`;
+  if(aiVisibleQuestions().length)
+    h += `<div class="btn-row"><button class="btn ghost small" id="aiBackQ" style="flex:1">Back to the questions</button></div>`;
+  h += `<div class="btn-row"><button class="btn ghost small" id="aiAgain" style="flex:1">Start over</button></div>
+    <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`;
+  return h;
+}
+
 function bindAIImport(){
   const a = AI_IMP;
   const on = (id, fn)=>{ const el = $("#"+id); if(el) el.onclick = fn; };
@@ -5479,14 +6342,40 @@ function bindAIImport(){
   const c = $("#closeModal");
   if(c) c.onclick = hideModal;
 
-  on("aiAgain",   ()=>{ a.result = null; a.err = ""; a.text = ""; a.files = []; renderAIImport(); });
-  on("aiUse",     aiUsePlan);
-  on("aiGo",      aiRun);
+  on("aiAgain", ()=>{
+    AI_IMP = {ob: a.ob, stage:"collect", text:"", files:[], parts:null, busy:false, busyMsg:"",
+              err:"", check:null, doc:null, questions:[], answers:{}, result:null};
+    renderAIImport();
+  });
+  on("aiUse",      aiUsePlan);
+  on("aiGo",       aiRun);
+  on("aiForce",    ()=> aiExtractNow());
+  on("aiToReview", ()=>{ if(aiBuildResult()) a.stage = "review"; renderAIImport(); });
+  on("aiBackQ",    ()=>{ a.stage = "questions"; renderAIImport(); });
 
   const ta = $("#aiText");
   // Deliberately does not re-render: re-rendering on every keystroke would take the
   // caret and the keyboard with it.
   if(ta) ta.oninput = ()=>{ a.text = ta.value; };
+
+  document.querySelectorAll("[data-aiq]").forEach(b=> b.onclick = ()=>{
+    a.answers[b.dataset.aiq] = b.dataset.aiv;
+    renderAIImport();
+  });
+  /* Re-pointing an exercise at a movement the database knows. The rename is applied to
+     the plan in front of them, so the day list below updates and they can see what they
+     just did rather than trusting a dropdown. */
+  document.querySelectorAll("[data-aifix]").forEach(sel=> sel.onchange = ()=>{
+    const [dayId, idx] = String(sel.dataset.aifix).split(":");
+    const rec = (a.result.matches || []).find(x=> x.dayId === dayId && String(x.idx) === idx);
+    const ex = (a.result.program[dayId] || [])[parseInt(idx, 10)];
+    if(!rec || !ex) return;
+    const pick = sel.value;
+    ex.name = pick || aiSnapName(rec.given) || ex.name;
+    rec.name = ex.name;
+    rec.matched = !!pick;
+    renderAIImport();
+  });
 
   on("aiPick", ()=>{ const f = $("#obFile"); if(f) f.click(); });
   document.querySelectorAll("[data-airm]").forEach(b=> b.onclick = ()=>{
@@ -5506,11 +6395,13 @@ function bindAIImport(){
     if(backup && picked.length === 1){ aiTryBackup(backup); return; }
     a.files = a.files.concat(picked).slice(0, 6);
     a.err = "";
+    a.parts = null;                       // the attachments changed, so the request does
     renderAIImport();
   };
 }
 /* A .json file gets one chance to be an Element 26 export before it is treated as
-   something to read. If it is, no API call is made at all. */
+   something to read. If it is, no API call is made at all — no screening, no extraction,
+   and none of the questions below, because a backup already carries its own answers. */
 function aiTryBackup(file){
   const r = new FileReader();
   r.onload = ()=>{
@@ -5523,6 +6414,7 @@ function aiTryBackup(file){
     if(!days.length){
       AI_IMP.files = AI_IMP.files.concat([file]).slice(0, 6);
       AI_IMP.err = "";
+      AI_IMP.parts = null;
       renderAIImport();
       return;
     }
@@ -5532,7 +6424,10 @@ function aiTryBackup(file){
          days: days.map((k,i)=>({id:k, name:prettyDayId(k), short:"D"+(i+1)})),
          layout: days.concat(days.length >= 5 ? ["rest","rest"] : ["rest"])};
     AI_IMP.result = {program: prog, customSplit: split, splitId: d.splitId || null,
-                     warnings: [], backup: d};
+                     warnings: [], attention: [], matches: [], meta: null,
+                     prefs: d.prefs && typeof d.prefs === "object" ? d.prefs : {}, backup: d};
+    AI_IMP.questions = [];
+    AI_IMP.stage = "review";
     AI_IMP.err = "";
     renderAIImport();
     toast("Read straight from your Element 26 file");
@@ -5540,6 +6435,21 @@ function aiTryBackup(file){
   r.onerror = ()=>{ AI_IMP.err = "Couldn't read that file."; renderAIImport(); };
   r.readAsText(file);
 }
+/* Everything that will be sent, built once. Reused by the screening pass and the
+   extraction pass so a PDF is read off the disk once and encoded once. */
+async function aiBuildParts(){
+  const a = AI_IMP;
+  if(a.parts) return a.parts;
+  const parts = [];
+  const text = String(a.text || "").trim();
+  if(text) parts.push({text:"Here is the plan:\n\n" + text.slice(0, 120000)});
+  for(let i = 0; i < a.files.length; i++) parts.push(await aiFilePart(a.files[i]));
+  a.parts = parts;
+  return parts;
+}
+/* STAGE 1. Nothing below this line runs until the document has been looked at and found
+   to be a training plan, which is the point: a rejected document costs one small call
+   and never reaches the extraction. */
 async function aiRun(){
   const a = AI_IMP;
   if(a.busy) return;
@@ -5549,24 +6459,85 @@ async function aiRun(){
     renderAIImport();
     return;
   }
-  a.busy = true; a.err = "";
+  a.busy = true; a.busyMsg = "Checking your document…"; a.err = "";
   renderAIImport();
   try{
-    const parts = [];
-    if(text) parts.push({text:"Here is the plan:\n\n" + text.slice(0, 120000)});
-    for(let i = 0; i < a.files.length; i++) parts.push(await aiFilePart(a.files[i]));
-    const data = await aiCall(parts);
-    if(data && data.understood === false){
-      throw new Error(String(data.problem || "That didn't read as a training plan.").slice(0,200));
+    const parts = await aiBuildParts();
+    const check = await aiCall(parts, {system: aiCheckPrompt(), schema: AI_CHECK_SCHEMA, temperature: 0});
+    a.check = check || {};
+    const verdict = ["ok","questionable","reject"].indexOf(a.check.verdict) > -1 ? a.check.verdict : "questionable";
+    /* Belt and braces: a document that is not readable, or that names no exercises and
+       gives no sets or reps, is not importable whatever the verdict field says. */
+    const hopeless = a.check.readable === false || a.check.isTrainingPlan === false
+                  || (a.check.hasExercises === false && a.check.hasSetsOrReps === false);
+    if(verdict === "reject" || hopeless){
+      a.busy = false; a.stage = "blocked";
+      renderAIImport();
+      return;
     }
-    a.result = aiPlanToProgram(data || {});
+    if(verdict === "questionable"){
+      a.busy = false; a.stage = "caution";
+      renderAIImport();
+      return;
+    }
+    await aiExtractNow();
+  }catch(err){
     a.busy = false;
+    a.err = (err && err.message) || "Something went wrong reading that.";
+    renderAIImport();
+  }
+}
+/* STAGE 2 and 3. */
+async function aiExtractNow(){
+  const a = AI_IMP;
+  a.busy = true; a.busyMsg = "Reading your plan…"; a.err = "";
+  renderAIImport();
+  try{
+    const parts = await aiBuildParts();
+    const doc = await aiCall(parts, {system: aiSystemPrompt(), schema: AI_PLAN_SCHEMA, temperature: 0.1});
+    if(doc && doc.understood === false){
+      a.doc = null;
+      a.check = Object.assign({}, a.check, {
+        summary: aiTrim(doc.problem, 200) || "That didn't read as a training plan.",
+        problems: [], needed: (a.check && a.check.needed) || ""
+      });
+      a.busy = false; a.stage = "blocked";
+      renderAIImport();
+      return;
+    }
+    a.doc = doc || {};
+    a.questions = aiBuildQuestions(a.doc);
+    a.answers = {};
+    a.questions.forEach(q=>{ a.answers[q.id] = q.def; });
+    a.busy = false;
+    if(aiVisibleQuestions().length){ a.stage = "questions"; renderAIImport(); return; }
+    if(aiBuildResult()) a.stage = "review";
     renderAIImport();
   }catch(err){
     a.busy = false;
     a.err = (err && err.message) || "Something went wrong reading that.";
     renderAIImport();
   }
+}
+// Build (or rebuild, after an answer changed) the plan the review screen shows.
+function aiBuildResult(){
+  const a = AI_IMP;
+  try{
+    a.result = aiPlanToProgram(a.doc || {}, a.answers || {});
+    a.err = "";
+    return true;
+  }catch(err){
+    a.err = (err && err.message) || "That plan couldn't be turned into a programme.";
+    return false;
+  }
+}
+/* The preferences an import decided, written into the profile. Only the keys the import
+   actually settled — anything it did not ask about keeps whatever this person already
+   had, and a generated plan's defaults are never touched by somebody else's import. */
+function aiApplyPrefs(p){
+  if(!p) return;
+  const cur = trainPrefs();
+  Object.keys(PREF_DEFAULTS).forEach(k=>{ if(p[k] != null) cur[k] = p[k]; });
 }
 /* Committing the plan. During onboarding it becomes the wizard's imported plan and
    finishOnboarding writes it with everything else; afterwards it replaces the current
@@ -5575,7 +6546,8 @@ async function aiUsePlan(){
   const r = AI_IMP && AI_IMP.result;
   if(!r) return;
   if(AI_IMP.ob && OB){
-    OB.imported = r.backup || {program:r.program, customSplit:r.customSplit, splitId:r.splitId};
+    OB.imported = r.backup || {program:r.program, customSplit:r.customSplit, splitId:r.splitId,
+                               prefs:r.prefs, meta:r.meta};
     hideModal();
     obGo(OB_STEPS.indexOf("plan"));
     toast("Plan read. Have a look before you start.");
@@ -5594,19 +6566,93 @@ async function aiUsePlan(){
   S.program = Object.assign({}, r.program, {finisher: oldFin});
   if(r.customSplit){ S.customSplit = r.customSplit; S.splitId = null; }
   else if(r.splitId){ S.splitId = r.splitId; S.customSplit = null; }
+  aiApplyPrefs(r.prefs);
+  S.importMeta = r.meta || null;
   applySplit();
   invalidateTableOrigin();
   invalidateMultiDay();
   S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = [];
-  logPlanChange("programme", null, r.customSplit.name,
-    ["Plan imported: " + r.customSplit.name,
-     "Rotation is now " + DAYS.map(dayName).join(" → ")],
+  const lines = ["Plan imported: " + r.customSplit.name,
+                 "Rotation is now " + DAYS.map(dayName).join(" → ")];
+  if(r.meta && (r.meta.deloadWeeks||[]).length) lines.push("Deload weeks kept from your document");
+  if(r.meta && (r.meta.progression||[]).length) lines.push("Progression rules kept from your document");
+  logPlanChange("programme", null, r.customSplit.name, lines,
     {note:"Logged workouts were not affected."});
   AI_IMP = null;
   save(); queueSync();
   hideModal();
   TAB = "program"; render();
   toast("Plan imported. It's all yours to edit.");
+}
+
+/* What the document said about running the programme, kept where it can be read while
+   training rather than thrown away at import. Element 26 does not run somebody else's
+   periodisation for them — it holds on to it accurately and says so. */
+function importMetaCardHTML(){
+  const m = S.importMeta;
+  if(!m) return "";
+  const sec = (title, rows)=> rows.length
+    ? `<div style="margin-top:10px"><div class="fc-k" style="color:var(--dim)">${esc(title)}</div>${
+        rows.map(x=>`<div class="sub" style="margin:3px 0 0">${esc(x)}</div>`).join("")}</div>`
+    : "";
+  const body =
+    sec("Phases",       (m.phases||[]).map(x=> x.name + (x.weeks ? " · " + x.weeks : "") + (x.focus ? " — " + x.focus : ""))) +
+    sec("Deload weeks", (m.deloadWeeks||[]).map(x=> "Week " + x.week + (x.instruction ? " — " + x.instruction : ""))) +
+    sec("Testing weeks",(m.testingWeeks||[]).map(x=> "Week " + x.week + (x.instruction ? " — " + x.instruction : ""))) +
+    sec("Week to week", (m.weeklyChanges||[]).map(x=> (x.week ? "Week " + x.week + " — " : "") + x.change)) +
+    sec("Progression",  (m.progression||[]).map(x=> (x.applies ? x.applies + " — " : "") + x.rule)) +
+    sec("Special instructions", (m.special||[]).map(x=> x)) +
+    sec("Notes",        (m.notes||[]).map(x=> x));
+  if(!body) return "";
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>From your imported plan</h3>
+    </div>
+    <div class="sub" style="margin:4px 0 0">Kept exactly as your document wrote it${
+      m.weeks ? ", a " + m.weeks + "-week programme" : ""}. Element 26 tracks your sessions;
+      these are the instructions it read and is holding on to for you.</div>
+    ${body}
+  </div>`;
+}
+
+/* The three preferences the importer asks about, kept somewhere they can be changed
+   afterwards. They are settings about YOU, so they belong in Setup rather than living
+   only inside an import flow you go through once.
+
+   An exercise whose document spelled out how its sides are run keeps doing that
+   whatever this says — a fact from a programme is not overridden by a general
+   preference, which is the whole distinction this file is built on. */
+function trainPrefsCardHTML(){
+  const p = trainPrefs();
+  const anyUni = DAYS.some(d=> (S.program[d]||[]).some(e=> isSingleArm(e) || isCrossover(e) || e.sideMode));
+  const seg = (attr, val, opts)=> `<div class="seg">` + opts.map(o=>
+    `<button class="${val === o.v ? "on" : ""}" ${attr}="${esc(o.v)}">${esc(o.t)}</button>`).join("") + `</div>`;
+  let h = `<div class="card">
+    <h3>How you train</h3>`;
+  if(anyUni){
+    h += `<div class="sub" style="margin:4px 0 8px">One-limb movements. <b>Separately</b> marks each set L or R;
+      <b>match weaker</b> also holds both sides to whatever the weaker one manages; <b>together</b> counts a set
+      as covering both limbs. Exercises whose own plan states how sides are run keep doing that.</div>
+      ${seg("data-prefsides", p.sides, [
+        {v:"separate", t:"Separately"}, {v:"matchWeaker", t:"Match weaker"}, {v:"both", t:"Together"}])}`;
+    if(p.sides !== "both"){
+      h += `<div class="sub" style="margin:14px 0 8px">Which side opens the session. Swapping it each time keeps
+        the fresh set from always going to the same limb.</div>
+        ${seg("data-prefstart", p.startSideFlip ? "flip" : "fixed", [
+          {v:"fixed", t:"Always right"}, {v:"flip", t:"Swap each cycle"}])}`;
+    }
+  }
+  h += `<div class="sub" style="margin:14px 0 8px">Warm-up sets. <b>Add them</b> builds a ramp before the first
+    compound of a session; <b>plan only</b> shows warm-ups exactly where a plan prescribes them; <b>off</b> leaves
+    them to you. Warm-ups are never counted as working volume either way.</div>
+    ${seg("data-prefwarm", p.warmups, [
+      {v:"auto", t:"Add them"}, {v:"planOnly", t:"Plan only"}, {v:"manual", t:"Off"}])}
+    <div class="sub" style="margin:14px 0 8px">Deload weeks. Element 26 can watch for one being due after
+    ${DELOAD_EVERY_WEEKS} weeks and offer it, or stay quiet if your programme schedules its own.</div>
+    ${seg("data-prefdeload", p.deloads, [
+      {v:"auto", t:"Suggest one"}, {v:"planOnly", t:"Leave it to me"}])}
+  </div>`;
+  return h;
 }
 
 /* =====================================================================
@@ -6310,9 +7356,14 @@ function altHintHTML(style, startSide, nSets){
   const lead = style === "cross"
     ? `Start with your <b>${sideWord(startSide)}</b> arm crossing on top`
     : `Start with your <b>${sideWord(startSide)}</b> arm`;
-  const tail = style === "cross"
-    ? `swap which arm is on top every set. Flips to ${sideWord(startSide==="R"?"L":"R")} first next time.`
-    : `alternate every set. Flips to ${sideWord(startSide==="R"?"L":"R")} first next time.`;
+  /* Whether the opening side moves next session is a preference, so the sentence has to
+     follow it — promising a flip that has been turned off is worse than saying nothing. */
+  const next = trainPrefs().startSideFlip
+    ? ` Flips to ${sideWord(startSide==="R"?"L":"R")} first next time.`
+    : ` Every session opens the same way.`;
+  const tail = (style === "cross"
+    ? `swap which arm is on top every set.`
+    : `alternate every set.`) + next;
   return `<div class="arm-hint">
     <div>${lead}, ${tail}</div>
     <div class="alt-seq">${seq.join('<span class="alt-arrow">›</span>')}</div>
@@ -7410,6 +8461,9 @@ function viewProgram(){
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">✨ Import a plan</button>
   </div>
   <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
+  // Anything an imported document said about running the programme — phases, deloads,
+  // progression rules — kept where it can be read rather than discarded at import.
+  h += importMetaCardHTML();
   DAYS.forEach(wid=>{
     const m = dayMeta(wid);
     h += `<div class="card">
@@ -7503,8 +8557,10 @@ function viewSync(){
     <h3>Import a plan</h3>
     <div class="sub" style="margin:4px 0 10px">Already train on a programme of your own? Hand it over in whatever
       form you have it — pasted text, a coach's PDF, a spreadsheet, a screenshot, or a photograph of a sheet of
-      paper — and it gets read into a working plan: days, exercises, sets, reps and RPE targets. Everything is
-      editable afterwards, and your logged history is never touched.</div>
+      paper. It checks the document is really a training plan, reads what it says — sets, rep ranges, RIR, rest,
+      tempo, warm-ups, supersets, alternating work, deloads and progression rules — and asks you about the few
+      things your plan leaves open rather than guessing. Everything is editable afterwards, and your logged
+      history is never touched.</div>
     <div class="btn-row" style="margin-top:0">
       <button class="btn ghost small" id="aiImportSetup" style="flex:1">✨ Import a plan</button>
     </div>
@@ -7522,6 +8578,8 @@ function viewSync(){
       <button class="${S.askWhy===false?"on":""}" data-askwhy="off">Don't ask</button>
     </div>
   </div>
+
+  ${trainPrefsCardHTML()}
 
   <div class="card">
     <h3>Sleep</h3>
@@ -7980,6 +9038,22 @@ function bind(){
     save(); render();
     toast(S.viewMode==="focus" ? "Focus mode on, one exercise at a time" : "Regular view on");
   });
+  /* The training preferences. Each one only changes what the app does from here on —
+     nothing already logged moves, and no exercise that states its own behaviour is
+     touched. */
+  const setPref = (k, v, msg)=>{ trainPrefs()[k] = v; save(); queueSync(); render(); toast(msg); };
+  document.querySelectorAll("[data-prefsides]").forEach(b=> b.onclick=()=> setPref("sides", b.dataset.prefsides,
+    b.dataset.prefsides === "both" ? "A set now covers both limbs"
+      : b.dataset.prefsides === "matchWeaker" ? "Both sides held to the weaker one"
+      : "Each side tracked separately"));
+  document.querySelectorAll("[data-prefstart]").forEach(b=> b.onclick=()=> setPref("startSideFlip", b.dataset.prefstart === "flip",
+    b.dataset.prefstart === "flip" ? "Starting side swaps each cycle" : "Every session starts on the right"));
+  document.querySelectorAll("[data-prefwarm]").forEach(b=> b.onclick=()=> setPref("warmups", b.dataset.prefwarm,
+    b.dataset.prefwarm === "auto" ? "Warm-ups added before your first working sets"
+      : b.dataset.prefwarm === "planOnly" ? "Warm-ups only where your plan prescribes them"
+      : "Warm-ups left to you"));
+  document.querySelectorAll("[data-prefdeload]").forEach(b=> b.onclick=()=> setPref("deloads", b.dataset.prefdeload,
+    b.dataset.prefdeload === "auto" ? "Deloads suggested when due" : "Deloads left to you"));
   const sn = $("#sessNote");
   if(sn) sn.onchange = ()=>{ S.active.note = sn.value; save(); };
   document.querySelectorAll("#app [data-feel]").forEach(b=> b.onclick=()=>{
@@ -8203,8 +9277,12 @@ function startWorkout(wid){
       // the per-set ramp, frozen at session start so editing the plan mid-workout
       // can't retarget sets you have already done
       rpes: Array.isArray(e.rpes) ? e.rpes.slice() : undefined,
-      // which warm-up ramp this slot earns, decided by position in the session
+      // which warm-up ramp this slot earns: what the plan prescribed if it prescribed
+      // anything, otherwise whatever this person's warm-up preference generates
       warm: warmupKindFor(resolvedProgram(wid).map(x=>x.chosen), _wi) || undefined,
+      warmups: Array.isArray(e.warmups) && e.warmups.length ? e.warmups.slice() : undefined,
+      warmupNote: e.warmupNote || undefined,
+      sideMode: e.sideMode || undefined,
       // the prescribed load, carried so the warm-up ramp has something to take a
       // percentage of. Distinct from the per-set weights on entry.sets.
       planWeight: (e.weight == null ? undefined : e.weight),
@@ -8238,6 +9316,8 @@ function resumeSession(id){
     entries: s.entries.map(e=>({
       name: e.name, reps: e.reps, rpe: e.rpe, note: e.note, fin: e.fin||undefined,
       superset: e.superset||undefined, supersetEnd: e.supersetEnd||undefined,
+      warm: e.warm||undefined, warmups: e.warmups||undefined, warmupNote: e.warmupNote||undefined,
+      sideMode: e.sideMode||undefined,
       altStyle: e.altStyle || altStyle(e) || undefined,
       startSide: altStyle(e) ? (e.startSide || startSideFor(s.workoutId)) : undefined,
       sets: e.sets.map(st=>Object.assign({}, st))
@@ -8507,6 +9587,17 @@ function openExEditor(wid, idx){
       note: $("#f_note").value.trim()
     };
     if(!ne.name){ toast("Name it first"); return; }
+    /* Everything this form does not show is carried across rather than dropped. The
+       fields are real prescriptions — the rest window, the superset pairing, the warm-up
+       sets an imported plan prescribed, the side rule its document stated — and editing
+       a rep range is not a request to delete them. Per-set RPE targets only survive when
+       the set count did not change, because a six-long ramp on a four-set exercise
+       describes sets that no longer exist. */
+    if(!isNew){
+      ["rest","slotKind","superset","supersetEnd","warmups","warmupNote","sideMode","incr","imported","rampIn"]
+        .forEach(k=>{ if(e[k] !== undefined) ne[k] = e[k]; });
+      if(Array.isArray(e.rpes) && e.rpes.length === ne.sets) ne.rpes = e.rpes.slice();
+    }
     // store the override only when it disagrees with the built-in tables, so those can
     // keep improving for exercises the user never touched
     const want = $("#f_alt").value;                       // "", "side" or "cross"
@@ -8515,6 +9606,11 @@ function openExEditor(wid, idx){
       ne.cross = want === "cross";
       ne.uni   = want === "side";
     }
+    /* The dropdown is the person speaking about this exercise directly, so it outranks
+       a side rule carried over from the document it was imported from. Without this the
+       carried `sideMode` would keep winning and the choice would appear not to save. */
+    if(ne.sideMode === "both" && want) delete ne.sideMode;
+    else if(ne.sideMode && ne.sideMode !== "both" && !want) ne.sideMode = "both";
     if($("#f_hasAlt").checked){
       const na = {
         name: $("#g_name").value.trim(),
@@ -9857,6 +10953,10 @@ function deloadSignals(){
   return out;
 }
 function deloadDue(){
+  /* A six-week deload clock is this app's opinion, and a plan that schedules its own
+     deload weeks has a better one. "planOnly" leaves the prompting to the programme; the
+     manual "Start a deload" button in Setup is unaffected either way. */
+  if(trainPrefs().deloads !== "auto") return null;
   const wk = weeksSince(blockStartAt());
   const signals = deloadSignals();
   if(deloadActive()) return null;
@@ -10039,6 +11139,7 @@ function rampedSets(e){
 }
 function asymNoteFor(e){
   if(!asymActive()) return null;
+  if(sideModeFor(e) !== "matchWeaker") return null;
   if(altStyle(e) !== "side") return null;
   return "Match the weaker side: do the same rep count on both sides, set by the weaker one.";
 }
@@ -10283,14 +11384,39 @@ function warmRound(w, name){
    gets a single light set, and isolation gets nothing because the compounds in front
    of it have already warmed the joint. */
 function warmupKindFor(list, index){
+  const e = list && list[index];
+  /* A warm-up the source document actually prescribed outranks everything below it. It
+     is part of somebody's programme, not a default this app is entitled to replace. */
+  if(e && Array.isArray(e.warmups) && e.warmups.length) return "plan";
+  /* Generating a ramp for a movement the plan says nothing about is a PREFERENCE, and
+     it used to be applied to everyone unasked. "planOnly" means exactly what it says:
+     warm-ups appear where the plan prescribes them and nowhere else. */
+  const mode = trainPrefs().warmups;
+  if(mode !== "auto") return null;
   if(index === 0) return "full";
   const compounds = [];
   list.forEach((x, i)=>{ if(isCompound(x.name || (x.chosen && x.chosen.name))) compounds.push(i); });
   if(compounds.length > 1 && compounds[1] === index) return "light";
   return null;
 }
+/* The warm-up sets a document prescribed, shown as written. A percentage is resolved
+   against the working load when there is one, and left as the percentage when there
+   isn't, because "60% × 5" is still a usable instruction and an invented pound figure
+   is not. */
+function warmupFromPlan(e, ctx){
+  const src = warmWorkingLoad(e, ctx);
+  const w = src && src.w;
+  return (e.warmups || []).slice(0, 6).map(x=>{
+    const pct = Number(x.pct);
+    if(isFinite(pct) && pct > 0 && pct < 1 && w > 0)
+      return {label: warmRound(w * pct, e.name) + " lb", reps: String(x.reps || ""), pct: Math.round(pct*100), src:"plan"};
+    return {label: String(x.label || (isFinite(pct) && pct > 0 ? Math.round(pct*100) + "%" : "warm-up")).slice(0,24),
+            reps: String(x.reps || ""), src:"plan"};
+  }).filter(x=> x.label);
+}
 function warmupPlan(e, kind, ctx){
   if(!kind) return [];
+  if(kind === "plan") return warmupFromPlan(e, ctx);
   const spec = kind === "full" ? WARM_FULL : WARM_LIGHT;
   const src = warmWorkingLoad(e, ctx);
   const w = src && src.w;
@@ -10316,11 +11442,14 @@ function warmupHTML(e, kind, ctx){
   const plan = warmupPlan(e, kind, ctx);
   if(!plan.length) return "";
   return `<div class="warm">
-    <span class="warm-tag">Warm-up</span>
+    <span class="warm-tag">Warm-up${kind === "plan" ? " · from your plan" : ""}</span>
     <span class="warm-sets">${plan.map(x=>
-      `<span class="warm-set">${esc(x.label)} <i>&times;${esc(x.reps)}</i></span>`).join("")}</span>
+      `<span class="warm-set">${esc(x.label)}${x.reps?` <i>&times;${esc(x.reps)}</i>`:""}</span>`).join("")}</span>
     <span class="warm-note">${
-      plan[0] && plan[0].pct == null
+      kind === "plan"
+        ? (e && e.warmupNote ? esc(e.warmupNote) + ". Not counted."
+                             : "prescribed by your plan. Not counted.")
+      : plan[0] && plan[0].pct == null
         ? (isBodyweightMovement(e && e.name)
             ? (kind === "full" ? "easy reps to warm the joint, no added load. Not counted."
                                : "one easy set. Not counted.")
@@ -10468,6 +11597,11 @@ function asymRetiredFor(exName){
   return !!(S.asymRetired && S.asymRetired[nrm(exName)]);
 }
 function asymActiveFor(e){
+  /* Training both sides to the weaker one is a CHOICE about how you want to train, and
+     it was the author's. Somebody who wants each side pushed on its own merits, or who
+     treats a set as covering both limbs, should never see the rule appear on a plan they
+     imported. It runs where it has been asked for and nowhere else. */
+  if(sideModeFor(e) !== "matchWeaker") return false;
   if(altStyle(e) !== "side") return false;
   if(asymRetiredFor(e.name)) return false;
   /* Once the re-test has run, the four-week clock stops being the authority. Anything
@@ -10497,6 +11631,8 @@ function unilateralInPlan(){
 /* The four-week re-test. Due once the rule's window is up; reports each movement's
    measured gap and retires the rule on the ones now inside 2 reps. */
 function asymRetestDue(){
+  // Nothing to re-test if the rule was never switched on for this person.
+  if(trainPrefs().sides !== "matchWeaker") return false;
   if(asymActive()) return false;                       // still inside the four weeks
   if(S.asymRetest && S.asymRetest.at){
     /* Already run once. It comes back only when there is something good to report:
