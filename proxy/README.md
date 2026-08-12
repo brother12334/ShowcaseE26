@@ -113,3 +113,74 @@ Worker's side.
 Nothing here is Cloudflare-specific beyond the export shape. The same 60 lines port to
 Deno Deploy, Netlify Functions, or Vercel Edge — read the key from that platform's env
 instead of `env.GEMINI_API_KEY`, and keep the origin check.
+
+---
+
+# The account service (optional)
+
+`account-worker.js` is a second, separate Worker. Element 26 does not need it: an
+account created with no service configured is real, it names your data and namespaces
+your storage, and it lives on the device that made it. Deploy this one and the same
+account becomes portable — sign in on a phone with the ID and recovery key from a
+laptop, and the log follows.
+
+**What it stores.** One record per account (`name`, a SHA-256 hash of the recovery key,
+a created-at) and one blob per account (the app's own state). Nothing else. No email, no
+password, no GitHub.
+
+**How access works.** The User ID identifies an account. The recovery key authenticates
+it. Every route that touches private data requires both, in one `Authorization` header,
+and the account is derived from the credential rather than read from a path or a
+parameter — so there is no id to change in a URL, and an ID on its own reads nothing.
+Keys are compared in constant time against a stored hash; a dump of the database does
+not hand anybody the credentials it protects. `POST /session` answers the same 401 for
+"no such account" and "wrong key", so it cannot be used to test whether an ID exists.
+
+## Deploy
+
+```bash
+wrangler kv namespace create E26_ACCOUNTS       # prints an id
+```
+
+Put that id in a second wrangler config (or a second `[env]` block) and deploy:
+
+```toml
+name = "element26-accounts"
+main = "proxy/account-worker.js"
+compatibility_date = "2024-11-01"
+
+[[kv_namespaces]]
+binding = "E26_ACCOUNTS"
+id = "<the id wrangler printed>"
+```
+
+```bash
+wrangler deploy -c wrangler.accounts.toml
+```
+
+Add the origin you serve the app from to `ALLOWED_ORIGINS` at the top of
+`account-worker.js`, then set `E26_API` near the top of `index.html` to the Worker's
+URL. **No secret goes in the page** — the whole design is that the page holds an
+identifier and the device holds a key, and the service is the only thing that can match
+them.
+
+## Check it works
+
+```bash
+# create an account
+curl -s -X POST https://element26-accounts.<sub>.workers.dev/account \
+  -H 'Origin: https://your.site' -H 'Content-Type: application/json' \
+  -d '{"name":"Test"}'
+# → {"id":"E26-7F42-K9P3","key":"…32 hex…","name":"Test"}
+
+# the ID alone gets you nothing
+curl -i https://element26-accounts.<sub>.workers.dev/data \
+  -H 'Origin: https://your.site' -H 'Authorization: Bearer E26-7F42-K9P3.'
+# → HTTP/2 401
+```
+
+## If both halves are lost
+
+The account is gone, and that is the honest trade for having no email and no password.
+The app says so at sign-up and shows the ID once, big, behind a confirmation — and the
+recovery key is always visible again under **Settings → Account**.
