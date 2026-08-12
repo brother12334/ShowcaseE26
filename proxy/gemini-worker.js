@@ -32,12 +32,85 @@ const ALLOWED_ORIGINS = [
   "https://brother12334.github.io",
 ];
 
-/* Models this proxy will forward. The app asks for one by name, and an allowlist stops
-   a stranger pointing your key at a more expensive model. */
-const ALLOWED_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+/* Models this proxy will forward when the APP asks for one by name. The allowlist stops
+   a stranger pointing your key at something more expensive; it is not a claim that any
+   of these still exist, which is what resolveModel() below is for. */
+const ALLOWED_MODELS = [
+  "gemini-flash-latest",
+  "gemini-3-flash",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+];
+
+/* WHY THIS PROXY PICKS ITS OWN MODEL WHEN THE NAMED ONE IS GONE.
+   Google retires model names on its own schedule, and does it per-key: a name that
+   works for an account set up last year answers "no longer available to new users" for
+   one set up last week. A hard-coded name is therefore a scheduled outage — the app
+   keeps working right up until the day it doesn't, and the person who has to fix it is
+   whoever published the file, not the person standing in the gym trying to import a
+   plan. So a 404 is treated as "that name is gone", not as a fatal error: the Worker
+   asks Google what this key can actually use, picks the closest thing, and retries once.
+
+   Preference order, highest score first. Flash-class only, because all this does is
+   read a document into JSON — reasoning models cost more and are no better at it. */
+function scoreModel(name) {
+  let s = 0;
+  if (/flash/.test(name)) s += 100;          // fast and cheap, which is the whole job
+  if (/-latest$/.test(name)) s += 50;        // an alias survives the next retirement
+  if (/lite/.test(name)) s -= 15;            // capable enough beats cheapest
+  if (/preview|-exp|experimental/.test(name)) s -= 40;   // never pin to a preview
+  const v = parseFloat((name.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  s += v * 5;                                // newer generation wins ties
+  return s;
+}
+
+/* Cached per isolate so the extra lookup happens roughly once, not once per import.
+   The TTL is short enough that fixing things on Google's side takes effect the same
+   hour rather than needing a redeploy. */
+let RESOLVED = null;
+const RESOLVE_TTL_MS = 60 * 60 * 1000;
 
 const MAX_BODY_BYTES = 14 * 1024 * 1024;   // Gemini's own inline-data ceiling is ~15 MB
-const GOOGLE = "https://generativelanguage.googleapis.com/v1beta/models/";
+const API = "https://generativelanguage.googleapis.com/v1beta";
+const GOOGLE = API + "/models/";
+
+/* Every model this key may actually call, which is the only authority on the question.
+   Filtered to the ones that support generateContent, because the list also carries
+   embedding and other models that would 404 in a different way. */
+async function availableModels(key) {
+  let r;
+  try {
+    r = await fetch(API + "/models?pageSize=200", { headers: { "x-goog-api-key": key } });
+  } catch {
+    return [];
+  }
+  if (!r.ok) return [];
+  const j = await r.json().catch(() => ({}));
+  return (j.models || [])
+    .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map((m) => String(m.name || "").replace(/^models\//, ""))
+    .filter(Boolean);
+}
+
+async function resolveModel(key, avoid) {
+  if (RESOLVED && Date.now() - RESOLVED.at < RESOLVE_TTL_MS && RESOLVED.name !== avoid) {
+    return RESOLVED.name;
+  }
+  const list = (await availableModels(key)).filter((m) => m !== avoid);
+  if (!list.length) return null;
+  const best = list.sort((a, b) => scoreModel(b) - scoreModel(a))[0];
+  RESOLVED = { name: best, at: Date.now() };
+  return best;
+}
+
+async function callGoogle(model, body, key) {
+  return fetch(GOOGLE + encodeURIComponent(model) + ":generateContent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify(body),
+  });
+}
 
 /* The app reads `error.message` out of whatever comes back, so failures raised HERE use
    Google's error shape too. Otherwise a proxy rejection would surface as a blank. */
@@ -94,6 +167,16 @@ export default {
       return fail(400, "Body was not valid JSON.", origin);
     }
 
+    /* A diagnostic, not a feature: {"list":true} answers with every model this key can
+       actually call. It is behind the same origin check as everything else, so it is
+       reachable from your own site's console and nowhere else, and it exists because
+       "which models do I have?" is otherwise unanswerable without putting the key
+       somewhere it should not go. */
+    if (body && body.list === true) {
+      const models = await availableModels(env.GEMINI_API_KEY);
+      return json({ models, resolved: RESOLVED && RESOLVED.name }, 200, origin);
+    }
+
     /* `model` is the app's only say in where this goes, and it is checked rather than
        trusted. Everything else is passed through untouched. */
     const model = String(body.model || "");
@@ -104,24 +187,38 @@ export default {
 
     let upstream;
     try {
-      upstream = await fetch(GOOGLE + encodeURIComponent(model) + ":generateContent", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": env.GEMINI_API_KEY,
-        },
-        body: JSON.stringify(body),
-      });
+      upstream = await callGoogle(model, body, env.GEMINI_API_KEY);
     } catch {
       return fail(502, "Couldn't reach Google from the proxy.", origin);
     }
 
+    /* The model was retired, or was never available to this key. Ask what is, and try
+       once more — see the note on resolveModel(). Only a 404 earns a retry: a 429 means
+       the quota is gone whichever model you pick, and a 400 means the request itself is
+       wrong, so retrying either would just spend the allowance twice. */
+    let served = model;
+    if (upstream.status === 404) {
+      const alt = await resolveModel(env.GEMINI_API_KEY, model);
+      if (alt) {
+        try {
+          const retry = await callGoogle(alt, body, env.GEMINI_API_KEY);
+          upstream = retry;
+          served = alt;
+        } catch {
+          /* keep the original 404, which at least carries Google's explanation */
+        }
+      }
+    }
+
     /* Verbatim, status included. A 429 from Google has to arrive at the app as a 429 or
-       the rate-limit message it already has never fires. */
+       the rate-limit message it already has never fires. The extra header names which
+       model actually answered, so a substitution is visible in the network tab instead
+       of being silent. */
     return new Response(upstream.body, {
       status: upstream.status,
       headers: {
         "Content-Type": upstream.headers.get("Content-Type") || "application/json",
+        "X-E26-Model": served,
         ...cors(origin),
       },
     });
