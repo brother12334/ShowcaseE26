@@ -5511,6 +5511,50 @@ async function signInAccount(id, key){
   saveAccount();
   return ACCT;
 }
+/* Deleting the account. Everything this device holds under it goes: the log, the
+   profile registry, the account record itself, and — where a Worker is configured — the
+   server's copy too. It is the one action in the app that destroys training history, so
+   it asks twice and the second ask requires typing the ID: a yes/no box is not enough
+   friction for something with no undo. */
+async function deleteAccount(){
+  if(!hasAccount()) return;
+  const id = ACCT.id;
+  const first = await askConfirm({
+    title:"Delete this account?",
+    body:`This erases <b>everything</b> under <b>${esc(id)}</b> on this device — your plan, every logged
+          workout, your history and your settings${ACCT.cloud ? ", and the copy stored against your account" : ""}.
+          <br><br>There is no undo, and no way to recover it afterwards. If you only want to leave this device,
+          sign out instead: your log stays and your ID gets you back in.`,
+    yes:"Continue", no:"Cancel"
+  });
+  if(!first) return;
+  const typed = prompt("Type your User ID to confirm you want to delete it and everything in it:\n\n" + id);
+  if(!typed || typed.trim().toUpperCase() !== id){
+    if(typed !== null) toast("That didn't match — nothing was deleted");
+    return;
+  }
+  if(accountAuth()){
+    try{
+      await fetch(String(E26_API).replace(/\/+$/,"") + "/account", {method:"DELETE", headers:{"Authorization": accountAuth()}});
+    }catch(e){ /* the local wipe below happens either way */ }
+  }
+  /* Every key this account owns, and nothing else: another account on the same device
+     keeps its own namespace untouched. */
+  try{
+    const ns = acctNS();
+    Object.keys(localStorage).forEach(k=>{
+      if(ns){ if(k.endsWith(ns)) localStorage.removeItem(k); }
+      else if(k === LS_KEY || k === PROF_KEY_BASE || k.indexOf(LS_KEY + ".") === 0) localStorage.removeItem(k);
+    });
+    localStorage.removeItem(ACCT_KEY);
+    if(localStorage.getItem(NS0_KEY) === id) localStorage.removeItem(NS0_KEY);
+  }catch(e){}
+  ACCT = null;
+  bootProfiles();
+  S = load(); migrate(); applySplit(); saveQuiet();
+  startAccountFlow("signup");
+  toast("Account deleted");
+}
 function signOutAccount(){
   /* Signing out forgets the SESSION, not the data: the log stays in its namespace on
      this device and signing back in with the same id picks it up exactly where it was.
@@ -9691,21 +9735,6 @@ function viewSync(){
   const restLog = (S.restLog||[]).slice().sort();
   let h = `<div class="hdr"><h1>Setup</h1>${hdrRight(`<span class="date num">v${APP_VERSION}</span>`)}</div>
   <div class="card">
-    <h3>What you're training for</h3>
-    <div class="sub" style="margin:4px 0 10px">Currently on <b>${esc(splitName())}</b>. Your goal decides what the
-      Body tab measures you against — the volume landmarks per muscle, and how a session is graded. It never
-      rewrites your plan: the sets and reps in the Program tab are whatever your imported programme says.</div>
-    <div class="ob-opts" style="gap:7px;margin-bottom:12px">${Object.keys(GOALS).map(k=>
-      `<button class="ob-opt${(S.setup&&S.setup.goal)===k?" on":""}" data-setgoal="${k}" style="padding:11px 13px">
-        <span class="ob-opt-t">${esc(GOALS[k].name)}</span>
-        <span class="ob-opt-s">${esc(GOALS[k].sub)}</span>
-        <span class="ob-tick">✓</span>
-      </button>`).join("")}</div>
-    <div class="btn-row" style="margin-top:0">
-      <button class="btn ghost small" id="setupSplit">Schedule</button>
-    </div>
-  </div>
-  <div class="card">
     <h3>Account</h3>
     <div class="sub" style="margin:4px 0 4px">Signed in as <b>${esc(accountName())}</b>. ${
       ACCT && ACCT.cloud
@@ -9729,6 +9758,7 @@ function viewSync(){
       identifies the account and never opens it.</div>
     <div class="btn-row" style="margin-top:0">
       <button class="btn ghost small" id="acctSignOut">Sign out</button>
+      <button class="btn ghost small danger" id="acctDelete">Delete account</button>
     </div>
   </div>
   <div class="card">
@@ -9740,23 +9770,26 @@ function viewSync(){
       <button class="btn ghost small" id="profManageSetup">Manage people</button>
     </div>
   </div>
-  <div class="card">
-    <h3>Import a plan</h3>
-    <div class="sub" style="margin:4px 0 10px">Already train on a programme of your own? Hand it over in whatever
-      form you have it — pasted text, a coach's PDF, a spreadsheet, a screenshot, or a photograph of a sheet of
-      paper. It checks the document is really a training plan, reads what it says — sets, rep ranges, RIR, rest,
-      tempo, warm-ups, supersets, alternating work, deloads and progression rules — and asks you about the few
-      things your plan leaves open rather than guessing. Everything is editable afterwards, and your logged
-      history is never touched.</div>
-    <div class="btn-row" style="margin-top:0">
-      <button class="btn ghost small" id="aiImportSetup" style="flex:1">✨ Import a plan</button>
-    </div>
-  </div>
   <details class="adv-fold">
     <summary>Advanced — how the app behaves</summary>
     <div class="sub" style="margin:8px 2px 10px;font-size:12.5px;color:var(--faint)">
       These were set when you imported your plan, and they change how every session is shown and graded —
       not what your plan says. Worth a look if something isn't behaving how you expect; otherwise leave them.</div>
+  <div class="card">
+    <h3>What you're training for</h3>
+    <div class="sub" style="margin:4px 0 10px">Currently on <b>${esc(splitName())}</b>. Your goal decides what the
+      Body tab measures you against — the volume landmarks per muscle, and how a session is graded. It never
+      rewrites your plan: the sets and reps in the Program tab are whatever your imported programme says.</div>
+    <div class="ob-opts" style="gap:7px;margin-bottom:12px">${Object.keys(GOALS).map(k=>
+      `<button class="ob-opt${(S.setup&&S.setup.goal)===k?" on":""}" data-setgoal="${k}" style="padding:11px 13px">
+        <span class="ob-opt-t">${esc(GOALS[k].name)}</span>
+        <span class="ob-opt-s">${esc(GOALS[k].sub)}</span>
+        <span class="ob-tick">✓</span>
+      </button>`).join("")}</div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn ghost small" id="setupSplit">Schedule</button>
+    </div>
+  </div>
   <div class="card">
     <h3>Preferences</h3>
     <div class="sub" style="margin:4px 0 10px">Workout view, <b>Regular</b> shows the whole session at once; <b>Focus</b> shows one exercise at a time with bigger controls, built for the gym floor.</div>
@@ -10480,6 +10513,8 @@ function bind(){
   if(ckey) ckey.onclick = async ()=>{ toast(await copyText(ACCT ? ACCT.key : "") ? "Recovery key copied" : "Couldn't copy"); };
   const skey = $("#acctShowKey");
   if(skey) skey.onclick = ()=>{ SHOW_KEY = !SHOW_KEY; render(); };
+  const del = $("#acctDelete");
+  if(del) del.onclick = deleteAccount;
   const sout = $("#acctSignOut");
   if(sout) sout.onclick = async ()=>{
     const ok = await askConfirm({
@@ -10493,8 +10528,6 @@ function bind(){
     SHOW_KEY = false;
     signOutAccount();
   };
-  const aiI = $("#aiImportSetup");
-  if(aiI) aiI.onclick = ()=> openAIImport(false);
   const pas = $("#profAddSetup");
   if(pas) pas.onclick = ()=> openProfileEditor(null);
   const pms = $("#profManageSetup");
