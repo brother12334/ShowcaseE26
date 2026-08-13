@@ -6033,26 +6033,6 @@ function aiSnapName(n){
      already is left alone, because "DB" and "RDL" are not "Db" and "Rdl". */
   return /[A-Z]/.test(clean) ? clean : clean.replace(/\b[a-z]/g, c=>c.toUpperCase());
 }
-/* The closest things in the database to a name it does not know, so the review screen
-   can offer them rather than making somebody retype the movement. Word overlap, not
-   fuzzy string distance: "Seated DB Shoulder Press" and "Dumbbell Shoulder Press" share
-   the words that matter and differ by half their characters. */
-function aiCandidates(n, limit){
-  const words = canonEx(aiCleanName(n)).split(/\s+/).filter(w=> w.length > 2);
-  if(!words.length) return [];
-  const scored = [];
-  aiVocabulary().forEach(v=>{
-    const vw = canonEx(v).split(/\s+/);
-    let hit = 0;
-    words.forEach(w=>{
-      if(vw.some(x=> x === w || x.indexOf(w) === 0 || w.indexOf(x) === 0)) hit++;
-    });
-    if(hit) scored.push({v, s: hit / Math.max(words.length, vw.length)});
-  });
-  scored.sort((a,b)=> b.s - a.s);
-  return scored.filter(x=> x.s >= 0.34).slice(0, limit || 6).map(x=> x.v);
-}
-
 /* ---------- stage 1: is this even a training plan? ----------
 
    A separate, deliberately small call. It exists because the old importer's only defence
@@ -6535,11 +6515,7 @@ function aiExercise(x, ctx){
   const e = exr(name, rpes, reps, weight, note, extra);
   // Which barbell lifts are in here decides whether the bar question is worth asking.
   if(isBarbellLift(name) && ctx.barbell.indexOf(name) < 0) ctx.barbell.push(name);
-  ctx.matches.push({
-    dayId: ctx.dayId, idx: ctx.idx, given, name,
-    matched: aiKnownName(name),
-    candidates: aiKnownName(name) ? [] : aiCandidates(given, 6)
-  });
+  ctx.matches.push({dayId: ctx.dayId, idx: ctx.idx, given, name, matched: aiKnownName(name)});
   return e;
 }
 /* Supersets and circuits, as the document grouped them. The app's own model is a pair:
@@ -9776,6 +9752,11 @@ function viewSync(){
       <button class="btn ghost small" id="aiImportSetup" style="flex:1">✨ Import a plan</button>
     </div>
   </div>
+  <details class="adv-fold">
+    <summary>Advanced — how the app behaves</summary>
+    <div class="sub" style="margin:8px 2px 10px;font-size:12.5px;color:var(--faint)">
+      These were set when you imported your plan, and they change how every session is shown and graded —
+      not what your plan says. Worth a look if something isn't behaving how you expect; otherwise leave them.</div>
   <div class="card">
     <h3>Preferences</h3>
     <div class="sub" style="margin:4px 0 10px">Workout view, <b>Regular</b> shows the whole session at once; <b>Focus</b> shows one exercise at a time with bigger controls, built for the gym floor.</div>
@@ -9791,6 +9772,7 @@ function viewSync(){
   </div>
 
   ${trainPrefsCardHTML()}
+  </details>
 
   <div class="card">
     <h3>Sleep</h3>
