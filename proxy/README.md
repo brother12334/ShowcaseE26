@@ -179,6 +179,13 @@ curl -i https://element26-accounts.<sub>.workers.dev/data \
 # → HTTP/2 401
 ```
 
+## Deleting an account
+
+`DELETE /account`, with the same `Authorization` header as everything else — the ID
+alone cannot do it. It removes the account record and its data blob, with no soft-delete
+and nothing to restore from. The app asks twice and makes you type your ID before it
+calls this.
+
 ## If both halves are lost
 
 The account is gone, and that is the honest trade for having no email and no password.

@@ -55,7 +55,7 @@ function cors(origin) {
   const ok = ALLOWED_ORIGINS.includes(origin);
   return {
     "Access-Control-Allow-Origin": ok ? origin : ALLOWED_ORIGINS[0] || "null",
-    "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
@@ -153,6 +153,18 @@ export default {
       try { rec = JSON.parse(raw); } catch (e) { return json({ error: "unauthorized" }, 401, origin); }
       if (!sameSecret(await sha256(key), rec.keyHash || "")) return json({ error: "unauthorized" }, 401, origin);
       return json({ ok: true, name: rec.name || "" }, 200, origin);
+    }
+
+    /* DELETE. Requires the same credential as reading the data, for the same reason: an
+       ID on its own must not be able to do anything at all, least of all this. Removes
+       the account record and its blob; there is no soft-delete and nothing to restore
+       from, which is what the app tells the person before it calls this. */
+    if (path.endsWith("/account") && request.method === "DELETE") {
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+      await env.E26_ACCOUNTS.delete("data:" + who.id);
+      await env.E26_ACCOUNTS.delete("acct:" + who.id);
+      return json({ ok: true }, 200, origin);
     }
 
     /* THE DATA. One blob per account, addressed by the credential and nothing else. */
