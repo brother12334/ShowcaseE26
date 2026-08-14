@@ -118,7 +118,7 @@ instead of `env.GEMINI_API_KEY`, and keep the origin check.
 
 # The account service (optional)
 
-`account-worker.js` is a second, separate Worker. Element 26 does not need it: an
+`accountworker.js` is a second, separate Worker. Element 26 does not need it: an
 account created with no service configured is real, it names your data and namespaces
 your storage, and it lives on the device that made it. Deploy this one and the same
 account becomes portable — sign in on a phone with the ID and recovery key from a
@@ -146,7 +146,7 @@ Put that id in a second wrangler config (or a second `[env]` block) and deploy:
 
 ```toml
 name = "element26-accounts"
-main = "proxy/account-worker.js"
+main = "proxy/accountworker.js"
 compatibility_date = "2024-11-01"
 
 [[kv_namespaces]]
@@ -159,7 +159,7 @@ wrangler deploy -c wrangler.accounts.toml
 ```
 
 Add the origin you serve the app from to `ALLOWED_ORIGINS` at the top of
-`account-worker.js`, then set `E26_API` near the top of `index.html` to the Worker's
+`accountworker.js`, then set `E26_API` near the top of `index.html` to the Worker's
 URL. **No secret goes in the page** — the whole design is that the page holds an
 identifier and the device holds a key, and the service is the only thing that can match
 them.
