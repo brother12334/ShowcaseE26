@@ -1401,16 +1401,49 @@ body.cele-open{overflow:hidden}
 #splash.bye{opacity:0;transition:opacity .45s ease}
 #splash.bye .splash-inner{transform:scale(1.06);transition:transform .45s ease}
 .splash-inner{display:flex;flex-direction:column;align-items:center;gap:6px}
-/* The mark drops in and settles, then breathes a slow glow — the same two-beat
-   entrance the header mark and the hero animation both use elsewhere in the app. */
+/* The mark launches out of its own shadow with a bounce, settles, and breathes a slow
+   glow while the word and the quote catch up. Two pieces animate independently — the
+   ground shadow and the dumbbell — which is why the splash draws its own copy of the
+   shape instead of <use>-ing #e26-mark: a bounce only reads as a bounce if the thing it
+   launches from holds still while it moves. */
 .splash-inner svg{overflow:visible}
-.mk-splash{
-  color:var(--acc);opacity:0;transform:translateY(-14px) scale(.88);
-  animation:feDraw .6s .1s cubic-bezier(.22,1.3,.36,1) forwards, feGlow 2.2s 1s ease-in-out infinite;
-}
-@keyframes feDraw{to{opacity:1;transform:none}}
+.mk-splash{color:var(--acc);animation:feGlow 2.2s 1s ease-in-out infinite}
 @keyframes feGlow{0%,100%{filter:drop-shadow(0 0 0 rgba(201,138,75,0))}50%{filter:drop-shadow(0 0 14px rgba(201,138,75,.6))}}
 @keyframes feUp{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.mk-shadow{
+  transform-box:fill-box;transform-origin:center;opacity:0;
+  animation:mkShadowIn .5s .32s cubic-bezier(.3,.7,.3,1) both;
+}
+.mk-body{
+  transform-box:fill-box;transform-origin:50% 62%;opacity:0;
+  animation:mkBounceIn .95s .05s cubic-bezier(.22,.9,.32,1) both;
+}
+/* One shot: up past rest, a small drop, a smaller re-bounce, settle. The overshoot on
+   the way up is what a bounce actually is — without it this is just a rise. */
+@keyframes mkBounceIn{
+  0%  {opacity:0; transform:translateY(18px) scale(.42)}
+  44% {opacity:1; transform:translateY(-16px) scale(1.08)}
+  63% {opacity:1; transform:translateY(5px) scale(.95)}
+  80% {opacity:1; transform:translateY(-5px) scale(1.03)}
+  92% {opacity:1; transform:translateY(1px) scale(.99)}
+  100%{opacity:1; transform:translateY(0) scale(1)}
+}
+/* Every keyframe past the fade-in restates opacity:1, deliberately. A CSS keyframe
+   animation does not hold the last value it was GIVEN for a property through to the end
+   — a keyframe offset that doesn't mention a property implicitly animates that property
+   back toward the element's own pre-animation base value (opacity:0 here) by 100%. Leave
+   any of these out and the mark fades itself back out partway through its own entrance. */
+@keyframes mkShadowIn{from{opacity:0;transform:scaleX(.45)}to{opacity:1;transform:scaleX(1)}}
+/* The exit: the splash already fades as a whole (#splash.bye below), and the mark rides
+   its OWN motion on top of that — sinking back down and shrinking into the shadow it
+   came from, rather than just dimming in place like everything around it. Swapped in by
+   specificity (an id in the selector beats a bare class), which fully replaces the
+   entrance animation rather than layering a transition under it — a still-playing
+   `animation` wins that fight and a transition would never be seen. */
+#splash.bye .mk-body{animation:mkSink .4s cubic-bezier(.4,0,.7,1) forwards}
+#splash.bye .mk-shadow{animation:mkShadowOut .4s ease forwards}
+@keyframes mkSink{from{opacity:1;transform:translateY(0) scale(1)}to{opacity:0;transform:translateY(22px) scale(.4)}}
+@keyframes mkShadowOut{from{opacity:1;transform:scaleX(1)}to{opacity:0;transform:scaleX(.3)}}
 .sp-left,.sp-right,.sp-bar{transform-box:fill-box;transform-origin:center}
 .sp-left{animation:slideL .6s .12s cubic-bezier(.22,1.3,.36,1) both}
 .sp-right{animation:slideR .6s .12s cubic-bezier(.22,1.3,.36,1) both}
@@ -1932,8 +1965,16 @@ body.cele-open{overflow:hidden}
 </svg>
 <div id="splash" aria-hidden="true">
   <div class="splash-inner">
+    <!-- Drawn directly here rather than <use>'d from #e26-mark, because the splash is the
+         one place the shadow and the mark move independently — a bounce reads as a
+         bounce only if the ground it launches from and lands on holds still. -->
     <svg class="mk-splash" viewBox="0 0 100 100" width="min(34vw,144px)" height="min(34vw,144px)" aria-hidden="true">
-      <use href="#e26-mark"></use>
+      <ellipse class="mk-shadow" cx="50" cy="92" rx="34" ry="6" fill="currentColor" opacity="0.3"></ellipse>
+      <g class="mk-body" transform="translate(0 -4) rotate(-25 50 50)">
+        <rect x="26" y="44" width="48" height="12" fill="currentColor"></rect>
+        <polygon points="26,26 44,38 44,62 26,74 8,62 8,38" fill="currentColor"></polygon>
+        <polygon points="74,26 92,38 92,62 74,74 56,62 56,38" fill="currentColor"></polygon>
+      </g>
     </svg>
     <div class="splash-word">Element 26</div>
     <div class="splash-quote" id="splashQuote"></div>
@@ -1993,7 +2034,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "1.9";
+const APP_VERSION = "2.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
