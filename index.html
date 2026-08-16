@@ -1401,49 +1401,47 @@ body.cele-open{overflow:hidden}
 #splash.bye{opacity:0;transition:opacity .45s ease}
 #splash.bye .splash-inner{transform:scale(1.06);transition:transform .45s ease}
 .splash-inner{display:flex;flex-direction:column;align-items:center;gap:6px}
-/* The mark launches out of its own shadow with a bounce, settles, and breathes a slow
-   glow while the word and the quote catch up. Two pieces animate independently — the
-   ground shadow and the dumbbell — which is why the splash draws its own copy of the
-   shape instead of <use>-ing #e26-mark: a bounce only reads as a bounce if the thing it
-   launches from holds still while it moves. */
+/* The mark starts hidden, tucked in its own shadow. It leaps up, hangs a moment near the
+   top of the arc — real projectile motion is slowest right where it turns around, which
+   is what a "hang" actually is — then falls back down and disappears back into the
+   shadow it came from. One occurrence, not a loop, and it does not stay: the mark is
+   gone again well before the word and the quote take their turn.
+
+   The shadow is drawn as a separate element that only fades IN and then holds, rather
+   than following the mark back down, so the ground it launched from is still legible
+   after it has vanished — it fell into the dark, not off the edge of the screen. That is
+   also why the splash draws its own copy of the shape instead of <use>-ing #e26-mark:
+   the two pieces move on entirely different schedules. */
 .splash-inner svg{overflow:visible}
-.mk-splash{color:var(--acc);animation:feGlow 2.2s 1s ease-in-out infinite}
-@keyframes feGlow{0%,100%{filter:drop-shadow(0 0 0 rgba(201,138,75,0))}50%{filter:drop-shadow(0 0 14px rgba(201,138,75,.6))}}
+.mk-splash{color:var(--acc)}
 @keyframes feUp{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 .mk-shadow{
   transform-box:fill-box;transform-origin:center;opacity:0;
-  animation:mkShadowIn .5s .32s cubic-bezier(.3,.7,.3,1) both;
+  animation:mkShadowIn .5s .28s cubic-bezier(.3,.7,.3,1) both;
 }
 .mk-body{
   transform-box:fill-box;transform-origin:50% 62%;opacity:0;
-  animation:mkBounceIn .95s .05s cubic-bezier(.22,.9,.32,1) both;
+  animation:mkJump 1.05s .05s linear both;
 }
-/* One shot: up past rest, a small drop, a smaller re-bounce, settle. The overshoot on
-   the way up is what a bounce actually is — without it this is just a rise. */
-@keyframes mkBounceIn{
-  0%  {opacity:0; transform:translateY(18px) scale(.42)}
-  44% {opacity:1; transform:translateY(-16px) scale(1.08)}
-  63% {opacity:1; transform:translateY(5px) scale(.95)}
-  80% {opacity:1; transform:translateY(-5px) scale(1.03)}
-  92% {opacity:1; transform:translateY(1px) scale(.99)}
-  100%{opacity:1; transform:translateY(0) scale(1)}
+/* A single jump, timed as one physical arc rather than a bounce-and-settle:
+     0-8%    still down in the shadow, not yet visible
+     8-42%   launches up, decelerating into the turn (fast off the ground, slow arriving)
+     42-70%  the hang — barely moving, which IS what the top of a real arc looks like
+     70-100% falls, accelerating hard, and fades out exactly as it lands — gravity, not
+             a fade layered on top of it
+   Every keyframe from 8% on restates opacity explicitly. A CSS keyframe animation does
+   NOT hold the last value it was given for a property — an offset that omits a property
+   implicitly animates it back toward the element's pre-animation base value (opacity:0
+   here) by 100%, so leaving any of these out quietly fades the mark out mid-air. */
+@keyframes mkJump{
+  0%  {opacity:0; filter:drop-shadow(0 0 0 rgba(201,138,75,0));   transform:translateY(15px) scale(.5); animation-timing-function:ease-out}
+  8%  {opacity:1; filter:drop-shadow(0 0 0 rgba(201,138,75,0));   transform:translateY(10px) scale(.6); animation-timing-function:cubic-bezier(.16,.84,.44,1)}
+  42% {opacity:1; filter:drop-shadow(0 0 9px rgba(201,138,75,.45));transform:translateY(-17px) scale(1.05); animation-timing-function:ease}
+  55% {opacity:1; filter:drop-shadow(0 0 14px rgba(201,138,75,.65));transform:translateY(-18px) scale(1.06)}
+  70% {opacity:1; filter:drop-shadow(0 0 7px rgba(201,138,75,.35));transform:translateY(-13px) scale(1.02); animation-timing-function:cubic-bezier(.55,.06,.68,.19)}
+  100%{opacity:0; filter:drop-shadow(0 0 0 rgba(201,138,75,0));   transform:translateY(16px) scale(.4)}
 }
-/* Every keyframe past the fade-in restates opacity:1, deliberately. A CSS keyframe
-   animation does not hold the last value it was GIVEN for a property through to the end
-   — a keyframe offset that doesn't mention a property implicitly animates that property
-   back toward the element's own pre-animation base value (opacity:0 here) by 100%. Leave
-   any of these out and the mark fades itself back out partway through its own entrance. */
 @keyframes mkShadowIn{from{opacity:0;transform:scaleX(.45)}to{opacity:1;transform:scaleX(1)}}
-/* The exit: the splash already fades as a whole (#splash.bye below), and the mark rides
-   its OWN motion on top of that — sinking back down and shrinking into the shadow it
-   came from, rather than just dimming in place like everything around it. Swapped in by
-   specificity (an id in the selector beats a bare class), which fully replaces the
-   entrance animation rather than layering a transition under it — a still-playing
-   `animation` wins that fight and a transition would never be seen. */
-#splash.bye .mk-body{animation:mkSink .4s cubic-bezier(.4,0,.7,1) forwards}
-#splash.bye .mk-shadow{animation:mkShadowOut .4s ease forwards}
-@keyframes mkSink{from{opacity:1;transform:translateY(0) scale(1)}to{opacity:0;transform:translateY(22px) scale(.4)}}
-@keyframes mkShadowOut{from{opacity:1;transform:scaleX(1)}to{opacity:0;transform:scaleX(.3)}}
 .sp-left,.sp-right,.sp-bar{transform-box:fill-box;transform-origin:center}
 .sp-left{animation:slideL .6s .12s cubic-bezier(.22,1.3,.36,1) both}
 .sp-right{animation:slideR .6s .12s cubic-bezier(.22,1.3,.36,1) both}
@@ -2034,7 +2032,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
