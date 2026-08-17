@@ -1416,7 +1416,7 @@ body.cele-open{overflow:hidden}
    shadow and vanishes there  →  the shadow itself fades  →  clean dark screen  →
    quote of the day.
 
-   The mark starts and ends inside the ellipse — below it, at translateY(16px), where it
+   The mark starts and ends inside the ellipse — below it, at translateY(26px), where it
    is behind the shadow's own footprint and invisible. It is not a thing that appears in
    mid-air and later fades in mid-air: it comes out of the shadow and goes back into it,
    which is the whole read of the animation.
@@ -1428,42 +1428,64 @@ body.cele-open{overflow:hidden}
    * The mark never scales and never takes a filter — it is the same size, colour and
      crispness the instant it clears the shadow as it is on the way back down, hexagons
      and tilted bar legible throughout. No glow, no bloom, no growing out of a blur.
+   * The mark never goes translucent. Visibility is driven by a SEPARATE opacity
+     animation (mkFloatOpacity) that only ever holds at 1 or 0, switching between them
+     over a sliver of the timeline (~30ms) too fast to read as a fade — it disappears
+     going in, it doesn't fade going in. Position (mkFloatMove) keeps travelling the
+     whole time regardless, so the physical sinking motion stays smooth even though the
+     opacity snap that ends it is instant; combining the two into one keyframe set would
+     force them to share timing functions and either blur the motion or fade the cut.
    * Both pieces end at opacity 0 with nothing left behind: no particles, no residual glow.
-   * Every keyframe restates opacity explicitly. A CSS keyframe does NOT hold the last
-     value it was given — an offset that omits a property animates it back toward the
-     element's pre-animation base value (opacity:0 here) by 100%, which quietly fades
-     the mark out mid-flight if you leave one off.                                    */
+   * Every opacity keyframe restates its value explicitly. A CSS keyframe does NOT hold
+     the last value it was given — an offset that omits a property animates it back
+     toward the element's pre-animation base value by 100%, which quietly fades the mark
+     out mid-flight if you leave one off.                                             */
 .mk-shadow{
   transform-box:fill-box;transform-origin:center;opacity:0;
   animation:mkShadow 3.1s linear both;
 }
 /* Timings inside the keyframes, not on the shorthand, because each leg of a physical
-   motion has its own curve: rising decelerates, falling accelerates. */
-.mk-lift{opacity:0;animation:mkFloat 2.9s linear both}
-@keyframes mkFloat{
+   motion has its own curve: rising decelerates, falling accelerates. Two animations
+   sharing one element, one for where it is and one for whether you can see it — see the
+   comment above for why they're not merged. */
+.mk-lift{opacity:0;animation:mkFloatMove 2.9s linear both, mkFloatOpacity 2.9s linear both}
+@keyframes mkFloatMove{
   /* Down inside the hole, out of sight, while the floor holds the frame alone. */
-  0%    {opacity:0; transform:translateY(26px)}
-  12%   {opacity:0; transform:translateY(26px); animation-timing-function:cubic-bezier(.04,.86,.28,1)}
+  0%    {transform:translateY(26px)}
+  12%   {transform:translateY(26px); animation-timing-function:cubic-bezier(.04,.86,.28,1)}
   /* THE JUMP. A launch is fastest at the instant it leaves the ground and slows the whole
      way up — so more than half the climb is covered in the first 0.15s. The mark becomes
      visible while still inside the hole's own footprint and already travelling at speed:
      it is thrown out of the shadow, not faded in above it. */
-  15%   {opacity:1; transform:translateY(11px);  animation-timing-function:cubic-bezier(.1,.66,.3,1)}
-  20%   {opacity:1; transform:translateY(-19px); animation-timing-function:cubic-bezier(.28,.48,.42,1)}
-  34%   {opacity:1; transform:translateY(-38px); animation-timing-function:ease-in-out}
+  15%   {transform:translateY(11px);  animation-timing-function:cubic-bezier(.1,.66,.3,1)}
+  20%   {transform:translateY(-19px); animation-timing-function:cubic-bezier(.28,.48,.42,1)}
+  34%   {transform:translateY(-38px); animation-timing-function:ease-in-out}
   /* Float: a slow, shallow breath a few pixels either way — weightless presence, not
      bobbing. It never leaves the column above the hole. */
-  45%   {opacity:1; transform:translateY(-33px); animation-timing-function:ease-in-out}
-  55%   {opacity:1; transform:translateY(-38px); animation-timing-function:ease-in-out}
-  65%   {opacity:1; transform:translateY(-33.5px);animation-timing-function:ease-in-out}
-  72%   {opacity:1; transform:translateY(-36px); animation-timing-function:cubic-bezier(.4,0,.86,.5)}
+  45%   {transform:translateY(-33px); animation-timing-function:ease-in-out}
+  55%   {transform:translateY(-38px); animation-timing-function:ease-in-out}
+  65%   {transform:translateY(-33.5px);animation-timing-function:ease-in-out}
+  72%   {transform:translateY(-36px); animation-timing-function:cubic-bezier(.4,0,.86,.5)}
   /* The fall: gravity the whole way, no bounce — it is landing in a hole, not on a floor.
-     It keeps moving while it goes translucent, so the last thing you see is the mark
-     sinking through the opening rather than stopping above it and fading. */
-  86%   {opacity:1;   transform:translateY(9px); animation-timing-function:linear}
-  90%   {opacity:.5;  transform:translateY(16px)}
-  93.5% {opacity:0;   transform:translateY(26px)}
-  100%  {opacity:0;   transform:translateY(26px)}
+     It keeps sinking after the opacity cut below has already made it invisible, so the
+     hole never appears to run out of depth. */
+  86%   {transform:translateY(9px); animation-timing-function:linear}
+  93.5% {transform:translateY(26px)}
+  100%  {transform:translateY(26px)}
+}
+/* Purely a visibility switch — 0 or 1, never anything between. Each transition is ~30ms
+   of a 2.9s animation, under the threshold where a fade reads as a fade at all: the mark
+   is just there, then it isn't. The disappear point (88%) sits a beat before the mark's
+   lowest point (93.5% in mkFloatMove above), i.e. once it has visibly entered the disc's
+   footprint but before its own downward travel finishes — so the cut always lands on top
+   of the ellipse, not above it. */
+@keyframes mkFloatOpacity{
+  0%    {opacity:0}
+  14%   {opacity:0}
+  15%   {opacity:1}
+  87.5% {opacity:1}
+  88.5% {opacity:0}
+  100%  {opacity:0}
 }
 /* Speed streaks, on only while the mark is genuinely moving fast: a hard burst on the way
    out, a longer smear on the way down. They are absent through the whole float, which is
@@ -1475,7 +1497,9 @@ body.cele-open{overflow:hidden}
   0%,12%{opacity:0} 15%{opacity:.85} 20%{opacity:.4} 26%{opacity:0} 100%{opacity:0}
 }
 @keyframes mkTrailFall{
-  0%,74%{opacity:0} 80%{opacity:.4} 86%{opacity:.7} 90%{opacity:.3} 93.5%{opacity:0} 100%{opacity:0}
+  /* Cut at the same instant the mark itself does (88.5% in mkFloatOpacity), so no streak
+     is ever left hanging in the air with nothing attached to it. */
+  0%,74%{opacity:0} 80%{opacity:.4} 86%{opacity:.7} 88.5%{opacity:0} 100%{opacity:0}
 }
 /* The disturbance the floor gives off when something passes through it: one ring thrown
    off as the mark launches, one as it drops back in. Rings only — no particles and no
@@ -2079,19 +2103,15 @@ body.cele-open{overflow:hidden}
             <stop offset="1"   stop-color="currentColor" stop-opacity=".7"></stop>
           </linearGradient>
         </defs>
-        <!-- THE FLOOR. Not a smudge under the logo — a hole in the dark that the mark comes
-             out of and goes back into. A near-black disc reads as an opening rather than an
-             object, and the pale rim is the only thing that makes it visible at all; the
-             rings are the disturbance it gives off when something passes through.
+        <!-- THE FLOOR. The same slender orange ellipse the static logo uses — currentColor,
+             no separate hole colour — the mark comes out of it and goes back into it, but
+             the disc itself never stops being the brand's own copper.
              cx=50 matches the dumbbell's own centre of symmetry and nothing here ever
              translates horizontally, so one centre line holds for the whole sequence by
              construction rather than by tuning. -->
-        <ellipse class="mk-ripple mk-ripple1" cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="#ffe8cd" stroke-width="1.3"></ellipse>
-        <ellipse class="mk-ripple mk-ripple2" cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="#ffe8cd" stroke-width="1.3"></ellipse>
-        <g class="mk-shadow">
-          <ellipse cx="50" cy="92" rx="34" ry="6.5" fill="#07060a"></ellipse>
-          <ellipse cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="#ffe4c4" stroke-opacity=".4" stroke-width="1.2"></ellipse>
-        </g>
+        <ellipse class="mk-ripple mk-ripple1" cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="currentColor" stroke-width="1.3"></ellipse>
+        <ellipse class="mk-ripple mk-ripple2" cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="currentColor" stroke-width="1.3"></ellipse>
+        <ellipse class="mk-shadow" cx="50" cy="92" rx="34" ry="6.5" fill="currentColor"></ellipse>
         <!-- THE ANIMATED WRAPPER EXISTS BECAUSE OF A REAL TRAP: a CSS `transform` on an
              SVG element REPLACES that element's `transform` attribute outright. Animating
              the tilted group directly threw its rotate(-25) away, and the splash rendered
