@@ -1411,173 +1411,179 @@ body.cele-open{overflow:hidden}
 @keyframes feUp{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 
 /* ---- The sequence ----------------------------------------------------------------
-   shadow alone  →  the dumbbell JUMPS OUT of it  →  floats, breathing slightly  →  one
-   specular glint travels the bar  →  falls back under acceleration  →  sinks INTO the
-   shadow and vanishes there  →  the shadow itself fades  →  clean dark screen  →
-   quote of the day.
+   disc alone  →  the mark is thrown OUT of it  →  gravity bleeds off the climb  →  a
+   natural peak  →  gravity takes it back down, accelerating  →  it rotates up on end as
+   it goes  →  it falls BEHIND the disc and is occluded from the bottom up  →  the disc
+   itself fades  →  clean dark screen  →  quote of the day.
 
-   The mark starts and ends inside the ellipse — below it, at translateY(26px), where it
-   is behind the shadow's own footprint and invisible. It is not a thing that appears in
-   mid-air and later fades in mid-air: it comes out of the shadow and goes back into it,
-   which is the whole read of the animation.
+   The mark starts and ends at translateY(120px), which is far enough below the disc that
+   the void's clip hides every part of it — it is not hidden by an opacity trick at either
+   end, it is hidden because it is genuinely underneath the opening. Coordinates that make
+   that work, in viewBox units (1 unit = 1.326 px at the rendered size):
+     the tilted mark spans y 6.5 → 85.5, centred on y=46
+     rotated up on end it spans y 4.2 → 87.9
+     the disc is cy=92 ry=6.5, so its top edge is y=85.5 and the clip's cut is y=92
+   Hence 120px (= 90.5 units) of offset puts the mark's highest point at y≈94.7, below the
+   cut, with margin. Everything between those two extremes is real flight.
 
    Rules this CSS is built to keep:
-   * Nothing here translates horizontally, and every rotation is about the mark's own
-     centre. The mark and the ellipse are both centred on x=50 in the same viewBox, so
-     horizontal centre is held by construction for the whole sequence, not by tuning.
-   * The mark never scales and never takes a filter — it is the same size, colour and
-     crispness the instant it clears the shadow as it is on the way back down, hexagons
-     and tilted bar legible throughout. No glow, no bloom, no growing out of a blur.
-   * The mark never goes translucent. Visibility is driven by a SEPARATE opacity
-     animation (mkFloatOpacity) that only ever holds at 1 or 0, switching between them
-     over a sliver of the timeline (~30ms) too fast to read as a fade — it disappears
-     going in, it doesn't fade going in. Position (mkFloatMove) keeps travelling the
-     whole time regardless, so the physical sinking motion stays smooth even though the
-     opacity snap that ends it is instant; combining the two into one keyframe set would
-     force them to share timing functions and either blur the motion or fade the cut.
-   * Both pieces end at opacity 0 with nothing left behind: no particles, no residual glow.
-   * Every opacity keyframe restates its value explicitly. A CSS keyframe does NOT hold
-     the last value it was given — an offset that omits a property animates it back
-     toward the element's pre-animation base value by 100%, which quietly fades the mark
-     out mid-flight if you leave one off.                                             */
+   * Nothing translates horizontally and every rotation is about the mark's own centre.
+     Mark and disc are both centred on x=50 in one viewBox, so the centre line holds by
+     construction for the whole sequence rather than by tuning.
+   * The mark never scales, never blurs, never fades and never dissolves. It is the same
+     size, colour and crispness on the way in as on the way out. It vanishes ONLY by
+     going behind the disc — see #mkVoid in the markup.
+   * The disc ends at opacity 0 with nothing left behind: no particles, no residual glow.
+   * Every keyframe restates the properties it animates. A CSS keyframe does NOT hold the
+     last value it was given — an offset that omits a property animates it back toward the
+     element's pre-animation base value by 100%.                                       */
 .mk-shadow{
   transform-box:fill-box;transform-origin:center;opacity:0;
-  animation:mkShadow 3.1s linear both;
+  animation:mkShadow 2.4s linear both;
 }
-/* Timings inside the keyframes, not on the shorthand, because each leg of a physical
-   motion has its own curve: rising decelerates, falling accelerates. Two animations
-   sharing one element, one for where it is and one for whether you can see it — see the
-   comment above for why they're not merged. */
-.mk-lift{opacity:0;animation:mkFloatMove 2.9s linear both, mkFloatOpacity 2.9s linear both}
-@keyframes mkFloatMove{
-  /* Down inside the hole, out of sight, while the floor holds the frame alone. */
-  0%    {transform:translateY(26px)}
-  12%   {transform:translateY(26px); animation-timing-function:cubic-bezier(.04,.86,.28,1)}
-  /* THE JUMP. A launch is fastest at the instant it leaves the ground and slows the whole
-     way up — so more than half the climb is covered in the first 0.15s. The mark becomes
-     visible while still inside the hole's own footprint and already travelling at speed:
-     it is thrown out of the shadow, not faded in above it. */
-  15%   {transform:translateY(11px);  animation-timing-function:cubic-bezier(.1,.66,.3,1)}
-  20%   {transform:translateY(-19px); animation-timing-function:cubic-bezier(.28,.48,.42,1)}
-  34%   {transform:translateY(-38px); animation-timing-function:ease-in-out}
-  /* Float: a slow, shallow breath a few pixels either way — weightless presence, not
-     bobbing. It never leaves the column above the hole. */
-  45%   {transform:translateY(-33px); animation-timing-function:ease-in-out}
-  55%   {transform:translateY(-38px); animation-timing-function:ease-in-out}
-  65%   {transform:translateY(-33.5px);animation-timing-function:ease-in-out}
-  72%   {transform:translateY(-36px); animation-timing-function:cubic-bezier(.4,0,.86,.5)}
-  /* The fall: gravity the whole way, no bounce — it is landing in a hole, not on a floor.
-     It keeps sinking after the opacity cut below has already made it invisible, so the
-     hole never appears to run out of depth. */
-  86%   {transform:translateY(9px); animation-timing-function:linear}
-  93.5% {transform:translateY(26px)}
-  100%  {transform:translateY(26px)}
+/* BALLISTICS, NOT EASING. The keyframes below are a parabola sampled every 100ms and
+   played back linearly, which is the honest way to do gravity in CSS: each segment
+   carries its own constant velocity and every segment differs from the last by the same
+   amount (g × 100ms ≈ 64px/s), so the acceleration is genuinely uniform. A bezier can
+   only approximate that, and always ends up either hovering at the top or arriving soft.
+   Sampling at 100ms keeps the worst deviation from the true curve under 1px — invisible —
+   while the velocities it produces are anything but subtle: the climb starts at ~450px/s
+   and bleeds to zero, the fall ends at ~450px/s, and the last 100ms of the descent covers
+   42px against the first 100ms's 3px. That 13x speed ratio IS the read of gravity.
+   g ≈ 645px/s² in both directions, because it is the same fall either way up. */
+.mk-lift{animation:mkFlight 2s linear both}
+@keyframes mkFlight{
+  /* Waiting inside the void. Nothing is visible; the disc has the frame to itself. */
+  0%    {transform:translateY(120px)}
+  17.5% {transform:translateY(120px)}
+  /* THE LAUNCH — thrown out at ~450px/s, decelerating from the very first instant. It
+     clears the disc's mouth within ~15ms of leaving, so what you see is a mark rising out
+     of the opening, never one that appeared above it. */
+  22.5% {transform:translateY(78.1px)}
+  27.5% {transform:translateY(42.6px)}
+  32.5% {transform:translateY(13.6px)}
+  37.5% {transform:translateY(-9px)}
+  42.5% {transform:translateY(-25.1px)}
+  47.5% {transform:translateY(-34.7px)}
+  /* THE PEAK — vertical velocity passes through zero here. The apparent hang is the
+     parabola's own doing (100ms either side of the apex covers 3px, against 42px at the
+     extremes), not a hold: it is what a real thrown object looks like at the top. The one
+     concession is 120ms of near-stillness across the apex, 0.8px of drift, for the glint
+     to land in. */
+  52.5% {transform:translateY(-38px)}
+  58.5% {transform:translateY(-37.2px)}
+  /* THE FALL — gravity again, from rest, gaining 64px/s every 100ms. */
+  63.5% {transform:translateY(-34px)}
+  68.5% {transform:translateY(-24.4px)}
+  73.5% {transform:translateY(-8.3px)}
+  /* Contact: the mark's lower end meets the disc around here, moving at ~250px/s, and
+     from this point the void takes it a piece at a time. */
+  78.5% {transform:translateY(14.1px)}
+  83.5% {transform:translateY(43px)}
+  88.5% {transform:translateY(78.3px)}
+  /* Fully behind the disc — its highest point is now below the void's cut. */
+  93.5% {transform:translateY(120px)}
+  100%  {transform:translateY(120px)}
 }
-/* Purely a visibility switch — 0 or 1, never anything between. Each transition is ~30ms
-   of a 2.9s animation, under the threshold where a fade reads as a fade at all: the mark
-   is just there, then it isn't. The disappear point (88%) sits a beat before the mark's
-   lowest point (93.5% in mkFloatMove above), i.e. once it has visibly entered the disc's
-   footprint but before its own downward travel finishes — so the cut always lands on top
-   of the ellipse, not above it. */
-@keyframes mkFloatOpacity{
-  0%    {opacity:0}
-  14%   {opacity:0}
-  15%   {opacity:1}
-  87.5% {opacity:1}
-  88.5% {opacity:0}
-  100%  {opacity:0}
-}
-/* Speed streaks, on only while the mark is genuinely moving fast: a hard burst on the way
-   out, a longer smear on the way down. They are absent through the whole float, which is
-   what keeps them reading as velocity rather than decoration. */
+/* Speed streaks, on only while the mark is genuinely moving fast: a hard burst as it
+   comes out, a longer smear on the way back down. Absent through the whole apex, which is
+   what keeps them reading as velocity rather than decoration. They sit inside the void's
+   clip with the mark, so they are occluded by the disc on exactly the same terms. */
 .mk-trail{opacity:0}
-.mk-trail-jump{animation:mkTrailJump 2.9s linear both}
-.mk-trail-fall{animation:mkTrailFall 2.9s linear both}
+.mk-trail-jump{animation:mkTrailJump 2s linear both}
+.mk-trail-fall{animation:mkTrailFall 2s linear both}
 @keyframes mkTrailJump{
-  0%,12%{opacity:0} 15%{opacity:.85} 20%{opacity:.4} 26%{opacity:0} 100%{opacity:0}
+  0%,17.5%{opacity:0} 20%{opacity:.85} 25%{opacity:.45} 32%{opacity:0} 100%{opacity:0}
 }
 @keyframes mkTrailFall{
-  /* Cut at the same instant the mark itself does (88.5% in mkFloatOpacity), so no streak
-     is ever left hanging in the air with nothing attached to it. */
-  0%,74%{opacity:0} 80%{opacity:.4} 86%{opacity:.7} 88.5%{opacity:0} 100%{opacity:0}
+  0%,76%{opacity:0} 82%{opacity:.35} 89%{opacity:.7} 93.5%{opacity:0} 100%{opacity:0}
 }
-/* The disturbance the floor gives off when something passes through it: one ring thrown
-   off as the mark launches, one as it drops back in. Rings only — no particles and no
-   lingering haze, so the screen still empties completely. */
+/* The disturbance the disc gives off when something passes through it: one ring as the
+   mark is thrown out (17.5% of the flight), one as it drops back in (~62%). Rings only —
+   no particles, no lingering haze, so the screen still empties completely. */
 .mk-ripple{transform-box:fill-box;transform-origin:center;opacity:0}
-.mk-ripple1{animation:mkRipple1 2.9s ease-out both}
-.mk-ripple2{animation:mkRipple2 2.9s ease-out both}
+.mk-ripple1{animation:mkRipple1 2.4s ease-out both}
+.mk-ripple2{animation:mkRipple2 2.4s ease-out both}
 @keyframes mkRipple1{
-  0%,12%{opacity:0;   transform:scale(.82)}
-  16%   {opacity:.45; transform:scale(1.04)}
-  30%   {opacity:0;   transform:scale(1.5)}
-  100%  {opacity:0;   transform:scale(1.5)}
+  0%,14.5%{opacity:0;   transform:scale(.84)}
+  18%     {opacity:.45; transform:scale(1.05)}
+  30%     {opacity:0;   transform:scale(1.45)}
+  100%    {opacity:0;   transform:scale(1.45)}
 }
 @keyframes mkRipple2{
-  0%,86%{opacity:0;   transform:scale(.86)}
-  89%   {opacity:.5;  transform:scale(1.06)}
-  99%   {opacity:0;   transform:scale(1.5)}
-  100%  {opacity:0;   transform:scale(1.5)}
+  0%,62%{opacity:0;   transform:scale(.86)}
+  66%   {opacity:.5;  transform:scale(1.06)}
+  78%   {opacity:0;   transform:scale(1.45)}
+  100%  {opacity:0;   transform:scale(1.45)}
 }
-/* The fall turns the dumbbell up on end. It is dead still through the jump and the float,
-   then picks up angular momentum with the drop — slow at first, quickest through the
-   middle of the fall, easing into rest exactly as the mark meets the shadow, so it enters
-   vertically. -65deg on top of the logo's own -25deg tilt is a true vertical bar.
-   transform-box:fill-box puts the pivot at the mark's own bounding-box centre, which is
-   what keeps a rotation from reading as a swing. */
-.mk-spin{transform-box:fill-box;transform-origin:center;animation:mkSpin 2.9s linear both}
+/* The fall turns the mark up on end. Dead still through launch and apex, it picks up
+   angular momentum as gravity takes hold and eases into rest just as the mark reaches the
+   disc, so it enters the void vertically and stays that way all the way down. The single
+   S-curve is deliberate: an object tipping over starts slowly, turns fastest through the
+   middle, and settles — a linear rotation would read as a UI spin. -65deg on top of the
+   logo's own -25deg tilt is a true vertical bar. transform-box:fill-box pivots on the
+   mark's own bounding-box centre, which is what keeps this from reading as a swing. */
+.mk-spin{transform-box:fill-box;transform-origin:center;animation:mkSpin 2s linear both}
 @keyframes mkSpin{
-  0%   {transform:rotate(0)}
-  72%  {transform:rotate(0); animation-timing-function:cubic-bezier(.5,0,.35,1)}
-  85%  {transform:rotate(-65deg)}
-  100% {transform:rotate(-65deg)}
+  0%    {transform:rotate(0)}
+  58.5% {transform:rotate(0); animation-timing-function:cubic-bezier(.42,0,.45,1)}
+  74%   {transform:rotate(-65deg)}
+  100%  {transform:rotate(-65deg)}
 }
-/* The ellipse reads the dumbbell's height the way a real shadow does: wider, fainter and
-   softer-edged the higher the mark gets; tighter, darker and more defined as it comes
-   back down. It is at its densest at the two moments the mark is inside it — the crouch
-   before the jump and the sink at the end — and it deepens briefly as the mark arrives,
-   which is what sells the mark going IN rather than merely disappearing in front of it.
-   Then it outlives the mark by 0.4s and goes too, leaving nothing at all. */
+/* The disc reads the mark's height the way a real shadow does: wider, fainter and
+   softer-edged the higher the mark gets; tighter, darker and more defined as it comes back
+   down. It compresses at the two moments something is physically passing through it — the
+   launch at 14.6% and the entry at 62.5% — and holds its densest state while the mark is
+   sinking behind it, which is what sells a hole with something falling into it rather than
+   a flat graphic. Restrained on purpose: a couple of percent of scale and a tenth of
+   opacity, never a liquid wobble. It outlives the mark by half a second and then goes too.
+   This runs 2.4s against the flight's 2s, so the percentages are NOT interchangeable
+   between the two: 62.5% here is 1.50s, which is 75% of the flight. */
 @keyframes mkShadow{
-  0%   {opacity:0;   transform:scaleX(.9);  filter:blur(2.2px)}
-  11.2%{opacity:.48; transform:scaleX(.96); filter:blur(1px)}
-  /* the recoil: the ellipse spreads and thins in the instant the mark launches off it */
-  14.5%{opacity:.38; transform:scaleX(1.12);filter:blur(2px)}
-  18%  {opacity:.36; transform:scaleX(1.07);filter:blur(2.4px)}
-  31.9%{opacity:.26; transform:scaleX(1.12);filter:blur(3.6px)}
-  42.3%{opacity:.33; transform:scaleX(1.05);filter:blur(2.7px)}
-  51.6%{opacity:.26; transform:scaleX(1.12);filter:blur(3.6px)}
-  61%  {opacity:.32; transform:scaleX(1.06);filter:blur(2.8px)}
-  67.4%{opacity:.28; transform:scaleX(1.1); filter:blur(3.3px)}
-  80.3%{opacity:.48; transform:scaleX(1.02);filter:blur(1.4px)}
-  87.1%{opacity:.62; transform:scaleX(1);   filter:blur(1px)}
-  93.5%{opacity:.5;  transform:scaleX(1);   filter:blur(1.1px)}
-  100% {opacity:0;   transform:scaleX(.88); filter:blur(2.4px)}
+  0%    {opacity:0;   transform:scaleX(.9);  filter:blur(2.2px)}
+  12.5% {opacity:.46; transform:scaleX(1);   filter:blur(1px)}
+  /* the push-through: it tightens as the mark comes up under it, then spreads and thins
+     in the instant the mark breaks the surface */
+  14.6% {opacity:.5;  transform:scaleX(.95); filter:blur(.9px)}
+  17%   {opacity:.38; transform:scaleX(1.1); filter:blur(2px)}
+  21%   {opacity:.34; transform:scaleX(1.05);filter:blur(2.6px)}
+  43.75%{opacity:.24; transform:scaleX(1.12);filter:blur(3.6px)}
+  55%   {opacity:.28; transform:scaleX(1.08);filter:blur(3.1px)}
+  /* the entry: tight and dark as the mark arrives, then a restrained compression while it
+     passes through */
+  62.5% {opacity:.48; transform:scaleX(.98); filter:blur(1.1px)}
+  66%   {opacity:.55; transform:scaleX(.94); filter:blur(.9px)}
+  72%   {opacity:.48; transform:scaleX(1.01);filter:blur(1.3px)}
+  /* mark fully behind it from here — the disc simply holds, then leaves */
+  78%   {opacity:.45; transform:scaleX(1);   filter:blur(1.4px)}
+  85%   {opacity:.43; transform:scaleX(1);   filter:blur(1.5px)}
+  100%  {opacity:0;   transform:scaleX(.88); filter:blur(2.4px)}
 }
-/* One glint, once, while the mark hangs: a narrow soft-edged band of white travelling the
-   bar's own axis, clipped to the silhouette so the light can only ever land on the metal.
-   It is a reflection crossing a machined edge, not a twinkle sitting on top of the logo —
-   hence no drop-shadow, no scaling star, and a single pass. */
-.mk-glint{opacity:0;animation:mkGlintFade .6s 1.3s linear both}
-.mk-glint-band{animation:mkGlintSweep .6s 1.3s cubic-bezier(.4,0,.6,1) both}
+/* One glint, once, across the apex: a narrow soft-edged band of white travelling the bar's
+   own axis, clipped to the silhouette so the light can only ever land on the metal. It is
+   a reflection crossing a machined edge, not a twinkle sitting on top of the logo — hence
+   no drop-shadow, no scaling star, and a single brief pass. */
+.mk-glint{opacity:0;animation:mkGlintFade .45s 1s linear both}
+.mk-glint-band{animation:mkGlintSweep .45s 1s cubic-bezier(.4,0,.6,1) both}
 @keyframes mkGlintFade{0%{opacity:0}22%{opacity:1}72%{opacity:1}100%{opacity:0}}
 @keyframes mkGlintSweep{from{transform:translateX(-22px)}to{transform:translateX(104px)}}
 /* One quote a day, the same one for everybody, and it turns over at midnight local.
    Chosen by the day number rather than at random so two people who open the app on the
    same morning see the same line — the app talking to its users, not to each of them
    separately. */
-/* The quote waits out the whole dumbbell sequence (3.4s) plus a beat of clean dark
-   screen, so the two never share the frame — the animation finishes, the screen empties,
-   and then the day's line arrives on its own. Same type and layout it has always had. */
+/* The quote waits out the whole sequence — the mark is fully behind the disc at 1.87s and
+   the disc itself is gone at 2.4s — plus a beat of clean dark screen, so the two never
+   share the frame. The animation finishes, the screen empties, and then the day's line
+   arrives on its own. Same type and layout it has always had. */
 .splash-quote-wrap{display:flex;flex-direction:column;align-items:center}
 .splash-quote{
   max-width:min(78vw,420px);margin-top:18px;text-align:center;
   font-size:14px;line-height:1.55;color:var(--dim);
-  animation:feUp .6s 3.45s ease both;
+  animation:feUp .6s 2.75s ease both;
 }
 .splash-quote b{display:block;margin-top:7px;font:11px var(--mono);letter-spacing:.1em;
   text-transform:uppercase;color:var(--faint);font-weight:500}
-.splash-ver{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.2em;animation:feUp .5s 3.8s ease both}
+.splash-ver{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.2em;animation:feUp .5s 3.1s ease both}
 
 /* single-arm "start side" hint */
 .arm-hint{
@@ -2102,16 +2108,28 @@ body.cele-open{overflow:hidden}
             <stop offset=".82" stop-color="currentColor" stop-opacity=".3"></stop>
             <stop offset="1"   stop-color="currentColor" stop-opacity=".7"></stop>
           </linearGradient>
+          <!-- THE VOID'S MOUTH. This is what makes the disc an opening with depth instead
+               of a flat graphic: everything the mark draws is clipped to "above the disc's
+               centre line, and outside the disc itself". The mark is never hidden by a
+               fade or a cut — it is hidden because the parts of it that have gone below
+               this boundary are BEHIND the opening, exactly as a real object passing into
+               a hole is. The portion still above stays fully opaque and full size.
+
+               One <path> with clip-rule="evenodd", not two children, because multiple
+               children of a <clipPath> UNION — they cannot subtract. Even-odd on a single
+               path (big rect stopping at y=92, then the ellipse) gives rect MINUS ellipse.
+               The clip lives on a static wrapper, never on the moving group: an SVG
+               clip-path travels with its own element's transform, so putting it on the
+               animated group would drag the hole down with the falling mark and occlude
+               precisely nothing. -->
+          <clipPath id="mkVoid" clipPathUnits="userSpaceOnUse">
+            <path clip-rule="evenodd" d="M-400,-400 H500 V92 H-400 Z M16,92 A34,6.5 0 1,0 84,92 A34,6.5 0 1,0 16,92 Z"></path>
+          </clipPath>
         </defs>
-        <!-- THE FLOOR. The same slender orange ellipse the static logo uses — currentColor,
-             no separate hole colour — the mark comes out of it and goes back into it, but
-             the disc itself never stops being the brand's own copper.
-             cx=50 matches the dumbbell's own centre of symmetry and nothing here ever
-             translates horizontally, so one centre line holds for the whole sequence by
-             construction rather than by tuning. -->
-        <ellipse class="mk-ripple mk-ripple1" cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="currentColor" stroke-width="1.3"></ellipse>
-        <ellipse class="mk-ripple mk-ripple2" cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="currentColor" stroke-width="1.3"></ellipse>
-        <ellipse class="mk-shadow" cx="50" cy="92" rx="34" ry="6.5" fill="currentColor"></ellipse>
+        <!-- Painting order is the occlusion: the mark goes down FIRST, inside the void's
+             clip, and the disc is painted last so its own anti-aliased edge covers the
+             clip boundary and there is never a hairline seam where the mark meets it. -->
+        <g class="mk-occlude" clip-path="url(#mkVoid)">
         <!-- THE ANIMATED WRAPPER EXISTS BECAUSE OF A REAL TRAP: a CSS `transform` on an
              SVG element REPLACES that element's `transform` attribute outright. Animating
              the tilted group directly threw its rotate(-25) away, and the splash rendered
@@ -2150,6 +2168,16 @@ body.cele-open{overflow:hidden}
             </g>
           </g>
         </g>
+        </g>
+        <!-- THE VOID ITSELF. The same slender orange ellipse the static logo uses —
+             currentColor, the brand's own copper, never a separate hole colour. The mark
+             comes out of it and goes back into it, and it is drawn after the mark so it
+             occludes cleanly. cx=50 matches the dumbbell's own centre of symmetry and
+             nothing here ever translates horizontally, so one centre line holds for the
+             whole sequence by construction rather than by tuning. -->
+        <ellipse class="mk-ripple mk-ripple1" cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="currentColor" stroke-width="1.3"></ellipse>
+        <ellipse class="mk-ripple mk-ripple2" cx="50" cy="92" rx="34" ry="6.5" fill="none" stroke="currentColor" stroke-width="1.3"></ellipse>
+        <ellipse class="mk-shadow" cx="50" cy="92" rx="34" ry="6.5" fill="currentColor"></ellipse>
       </svg>
     </div>
     <div class="splash-quote-wrap">
@@ -2211,7 +2239,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14655,10 +14683,11 @@ function quoteOfTheDay(){
     setTimeout(()=>sp.remove(), 480);
   };
   sp.onclick = bye;
-  /* The dumbbell sequence runs 3.1s, the screen sits clean for a beat, and the quote
-     lands at 3.45s — so this has to leave the quote up long enough to actually be read
-     after all that, not cut it off. Tapping anywhere skips straight ahead. */
-  setTimeout(bye, 6000);
+  /* The flight ends at 1.87s and the disc is gone by 2.4s; the screen then sits clean for
+     a beat and the quote lands at 2.75s — so this has to leave the quote up long enough to
+     actually be read after all that, not cut it off. Tapping anywhere skips straight
+     ahead, and the home page is only ever revealed from an empty screen. */
+  setTimeout(bye, 5600);
 })();
 /* First run opens the wizard. This sits here, at the end of the script, rather than up
    beside load(): `OB` is a `let` declared with the onboarding code far below, so
