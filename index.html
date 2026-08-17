@@ -1399,89 +1399,108 @@ body.cele-open{overflow:hidden}
   display:flex;align-items:center;justify-content:center;cursor:pointer;
 }
 #splash.bye{opacity:0;transition:opacity .45s ease}
-#splash.bye .splash-inner{transform:scale(1.06);transition:transform .45s ease}
-.splash-inner{display:flex;flex-direction:column;align-items:center;gap:6px}
-/* The mark starts hidden, tucked in its own shadow. It leaps up, hangs a moment near the
-   top of the arc — real projectile motion is slowest right where it turns around, which
-   is what a "hang" actually is — then falls back down and disappears back into the
-   shadow, which fades out with it. One occurrence, not a loop: both are gone again well
-   before the word and the quote take their turn.
-
-   ONLY POSITION AND OPACITY MOVE. No scale, no glow — the shape stays exactly the size
-   and clarity it is meant to be read at throughout, hexagons and the tilted bar legible
-   the instant it's visible, rather than growing out of a blur or catching a filter's
-   bloom. The two pieces (shadow, mark) still animate independently and on separate
-   timelines, which is why the splash draws its own copy of the shape instead of
-   <use>-ing #e26-mark. */
+/* No scale on the way out either: the camera never moves in this sequence, it only
+   cuts to black. */
+.splash-inner{display:grid;place-items:center}
+/* The stage and the quote share ONE grid cell, so neither reserves layout space from the
+   other. Nothing shifts position when the quote arrives — the frame is genuinely static
+   rather than merely animated as though it were. */
+.splash-inner > *{grid-area:1/1}
 .splash-inner svg{overflow:visible}
 .mk-splash{color:var(--acc)}
 @keyframes feUp{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+
+/* ---- The sequence ----------------------------------------------------------------
+   shadow alone  →  dumbbell appears above it  →  floats, breathing slightly  →  one
+   specular glint travels the bar  →  drops under acceleration  →  one small settle  →
+   dumbbell fades out where it landed  →  shadow follows it  →  clean dark screen  →
+   quote of the day.
+
+   Rules this CSS is built to keep:
+   * Every transform here is translateY only. The mark and the ellipse are both centred
+     on x=50 in the same viewBox, so horizontal centre is held by construction for the
+     whole sequence, not by tuning.
+   * The mark never scales and never takes a filter — it is the same size, colour and
+     crispness the instant it appears as it is when it lands, hexagons and tilted bar
+     legible throughout. No glow, no bloom, no growing out of a blur.
+   * Both pieces end at opacity 0 with nothing left behind: no particles, no residual glow.
+   * Every keyframe restates opacity explicitly. A CSS keyframe does NOT hold the last
+     value it was given — an offset that omits a property animates it back toward the
+     element's pre-animation base value (opacity:0 here) by 100%, which quietly fades
+     the mark out mid-flight if you leave one off.                                    */
 .mk-shadow{
   transform-box:fill-box;transform-origin:center;opacity:0;
-  animation:mkShadowArc 1.05s .05s ease both;
+  animation:mkShadow 3.1s linear both;
 }
-.mk-body{
-  opacity:0;
-  animation:mkJump 1.05s .05s linear both;
+/* Timings inside the keyframes, not on the shorthand, because each leg of a physical
+   motion has its own curve: rising decelerates, falling accelerates. */
+.mk-lift{opacity:0;animation:mkFloat 2.9s linear both}
+@keyframes mkFloat{
+  /* the shadow holds the frame alone for the first 0.4s */
+  0%    {opacity:0; transform:translateY(-6px)}
+  14%   {opacity:0; transform:translateY(-6px); animation-timing-function:cubic-bezier(.2,.7,.3,1)}
+  26.5% {opacity:1; transform:translateY(-10px); animation-timing-function:ease-in-out}
+  /* float: a slow, shallow breath, well under a pixel per frame — presence, not bobbing */
+  37.5% {opacity:1; transform:translateY(-13px); animation-timing-function:ease-in-out}
+  48.4% {opacity:1; transform:translateY(-8px);  animation-timing-function:ease-in-out}
+  61%   {opacity:1; transform:translateY(-13px); animation-timing-function:ease-in-out}
+  68.75%{opacity:1; transform:translateY(-11px); animation-timing-function:cubic-bezier(.45,0,.9,.4)}
+  /* the drop: gravity curve in, then the impact stops it hard */
+  78.75%{opacity:1; transform:translateY(9px);   animation-timing-function:cubic-bezier(.15,.8,.4,1)}
+  83%   {opacity:1; transform:translateY(2px);   animation-timing-function:cubic-bezier(.45,0,.9,.4)}
+  88%   {opacity:1; transform:translateY(9px);   animation-timing-function:cubic-bezier(.2,.8,.4,1)}
+  91%   {opacity:1; transform:translateY(6.5px); animation-timing-function:cubic-bezier(.45,0,.9,.4)}
+  93.75%{opacity:1; transform:translateY(9px)}
+  /* fades out standing still, exactly where it landed */
+  100%  {opacity:0; transform:translateY(9px)}
 }
-/* A single jump, timed as one physical arc rather than a bounce-and-settle:
-     0-8%    still down in the shadow, not yet visible
-     8-42%   launches up, decelerating into the turn (fast off the ground, slow arriving)
-     42-70%  the hang — barely moving, which IS what the top of a real arc looks like
-     70-100% falls, accelerating hard, and fades out exactly as it lands — gravity, not
-             a fade layered on top of it
-   Every keyframe from 8% on restates opacity explicitly. A CSS keyframe animation does
-   NOT hold the last value it was given for a property — an offset that omits a property
-   implicitly animates it back toward the element's pre-animation base value (opacity:0
-   here) by 100%, so leaving any of these out quietly fades the mark out mid-air. */
-@keyframes mkJump{
-  0%  {opacity:0; transform:translateY(15px); animation-timing-function:ease-out}
-  8%  {opacity:1; transform:translateY(10px); animation-timing-function:cubic-bezier(.16,.84,.44,1)}
-  42% {opacity:1; transform:translateY(-17px); animation-timing-function:ease}
-  55% {opacity:1; transform:translateY(-18px)}
-  70% {opacity:1; transform:translateY(-13px); animation-timing-function:cubic-bezier(.55,.06,.68,.19)}
-  100%{opacity:0; transform:translateY(16px)}
+/* The ellipse reads the dumbbell's height the way a real shadow does: wider, fainter and
+   softer-edged when the mark is high; tighter, darker and more defined as it comes down,
+   at its most defined on the frame of impact. Then it outlives the mark by 0.2s and goes
+   too, so the screen is left with nothing at all. */
+@keyframes mkShadow{
+  0%   {opacity:0;   transform:scaleX(.94); filter:blur(2px)}
+  13%  {opacity:.34; transform:scaleX(1);   filter:blur(1.6px)}
+  25%  {opacity:.2;  transform:scaleX(1.06);filter:blur(3px)}
+  35%  {opacity:.16; transform:scaleX(1.1); filter:blur(3.6px)}
+  45.6%{opacity:.23; transform:scaleX(1.03);filter:blur(2.6px)}
+  57%  {opacity:.16; transform:scaleX(1.1); filter:blur(3.6px)}
+  64.7%{opacity:.18; transform:scaleX(1.08);filter:blur(3.3px)}
+  74%  {opacity:.44; transform:scaleX(.97); filter:blur(1.1px)}
+  78%  {opacity:.3;  transform:scaleX(1.03);filter:blur(2.2px)}
+  83%  {opacity:.42; transform:scaleX(.98); filter:blur(1.2px)}
+  88%  {opacity:.4;  transform:scaleX(.99); filter:blur(1.4px)}
+  94%  {opacity:.4;  transform:scaleX(.99); filter:blur(1.4px)}
+  100% {opacity:0;   transform:scaleX(.9);  filter:blur(2.4px)}
 }
-/* The shadow's own arc: in while the mark is airborne, held while it hangs, out at the
-   same moment the mark lands — so the ground it launched from disappears WITH it rather
-   than being left behind as a lingering smudge once the splash has nothing above it. */
-@keyframes mkShadowArc{
-  0%  {opacity:0; transform:scaleX(.45)}
-  27% {opacity:1; transform:scaleX(1)}
-  82% {opacity:1; transform:scaleX(1)}
-  100%{opacity:0; transform:scaleX(.5)}
-}
-.sp-left,.sp-right,.sp-bar{transform-box:fill-box;transform-origin:center}
-.sp-left{animation:slideL .6s .12s cubic-bezier(.22,1.3,.36,1) both}
-.sp-right{animation:slideR .6s .12s cubic-bezier(.22,1.3,.36,1) both}
-@keyframes slideL{from{transform:translateX(-190px);opacity:0}30%{opacity:1}to{transform:none;opacity:1}}
-@keyframes slideR{from{transform:translateX(190px);opacity:0}30%{opacity:1}to{transform:none;opacity:1}}
-.sp-bar{animation:barIn .35s .5s cubic-bezier(.34,1.56,.64,1) both}
-@keyframes barIn{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}
-.spark{transform-box:fill-box;transform-origin:center;opacity:0;filter:drop-shadow(0 0 6px rgba(200,150,70,.9))}
-.spark1{animation:sparkIn .5s .95s cubic-bezier(.34,1.56,.64,1) both, twinkle 1.1s 1.45s ease-in-out infinite}
-.spark2{animation:sparkIn .5s 1.15s cubic-bezier(.34,1.56,.64,1) both, twinkle 1.1s 1.75s ease-in-out infinite}
-@keyframes sparkIn{from{transform:scale(0) rotate(-120deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
-@keyframes twinkle{
-  0%,100%{opacity:1;transform:scale(1) rotate(0);filter:drop-shadow(0 0 9px rgba(220,170,90,1))}
-  50%{opacity:.3;transform:scale(.7) rotate(18deg);filter:drop-shadow(0 0 2px rgba(200,150,70,.3))}
-}
+/* One glint, once, while the mark hangs: a narrow soft-edged band of white travelling the
+   bar's own axis, clipped to the silhouette so the light can only ever land on the metal.
+   It is a reflection crossing a machined edge, not a twinkle sitting on top of the logo —
+   hence no drop-shadow, no scaling star, and a single pass. */
+.mk-glint{opacity:0;animation:mkGlintFade .6s 1.3s linear both}
+.mk-glint-band{animation:mkGlintSweep .6s 1.3s cubic-bezier(.4,0,.6,1) both}
+@keyframes mkGlintFade{0%{opacity:0}22%{opacity:1}72%{opacity:1}100%{opacity:0}}
+@keyframes mkGlintSweep{from{transform:translateX(-22px)}to{transform:translateX(104px)}}
 /* One quote a day, the same one for everybody, and it turns over at midnight local.
    Chosen by the day number rather than at random so two people who open the app on the
    same morning see the same line — the app talking to its users, not to each of them
    separately. */
+/* The quote waits out the whole dumbbell sequence (3.4s) plus a beat of clean dark
+   screen, so the two never share the frame — the animation finishes, the screen empties,
+   and then the day's line arrives on its own. Same type and layout it has always had. */
+.splash-quote-wrap{display:flex;flex-direction:column;align-items:center}
 .splash-quote{
   max-width:min(78vw,420px);margin-top:18px;text-align:center;
   font-size:14px;line-height:1.55;color:var(--dim);
-  animation:feUp .6s 1.75s ease both;
+  animation:feUp .6s 3.65s ease both;
 }
 .splash-quote b{display:block;margin-top:7px;font:11px var(--mono);letter-spacing:.1em;
   text-transform:uppercase;color:var(--faint);font-weight:500}
-.splash-ver{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.2em;animation:feUp .5s 1.5s ease both}
+.splash-ver{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:7px;letter-spacing:.2em;animation:feUp .5s 4s ease both}
 .splash-word{
   font-family:var(--disp);font-size:19px;font-weight:600;text-transform:uppercase;letter-spacing:.34em;
-  color:var(--text);margin-top:20px;padding-left:.34em;
-  animation:wordPunch .55s 1.3s cubic-bezier(.22,1.4,.36,1) both;
+  color:var(--text);padding-left:.34em;
+  animation:wordPunch .55s 3.45s cubic-bezier(.22,1.4,.36,1) both;
 }
 @keyframes wordPunch{
   0%{opacity:0;letter-spacing:.9em;filter:blur(5px)}
@@ -1971,21 +1990,62 @@ body.cele-open{overflow:hidden}
   </symbol>
 </svg>
 <div id="splash" aria-hidden="true">
+  <!-- Two stacked layers in ONE centred grid cell: the animation, then the quote. They
+       occupy the same cell rather than sitting in a column, so neither reserves layout
+       space from the other and nothing shifts position when the quote arrives — the
+       "camera" is genuinely static, not merely animated as if it were.
+
+       The mark is drawn here rather than <use>'d from #e26-mark because the shadow, the
+       dumbbell and the glint all move on separate timelines. -->
   <div class="splash-inner">
-    <!-- Drawn directly here rather than <use>'d from #e26-mark, because the splash is the
-         one place the shadow and the mark move independently — a bounce reads as a
-         bounce only if the ground it launches from and lands on holds still. -->
-    <svg class="mk-splash" viewBox="0 0 100 100" width="min(34vw,144px)" height="min(34vw,144px)" aria-hidden="true">
-      <ellipse class="mk-shadow" cx="50" cy="92" rx="34" ry="6" fill="currentColor" opacity="0.3"></ellipse>
-      <g class="mk-body" transform="translate(0 -4) rotate(-25 50 50)">
-        <rect x="26" y="44" width="48" height="12" fill="currentColor"></rect>
-        <polygon points="26,26 44,38 44,62 26,74 8,62 8,38" fill="currentColor"></polygon>
-        <polygon points="74,26 92,38 92,62 74,74 56,62 56,38" fill="currentColor"></polygon>
-      </g>
-    </svg>
-    <div class="splash-word">Element 26</div>
-    <div class="splash-quote" id="splashQuote"></div>
-    <div class="splash-ver"></div>
+    <div class="splash-stage">
+      <svg class="mk-splash" viewBox="0 0 100 100" width="min(34vw,150px)" height="min(34vw,150px)" aria-hidden="true">
+        <defs>
+          <!-- The dumbbell's own silhouette, so the glint can only ever appear ON the
+               metal. Each shape carries the tilt itself: <g> is not a permitted child of
+               <clipPath> in SVG 1.1, and Safari enforces that. -->
+          <clipPath id="mkShape">
+            <rect x="26" y="44" width="48" height="12" transform="translate(0 -4) rotate(-25 50 50)"></rect>
+            <polygon points="26,26 44,38 44,62 26,74 8,62 8,38" transform="translate(0 -4) rotate(-25 50 50)"></polygon>
+            <polygon points="74,26 92,38 92,62 74,74 56,62 56,38" transform="translate(0 -4) rotate(-25 50 50)"></polygon>
+          </clipPath>
+          <linearGradient id="mkGlintGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0"   stop-color="#fff" stop-opacity="0"></stop>
+            <stop offset=".45" stop-color="#fff" stop-opacity=".6"></stop>
+            <stop offset=".55" stop-color="#fff" stop-opacity=".6"></stop>
+            <stop offset="1"   stop-color="#fff" stop-opacity="0"></stop>
+          </linearGradient>
+        </defs>
+        <!-- cx=50 matches the dumbbell's own centre of symmetry, and every transform in
+             this animation is vertical only, so the two share one horizontal centre for
+             the whole sequence by construction rather than by tuning. -->
+        <ellipse class="mk-shadow" cx="50" cy="92" rx="34" ry="6" fill="currentColor"></ellipse>
+        <!-- THE ANIMATED WRAPPER EXISTS BECAUSE OF A REAL TRAP: a CSS `transform` on an
+             SVG element REPLACES that element's `transform` attribute outright. Animating
+             the tilted group directly threw its rotate(-25) away, and the splash rendered
+             a flat, untilted dumbbell for weeks while the exported icons looked correct.
+             The wrapper carries the motion; the inner group keeps the tilt. -->
+        <g class="mk-lift">
+          <g class="mk-tilt" transform="translate(0 -4) rotate(-25 50 50)">
+            <rect x="26" y="44" width="48" height="12" fill="currentColor"></rect>
+            <polygon points="26,26 44,38 44,62 26,74 8,62 8,38" fill="currentColor"></polygon>
+            <polygon points="74,26 92,38 92,62 74,74 56,62 56,38" fill="currentColor"></polygon>
+          </g>
+          <!-- One specular sweep along the bar's own axis, clipped to the silhouette. Same
+               wrapper trick: the tilt is on a static <g>, the travel is on the rect. -->
+          <g class="mk-glint" clip-path="url(#mkShape)">
+            <g transform="translate(0 -4) rotate(-25 50 50)">
+              <rect class="mk-glint-band" x="0" y="18" width="17" height="64" fill="url(#mkGlintGrad)"></rect>
+            </g>
+          </g>
+        </g>
+      </svg>
+    </div>
+    <div class="splash-quote-wrap">
+      <div class="splash-word">Element 26</div>
+      <div class="splash-quote" id="splashQuote"></div>
+      <div class="splash-ver"></div>
+    </div>
   </div>
 </div>
 <div id="app"></div>
@@ -2041,7 +2101,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "2.2";
+const APP_VERSION = "2.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14485,7 +14545,10 @@ function quoteOfTheDay(){
     setTimeout(()=>sp.remove(), 480);
   };
   sp.onclick = bye;
-  setTimeout(bye, 2450);
+  /* The dumbbell sequence runs 3.1s, the screen sits clean for a beat, and the quote
+     lands at 3.45s — so this has to leave the quote up long enough to actually be read
+     after all that, not cut it off. Tapping anywhere skips straight ahead. */
+  setTimeout(bye, 6000);
 })();
 /* First run opens the wizard. This sits here, at the end of the script, rather than up
    beside load(): `OB` is a `let` declared with the onboarding code far below, so
