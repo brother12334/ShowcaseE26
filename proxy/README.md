@@ -1,4 +1,4 @@
-# Plan-reader proxy
+ Plan-reader proxy
 
 Element 26 is one static HTML file. Anything inside it is public the moment it is
 served — including a Gemini API key, which is why Google emails you about it.
