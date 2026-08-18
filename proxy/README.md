@@ -142,20 +142,11 @@ not hand anybody the credentials it protects. `POST /session` answers the same 4
 wrangler kv namespace create E26_ACCOUNTS       # prints an id
 ```
 
-Put that id in a second wrangler config (or a second `[env]` block) and deploy:
-
-```toml
-name = "element26-accounts"
-main = "proxy/accountworker.js"
-compatibility_date = "2024-11-01"
-
-[[kv_namespaces]]
-binding = "E26_ACCOUNTS"
-id = "<the id wrangler printed>"
-```
+The repo already has `wrangler.accounts.toml` at its root with a placeholder for that id
+— open it, replace `REPLACE_WITH_KV_NAMESPACE_ID` with what wrangler printed, then:
 
 ```bash
-wrangler deploy -c wrangler.accounts.toml
+wrangler deploy proxy/accountworker.js --name element26-accounts --config wrangler.accounts.toml
 ```
 
 Add the origin you serve the app from to `ALLOWED_ORIGINS` at the top of

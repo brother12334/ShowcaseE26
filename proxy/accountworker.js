@@ -36,8 +36,8 @@
  * DEPLOY
  *
  *   wrangler kv namespace create E26_ACCOUNTS
- *   # put the returned id in wrangler.toml (see proxy/README.md)
- *   wrangler deploy proxy/account-worker.js --name element26-accounts
+ *   # put the returned id in wrangler.accounts.toml (see proxy/README.md)
+ *   wrangler deploy proxy/accountworker.js --name element26-accounts --config wrangler.accounts.toml
  *
  * Then set E26_API in index.html to the Worker's URL. No secret goes in the page.
  */
