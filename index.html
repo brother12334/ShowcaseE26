@@ -258,6 +258,10 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .rl-list{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:4px}
 .rl-chip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:5px 6px 5px 12px;font-family:var(--mono);font-size:13px;color:var(--dim)}
 .rl-chip button{background:var(--line);border:none;color:var(--text);width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1}
+/* A day the app filled in for you, marked as such. It is a reading of your history, not
+   a choice you made, and the two should never look identical. */
+.rl-chip.auto{border-style:dashed}
+.rl-auto{font-style:normal;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border:1px solid var(--line);border-radius:5px;padding:1px 4px}
 .ss-badge{display:inline-block;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--bg);background:var(--dim);border-radius:5px;padding:2px 6px;vertical-align:middle;margin-left:5px}
 .ss-card{border-left:3px solid var(--dim)}
 /* The second half of a pair gets the outline treatment so the two read as one unit
@@ -268,6 +272,47 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   margin:-2px 0 9px;padding-left:9px;border-left:2px solid var(--line);
 }
 .ss-note b{color:var(--text)}
+
+/* ================= SET TECHNIQUES =================
+   Accent-coloured rather than grey, and outlined rather than filled, so a technique badge
+   is legible next to a superset badge without the two competing — one says what this
+   exercise is paired with, the other says how the set is taken. */
+/* Written at two-class specificity on purpose. Every badge also carries `.term` so that
+   tapping it opens the glossary, and `.term` sets `font:inherit` — a shorthand, so it
+   resets family, size AND weight — from further down this stylesheet. At equal
+   specificity the later rule wins and the badge came out at the exercise heading's own
+   15px bold, which is to say not a badge at all. */
+.tech-badge, .tech-badge.term{
+  display:inline-block;font-family:var(--mono);font-size:9.5px;font-weight:500;
+  text-transform:uppercase;text-decoration:none;
+  letter-spacing:.08em;color:var(--acc);background:var(--acc-soft);
+  border:1px solid var(--acc-line);border-radius:5px;padding:1px 5px;
+  vertical-align:middle;margin-left:5px;cursor:pointer;line-height:1.5;
+}
+/* The cue sits with the set it governs, indented under it in the accent so it reads as
+   an instruction attached to that row rather than another line of the card's body copy. */
+.tech-cue{
+  font-size:12.5px;line-height:1.45;color:var(--dim);
+  margin:2px 0 8px;padding-left:9px;border-left:2px solid var(--acc-line);
+}
+.tech-cue b{color:var(--acc);font-weight:600}
+/* Sub-sets: the drops, mini-sets and bursts inside one set. Indented and set in the mono
+   face so a row of them reads as belonging to the set above rather than as more sets. */
+.sub-set{display:flex;align-items:center;gap:6px;margin:3px 0 0 22px}
+.sub-set .sub-i{font-family:var(--mono);font-size:10px;color:var(--faint);min-width:52px;letter-spacing:.06em}
+.sub-set input{
+  flex:1;min-width:0;background:var(--card2);border:1px solid var(--line);color:var(--text);
+  border-radius:8px;padding:7px 8px;font-size:14px;font-family:var(--mono);text-align:center;
+}
+.sub-set button{
+  background:none;border:none;color:var(--faint);cursor:pointer;font-size:15px;
+  width:30px;height:30px;line-height:1;flex:none;
+}
+.sub-add{
+  background:none;border:1px dashed var(--acc-line);color:var(--acc);border-radius:8px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:6px 10px;margin:5px 0 0 22px;cursor:pointer;
+}
 
 /* ================= SUPERSET ROUNDS =================
    The pair as one card. The accent border is the whole card rather than a per-exercise
@@ -2379,7 +2424,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "2.4";
+const APP_VERSION = "2.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -2667,11 +2712,96 @@ function restTombstones(){
 }
 function releaseRestDay(date, alsoUnlog){
   S.restDays = restDaysThisCycle().filter(d=>d !== date);
+  /* Whatever happens to the credit, the day is no longer one the app filled in — either
+     you have taken it over as your own, or it is gone entirely. Leaving it in S.restAuto
+     would keep labelling a day "auto" that the app no longer holds any opinion about. */
+  S.restAuto = autoRestAuto().filter(d=>d !== date);
   if(alsoUnlog){
     S.restLog = (S.restLog||[]).filter(d=>d !== date);
     const t = restTombstones();
     if(t.indexOf(date) < 0) t.push(date);
   }
+}
+/* ---------- REST DAYS YOU DID NOT HAVE TO DECLARE ----------
+   A day with no session logged on it was a rest day. That is not an inference, it is
+   what the words mean — and yet the app used to learn it only if you opened it and
+   tapped a plate, so a day you simply did not train stayed permanently ambiguous:
+   neither trained nor rested, just missing. Everything downstream then had to hedge
+   around a gap it could not name.
+
+   So gaps are filled in. Every past day between the last thing that happened and
+   yesterday, with no session on it, is recorded as a rest day.
+
+   The rules it obeys, each for a reason:
+
+   TODAY IS NEVER TOUCHED. The day is not over. Marking it would tell you that you have
+   rested when you are about to train, and would spend a credit you never chose to.
+
+   A TOMBSTONE IS FINAL. Delete an auto-filled rest day and it stays deleted —
+   releaseRestDay() writes to S.restDeleted and this skips anything in it, or the app
+   would cheerfully re-add tomorrow exactly what you removed today, forever.
+
+   IT STOPS AT TWO WEEKS. Come back after three months away and the honest reading is a
+   layoff, not ninety rest days; fabricating ninety entries would bury the real ones and
+   claim a precision the app does not have. Past the cap the gap is simply left as a gap.
+
+   CREDITS STILL CAP IT. takeRestDay() refuses past the split's own allowance, so an
+   auto-filled day cannot conjure rest the plan never budgeted for. Days beyond the cap
+   are recorded as auto-detected without a credit.
+
+   Which days were filled in rather than chosen is kept in S.restAuto, so the app can
+   say which is which instead of quietly presenting a guess as your decision. */
+const AUTO_REST_BACKFILL_DAYS = 14;
+/* Its own copy of the day length, deliberately. This runs from migrate(), which is called
+   at boot from far above the `const DAY_MS` further down this file — and a `const` read
+   before its declaration is evaluated is not undefined, it THROWS, taking the rest of the
+   script and the entire app down with it. Same temporal-dead-zone trap the onboarding
+   boot block carries a note about. A local number cannot be dead-zoned. */
+const AUTO_REST_DAY_MS = 86400000;
+function autoRestAuto(){
+  if(!Array.isArray(S.restAuto)) S.restAuto = [];
+  return S.restAuto;
+}
+function isAutoRest(date){ return autoRestAuto().indexOf(date) > -1; }
+function dayKey(ms){ return new Date(ms).toLocaleDateString("en-CA"); }
+function fillMissedRestDays(now){
+  now = now || Date.now();
+  if(!Array.isArray(S.sessions)) return 0;
+  const auto = autoRestAuto();
+  const tomb = restTombstones();
+  const today = dayKey(now);
+
+  /* Days that already have a session on them are training days, not rest days. Built
+     from the session's own date string rather than by re-deriving one from startedAt, so
+     a session logged either side of midnight stays on the day it was logged under. */
+  const trained = {};
+  S.sessions.forEach(s=>{ if(s && s.date) trained[s.date] = 1; });
+
+  /* Start the morning after the last thing that happened — a session, or a rest day
+     already recorded. Never earlier than the cycle itself. */
+  let lastMs = S.cycleStart || 0;
+  S.sessions.forEach(s=>{ if(s.startedAt > lastMs && s.startedAt <= now) lastMs = s.startedAt; });
+  (S.restDays || []).forEach(d=>{
+    const ms = new Date(d + "T12:00:00").getTime();
+    if(isFinite(ms) && ms > lastMs && ms <= now) lastMs = ms;
+  });
+  if(!lastMs) return 0;
+
+  let added = 0;
+  const startMs = new Date(dayKey(lastMs) + "T12:00:00").getTime();
+  for(let i = 1; i <= AUTO_REST_BACKFILL_DAYS; i++){
+    const ms = startMs + i*AUTO_REST_DAY_MS;
+    if(ms > now) break;
+    const d = dayKey(ms);
+    if(d === today) break;                 // the day is not over yet
+    if(trained[d]) continue;               // you trained, that is not a rest day
+    if(tomb.indexOf(d) > -1) continue;     // you said it was not one, and meant it
+    if(isRestDay(d)) continue;             // already recorded
+    takeRestDay(d);                        // no-op once the split's credits are spent
+    if(auto.indexOf(d) < 0){ auto.push(d); added++; }
+  }
+  if(added){ auto.sort(); }
+  return added;
 }
 // short label for a rest plate that has already been spent
 function restPlateLabel(date){
@@ -2707,6 +2837,13 @@ const GLOSSARY_TIP = {
   failure:"Taking a set until you physically cannot complete another rep with good form. That's RPE 10.",
   deload:"A deliberately easy week: keep the weights, halve the sets, so fatigue drains off.",
   superset:"Two exercises done back to back with no rest between them.",
+  lengthenedpartials:"Partial reps at the stretched end of the movement, once full reps run out.",
+  dropset:"At failure, strip weight and keep going with no rest.",
+  myoreps:"One hard activation set, then short mini-sets with a few breaths between.",
+  restpause:"Go to failure, rest 15-20 seconds, go again. Repeat.",
+  cluster:"One set broken into small bunches with a planned pause between each.",
+  amrap:"As many reps as possible.",
+  failure:"Taken until another rep is genuinely not there.",
   restwindow:"How long to wait between sets. Depends on how hard the set was, not one number for everything.",
   dropoff:"How many reps you lose from your first set to your last at the same weight. ~25% is normal.",
   density:"How many working sets you get through per hour. 15-20 is brisk and focused.",
@@ -2855,6 +2992,48 @@ const GLOSSARY = {
     <div class="gl-def"><b>Two exercises done back to back with no rest between them.</b></div>
     <p>Your ab finisher is one: crunch → leg raise → crunch, straight through. Because there's no rest inside a superset, Element 26 doesn't start the rest stopwatch between those sets and doesn't grade them for ${term("restwindow","rest length")}.</p>
     <p>Supersetting two <em>unrelated</em> muscles, say calves and biceps, is close to free time saved. Supersetting the same muscle raises the difficulty a lot and cuts the weight you can use, so it's a tool for finishers rather than main lifts.</p>`},
+
+  /* The intensity techniques. Each one is here because a plan can ask for it and the app
+     now carries it through to the moment you are doing the set. The shared point at the
+     bottom of several of them — that the whole thing counts as one set — is the single
+     most load-bearing sentence in this section, because it is what keeps the Body tab's
+     numbers meaning the same thing whether or not you use any of these. */
+  lengthenedpartials:{title:"Lengthened partials", html:`
+    <div class="gl-def"><b>Partial reps at the stretched end of the movement, once full reps run out.</b></div>
+    <p>When you can't complete another full rep, you keep going through the bottom portion only — the deepest part of a curl, the stretch at the bottom of a fly. The muscle is under load in its lengthened position, which is the part of the range most associated with growth.</p>
+    <p>They extend a set past the point where it would otherwise end, so they belong on the last set of an exercise rather than on all of them.</p>
+    <p>Element 26 counts the set as <b>one ${term("hardset","hard set")}</b>. The partials are extra work inside it, not extra sets.</p>`},
+
+  dropset:{title:"Drop set", html:`
+    <div class="gl-def"><b>At failure, strip weight and keep going with no rest.</b></div>
+    <p>Take the set to failure, immediately cut the load — commonly 20-30% — and rep out again. Repeat for as many drops as the plan asks for.</p>
+    <p>Log each drop under the set it belongs to. Element 26 counts the whole thing as <b>one ${term("hardset","hard set")}</b>: the drops add tonnage and fatigue, not set count. Counting a triple drop as three sets would overstate your weekly ${term("volume","volume")} against thresholds that were never measured that way.</p>`},
+
+  myoreps:{title:"Myo-reps", html:`
+    <div class="gl-def"><b>One hard activation set, then short mini-sets with a few breaths between.</b></div>
+    <p>You take an activation set to roughly ${term("rpe","RPE")} 9, rest only 3-5 deep breaths, then do a mini-set of 3-5 reps. Repeat until you can't hit the target reps. The idea is to keep the muscle near the high-effort end of the set without re-doing the easy reps at the start.</p>
+    <p>Element 26 counts the activation set plus its mini-sets as <b>one ${term("hardset","hard set")}</b>.</p>`},
+
+  restpause:{title:"Rest-pause", html:`
+    <div class="gl-def"><b>Go to failure, rest 15-20 seconds, go again. Repeat.</b></div>
+    <p>Close relative of myo-reps, with slightly longer pauses and usually fewer bursts. Same purpose: more near-failure reps out of one load.</p>
+    <p>Counted as <b>one ${term("hardset","hard set")}</b>, bursts included.</p>`},
+
+  cluster:{title:"Cluster set", html:`
+    <div class="gl-def"><b>One set broken into small bunches with a planned pause between each.</b></div>
+    <p>Instead of 6 straight reps, you might do 2 reps, rack it for 20 seconds, 2 more, pause, 2 more. The short rests let you handle a heavier load for the same total reps, so clusters are usually a strength tool rather than a finisher.</p>
+    <p>Unlike the others here, a plan that prescribes clusters normally means <em>every</em> set, not just the last, so Element 26 applies it to all of them.</p>
+    <p>Counted as <b>one ${term("hardset","hard set")}</b> per cluster set.</p>`},
+
+  amrap:{title:"AMRAP", html:`
+    <div class="gl-def"><b>As many reps as possible.</b></div>
+    <p>A set with no rep target — you go until the reps stop. Plans use it on a final set to autoregulate: how many you get tells you whether the load is right, without the plan having to guess your exact strength on the day.</p>
+    <p>Log what you actually got. That number is what the app reads for ${term("overload","progression")}.</p>`},
+
+  failure:{title:"Training to failure", html:`
+    <div class="gl-def"><b>Taken until another rep is genuinely not there.</b></div>
+    <p>That's ${term("rpe","RPE")} 10 — not "it got hard", but a rep you attempted and could not finish. It buys a little extra stimulus per set and costs a lot more recovery, which is why most plans reserve it for the last set of an exercise, and why Element 26's ${term("mrv","MRV")} estimate drops when your average RPE climbs.</p>
+    <p>Isolation work is the sensible place for it. Taking heavy compounds to true failure is where most of the risk lives for very little extra return.</p>`},
 
   restwindow:{title:"Rest between sets", html:`
     <div class="gl-def"><b>How long to wait depends on how hard the set was, not one number for everything.</b></div>
@@ -3267,6 +3446,82 @@ const ALT_CROSS_NOTE = "both arms, alternate which arm crosses on top each set";
    derived from what you logged; it only breaks if a single exercise is logged both
    ways on different days.
    ===================================================================== */
+
+/* =====================================================================
+   SET TECHNIQUES
+
+   A plan rarely says only "4 x 8". It says the last set is a drop set, or that the reps
+   are myo-reps, or to finish in the stretched position with partials. Those instructions
+   used to be flattened into the exercise's free-text note — carried, but inert. Nothing
+   could show them at the right moment, nothing could give you anywhere to log the drops
+   you actually did, and the note grew until it was skipped.
+
+   Each technique here is a real thing with a shape:
+
+     `applies`  Whether it governs every working set or only the last one. Almost all of
+                these are last-set finishers, and saying "drop set" over four straight
+                sets when the plan meant the fourth is a different prescription.
+     `sub`      Whether the technique produces extra bursts of reps inside the set. A drop
+                set has drops, myo-reps has mini-sets, rest-pause has bursts. Techniques
+                without sub-sets — partials, AMRAP, to-failure — change how the set is
+                taken, not how many pieces it has.
+     `subLabel` What one of those pieces is called, in the language of the technique.
+
+   HOW THEY COUNT. One technique is ONE hard set, however many pieces it has. Drops and
+   mini-sets add tonnage, and they add RPE because they are taken at or past failure, but
+   they do not each add a set to your weekly volume. Counting a triple drop as three sets
+   would inflate every MEV/MAV/MRV comparison on the Body tab by exactly the amount the
+   technique was chosen to avoid needing, and the landmark research those numbers come
+   from does not count them that way either. Sub-sets therefore live ON their parent set
+   as `st.sub` rather than beside it in the sets array — which is also why not one of the
+   fourteen places that ask isWorkingSet() had to learn about any of this.       */
+const TECHNIQUES = {
+  lengthened: {label:"Lengthened partials", badge:"partials", applies:"last", sub:false,
+    cue:"Finish in the stretched position with partial reps, once full reps stop.",
+    gloss:"lengthenedpartials"},
+  dropset:    {label:"Drop set", badge:"drop set", applies:"last", sub:true, subLabel:"drop",
+    cue:"At failure, strip the weight and go again with no rest.",
+    gloss:"dropset"},
+  myoreps:    {label:"Myo-reps", badge:"myo-reps", applies:"last", sub:true, subLabel:"mini-set",
+    cue:"One activation set near failure, then short mini-sets with a few breaths between.",
+    gloss:"myoreps"},
+  restpause:  {label:"Rest-pause", badge:"rest-pause", applies:"last", sub:true, subLabel:"burst",
+    cue:"Go to failure, rest 15-20 seconds, then squeeze out more. Repeat.",
+    gloss:"restpause"},
+  cluster:    {label:"Cluster set", badge:"cluster", applies:"all", sub:true, subLabel:"cluster",
+    cue:"One set broken into small bunches with a planned pause between each.",
+    gloss:"cluster"},
+  amrap:      {label:"AMRAP", badge:"AMRAP", applies:"last", sub:false,
+    cue:"Last set is as many reps as possible.",
+    gloss:"amrap"},
+  failure:    {label:"To failure", badge:"to failure", applies:"last", sub:false,
+    cue:"Take the last set to genuine failure.",
+    gloss:"failure"}
+};
+const TECH_KEYS = Object.keys(TECHNIQUES);
+/* Normalised accessor. `e.tech` is a list of {k, detail} and every reader goes through
+   here, so a save written before techniques existed, or one carrying a key this build has
+   never heard of, reads as "no technique" instead of throwing halfway down a render. */
+function techList(e){
+  if(!e || !Array.isArray(e.tech)) return [];
+  return e.tech.filter(t=> t && TECHNIQUES[t.k]);
+}
+function hasTech(e, k){ return techList(e).some(t=> t.k === k); }
+/* The techniques in force on one particular set. Index is zero-based; `total` is how many
+   working sets the exercise prescribes, because "last set" needs to know which one that
+   is. Called with total 0 (an exercise with no declared set count) it treats every set as
+   the last, which is the honest reading of "finish with a drop set" when the app cannot
+   tell you how many sets there are. */
+function techFor(e, idx, total){
+  return techList(e).filter(t=>{
+    const T = TECHNIQUES[t.k];
+    if(T.applies === "all") return true;
+    return !total || idx === total - 1;
+  });
+}
+function techSub(e, idx, total){
+  return techFor(e, idx, total).find(t=> TECHNIQUES[t.k].sub) || null;
+}
 
 /* Per-set RPE targets. The whole programme is built on ramps (7,8,8,9) rather than a
    blanket range, because "3 sets at RPE 9" and "7,8,8,9" prescribe very different
@@ -3937,10 +4192,13 @@ function migrate(){
     delete S.restDay;
     saveQuiet();
   }
-  // a tombstoned day must never linger in either list
+  // which rest days the app filled in for you rather than you choosing them
+  if(!Array.isArray(S.restAuto)) S.restAuto = [];
+  // a tombstoned day must never linger in any of the lists
   if(S.restDeleted.length){
     S.restDays = S.restDays.filter(d=>S.restDeleted.indexOf(d) < 0);
     S.restLog = (S.restLog||[]).filter(d=>S.restDeleted.indexOf(d) < 0);
+    S.restAuto = S.restAuto.filter(d=>S.restDeleted.indexOf(d) < 0);
   }
   /* Every edit to the programme, dated. Nothing recorded the shape of the plan over
      time, so a lift that "went backwards" after a rep range changed looked identical to
@@ -3979,6 +4237,10 @@ function migrate(){
     S.fixSpiderV1 = true;
     if(touched) save(); else saveQuiet();
   }
+
+  /* Fill in the days you did not train before the cycle is recomputed, so everything
+     downstream reads a history with no unexplained holes in it. */
+  if(fillMissedRestDays(Date.now())) saveQuiet();
 
   recomputeCycle(false);
 }
@@ -5141,12 +5403,21 @@ function windowStats(from, to){
         const rpe = effRpe(st);
         const e1 = w > 0 ? est1RM(w, reps) : reps;   // bodyweight → reps stand in for load
         const tgt = restTargetFor(e, st);
+        /* Drops, mini-sets and bursts are real work and belong in tonnage. They are NOT
+           extra sets: one drop set is one hard set however many drops it has, which is
+           both how the volume-landmark research counts them and the only way the MEV /
+           MAV / MRV comparisons keep meaning the same thing for someone who uses these
+           techniques and someone who does not. */
+        let subVol = 0;
+        if(Array.isArray(st.sub)) st.sub.forEach(r=>{
+          subVol += (parseFloat(r && r.weight)||0) * (parseFloat(r && r.reps)||0);
+        });
         Object.keys(mm).forEach(m=>{
           const o = out[m];
           if(!o) return;
           const c = mm[m];
           o.sets += c;
-          o.vol  += w * reps * c;
+          o.vol  += (w * reps + subVol) * c;
           o.exs[e.name] = (o.exs[e.name]||0) + c;
           if(rpe >= 7) o.hardSets += c;
           if(rpe >= 9.5) o.nearFail += c;
@@ -5428,7 +5699,10 @@ function adjustedLandmarks(A, g){
   if(scale !== 1){
     mev *= scale; mav *= scale; mrv *= scale;
     why.push({k:"Window", v:Math.round(win.days)+" days",
-      note:"targets scaled from per-week figures to the length of this cycle"});
+      note: win.off >= 2
+        ? "targets scaled to the "+Math.round(win.days)+" days of this cycle you actually trained through. "
+          + Math.round(win.off)+" days away are left out, so time off does not inflate the target"
+        : "targets scaled from per-week figures to the length of this cycle"});
   }
 
   const R = v => Math.max(0, Math.round(v*10)/10);
@@ -5503,7 +5777,26 @@ function volState(m, sets, L, ctx){
    the thresholds scaled by how long that cycle has actually run, so a 9-day cycle is
    measured against 9/7 of the weekly landmark. The unit still matches the research; the
    window now matches how you actually train. Settings switches it back to a rolling
-   7 days for anyone who plans by the calendar instead.                              */
+   7 days for anyone who plans by the calendar instead.
+
+   TIME OFF MUST NOT STRETCH THE WINDOW. This scaled by RAW CALENDAR TIME since the cycle
+   began, which is only the same thing as "how long the cycle has run" while you are
+   actually training. Go away for five days and the calendar keeps counting while the
+   logged sets do not, so the window grew, every threshold grew with it, and the numbers
+   became nonsense in both directions at once: the target inflated AND the volume against
+   it stalled. A 17-day stretch put chest MAV at 49 sets against a weekly figure of 20.
+   Worked example, all from the real constants:
+
+       9-day cycle    scale 1.29   MAV 25.7      (correct)
+       + 5 days away  scale 2.43   MAV 48.6      (the bug)
+
+   So the window now ENDS AT THE LAST DAY YOU TRAINED, plus one day of grace for the rest
+   day that normally follows a session — not at "now". Train, and it grows exactly as
+   before. Stop training, and it freezes rather than inflating, so a fortnight off leaves
+   the cycle reading precisely as it did on the last day you lifted. The one day of grace
+   is what keeps an ordinary rest day from quietly shrinking the window instead, which is
+   the same bug pointing the other way.                                                */
+const LAYOFF_GRACE_DAYS = 1;
 function volWindowInfo(now){
   const week = {mode:"week", from: now - 7*DAY_MS, to: now + 1, days: 7, scale: 1,
                 label:"the last 7 days", short:"this week", unit:"per week",
@@ -5515,11 +5808,24 @@ function volWindowInfo(now){
   // Two days into a cycle there is nothing to read, and scaling by a fraction of a day
   // makes every target absurd, so the rolling week covers the gap.
   if(raw < 2) return week;
-  const days = Math.min(21, raw);          // a stalled cycle shouldn't inflate targets forever
+  /* The last session actually logged inside this cycle. A cycle with nothing logged in it
+     has no training span to measure, so it falls back to the rolling week rather than
+     scaling a target by however long the app has been sitting unopened. */
+  let lastMs = 0;
+  (S.sessions || []).forEach(s=>{
+    if(s.startedAt >= start && s.startedAt <= now && s.startedAt > lastMs) lastMs = s.startedAt;
+  });
+  if(!lastMs) return week;
+  const end = Math.min(now, lastMs + LAYOFF_GRACE_DAYS*DAY_MS);
+  const lived = (end - start)/DAY_MS;
+  if(lived < 2) return week;
+  const days = Math.min(21, lived);        // a stalled cycle shouldn't inflate targets forever
+  const off = Math.max(0, raw - lived);    // calendar time excluded as time away
   const prev = S.lastCycle;
   return {
-    mode:"cycle", from:start, to: now + 1, days, scale: days/7,
-    label:"this cycle, "+Math.round(days)+" day"+(Math.round(days)===1?"":"s")+" so far",
+    mode:"cycle", from:start, to: now + 1, days, scale: days/7, off,
+    label:"this cycle, "+Math.round(days)+" day"+(Math.round(days)===1?"":"s")+" so far"
+      + (off >= 2 ? " (+"+Math.round(off)+" off)" : ""),
     short:"this cycle", unit:"this cycle",
     prevFrom: prev ? prev.start : (start - days*DAY_MS),
     prevTo:   prev ? prev.end   : start,
@@ -5935,6 +6241,27 @@ function startAccountFlow(step){
   render();
 }
 function accountCloudOn(){ return !!String(E26_API).trim(); }
+/* EVERY CALL TO THE ACCOUNT SERVICE GETS A DEADLINE.
+
+   Signing up awaits this fetch before it can show you your ID, so with no timeout a
+   captive-portal wifi or a Worker having a bad morning left the sign-up button dead for
+   however long the browser felt like waiting — thirty seconds and upwards, with nothing
+   on screen explaining it. The service is optional by design and the app is meant to fall
+   back to a local account when it is not reachable; without a deadline that fallback
+   never ran, because "unreachable" and "slow" look identical until something gives up.
+
+   Four seconds is long enough for a working request on a bad connection and short enough
+   that failing costs a beat rather than the sign-up. AbortController rather than
+   Promise.race so the request is actually cancelled instead of left running. */
+const E26_API_TIMEOUT = 4000;
+function apiFetch(path, opts){
+  const url = String(E26_API).replace(/\/+$/,"") + path;
+  if(typeof AbortController === "undefined") return fetch(url, opts);
+  const ac = new AbortController();
+  const t = setTimeout(()=>ac.abort(), E26_API_TIMEOUT);
+  return fetch(url, Object.assign({}, opts, {signal: ac.signal}))
+    .finally(()=> clearTimeout(t));
+}
 
 /* Creating the account. With a Worker configured this registers server-side and the
    Worker mints the id; without one the id is generated here. Either way the same two
@@ -5945,7 +6272,7 @@ async function createAccount(name){
   let id = newUserId(), key = newSecretKey(), cloud = false;
   if(accountCloudOn()){
     try{
-      const res = await fetch(String(E26_API).replace(/\/+$/,"") + "/account", {
+      const res = await apiFetch("/account", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({name: clean})
       });
@@ -5964,6 +6291,16 @@ async function createAccount(name){
   saveAccount();
   return ACCT;
 }
+/* Does THIS device already hold a log under that account? Either it is the account that
+   claimed the unsuffixed storage, or there is a namespaced blob sitting under its id.
+   Used only to decide whether an unreachable service should block a sign-in — never to
+   decide whether credentials are valid, which is the service's job alone. */
+function deviceHasAccount(id){
+  try{
+    if(localStorage.getItem(NS0_KEY) === id) return true;
+    return localStorage.getItem(LS_KEY + "." + id.replace(/[^A-Z0-9]/g,"")) != null;
+  }catch(e){ return false; }
+}
 /* Signing back in. The id names the account; the key is what proves it is yours, which
    is why both are asked for and why a Worker is given the chance to reject the pair. */
 async function signInAccount(id, key){
@@ -5973,15 +6310,32 @@ async function signInAccount(id, key){
   if(!/^[a-f0-9]{16,64}$/.test(cleanKey)) throw new Error("That recovery key doesn't look right. It's 32 letters and numbers, from Settings → Account on your other device.");
   let name = "", cloud = false;
   if(accountCloudOn()){
-    const res = await fetch(String(E26_API).replace(/\/+$/,"") + "/session", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({id: cleanId, key: cleanKey})
-    });
-    if(res.status === 401) throw new Error("That ID and key don't match an account.");
-    if(!res.ok) throw new Error("Couldn't reach the account service. Try again in a moment.");
-    const j = await res.json();
-    name = (j && j.name) || "";
-    cloud = true;
+    /* A REFUSAL AND AN OUTAGE ARE NOT THE SAME ANSWER. 401 means these credentials are
+       wrong, and no amount of network trouble should ever soften that. But a timeout, a
+       dropped connection or a Worker having a bad morning means the service could not
+       answer at all — and if this device already holds that account's data, locking
+       somebody out of a log that is sitting in local storage two feet away, because a
+       server they do not need right now is unreachable, is the wrong call. So an outage
+       signs you in locally; the account simply is not marked cloud, and the next
+       successful sync picks that back up.
+
+       An account this device has never seen still fails, because there is genuinely
+       nothing here to let anyone into. */
+    let res = null;
+    try{
+      res = await apiFetch("/session", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({id: cleanId, key: cleanKey})
+      });
+    }catch(e){ res = null; }
+    if(res && res.status === 401) throw new Error("That ID and key don't match an account.");
+    if(res && res.ok){
+      const j = await res.json().catch(()=>null);
+      name = (j && j.name) || "";
+      cloud = true;
+    } else if(!deviceHasAccount(cleanId)){
+      throw new Error("Couldn't reach the account service. Try again in a moment.");
+    }
   }
   /* Signing back in on the device that made this account picks its own storage back up,
      rather than starting a second, empty namespace beside it. */
@@ -6016,7 +6370,7 @@ async function deleteAccount(){
   }
   if(accountAuth()){
     try{
-      await fetch(String(E26_API).replace(/\/+$/,"") + "/account", {method:"DELETE", headers:{"Authorization": accountAuth()}});
+      await apiFetch("/account", {method:"DELETE", headers:{"Authorization": accountAuth()}});
     }catch(e){ /* the local wipe below happens either way */ }
   }
   /* Every key this account owns, and nothing else: another account on the same device
@@ -6223,7 +6577,7 @@ async function accountPush(){
   const auth = accountAuth();
   if(!auth || !S) return false;
   try{
-    const res = await fetch(String(E26_API).replace(/\/+$/,"") + "/data", {
+    const res = await apiFetch("/data", {
       method:"PUT",
       headers:{"Content-Type":"application/json", "Authorization": auth},
       body: JSON.stringify({savedAt: Date.now(), data: S})
@@ -6235,7 +6589,7 @@ async function accountPull(){
   const auth = accountAuth();
   if(!auth) return false;
   try{
-    const res = await fetch(String(E26_API).replace(/\/+$/,"") + "/data", {headers:{"Authorization": auth}});
+    const res = await apiFetch("/data", {headers:{"Authorization": auth}});
     if(!res.ok) return false;
     const j = await res.json();
     if(!j || !j.data || typeof j.data !== "object") return false;
@@ -6608,7 +6962,8 @@ function aiSystemPrompt(){
 "9. 'tempo' exactly as written ('3-1-1', '4s eccentric').",
 "10. 'weight' only when an actual load is stated. Give the number as written and set the document's unit in 'unit' at the top level; put percentages of 1RM, band colours or 'moderate' in weightNote instead, with weight null.",
 "11. 'warmupSets' are the warm-up sets THIS DOCUMENT prescribes for this exercise: label them as written ('bar', '50%', '95 lb'), with percent as a fraction (0.5) where it is a percentage, and reps if given. 'warmupNote' is any warm-up instruction in words. If the document prescribes no warm-ups, leave the array empty and set stated.warmups false. The app has its own warm-up behaviour and it must not be applied to a plan that specifies its own.",
-"12. Techniques, each only when the document says so: 'supersetGroup' and 'circuitGroup' are a shared label for movements performed together (use the same label on each member, in the order performed); 'dropset', 'restPause', 'toFailure' are booleans; 'progression' is any progression instruction attached to this exercise, in the document's own words.",
+"12. Techniques, each only when the document says so: 'supersetGroup' and 'circuitGroup' are a shared label for movements performed together (use the same label on each member, in the order performed); 'progression' is any progression instruction attached to this exercise, in the document's own words.",
+"12b. 'techniques' is the list of intensity techniques this exercise prescribes. Use ONLY these keys: 'lengthened' (lengthened or stretch partials, partials in the stretched position), 'dropset' (drop sets, strip sets, running the rack), 'myoreps' (myo-reps, myo rep match), 'restpause' (rest-pause, DC-style rest pause), 'cluster' (cluster sets, intra-set rest), 'amrap' (as many reps as possible, reps to technical limit, '8+' or 'AMRAP' in the rep column), 'failure' (taken to failure, to complete failure). For each, 'detail' is the document's own words about how to run it — the number of drops, the mini-set reps, the percentage dropped — verbatim and short, or an empty string if it just names the technique. Do not add a technique because the exercise looks like it would suit one, and do not use 'failure' for an RPE 10 or RIR 0 target that is already captured in the rpe or rir arrays.",
 "13. Sides. 'unilateral' true when the movement trains one limb at a time. 'alternating' is what the document says: 'perRep' for alternating every rep, 'perSet' for one side then the other set by set, 'perRound' for a whole round each side, 'none' if it does not say. 'sideInstruction' is the document's exact instruction, e.g. 'alternate arms every rep, rest after both arms are done'. If it says nothing about how sides are handled, leave alternating 'none' and sideInstruction empty and set stated.sideHandling false.",
 "14. 'kind' classifies the job the movement does in that session: 'heavy' for the main barbell or machine compound it opens with, 'second' for a secondary compound, 'iso' for single-joint or isolation work, 'abs' for direct core work. This is a classification of the movement, not an instruction.",
 "15. 'note' is anything else the document says about that exercise, in one short sentence, in its own words. Never invent coaching cues.",
@@ -6714,9 +7069,15 @@ const AI_PLAN_SCHEMA = {
                 sideInstruction:{type:"STRING"},
                 supersetGroup:  {type:"STRING"},
                 circuitGroup:   {type:"STRING"},
-                dropset:        {type:"BOOLEAN"},
-                restPause:      {type:"BOOLEAN"},
-                toFailure:      {type:"BOOLEAN"},
+                /* Structured, not three booleans. The old shape could say THAT a drop set
+                   was prescribed and nothing about how to run it, and had no room at all
+                   for partials, myo-reps or clusters. */
+                techniques:{type:"ARRAY", items:{type:"OBJECT",
+                  properties:{
+                    kind:  {type:"STRING", enum:["lengthened","dropset","myoreps","restpause","cluster","amrap","failure"]},
+                    detail:{type:"STRING"}
+                  },
+                  required:["kind"], propertyOrdering:["kind","detail"]}},
                 progression:    {type:"STRING"},
                 note:           {type:"STRING"}
               },
@@ -6724,7 +7085,7 @@ const AI_PLAN_SCHEMA = {
               propertyOrdering:["name","sets","setsArePerSide","reps","rpe","rir","effortNote","kind",
                                 "restSeconds","restNote","tempo","weight","weightNote","warmupSets",
                                 "warmupNote","unilateral","alternating","sideInstruction","supersetGroup",
-                                "circuitGroup","dropset","restPause","toFailure","progression","note"]
+                                "circuitGroup","techniques","progression","note"]
             }
           }
         },
@@ -6984,13 +7345,28 @@ function aiExercise(x, ctx){
     })
     .filter(ws=> ws && (ws.label || ws.pct));
 
+  /* Intensity techniques, as structured data rather than words in the note. The three
+     legacy booleans are still read: a plan already imported under the old shape, or a
+     model that answers with them out of habit, keeps working and gets upgraded to the
+     new form instead of quietly losing the instruction. */
+  const tech = [];
+  const addTech = (k, detail)=>{
+    if(!TECHNIQUES[k] || tech.some(t=>t.k === k)) return;
+    tech.push({k, detail: aiTrim(detail, 60) || ""});
+  };
+  (Array.isArray(x.techniques) ? x.techniques : []).forEach(t=>{
+    if(t && t.kind) addTech(String(t.kind), t.detail);
+  });
+  if(x.dropset === true)   addTech("dropset");
+  if(x.restPause === true) addTech("restpause");
+  if(x.toFailure === true) addTech("failure");
+  // a rep column that literally says AMRAP is the plan prescribing one, not a guess
+  if(/^\s*amrap\s*$/i.test(String(x.reps||"")) || /\d\s*\+\s*$/.test(String(x.reps||""))) addTech("amrap");
+
   const note = aiNoteJoin([
     x.tempo ? "tempo " + aiTrim(x.tempo, 20) : "",
     x.effortNote,
     x.restNote ? "rest " + aiTrim(x.restNote, 24) : "",
-    x.toFailure ? "last set to failure" : "",
-    x.dropset ? "dropset" : "",
-    x.restPause ? "rest-pause" : "",
     x.circuitGroup ? "part of circuit " + aiTrim(x.circuitGroup, 16) : "",
     x.sideInstruction,
     x.progression,
@@ -7000,6 +7376,7 @@ function aiExercise(x, ctx){
   ]);
 
   const extra = {slotKind: kind, imported: true};
+  if(tech.length) extra.tech = tech.slice(0, 4);
   if(rest) extra.rest = rest;
   if(warmups.length) extra.warmups = warmups.slice(0, 6);
   if(aiTrim(x.warmupNote, 90)) extra.warmupNote = aiTrim(x.warmupNote, 90);
@@ -8865,8 +9242,11 @@ function viewToday(){
     const occ = occIndex(rp, rpi);
     const ll = lastBox(wid, e.name, isFinisher || sharedAcrossDays(e.name), occ);
     const ins = insight(e.name, occ);
-    h += `<div class="ex-head"><b>${esc(e.name)}${supersetBadge(supersetInfo(rp.map(x=>x.chosen), rpi))}${other?'<span class="alt-badge">⇄</span>':''}</b><span class="ex-target">${e.sets}×${esc(e.reps)}${e.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(e.rpe))+'</span>':""}</span></div>`;
+    h += `<div class="ex-head"><b>${esc(e.name)}${supersetBadge(supersetInfo(rp.map(x=>x.chosen), rpi))}${techBadges(e)}${other?'<span class="alt-badge">⇄</span>':''}</b><span class="ex-target">${e.sets}×${esc(e.reps)}${e.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(e.rpe))+'</span>':""}</span></div>`;
     h += supersetNoteHTML(supersetInfo(rp.map(x=>x.chosen), rpi));
+    /* Previewing the day, not doing it, so the cue names the set it belongs to instead of
+       sitting against a row that is not rendered here. */
+    h += techPlanNoteHTML(e);
     if(warmupKindFor(rp.map(x=>x.chosen), rpi))
       h += warmupHTML(e, warmupKindFor(rp.map(x=>x.chosen), rpi),
                       {workoutId: wid, anyDay: isFinisher || sharedAcrossDays(e.name), occ});
@@ -8949,7 +9329,7 @@ function viewActiveSession(){
     const last = lastSetsFor(a.workoutId, en.name, anyDay, occ);
     const ll = lastBox(a.workoutId, en.name, anyDay, occ);
     h += `<div class="card ex${supersetInfo(a.entries, ei)?' ss-card':''}">
-      <div class="ex-head"><b>${esc(en.name)}${supersetBadge(supersetInfo(a.entries, ei))}</b>
+      <div class="ex-head"><b>${esc(en.name)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b>
         <span style="display:flex;align-items:center;gap:8px">
           <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</span>
           <span class="icon-btns ex-ctl">
@@ -10140,6 +10520,7 @@ function viewProgram(){
       const asty = altStyle(e);
       let title = esc(e.name)
         + supersetBadge(supersetInfo(S.program[wid] || [], i))
+        + techBadges(e)
         + (asty === "side"  ? ' <span class="uni-badge">L / R</span>' : '')
         + (asty === "cross" ? ' <span class="uni-badge">crossover</span>' : '')
         + (e.alt ? ' <span class="alt-badge">⇄ '+esc(e.alt.name)+'</span>' : '');
@@ -10345,8 +10726,8 @@ function viewSync(){
 
   h += `  <div class="card">
     <h3>Rest days</h3>
-    <div class="sub" style="margin:4px 0 10px">Log a day you rested, or remove one added by mistake. Rest days show in History and your report.</div>
-    ${restLog.length ? `<div class="rl-list">${restLog.map(d=>`<span class="rl-chip">${fmtDate(d)}<button data-rmrest="${d}" aria-label="Remove">✕</button></span>`).join("")}</div>` : `<div class="sub" style="margin-bottom:8px">None logged yet.</div>`}
+    <div class="sub" style="margin:4px 0 10px">A past day with no session logged is recorded as a rest day for you — the ones marked <b>auto</b> below. Add or remove any of them; a day you remove stays removed.</div>
+    ${restLog.length ? `<div class="rl-list">${restLog.map(d=>`<span class="rl-chip${isAutoRest(d)?" auto":""}">${fmtDate(d)}${isAutoRest(d)?`<i class="rl-auto">auto</i>`:""}<button data-rmrest="${d}" aria-label="Remove">✕</button></span>`).join("")}</div>` : `<div class="sub" style="margin-bottom:8px">None logged yet.</div>`}
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
       <input type="date" class="timein" id="restDateIn" value="${todayStr()}" style="flex:1;min-height:44px;padding:11px 12px;font-size:15px">
       <button class="btn small" id="addRestBtn" style="width:auto;padding:11px 20px">Add</button>
@@ -10623,6 +11004,50 @@ function bind(){
       if(st.done) await maybeAskWhy(ei, si);
     };
   });
+  /* Sub-sets: the drops, mini-sets and bursts inside a single set. They live on the set
+     rather than beside it, so nothing that counts sets has to know about them — see the
+     TECHNIQUES note. Typed values are written straight through on change, and harvested
+     alongside the main rows before any re-render, or a half-typed drop is lost the moment
+     the card redraws. */
+  const subOf = (ei, si)=>{
+    const st = S.active && S.active.entries[ei] && S.active.entries[ei].sets[si];
+    if(!st) return null;
+    if(!Array.isArray(st.sub)) st.sub = [];
+    return st.sub;
+  };
+  function harvestSubs(){
+    if(!S.active) return;
+    document.querySelectorAll(".sub-set input[data-sub]").forEach(el=>{
+      const ei = +el.dataset.e, si = +el.dataset.s, ri = +el.dataset.sub;
+      const rows = subOf(ei, si);
+      if(rows && rows[ri]) rows[ri][el.dataset.f] = el.value;
+    });
+  }
+  document.querySelectorAll(".sub-set input[data-sub]").forEach(el=>{
+    el.onchange = ()=>{
+      const rows = subOf(+el.dataset.e, +el.dataset.s);
+      if(rows && rows[+el.dataset.sub]){ rows[+el.dataset.sub][el.dataset.f] = el.value; save(); }
+    };
+  });
+  document.querySelectorAll("[data-subadd]").forEach(b=> b.onclick=()=>{
+    const [ei, si] = b.dataset.subadd.split(":").map(Number);
+    harvestSubs();
+    const rows = subOf(ei, si);
+    if(!rows) return;
+    /* Seeded from the parent set's own load, because every one of these techniques starts
+       from the weight you just used — an empty box would be re-typing what is on the bar. */
+    const parent = S.active.entries[ei].sets[si];
+    rows.push({weight: parent && parent.weight != null ? parent.weight : "", reps:""});
+    save(); render();
+  });
+  document.querySelectorAll("[data-subdel]").forEach(b=> b.onclick=()=>{
+    const [ei, si, ri] = b.dataset.subdel.split(":").map(Number);
+    harvestSubs();
+    const rows = subOf(ei, si);
+    if(!rows) return;
+    rows.splice(ri, 1);
+    save(); render();
+  });
   document.querySelectorAll("[data-addset]").forEach(b=> b.onclick=()=>{
     S.active.entries[b.dataset.addset].sets.push({weight:"",reps:"",rpe:"",done:false});
     save(); render();
@@ -10640,6 +11065,7 @@ function bind(){
       const {e,s,f} = el.dataset;
       if(S.active.entries[e] && S.active.entries[e].sets[s]) S.active.entries[e].sets[s][f] = el.value;
     });
+    harvestSubs();
     const n = $("#sessNote");
     if(n) S.active.note = n.value;
   }
@@ -10996,6 +11422,9 @@ function startWorkout(wid){
       planWeight: (e.weight == null ? undefined : e.weight),
       rest: Array.isArray(e.rest) ? e.rest.slice() : undefined,
       superset: e.superset||undefined, supersetEnd: e.supersetEnd||undefined,
+      // the techniques the plan attached to this movement, frozen into the session so
+      // editing the programme mid-workout cannot change what today's card is asking for
+      tech: techList(e).length ? techList(e).map(t=>({k:t.k, detail:t.detail})) : undefined,
       // which alternating scheme this movement uses, and which side it opens on 
       // both frozen at session start so per-set L/R can never drift mid-workout
       altStyle: altStyle(e) || undefined,
@@ -11024,6 +11453,7 @@ function resumeSession(id){
     entries: s.entries.map(e=>({
       name: e.name, reps: e.reps, rpe: e.rpe, note: e.note, fin: e.fin||undefined,
       superset: e.superset||undefined, supersetEnd: e.supersetEnd||undefined,
+      tech: Array.isArray(e.tech) && e.tech.length ? e.tech.map(t=>({k:t.k, detail:t.detail})) : undefined,
       warm: e.warm||undefined, warmups: e.warmups||undefined, warmupNote: e.warmupNote||undefined,
       sideMode: e.sideMode||undefined,
       altStyle: e.altStyle || altStyle(e) || undefined,
@@ -13462,6 +13892,56 @@ function supersetNoteHTML(info){
 }
 
 /* =====================================================================
+   TECHNIQUE BADGES AND CUES
+
+   Same job the superset labels do, for the same reason: a technique the plan asked for
+   is worthless if it only exists in a field. The badge is tappable and opens the
+   glossary, because "myo-reps" is exactly the kind of word a plan uses and a person has
+   never been told the meaning of.
+
+   The cue is deliberately shown against the SET it governs, not the exercise. Nearly all
+   of these are last-set instructions, and a drop-set cue sitting at the top of a card of
+   four sets reads as though it applies to all four.                                  */
+function techBadges(e){
+  return techList(e).map(t=>{
+    const T = TECHNIQUES[t.k];
+    return ` <span class="tech-badge term" data-term="${T.gloss}" role="button" tabindex="0"${
+      t.detail ? ` title="${attrSafe(t.detail)}"` : ` title="${attrSafe(T.cue)}"`
+    }>${esc(T.badge)}</span>`;
+  }).join("");
+}
+/* One line per technique in force on this set, in the technique's own words where the
+   document gave them and the app's plain-English cue where it did not. */
+function techCueHTML(e, idx, total){
+  const on = techFor(e, idx, total);
+  if(!on.length) return "";
+  return `<div class="tech-cue">` + on.map(t=>{
+    const T = TECHNIQUES[t.k];
+    return `<div><b>${esc(T.label)}</b> ${esc(t.detail || T.cue)}</div>`;
+  }).join("") + `</div>`;
+}
+/* The plan view lists an exercise without rendering its set rows, so the cue has to say
+   which set it lands on rather than being positioned against one. */
+function techPlanNoteHTML(e){
+  const list = techList(e);
+  if(!list.length) return "";
+  const n = parseInt(e.sets, 10) || 0;
+  return `<div class="tech-cue">` + list.map(t=>{
+    const T = TECHNIQUES[t.k];
+    const where = T.applies === "all" ? "every set"
+      : (n > 1 ? "set " + n : "the last set");
+    return `<div><b>${esc(T.label)}</b> on ${where} — ${esc(t.detail || T.cue)}</div>`;
+  }).join("") + `</div>`;
+}
+/* A short summary for the Program tab, where there is no per-set context to hang a cue
+   on and the useful thing is simply which techniques this exercise carries. */
+function techSummary(e){
+  const list = techList(e);
+  if(!list.length) return "";
+  return list.map(t=> TECHNIQUES[t.k].label + (t.detail ? " (" + t.detail + ")" : "")).join(" · ");
+}
+
+/* =====================================================================
    SUPERSET ROUNDS
 
    A superset is performed round by round: one set of A, one set of B, rest, repeat.
@@ -13496,7 +13976,27 @@ function setRowHTML(en, ei, si, last, idxLabel){
     <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${st.reps??""}" placeholder="${last&&last[si]&&last[si].reps?last[si].reps:"reps"}">
     ${rpeOn ? `<span class="rpe-cell">${rpeTargetChipHTML(en, si)}<select data-e="${ei}" data-s="${si}" data-f="rpe">${rpeOptions(st.rpe)}</select></span>` : ""}
     <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-f="done">✓</button>
-  </div>${prBadgeRow(st, ei, si)}`;
+  </div>${prBadgeRow(st, ei, si)}${techRowHTML(en, ei, si)}`;
+}
+/* Whatever the technique adds to THIS row: the cue for it, and — where the technique has
+   pieces — a place to log them. Both come out of setRowHTML so the flat view and the
+   superset round view get them without either having to know they exist. */
+function techRowHTML(en, ei, si){
+  const total = (en.sets || []).length;
+  let h = techCueHTML(en, si, total);
+  const sub = techSub(en, si, total);
+  if(sub){
+    const T = TECHNIQUES[sub.k];
+    const rows = Array.isArray(en.sets[si].sub) ? en.sets[si].sub : [];
+    h += rows.map((r,ri)=>`<div class="sub-set">
+      <span class="sub-i">${esc(T.subLabel)} ${ri+1}</span>
+      <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="weight" value="${r.weight??""}" placeholder="lbs" aria-label="${esc(T.subLabel)} ${ri+1} weight">
+      <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="reps" value="${r.reps??""}" placeholder="reps" aria-label="${esc(T.subLabel)} ${ri+1} reps">
+      <button data-subdel="${ei}:${si}:${ri}" aria-label="Remove ${esc(T.subLabel)} ${ri+1}">✕</button>
+    </div>`).join("");
+    h += `<button class="sub-add" data-subadd="${ei}:${si}">+ ${esc(T.subLabel)}</button>`;
+  }
+  return h;
 }
 function rpeTracked(){ return trainPrefs().rpe !== false; }
 // The column headings above a block of set rows, matching whichever row shape is in use.
@@ -13929,7 +14429,7 @@ async function gistFetch(path, opts={}){
   return res.json();
 }
 function payload(){
-  return JSON.stringify({setup:S.setup||null, splitId:S.splitId||DEFAULT_SPLIT, customSplit:S.customSplit||null, program:S.program, pointer:S.pointer, cycleStart:S.cycleStart, cycleDone:S.cycleDone, restDays:S.restDays||[], restLog:S.restLog||[], restDeleted:S.restDeleted||[], lastCycle:S.lastCycle||null, lastReview:S.lastReview||null, checkins:S.checkins||{}, exAliases:S.exAliases||{}, stalls:S.stalls||{}, deload:S.deload||null,
+  return JSON.stringify({setup:S.setup||null, splitId:S.splitId||DEFAULT_SPLIT, customSplit:S.customSplit||null, program:S.program, pointer:S.pointer, cycleStart:S.cycleStart, cycleDone:S.cycleDone, restDays:S.restDays||[], restLog:S.restLog||[], restDeleted:S.restDeleted||[], restAuto:S.restAuto||[], lastCycle:S.lastCycle||null, lastReview:S.lastReview||null, checkins:S.checkins||{}, exAliases:S.exAliases||{}, stalls:S.stalls||{}, deload:S.deload||null,
     blockStart:S.blockStart||null, planStart:S.planStart||null, wakeTime:S.wakeTime||null, sleepTarget:S.sleepTarget||null,
     asymRetired:S.asymRetired||{}, asymRetest:S.asymRetest||null,
     volWindow:S.volWindow||"cycle", askWhy:S.askWhy!==false, deleted:(S.deleted||[]).slice(-500), planLog:(S.planLog||[]).slice(-500), sessions:S.sessions, savedAt:S.savedAt}, null, 1);
@@ -14099,6 +14599,10 @@ async function pullFromGist(){
     S.restDeleted = [...new Set([...(S.restDeleted||[]), ...(remote.restDeleted||[])])];
       S.restLog = [...new Set([...(S.restLog||[]), ...(remote.restLog||[])])]
         .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
+    /* Which days were auto-filled travels with them, or the same day reads as your own
+       decision on one device and the app's guess on the other. */
+    S.restAuto = [...new Set([...(S.restAuto||[]), ...(remote.restAuto||[])])]
+      .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
     S.planLog = mergePlanLog(S.planLog, remote.planLog);
     S.restDays = pickRestDay(S.restDays, remote.restDays || remote.restDay)
       .filter(d=>(S.restDeleted||[]).indexOf(d) < 0);
@@ -14170,6 +14674,10 @@ async function syncNow(announce){
       S.restDeleted = [...new Set([...(S.restDeleted||[]), ...(remote.restDeleted||[])])];
       S.restLog = [...new Set([...(S.restLog||[]), ...(remote.restLog||[])])]
         .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
+    /* Which days were auto-filled travels with them, or the same day reads as your own
+       decision on one device and the app's guess on the other. */
+    S.restAuto = [...new Set([...(S.restAuto||[]), ...(remote.restAuto||[])])]
+      .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
       S.planLog = mergePlanLog(S.planLog, remote.planLog);
       S.deleted = [...tomb];
       S.sessions = mergeSessions(S.sessions, remote.sessions||[], tomb);
@@ -14187,6 +14695,10 @@ async function syncNow(announce){
       S.restDeleted = [...new Set([...(S.restDeleted||[]), ...(remote.restDeleted||[])])];
       S.restLog = [...new Set([...(S.restLog||[]), ...(remote.restLog||[])])]
         .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
+    /* Which days were auto-filled travels with them, or the same day reads as your own
+       decision on one device and the app's guess on the other. */
+    S.restAuto = [...new Set([...(S.restAuto||[]), ...(remote.restAuto||[])])]
+      .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
       S.planLog = mergePlanLog(S.planLog, remote.planLog);
       S.restDays = pickRestDay(S.restDays, remote.restDays || remote.restDay)
       .filter(d=>(S.restDeleted||[]).indexOf(d) < 0);
