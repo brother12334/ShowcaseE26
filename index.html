@@ -43,7 +43,18 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- THE FONTS MUST NOT BLOCK THE APP FROM STARTING. A plain stylesheet link is
+     render-blocking, and a cross-origin one is render-blocking on a host that is not
+     there when you are offline: the parser sat waiting on it, the boot script below
+     never ran, and a gym with no signal got a blank page even with everything else
+     cached. media="print" makes the browser fetch it without blocking on it, and the
+     onload flip applies it the moment it does arrive. Every font stack in the CSS
+     already names real system fallbacks, and display=swap is in the URL, so the app
+     renders immediately in fallback type and upgrades itself when the webfont lands —
+     or simply stays in fallback type forever, offline, which is fine. -->
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet" media="print" onload="this.media='all';this.onload=null">
+<noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
 <style>
 :root{
   /* ELEMENT 26 — the periodic-table palette.
@@ -2424,7 +2435,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "2.5";
+const APP_VERSION = "2.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -15352,6 +15363,39 @@ function quoteOfTheDay(){
      ahead, and the home page is only ever revealed from an empty screen. */
   setTimeout(bye, 5600);
 })();
+
+/* =====================================================================
+   OFFLINE
+
+   Registering the service worker is what makes this app work in a basement gym. The log
+   itself was never the problem — every set is written to localStorage the moment you
+   type it, and nothing about logging, resting, progressing or reading the Body tab
+   touches a network. The problem was that the browser still had to DOWNLOAD the app
+   before it could run any of that, so no signal meant a blank error page and no way to
+   record the session standing in front of you. sw.js caches the app itself; this
+   registers it.
+
+   Registration is deliberately late and deliberately quiet. It is fired after load so it
+   never competes with the first paint, every failure is swallowed because offline
+   support is a bonus and must never be the reason the app does not start, and the whole
+   thing is skipped on file:// where service workers are unavailable by spec.
+
+   THE UPDATE NOTICE IS NOT OPTIONAL POLISH. Caching the app means a new build lands one
+   launch late by design, so without a word to that effect the honest behaviour — serve
+   instantly from cache, refresh in the background — is indistinguishable from the app
+   being broken and stuck on an old version. */
+if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
+  window.addEventListener("load", ()=>{
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+  navigator.serviceWorker.addEventListener("message", ev=>{
+    if(ev.data && ev.data.type === "e26-updated"){
+      /* Deliberately not auto-reloading. Doing that mid-session would tear down an
+         in-progress workout to deliver a cosmetic change. */
+      try{ toast("Updated to v" + ev.data.version + " — reopen when you're done 🔄"); }catch(e){}
+    }
+  });
+}
 /* First run opens the wizard. This sits here, at the end of the script, rather than up
    beside load(): `OB` is a `let` declared with the onboarding code far below, so
    touching it any earlier is a temporal-dead-zone ReferenceError that takes the whole
