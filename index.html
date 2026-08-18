@@ -6584,6 +6584,24 @@ function bindAccount(){
 function accountAuth(){
   return ACCT && ACCT.cloud && ACCT.id && ACCT.key ? ("Bearer " + ACCT.id + "." + ACCT.key) : "";
 }
+/* NO CREDENTIAL EVER LEAVES THIS DEVICE IN A SYNC BODY.
+
+   The sync pushes the whole state object, which is right — a partial backup that quietly
+   drops a field is worse than none. But `S.sync.token` is a GitHub Personal Access Token
+   from the legacy gist backup, and sending the state verbatim uploaded it in plaintext to
+   the account service, where it would sit in KV indefinitely. A token that grants write
+   access to somebody's repositories has no business in a training log's backup, and the
+   account service has no use for it: nothing server-side reads it, and the device it
+   belongs to already has it.
+
+   It is stripped here rather than at the Worker because the fix has to hold even if the
+   service is someone else's. Everything else in the state travels untouched. */
+function syncSafeState(){
+  if(!S) return S;
+  const out = Object.assign({}, S);
+  if(out.sync) out.sync = Object.assign({}, out.sync, {token: ""});
+  return out;
+}
 async function accountPush(){
   const auth = accountAuth();
   if(!auth || !S) return false;
@@ -6591,7 +6609,7 @@ async function accountPush(){
     const res = await apiFetch("/data", {
       method:"PUT",
       headers:{"Content-Type":"application/json", "Authorization": auth},
-      body: JSON.stringify({savedAt: Date.now(), data: S})
+      body: JSON.stringify({savedAt: Date.now(), data: syncSafeState()})
     });
     return res.ok;
   }catch(e){ return false; }
@@ -6608,7 +6626,16 @@ async function accountPull(){
        machine. A fresh device has savedAt 0, so a real account always beats it. */
     const mine = (S && S.savedAt) || 0;
     if((j.savedAt || 0) <= mine) return false;
+    /* The token was stripped on the way up, so the copy coming down has an empty one.
+       Adopting the remote state wholesale would therefore delete a working GitHub token
+       from a device that had one — the sanitising would have quietly broken the very
+       feature whose credential it was protecting. Carried across from the local copy. */
+    const keepToken = (S && S.sync && S.sync.token) || "";
     S = j.data;
+    if(keepToken){
+      if(!S.sync) S.sync = {token:"", gistId:"", repo:"", branch:"main", lastSync:null, lastRepo:null};
+      if(!S.sync.token) S.sync.token = keepToken;
+    }
     migrate(); applySplit(); save();
     return true;
   }catch(e){ return false; }
