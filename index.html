@@ -7160,14 +7160,21 @@ async function aiCall(parts, spec){
   }catch(e){
     throw new Error(viaProxy
       ? "Couldn't reach the plan reader. Check your connection and try again."
-      : "Couldn't reach Google. Check your connection and try again.");
+      : "Couldn't reach our servers. Check your connection and try again.");
   }
   let j = {};
   try{ j = await res.json(); }catch(e){}
   if(!res.ok){
     /* A key problem is the app owner's to fix, not this person's, so the wording never
        asks them to go and do something about it — it tells them it is not their fault
-       and that it will be back. */
+       and that it will be back.
+
+       NONE OF THESE MESSAGES NAME GOOGLE OR GEMINI, deliberately. Who we buy the model
+       from is our supply chain, not the reader's problem: "Google's API is having a
+       moment" reads as passing the buck for a failure they experienced in OUR app, and
+       it leaks an implementation detail that could change without any of this wording
+       needing to. "Our servers" owns it. The comments below still name the real upstream,
+       because a maintainer reading a 401 does need to know whose 401 it is. */
     const msg = (j.error && j.error.message) || ("HTTP " + res.status);
     /* 401 is its own case and it means one specific thing: the request reached Google
        carrying NO credential at all, which is why Google answers about OAuth tokens and
@@ -7178,7 +7185,7 @@ async function aiCall(parts, spec){
        the console message it replaces sends whoever reads it hunting for an OAuth bug
        that does not exist. */
     if(res.status === 401)
-      throw new Error("The plan reader isn't switched on for this copy of the app — no key reached Google. That's ours to fix, not yours.");
+      throw new Error("The plan reader isn't switched on for this copy of the app — no key reached our servers. That's ours to fix, not yours.");
     if((res.status === 400 && /api key/i.test(msg)) || res.status === 403)
       throw new Error("The plan reader isn't working right now — that's a problem at our end, not yours. Try again later, or build your plan in the Program tab in the meantime.");
     /* A 404 has two completely different causes and the old message asserted one of
@@ -7195,25 +7202,25 @@ async function aiCall(parts, spec){
       const reached = /HTTP 404/.test(msg);
       throw new Error(reached
         ? "The plan reader's address isn't answering (404, no detail). The proxy is probably not deployed. That's ours to fix."
-        : "The plan reader is misconfigured. Google said: " + msg + " (asked for \"" + AI_MODEL + "\"). That's ours to fix.");
+        : "The plan reader is misconfigured. Our servers said: " + msg + " (asked for \"" + AI_MODEL + "\"). That's ours to fix.");
     }
     if(res.status === 429)
       throw new Error("The plan reader is busy — it's had a lot of use today. Wait a few minutes and try again.");
     if(res.status >= 500)
-      throw new Error("Google's API is having a moment (" + res.status + "). Try again shortly.");
+      throw new Error("Our servers are having a moment (" + res.status + "). Try again shortly.");
     throw new Error(msg);
   }
   const cand = (j.candidates || [])[0];
   if(!cand){
     const b = j.promptFeedback && j.promptFeedback.blockReason;
-    throw new Error(b ? "Google's safety filter blocked that input (" + b + ")." : "Gemini sent back an empty answer.");
+    throw new Error(b ? "Our servers wouldn't accept that input (" + b + ")." : "Our servers sent back an empty answer.");
   }
   if(cand.finishReason === "MAX_TOKENS")
     throw new Error("That plan was too long to read in one go. Import a few days at a time.");
   const text = (((cand.content || {}).parts) || []).map(p=>p.text || "").join("");
-  if(!text.trim()) throw new Error("Gemini sent back an empty answer.");
+  if(!text.trim()) throw new Error("Our servers sent back an empty answer.");
   try{ return JSON.parse(text); }
-  catch(e){ throw new Error("Gemini's answer wasn't readable. Try again."); }
+  catch(e){ throw new Error("Our servers sent back something unreadable. Try again."); }
 }
 
 /* ---------- turning the answer into a programme ----------
