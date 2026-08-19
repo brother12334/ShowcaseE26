@@ -35,12 +35,15 @@ const ALLOWED_ORIGINS = [
 /* Models this proxy will forward when the APP asks for one by name. The allowlist stops
    a stranger pointing your key at something more expensive; it is not a claim that any
    of these still exist, which is what resolveModel() below is for. */
+/* Refreshed after gemini-2.5-flash, gemini-2.0-flash and gemini-3-flash all turned out
+   to be retired for this key ("no longer available to new users"/"no longer available"),
+   confirmed by calling each directly. gemini-3.6-flash and gemini-3.5-flash-lite are
+   confirmed live. gemini-flash-latest stays in the list even though it is no longer the
+   app's own default — it is still a valid thing for resolveModel() below to land on. */
 const ALLOWED_MODELS = [
   "gemini-flash-latest",
-  "gemini-3-flash",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.0-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
 ];
 
 /* WHY THIS PROXY PICKS ITS OWN MODEL WHEN THE NAMED ONE IS GONE.
@@ -192,12 +195,22 @@ export default {
       return fail(502, "Couldn't reach Google from the proxy.", origin);
     }
 
-    /* The model was retired, or was never available to this key. Ask what is, and try
-       once more — see the note on resolveModel(). Only a 404 earns a retry: a 429 means
-       the quota is gone whichever model you pick, and a 400 means the request itself is
-       wrong, so retrying either would just spend the allowance twice. */
+    /* The model was retired (404), or THIS SPECIFIC MODEL has hit its own quota (429).
+       Both are the same underlying situation from here — this one name is not usable
+       right now for a reason that has nothing to do with the request — so both ask what
+       else this key can call and retry once. A 400 is different in kind: the request
+       itself is malformed, and no amount of switching models fixes that, so it is left
+       alone.
+
+       429 was added to this list after "gemini-flash-latest" landed on a brand-new
+       model with a 20-request daily free cap, RESOURCE_EXHAUSTED, quotaId
+       GenerateRequestsPerDayPerProjectPerModel-FreeTier — a genuinely per-MODEL quota,
+       confirmed by the same key succeeding immediately against a different model. The
+       existing `avoid` parameter to resolveModel() is what keeps the retry from landing
+       right back on the model that just failed: it filters that name out of the
+       candidates before scoring, so a fresh lookup cannot simply re-choose it. */
     let served = model;
-    if (upstream.status === 404) {
+    if (upstream.status === 404 || upstream.status === 429) {
       const alt = await resolveModel(env.GEMINI_API_KEY, model);
       if (alt) {
         try {
@@ -205,7 +218,7 @@ export default {
           upstream = retry;
           served = alt;
         } catch {
-          /* keep the original 404, which at least carries Google's explanation */
+          /* keep the original error, which at least carries Google's explanation */
         }
       }
     }
