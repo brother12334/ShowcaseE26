@@ -2435,7 +2435,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "2.6";
+const APP_VERSION = "2.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7166,6 +7166,27 @@ function aiFilePart(file){
   });
 }
 
+/* RETRY THE TRANSIENT FAILURES, ONCE THE OWN THING IS RULED OUT. A model overload 503
+   is not a fixed condition — the exact same key, the exact same model, answered 503,
+   503, 200, 200, 200 four seconds apart when this was diagnosed, with nothing changing
+   on our end between attempts. Surfacing the first of those and stopping means the
+   person retypes and taps import again for a failure that would have cleared itself in
+   the time it took them to do that.
+
+   Bounded to two retries — three attempts total — with a short backoff and a little
+   jitter so many people hitting the same overloaded model do not all retry in lockstep
+   and recreate the spike they are waiting out.
+
+   ONLY THE TRANSIENT ONES. A dropped connection and a 429/5xx are retried because the
+   exact same request can succeed on the next attempt. A 400, 401, 403 or 404 is not,
+   because it is a deterministic answer about this key, this model or this request, and
+   retrying it spends nothing but the person's time to learn the same fact twice. */
+const AI_RETRY_MAX = 2;
+const AI_RETRY_DELAYS = [1200, 3500];   // ms before the 1st and 2nd retry
+function aiRetryable(res, threw){
+  if(threw) return true;
+  return res.status === 429 || res.status >= 500;
+}
 /* One call to the model. `spec` carries the system prompt and the response schema, so
    the screening pass and the extraction pass share every line of transport and error
    handling and can never drift apart in how they report a failure. */
@@ -7192,10 +7213,22 @@ async function aiCall(parts, spec){
     url = AI_ENDPOINT + encodeURIComponent(AI_MODEL) + ":generateContent";
     headers["x-goog-api-key"] = String(AI_KEY).trim();
   }
-  let res;
-  try{
-    res = await fetch(url, {method:"POST", headers, body: JSON.stringify(body)});
-  }catch(e){
+  let res, threw = false;
+  for(let attempt = 0; attempt <= AI_RETRY_MAX; attempt++){
+    threw = false;
+    try{
+      res = await fetch(url, {method:"POST", headers, body: JSON.stringify(body)});
+    }catch(e){
+      threw = true;
+    }
+    if(!aiRetryable(res, threw)) break;
+    if(attempt === AI_RETRY_MAX) break;    // out of attempts, fall through to the error below
+    aiRetryNote("Servers are busy — retrying…");
+    const base = AI_RETRY_DELAYS[attempt] || AI_RETRY_DELAYS[AI_RETRY_DELAYS.length - 1];
+    await new Promise(r=> setTimeout(r, base + Math.random()*400));
+  }
+  aiRetryNote(null);
+  if(threw){
     throw new Error(viaProxy
       ? "Couldn't reach the plan reader. Check your connection and try again."
       : "Couldn't reach our servers. Check your connection and try again.");
@@ -7981,6 +8014,16 @@ function aiHeroHTML(){
    The stages are real work, not a fake progress bar: stage 0 is the screening call and
    the rest tick over while the extraction is in flight. Each one ticks green as it is
    passed, and the last only completes when the answer is actually back. */
+/* A retry happening under the processing screen is exactly the kind of pause that reads
+   as "frozen" without a word about it, so this puts one there. Guarded on AI_IMP and the
+   stage because aiCall is used by name-resolution too, mid-review, where there is no
+   processing screen to update and calling render() there would be a visible, pointless
+   re-paint of a different screen entirely. */
+function aiRetryNote(text){
+  if(!AI_IMP || AI_IMP.stage !== "processing") return;
+  AI_IMP.retryNote = text || null;
+  renderAIImport();
+}
 const AI_STEPS = [
   {k:"Checking the document",        s:"Making sure this is a training plan we can use"},
   {k:"Understanding your workouts",  s:"Finding the sessions and how the week is laid out"},
@@ -8000,7 +8043,7 @@ function aiProcessingHTML(){
       </div>
     </div>
     <h3 style="margin-bottom:4px">Reading your plan…</h3>
-    <p class="ai-hero-p" style="margin-bottom:14px">Finding workouts, exercises, sets and instructions.</p>
+    <p class="ai-hero-p" style="margin-bottom:14px">${a.retryNote ? esc(a.retryNote) : "Finding workouts, exercises, sets and instructions."}</p>
     <div class="ai-prog"><span style="width:${pct}%"></span></div>
     <div class="ai-steplist">${AI_STEPS.map((s, i)=>{
       const cls = i < a.step ? "done" : i === a.step ? "on" : "";
