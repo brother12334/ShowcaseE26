@@ -1113,6 +1113,16 @@ body.onboarding #app{padding:0}
   color:var(--acc);border:1px solid var(--acc-line);border-radius:20px;padding:2px 7px;margin-left:2px;
 }
 .ai-recwhy{display:block;color:var(--faint);font-size:12px;line-height:1.45;margin-top:6px}
+/* "I don't know" needs to be visibly available without competing with the real answer.
+   Quiet, full width, under the primary buttons: findable the moment somebody stalls,
+   invisible to anybody who is not stuck. */
+.ai-dunno{
+  display:block;width:100%;margin:10px 0 0;padding:12px;
+  background:none;border:1px dashed var(--line);border-radius:12px;
+  color:var(--dim);font:13px var(--sans);cursor:pointer;
+}
+.ai-dunno:active{border-color:var(--acc-line);color:var(--acc)}
+.ai-dunno-sub{color:var(--faint);font-size:11.5px;line-height:1.45;margin:6px 2px 0;text-align:center}
 .ob-opt.just{animation:aiChosen .26s ease}
 @keyframes aiChosen{50%{transform:scale(1.012)}}
 .btn.ai-wait{opacity:.5}
@@ -2451,7 +2461,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "2.9";
+const APP_VERSION = "3.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7667,15 +7677,15 @@ function aiBuildQuestions(doc, result){
      the Body tab measures you against, and a plan cannot always say it. */
   if(!doc.goal || doc.goal === "unstated"){
     qs.push({
-      id:"goal", title:"What's this plan for?",
-      sub:"Your plan doesn't say in as many words. It changes what Element 26 measures you against, and nothing about the plan itself.",
-      detected:"not stated in your plan",
+      id:"goal", title:"What are you training for?",
+      sub:"Your plan doesn't say, which is completely normal. This only changes what the app compares you against — your plan itself is never altered.",
+      detected:"not in your plan",
       def:null, rec: rec.goal,
       options:[
-        {v:"muscle",   t:"Build muscle", s:`Size first. Judged on ${term("volume","volume")} per muscle and ${term("hypertrophy","hypertrophy")} rep ranges.`},
-        {v:"strength", t:"Get stronger", s:"Load first. Lower reps, longer rests, judged on what the bar weighs."},
-        {v:"lean",     t:"Lose fat, keep muscle", s:"Same training, tighter rests, and the app expects loads to hold rather than climb."},
-        {v:"health",   t:"General fitness", s:"Train consistently and feel good. No aggressive targets."}
+        {v:"muscle",   t:"Get bigger", s:"The usual answer. The app watches how much work each muscle gets."},
+        {v:"strength", t:"Get stronger", s:"Heavier weights, fewer reps, longer rests. Judged on what you lift."},
+        {v:"lean",     t:"Lose fat, keep muscle", s:"Train the same, rest a little less, and expect weights to hold steady rather than climb."},
+        {v:"health",   t:"Just stay fit", s:"Turn up, train, feel good. No pressure to push numbers."}
       ]
     });
   }
@@ -7684,14 +7694,14 @@ function aiBuildQuestions(doc, result){
      5 lb when you clear 8 reps" is imported as written and never asked about. */
   if(!(doc.progressionRules || []).length && !stated.progression){
     qs.push({
-      id:"progression", title:"When a weight gets easy, what should happen?",
-      sub:`Your plan doesn't say how to add load over time. This is ${term("overload","progressive overload")} — the one thing that makes training keep working — so it's worth deciding.`,
-      detected:"not stated in your plan",
+      id:"progression", title:"When a weight starts feeling easy, should we add more?",
+      sub:`Getting a bit stronger over time is what makes training keep working — it's called ${term("overload","progressive overload")}. The app can spot when you've earned more weight. You choose what it does about it.`,
+      detected:"not in your plan",
       def:null, rec: rec.progression,
       options:[
-        {v:"auto", t:"Add the weight for me", s:"When a session earns an increase, Element 26 writes it into your plan and tells you what changed."},
-        {v:"ask",  t:"Ask me first",          s:"You get the suggestion and a one-tap Apply after each session. Nothing changes unless you say so."},
-        {v:"hold", t:"I'll manage loads myself", s:"Element 26 still grades every session, it just never proposes a weight change."}
+        {v:"ask",  t:"Tell me, and I'll decide", s:"You get a suggestion after the session with a button to accept it. Nothing changes on its own."},
+        {v:"auto", t:"Just add it for me", s:"The app updates the weight itself and tells you what it changed."},
+        {v:"hold", t:"Leave my weights alone", s:"You set every weight yourself. The app still tracks how you're doing."}
       ]
     });
   }
@@ -7701,29 +7711,29 @@ function aiBuildQuestions(doc, result){
   const anyEffort = ex.some(x=> (Array.isArray(x.rpe) && x.rpe.length) || (Array.isArray(x.rir) && x.rir.length));
   if(!anyEffort && !stated.effort){
     qs.push({
-      id:"rpeTrack", title:"Want to rate how hard each set feels?",
-      sub:`${term("rpe","RPE")} is a 1-10 score for how close a set was to your limit. Logging it is what lets Element 26 tell a good session from a heavy-feeling one.`,
-      detected:"not used in your plan",
+      id:"rpeTrack", title:"After a set, want to say how hard it felt?",
+      sub:`It's one tap on a 1-10 scale — trainers call it ${term("rpe","RPE")}. It's how the app can tell a genuinely hard session from one that just felt long. Entirely optional.`,
+      detected:"not in your plan",
       def:null, rec: rec.rpeTrack,
       options:[
-        {v:"yes",  t:"Track it", s:"One tap per set. It powers the session grade, the load suggestions and the stall detection."},
-        {v:"no",   t:"Keep it simple", s:"Weight and reps only. Your sets rows lose a column and the app stops asking."},
-        {v:"unsure", t:"I'm not sure yet", s:"Start with it on — you can turn it off any time in Setup, and nothing you have logged is lost."}
+        {v:"yes",  t:"Yes, I'll tap a number", s:"One extra tap per set, and the app gets much better at spotting when to add weight."},
+        {v:"unsure", t:"I don't know what that means", s:"Start with it switched on and the app will explain it as you go. You can turn it off whenever."},
+        {v:"no",   t:"No, keep it simple", s:"Just weight and reps. The app never asks."}
       ]
     });
     /* EFFORT. What "hard enough" means for a plan that never said. Skipped entirely for
        somebody who has just said they don't want to think about effort at all. */
     qs.push({
-      id:"effort", title:"How hard should the working sets be?",
-      sub:`Your plan gives no ${term("rpe","RPE")} or ${term("rir","RIR")} targets, so Element 26 needs a bar to grade against. It won't invent one quietly.`,
-      detected:"not stated in your plan",
+      id:"effort", title:"How close to your limit should sets go?",
+      sub:"Your plan doesn't say, so pick whichever sounds most like how you train. You can change it later.",
+      detected:"not in your plan",
       def:null, rec: rec.effort,
       when: a=> a.rpeTrack !== "no",
       options:[
-        {v:"reserve", t:"Leave a couple of reps in the tank", s:`Around ${term("rir","RIR")} 2, RPE 8. Most of the growth, much less of the fatigue.`},
-        {v:"close",   t:"Close to failure", s:"RPE 9, roughly one rep left. Hard work, and it needs the recovery to match."},
-        {v:"failure", t:"To failure", s:`Every working set taken to ${term("failure","failure")}, RPE 10. Effective in small doses, expensive in large ones.`},
-        {v:"auto",    t:"Let Element 26 decide per movement", s:"Compounds ramp 7-8-8-9, isolation sits at 8-9. Marked as ours, not your plan's."}
+        {v:"reserve", t:"Stop with about 2 reps left", s:"You could have done a couple more. Almost all of the benefit, far less of the wear."},
+        {v:"close",   t:"Stop with about 1 rep left", s:"Genuinely hard. Works well, but you'll need to recover properly."},
+        {v:"failure", t:`Keep going until I can't`, s:`Every set taken to ${term("failure","failure")}. Effective in small doses, draining in large ones.`},
+        {v:"auto",    t:"Pick for me, exercise by exercise", s:"Easier on the big lifts, harder on the small ones. The app marks these as its choice, not your plan's."}
       ]
     });
   }
@@ -7733,19 +7743,19 @@ function aiBuildQuestions(doc, result){
   const anyRest = ex.some(x=> aiQNum(x.restSeconds, 0) > 0);
   if(!anyRest && !stated.rest){
     qs.push({
-      id:"rest", title:"How long between sets?",
-      sub:`Your plan doesn't say. Element 26 can judge it per set — a heavy triple and a set of 15 want very different ${term("restwindow","rest windows")} — or hold you to one number.`,
-      detected:"not stated in your plan",
+      id:"rest", title:"How long do you rest between sets?",
+      sub:"Your plan doesn't say. Heavy sets need longer than light ones, so the app can work it out for you — or you can keep it simple.",
+      detected:"not in your plan",
       def:null, rec: rec.rest,
       options:[
-        {v:"smart", t:"Judge it per set", s:"3-5 min after heavy work, 90 s-3 min for the rest. The rest timer grades against that."},
-        {v:"fixed", t:"Use one rest time", s:"Same target after every set, whatever the set was. You'll set the number next."},
-        {v:"free",  t:"I'll decide in the gym", s:"The timer still runs, it just never tells you that you were quick or slow."}
+        {v:"smart", t:"Work it out for me", s:"Longer after heavy lifts, shorter after light ones. A timer counts down for you."},
+        {v:"fixed", t:"Same rest every time", s:"One number after every set. You'll choose it on the next screen."},
+        {v:"free",  t:"I'll just go when I'm ready", s:"The timer still runs so you can see it, but nothing is judged."}
       ]
     });
     qs.push({
       id:"restSeconds", type:"number", title:"How long, in seconds?",
-      sub:"Used for every set your plan doesn't prescribe a rest for.",
+      sub:"Two minutes is a good all-rounder if you're not sure.",
       when: a=> a.rest === "fixed",
       def:120, unit:"seconds", min:20, max:600,
       picks:[60, 90, 120, 180, 240]
@@ -7756,17 +7766,17 @@ function aiBuildQuestions(doc, result){
   const planWarmups = ex.some(x=> Array.isArray(x.warmupSets) && x.warmupSets.length);
   if(!planWarmups && !stated.warmups){
     qs.push({
-      id:"warmups", title:"How should warm-ups work?",
-      sub:"Your plan lists working sets only. Element 26 can build a ramp before the first compound of a session — but that's a preference, not something your plan asked for.",
-      detected:"not stated in your plan",
+      id:"warmups", title:"Want warm-up sets added for you?",
+      sub:"Your plan lists only the real working sets. The app can add a few lighter sets before the big lifts to get you ready.",
+      detected:"not in your plan",
       def:null, rec: rec.warmups,
       /* Two options, not three. This page only appears when the document prescribes no
          warm-ups at all, and in that case "only where the plan says so" and "I'll handle
          it myself" are the same answer wearing two hats — a choice between identical
          outcomes is the fastest way to make somebody distrust the rest of the form. */
       options:[
-        {v:"auto",   t:"Add warm-up sets for me", s:"A ramp before the first compound of a session, one light set before the second. Never counted as working volume, and you can turn it off any time."},
-        {v:"manual", t:"No warm-ups", s:"Element 26 stays out of it. Your working sets are the only thing on the screen."}
+        {v:"auto",   t:"Yes, add them", s:"A few lighter sets before your first big lift. They never count towards your training total, and you can switch this off any time."},
+        {v:"manual", t:"No thanks", s:"Only the sets your plan lists. You warm up however you like."}
       ]
     });
   }
@@ -7779,25 +7789,25 @@ function aiBuildQuestions(doc, result){
     const names = undecided.map(x=> aiSnapName(x.name)).filter(Boolean);
     const shown = names.slice(0, 3).join(", ") + (names.length > 3 ? " and " + (names.length - 3) + " more" : "");
     qs.push({
-      id:"sides", title:"How should Element 26 handle your sides?",
-      sub:`Your plan has ${undecided.length} ${term("unilateral","one-limb")} movement${undecided.length===1?"":"s"} — ${esc(shown)} — and doesn't say how each side should be handled.`,
-      detected:"not stated in your plan",
+      id:"sides", title:"You've got some one-arm and one-leg exercises",
+      sub:`Things like ${esc(shown)} work one side at a time. Your plan doesn't say how to record them, so how would you like to?`,
+      detected:"not in your plan",
       def:null, rec: rec.sides,
       options:[
-        {v:"separate",   t:"Track each side separately", s:"Each set is one limb, marked L or R, alternating down the sets."},
-        {v:"matchWeaker",t:"Match my weaker side",       s:"Same L/R tracking, and both sides are held to whatever the weaker one manages."},
-        {v:"both",       t:"Same weight and reps on both sides", s:"A set covers both limbs. No L/R marking, sets counted exactly as your plan wrote them."}
+        {v:"separate",   t:"Track left and right separately", s:"Each set is one arm or leg, labelled L or R. Lets you see if one side falls behind."},
+        {v:"matchWeaker",t:"Make my stronger side match the weaker one", s:"Your weaker side sets the reps and the stronger one copies it, to even them up over time."},
+        {v:"both",       t:"Count both sides as one set", s:"Simplest option. Do both sides, tick it off once."}
       ]
     });
     qs.push({
-      id:"startSide", title:"Which side starts?",
-      sub:"Whoever goes first gets the freshest set. Alternating evens that out across a cycle; a fixed side keeps every session identical.",
-      detected:"not stated in your plan",
+      id:"startSide", title:"Which side should go first?",
+      sub:"Whichever side goes first is the freshest, so it tends to do a little better. Swapping each time keeps it fair.",
+      detected:"not in your plan",
       def:null, rec: rec.startSide,
       when: a=> a.sides !== "both",
       options:[
-        {v:"fixed", t:"Always start on the right", s:"Every session opens the same way."},
-        {v:"flip",  t:"Alternate the starting side", s:"Right first this session, left first the next, so neither side always gets the fresh set."}
+        {v:"flip",  t:"Swap it each session", s:"Right first today, left first next time, so neither side always gets the easy run."},
+        {v:"fixed", t:"Always start with the right", s:"Every session the same. Simpler to remember."}
       ]
     });
   }
@@ -7807,18 +7817,18 @@ function aiBuildQuestions(doc, result){
   const bars = (result && result.barbellLifts) || [];
   if(bars.length && doc.unit !== "percent"){
     qs.push({
-      id:"barMode", title:"How do you write down barbell weight?",
-      sub:`Your plan has ${bars.length} barbell movement${bars.length===1?"":"s"} — ${esc(bars.slice(0,3).join(", "))}. Element 26 takes percentages off your working load, so it needs to know whether the bar is in that number.`,
-      detected:"not stated in your plan",
-      def:null, rec:{v:"total", why:"how most people and most plans write it"},
+      id:"barMode", title:"When you write down a barbell weight, is the bar included?",
+      sub:`Your plan uses a barbell for ${esc(bars.slice(0,3).join(", "))}. Both ways of counting are fine — the app just needs to know which one you use.`,
+      detected:"not in your plan",
+      def:null, rec:{v:"total", why:"it's how most people and most plans write it"},
       options:[
-        {v:"total",  t:"Total weight", s:"Bar plus plates. 135 means a 45 lb bar with a 45 a side."},
-        {v:"plates", t:"Plates only",  s:"Just what you loaded. 90 means a 45 a side, bar not counted."}
+        {v:"total",  t:"Yes, bar and plates together", s:"You'd write 135 for an empty 45 lb bar with a 45 on each side."},
+        {v:"plates", t:"No, just the plates", s:"You'd write 90 for that same bar — only what you loaded onto it."}
       ]
     });
     qs.push({
       id:"barWeight", type:"number", title:"What does your bar weigh?",
-      sub:"Bars vary — 45, 35, 33 lb, and a fixed-weight or safety bar is its own thing. Element 26 won't guess yours.",
+      sub:"Most gym barbells are 45 lb, but not all of them. If you're not sure, 45 is the safe answer.",
       when: a=> a.barMode === "total",
       def:45, unit:"lb", min:5, max:120,
       picks:[45, 35, 33, 25, 15]
@@ -7836,10 +7846,10 @@ function aiBuildQuestions(doc, result){
     const opts = [{v:"auto", t:"Fit it into a normal week", s:n + " training day" + (n===1?"":"s") + " and " + week + " rest day" + (week===1?"":"s") + " a cycle."}];
     [1,2,3].forEach(k=>{ if(k !== week) opts.push({v:String(k), t:k + " rest day" + (k===1?"":"s") + " a cycle", s:"A " + (n+k) + "-day cycle that drifts across the week."}); });
     qs.push({
-      id:"restDays", title:"How many rest days between sessions?",
-      sub:`Your plan lists ${n} session${n===1?"":"s"} but doesn't place them in the week. Rest days are a budget here, not fixed weekdays — take them when you need them.`,
-      detected:"not stated in your plan",
-      def:null, rec:{v:"auto", why:"what almost every written plan means"},
+      id:"restDays", title:"How many rest days do you want between workouts?",
+      sub:`Your plan has ${n} workout${n===1?"":"s"} but doesn't say which days to do them. You don't have to stick to fixed weekdays — just take the rest days when you need them.`,
+      detected:"not in your plan",
+      def:null, rec:{v:"auto", why:"it's what almost every written plan means"},
       options: opts.slice(0, 4)
     });
   }
@@ -7847,13 +7857,13 @@ function aiBuildQuestions(doc, result){
   /* DELOAD. A plan that schedules its own is shown, not asked about. */
   if(!(doc.deloadWeeks || []).length && !stated.deload){
     qs.push({
-      id:"deloads", title:"Should Element 26 watch for a deload?",
-      sub:`A ${term("deload","deload")} is a deliberately easy week that lets fatigue drain off. Your plan doesn't schedule one.`,
-      detected:"not stated in your plan",
+      id:"deloads", title:"Want a nudge when it's time for an easy week?",
+      sub:`Training hard for weeks on end catches up with you. An easy week — a ${term("deload","deload")} — lets that drain off so you come back stronger. Your plan doesn't schedule one.`,
+      detected:"not in your plan",
       def:null, rec: rec.deloads,
       options:[
-        {v:"auto",     t:"Tell me when one's due", s:`Offered after ${DELOAD_EVERY_WEEKS} weeks, or earlier if fatigue signals stack up. Always your call to start.`},
-        {v:"planOnly", t:"Don't prompt me", s:"Nothing suggested. You can still start one any time from Setup."}
+        {v:"auto",     t:"Yes, tell me when", s:`The app will mention it after about ${DELOAD_EVERY_WEEKS} weeks, or sooner if you seem run down. Starting one is always your call.`},
+        {v:"planOnly", t:"No, don't mention it", s:"You can still start an easy week yourself whenever you want."}
       ]
     });
   }
@@ -7861,13 +7871,13 @@ function aiBuildQuestions(doc, result){
   /* UNITS. */
   if(doc.unit === "kg" && ex.some(x=> x.weight != null && Number(x.weight) > 0)){
     qs.push({
-      id:"units", title:"Your plan's loads are in kilos",
-      sub:"Element 26 logs in pounds. It can convert every stated load once, on the way in, or leave loads off and set them from your first working set.",
-      detected:"a fact in your plan",
-      def:null, rec:{v:"convert", why:"keeps the loads your coach actually prescribed"},
+      id:"units", title:"Your plan is written in kilos",
+      sub:"This app records weights in pounds. It can convert your plan's numbers now, or leave them blank so you fill them in as you go.",
+      detected:"from your plan",
+      def:null, rec:{v:"convert", why:"it keeps the weights your plan actually asked for"},
       options:[
-        {v:"convert", t:"Convert to pounds", s:"Rounded to the nearest 5 lb, and every converted load says so in its note."},
-        {v:"drop",    t:"Leave the loads out", s:"You set each one from a feeler set the first time you meet the movement."}
+        {v:"convert", t:"Convert them to pounds", s:"Rounded to the nearest 5 lb. Each converted weight says so, so you can check them."},
+        {v:"drop",    t:"Leave them blank", s:"You set each weight the first time you do the exercise."}
       ]
     });
   }
@@ -7915,6 +7925,42 @@ function aiVisibleQuestions(){
 function aiAnswered(q){
   const v = AI_IMP.answers[q.id];
   return q.type === "number" ? aiQNum(v, null) != null : !!v;
+}
+/* THE WAY OUT FOR SOMEBODY WHO DOES NOT KNOW.
+
+   Every question here already carries a recommendation and says why. But a beginner who
+   has just uploaded their first plan is being handed eight of them, several using words
+   they have never met, and being asked to have an opinion on each before they are
+   allowed to train — which is exactly the point people give up. Answering "I don't know"
+   honestly had no button.
+
+   It does now, and it fills in the recommendation for every remaining question rather
+   than skipping them, so the plan is set up properly rather than half-configured. None
+   of it is irreversible: every one of these is a normal setting afterwards, which is
+   what makes this safe to offer rather than a trap.
+
+   Iterative because some questions only exist depending on the answer to another — the
+   bar weight appears once you say the bar is included — so filling one can reveal the
+   next. It settles when a pass adds nothing, and is bounded in case a `when` ever
+   contradicts itself. */
+function aiUseAllRecommended(){
+  const a = AI_IMP;
+  if(!a) return 0;
+  let filled = 0;
+  for(let pass = 0; pass < 8; pass++){
+    let added = 0;
+    aiVisibleQuestions().forEach(q=>{
+      if(aiAnswered(q)) return;
+      const v = q.type === "number"
+        ? (q.def != null ? q.def : (q.picks || [])[0])
+        : (q.rec && q.rec.v != null ? q.rec.v : (q.options && q.options[0] && q.options[0].v));
+      if(v == null) return;
+      a.answers[q.id] = v;
+      added++; filled++;
+    });
+    if(!added) break;
+  }
+  return filled;
 }
 
 /* =====================================================================
@@ -8203,6 +8249,8 @@ function aiQuestionHTML(){
       <button class="btn small${done?"":" ai-wait"}" id="aiQNext" style="flex:1.4">${
         i === qs.length - 1 ? "Review my plan" : "Continue"}</button>
     </div>
+    <button class="ai-dunno" id="aiQAuto">I don't know — choose for me</button>
+    <div class="ai-dunno-sub">Picks the recommended answer for ${qs.length - i === 1 ? "this" : "every remaining"} question. All of them are ordinary settings you can change later.</div>
     <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`;
   return h;
 }
@@ -8350,6 +8398,17 @@ function bindAIImport(){
     renderAIImport();
   });
   on("aiQNext", aiQNext);
+  on("aiQAuto", ()=>{
+    const n = aiUseAllRecommended();
+    a.err = "";
+    /* Straight to the review rather than to the next unanswered page, because there is no
+       longer an unanswered page — and because the review is where the answers can be seen
+       and changed, which is the reassurance this button is trading on. */
+    aiBuildResult();
+    a.stage = "review";
+    renderAIImport();
+    toast(n === 1 ? "Recommended answer filled in ✓" : "Recommended answers filled in ✓");
+  });
   on("aiQBack", ()=>{
     if(a.qi <= 0){ a.stage = "hero"; renderAIImport(); return; }
     a.qi--;
