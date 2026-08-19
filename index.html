@@ -307,6 +307,22 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   margin:2px 0 8px;padding-left:9px;border-left:2px solid var(--acc-line);
 }
 .tech-cue b{color:var(--acc);font-weight:600}
+/* The strip naming what kind of set this is, sitting directly on top of the row with no
+   gap so the two read as one object rather than as a label floating near a set. */
+.set-tag{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  margin:0 0 -2px 0;padding:3px 8px;
+  border-left:2px solid var(--acc-line);border-radius:6px 6px 0 0;
+  background:var(--acc-soft);
+  font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+}
+.set-tag b{color:var(--acc);font-weight:600}
+.set-tag-match{font-style:normal;color:var(--dim)}
+/* A matched set is the stronger limb doing the weaker limb's number, so the row is
+   marked as taking its instruction from somewhere other than the plan. */
+.set.is-matched .idx{color:var(--acc)}
+.rpe-target.is-cap{background:var(--acc-soft);color:var(--acc);border-color:var(--acc-line)}
+.rpe-target.is-tech{background:var(--acc-soft);color:var(--acc);border-color:var(--acc-line)}
 /* Sub-sets: the drops, mini-sets and bursts inside one set. Indented and set in the mono
    face so a row of them reads as belonging to the set above rather than as more sets. */
 .sub-set{display:flex;align-items:center;gap:6px;margin:3px 0 0 22px}
@@ -2435,7 +2451,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "2.8";
+const APP_VERSION = "2.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -5099,14 +5115,29 @@ function lastEntryFor(workoutId, exName, anyDay, occ){
       const e = hits[Math.min(occ, hits.length-1)];
       // `sess` carries the whole session so callers can read what was decided ABOUT it,
       // not just what was lifted in it — the warm-up ramp uses its progression verdict.
-      return {sets:e.sets, date:s.date, workoutId:s.workoutId, sameDay:s.workoutId===workoutId, sess:s};
+      return {sets:e.sets, date:s.date, workoutId:s.workoutId, sameDay:s.workoutId===workoutId, sess:s,
+              // which limb that session opened on, so a placeholder can be matched to the
+              // SIDE it came from rather than to a set index — see lastSetsFor()
+              startSide:e.startSide || null};
     }
   }
   return null;
 }
-function lastSetsFor(workoutId, exName, anyDay, occ){
+/* Last session's sets, for the "tapping ✓ on an empty row copies last time's numbers"
+   behaviour and for the placeholders.
+
+   THE OPENING SIDE FLIPS BETWEEN SESSIONS, which quietly broke this for every
+   single-limb movement: set 2 last week was your right arm, set 2 this week is your
+   left, and matching by index therefore offered the OTHER arm's numbers. On a movement
+   with a real side gap that is not a small inaccuracy — under the match-the-weaker-side
+   rule it suggested the strong arm's rep count to the weak one, which is the opposite of
+   the rule. Sides strictly alternate, so when the two sessions opened on different limbs
+   every index is off by exactly one, and swapping neighbours realigns them. */
+function lastSetsFor(workoutId, exName, anyDay, occ, curStartSide){
   const l = lastEntryFor(workoutId, exName, anyDay, occ);
-  return l ? l.sets : null;
+  if(!l) return null;
+  if(!curStartSide || !l.startSide || l.startSide === curStartSide) return l.sets;
+  return l.sets.map((_, i)=> l.sets[i % 2 === 0 ? i + 1 : i - 1] || l.sets[i]);
 }
 function lastBox(workoutId, exName, anyDay, occ){
   const l = lastEntryFor(workoutId, exName, anyDay, occ);
@@ -9422,7 +9453,7 @@ function viewActiveSession(){
     }
     const occ = occIndex(a.entries, ei);
     const anyDay = en.fin || sharedAcrossDays(en.name);
-    const last = lastSetsFor(a.workoutId, en.name, anyDay, occ);
+    const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
     const ll = lastBox(a.workoutId, en.name, anyDay, occ);
     h += `<div class="card ex${supersetInfo(a.entries, ei)?' ss-card':''}">
       <div class="ex-head"><b>${esc(en.name)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b>
@@ -9538,10 +9569,136 @@ function rpeTargetFor(entry, si){
 // How far a logged RPE may sit from its target before it counts as off-target. Half a
 // point is inside the noise of self-reported RPE; a full point is a real difference.
 const RPE_TOL = 0.5;
-function rpeTargetChipHTML(entry, si){
-  const t = rpeTargetFor(entry, si);
+
+/* =====================================================================
+   WHEN THE RPE TARGET IS NOT THE THING BEING AIMED AT
+
+   An RPE target says how hard a set should have been. Several rules elsewhere in this
+   app then deliberately override that, and until this existed the grader did not know,
+   so it marked you down for following instructions it had given you:
+
+     MATCH THE WEAKER SIDE.  The whole rule is that the stronger limb stops where the
+       weaker one stopped. Those sets come in EASY by construction — that is the point —
+       and every one of them was being counted as "under target" and docking the session
+       score. The app was penalising obedience to its own rule.
+
+   A DELOAD IS DELIBERATELY NOT IN THAT LIST, and it is worth saying why, because it
+   looks like it belongs. deloadProgram() already caps `rpes` at DELOAD_RPE_CAP before a
+   session starts, so a deload's targets ARE the deload's targets by the time anything
+   grades them. Excusing misses against them a second time here would forgive a set that
+   genuinely fell short of an already-reduced target.
+
+   And in the other direction, a technique can deliberately take a set PAST its target:
+   a set that is to-failure, or carries a drop set, myo-reps, rest-pause or an AMRAP,
+   is meant to end at or beyond RPE 10, so an RPE above the prescribed number is the set
+   going right rather than going wrong.
+
+   Both directions return a REASON rather than a boolean, so anything reporting on a set
+   can say which rule moved the goalposts instead of silently ignoring a miss. */
+function effortCapped(entry){
+  /* asymActiveFor() is the authority rather than the raw preference: it already accounts
+     for the rule having been retired on this movement, and for the four-week window and
+     its re-test, so a movement whose gap has closed is graded normally again. */
+  if(entry && asymActiveFor(entry)) return "matchWeaker";
+  return null;
+}
+const TECH_PAST_TARGET = ["failure","dropset","myoreps","restpause","amrap"];
+function effortUncapped(entry, si){
+  if(!entry) return null;
+  const total = (entry.sets || []).length;
+  const hit = techFor(entry, si, total).find(t=> TECH_PAST_TARGET.indexOf(t.k) > -1);
+  return hit ? hit.k : null;
+}
+function effortCappedLabel(reason){
+  return reason === "matchWeaker" ? "held to the weaker side" : "";
+}
+
+/* =====================================================================
+   WHAT THIS PARTICULAR SET IS ACTUALLY ASKING FOR
+
+   The exercise header says "3 × 8-12 · RPE 8". That is the prescription for the
+   MOVEMENT, and for most sets it is also the prescription for the set. For several it
+   is not, and the set row was showing the movement's numbers anyway — so the screen
+   asked for one thing while the rules asked for another, and the person in the gym had
+   to hold the reconciliation in their head:
+
+     MATCHING THE WEAKER SIDE.  The stronger limb is supposed to stop on the number the
+       weaker one managed, not on the plan's range and not at the plan's RPE. Showing
+       "8-12, RPE 8" on that set is asking for the opposite of the rule. It now shows the
+       number to match, taken from what the weaker side ACTUALLY did — this session if it
+       has already been logged, otherwise its recent average — and drops the RPE target,
+       because an RPE target on a set you are deliberately cutting short is a
+       contradiction, not a goal.
+
+     AMRAP.  There is no rep target; the count is the measurement. Showing a range
+       invites you to stop at the top of it, which is the one thing an AMRAP set must not
+       do.
+
+     TO FAILURE, and the techniques that end past failure — drop sets, myo-reps,
+       rest-pause.  These end at RPE 10 whatever number the plan wrote in the RPE column,
+       so 10 is what the set row says.
+
+   Returns nulls freely. Every caller treats a null as "no override", which keeps an
+   ordinary set on an ordinary movement rendering exactly as it did before. */
+function weakerSideRepsThisSession(exName, weakSide){
+  const a = S.active;
+  if(!a || !weakSide) return null;
+  let best = null;
+  (a.entries || []).forEach(en=>{
+    if(nrm(en.name) !== nrm(exName) || !en.startSide) return;
+    (en.sets || []).forEach((st, i)=>{
+      if(sideForSet(en.startSide, i) !== weakSide) return;
+      const r = parseFloat(st.reps) || 0;
+      if(r > 0 && (st.done || st.reps)) best = r;    // the most recent one wins
+    });
+  });
+  return best;
+}
+function setPrescription(entry, si){
+  const out = {reps:null, rpe:null, match:null, why:null, tech:null};
+  if(!entry) return out;
+
+  /* Techniques first: they describe THIS set, and a technique on a matched set still
+     applies to whichever limb is doing the work. */
+  const total = (entry.sets || []).length;
+  const on = techFor(entry, si, total);
+  const past = on.find(t=> TECH_PAST_TARGET.indexOf(t.k) > -1);
+  if(past){
+    out.tech = past.k;
+    out.rpe = 10;
+    if(past.k === "amrap") out.reps = "max";
+  }
+  const shown = on[0];
+  if(shown) out.techLabel = TECHNIQUES[shown.k].label;
+
+  /* Then the weaker-side rule, which overrides both, because it is a cap on the set
+     rather than a description of how to take it. */
+  if(asymActiveFor(entry) && entry.startSide){
+    const side = sideForSet(entry.startSide, si);
+    const st = sideStats(entry.name);
+    if(side && st.ok && st.stronger && side === st.stronger){
+      const live = weakerSideRepsThisSession(entry.name, st.weaker);
+      const avg = st[st.weaker] && st[st.weaker].reps;
+      const n = live != null ? live : (avg != null ? Math.round(avg) : null);
+      out.match = n;
+      out.reps = n != null ? String(n) : null;
+      out.rpe = null;                       // a capped set has no effort target to hit
+      out.why = "match your " + sideWordFull(st.weaker);
+    }
+  }
+  return out;
+}
+function rpeTargetChipHTML(entry, si, rx){
+  rx = rx || setPrescription(entry, si);
+  /* A set that is deliberately cut short has no effort target to hit, so it shows the cap
+     instead of a number it is not supposed to reach. Printing "8" there would be asking
+     for the opposite of the rule in force. */
+  if(rx.match != null) return `<span class="rpe-target is-cap" title="Stop on the matched rep count, not on an effort target">cap</span>`;
+  const t = rx.rpe != null ? rx.rpe : rpeTargetFor(entry, si);
   if(t == null) return "";
-  return `<span class="rpe-target" title="Target for this set">${t}</span>`;
+  return `<span class="rpe-target${rx.rpe != null ? " is-tech" : ""}" title="${rx.rpe != null
+    ? "This set ends at failure, whatever the plan's RPE column says"
+    : "Target for this set"}">${t}</span>`;
 }
 function rpeOptions(v){
   const opts = ["","6","6.5","7","7.5","8","8.5","9","9.5","10"];
@@ -9618,7 +9775,7 @@ function viewFocusSession(){
   }
   const occ = occIndex(a.entries, ei);
   const anyDay = en.fin || sharedAcrossDays(en.name);
-  const last = lastSetsFor(a.workoutId, en.name, anyDay, occ);
+  const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
   const ll = lastBox(a.workoutId, en.name, anyDay, occ);
   h += `<div class="card ex focus">
     <div class="ex-head"><b class="focus-name">${esc(en.name)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b>
@@ -12371,16 +12528,22 @@ function scoreWorkout(sess){
       if(t == null) untargeted.push(x); else targeted.push({x, t, got: parseFloat(x.st.rpe)});
     });
 
-    let sum = 0, onTarget = 0, over = 0, under = 0;
+    let sum = 0, onTarget = 0, over = 0, under = 0, excused = 0;
     const overNames = {}, underNames = {};
     targeted.forEach(({x, t, got})=>{
       const d = got - t;
       if(Math.abs(d) <= RPE_TOL){ sum += 1; onTarget++; return; }
       if(d > 0){
+        /* Past the target because the technique on this set says to be. Full credit: a
+           drop set that ended at RPE 10 against a target of 8 did exactly its job. */
+        if(effortUncapped(x.e, x.e.sets.indexOf(x.st))){ sum += 1; onTarget++; excused++; return; }
         over++; overNames[x.e.name] = (overNames[x.e.name]||0)+1;
         // one point over target keeps most of its credit; two-plus is a different set
         sum += Math.max(0.25, 1 - (d - RPE_TOL) * 0.5);
       } else {
+        /* Under the target because a rule of this app put it there. Full credit, and it
+           is not counted as a miss — see the note on effortCapped(). */
+        if(effortCapped(x.e)){ sum += 1; onTarget++; excused++; return; }
         under++; underNames[x.e.name] = (underNames[x.e.name]||0)+1;
         sum += Math.max(0.3, 1 - (Math.abs(d) - RPE_TOL) * 0.35);
       }
@@ -14066,13 +14229,33 @@ function setRowHTML(en, ei, si, last, idxLabel){
      things in it instead of four. The grade still runs — a set logged with no RPE is
      treated as having met its target — so this costs detail, not function. */
   const rpeOn = rpeTracked();
-  return `<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}">
+  /* What THIS set is asking for, which is not always what the movement asks for — see
+     setPrescription(). The reps placeholder follows it, so the number the row suggests is
+     the number the rules actually want rather than last week's. */
+  const rx = setPrescription(en, si);
+  const repsPh = rx.reps != null ? rx.reps
+    : (last && last[si] && last[si].reps ? last[si].reps : "reps");
+  return `${setTagHTML(en, si, rx)}<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}">
     <span class="idx">${idx}${sideChip(en, si)}</span>
     <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${st.weight??""}" placeholder="${last&&last[si]&&last[si].weight!=null&&last[si].weight!==""?last[si].weight:"lbs"}">
-    <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${st.reps??""}" placeholder="${last&&last[si]&&last[si].reps?last[si].reps:"reps"}">
-    ${rpeOn ? `<span class="rpe-cell">${rpeTargetChipHTML(en, si)}<select data-e="${ei}" data-s="${si}" data-f="rpe">${rpeOptions(st.rpe)}</select></span>` : ""}
+    <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${st.reps??""}" placeholder="${esc(String(repsPh))}">
+    ${rpeOn ? `<span class="rpe-cell">${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-f="rpe">${rpeOptions(st.rpe)}</select></span>` : ""}
     <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-f="done">✓</button>
   </div>${prBadgeRow(st, ei, si)}${techRowHTML(en, ei, si)}`;
+}
+/* The strip that sits ON the set, naming what kind of set it is. A technique the plan
+   asked for is useless if you have to infer it from a cue three rows down — if this is a
+   myo-reps set it should say so, attached to the row you are typing into, in the
+   technique's own name. The weaker-side cap rides in the same strip because it answers
+   the same question: what is this set, specifically. */
+function setTagHTML(en, si, rx){
+  rx = rx || setPrescription(en, si);
+  const bits = [];
+  if(rx.techLabel) bits.push(`<b>${esc(rx.techLabel)}</b>`);
+  if(rx.match != null) bits.push(`<i class="set-tag-match">${esc(rx.why)} · ${rx.match} rep${rx.match===1?"":"s"}</i>`);
+  else if(rx.why) bits.push(`<i class="set-tag-match">${esc(rx.why)}</i>`);
+  if(!bits.length) return "";
+  return `<div class="set-tag">${bits.join("")}</div>`;
 }
 /* Whatever the technique adds to THIS row: the cue for it, and — where the technique has
    pieces — a place to log them. Both come out of setRowHTML so the flat view and the
@@ -14129,7 +14312,7 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
     const occ = occIndex(a.entries, p.ei);
     const anyDay = p.en.fin || sharedAcrossDays(p.en.name);
     return {
-      last: lastSetsFor(a.workoutId, p.en.name, anyDay, occ),
+      last: lastSetsFor(a.workoutId, p.en.name, anyDay, occ, p.en.startSide),
       box:  lastBox(a.workoutId, p.en.name, anyDay, occ),
       ctx:  {workoutId: a.workoutId, anyDay, occ}
     };
