@@ -1032,6 +1032,16 @@ body.onboarding #app{padding:0}
   border:1px solid var(--line);background:var(--card2);color:var(--dim);font-size:13px;line-height:1.5;
 }
 .ai-paste{margin-top:12px}
+/* Vertical only. A textarea defaults to resize:both, so the drag handle in its corner
+   could be pulled sideways out of the card, and pulled down far enough to shove the
+   action button off the screen. Height is the only axis anyone wants here anyway. */
+.ai-paste textarea{resize:vertical;max-height:46vh}
+/* Room to scroll the button clear of the on-screen keyboard. Without it the last element
+   on the page cannot be brought any higher than the bottom of the scroll area, which on a
+   phone is underneath the keyboard — the button was reachable only by dismissing the
+   keyboard first, which is not obvious when the thing you are trying to press is the one
+   that says "Read my plan". */
+.ai-full.has-paste .ai-full-in{padding-bottom:calc(52vh + env(safe-area-inset-bottom))}
 .ai-paste summary{color:var(--faint);font-size:13px;cursor:pointer;list-style:none;text-align:center}
 .ai-paste summary::-webkit-details-marker{display:none}
 .ai-paste summary:hover{color:var(--dim)}
@@ -2463,7 +2473,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.1";
+const APP_VERSION = "3.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8010,9 +8020,20 @@ function renderAIImport(){
   if(w){
     w.scrollTop = 0;
     /* Which screens are "static" — a finished page that fits — and which are lists that
-       have every right to be longer than the window. */
-    const stat = AI_IMP.stage === "hero" || AI_IMP.stage === "processing";
+       have every right to be longer than the window.
+
+       THE HERO STOPS BEING STATIC THE MOMENT THE PASTE BOX IS OPEN, and that is the fix
+       for the reported bug rather than a nicety. "Static" means overflow:hidden on a
+       centred 100dvh column: it does not scroll, at all, by design. Add a six-row
+       textarea and a button to that and the column outgrows the window, so the button was
+       simply CLIPPED — not below the fold, unreachable, with no scroll to bring it back.
+       Typing more text made it worse, which is exactly what "the text is blocking the
+       button" looks like from the outside. */
+    const pasting = AI_IMP.stage === "hero" &&
+      (AI_IMP.pasteOpen || !!String(AI_IMP.text||"").trim());
+    const stat = (AI_IMP.stage === "hero" && !pasting) || AI_IMP.stage === "processing";
     w.classList.toggle("is-static", stat);
+    w.classList.toggle("has-paste", pasting);
   }
   bindAIImport();
   /* Deliberately NOT set to renderAIImport: a glossary term tapped in here opens the
@@ -8084,12 +8105,19 @@ function aiHeroHTML(){
   h += `<div class="btn-row" style="margin-top:16px"><button class="btn" id="aiPick" style="flex:1">Upload training plan</button></div>
     <div class="ai-sub-cta">Choose a PDF, photo or file from your device</div>
     <div class="ai-reassure"><span class="ai-re-ic" aria-hidden="true"></span><span>We check the document first, and nothing is added to your workouts until you've seen it.</span></div>
-    <details class="ai-paste"${a.text?" open":""}>
+    <details class="ai-paste"${(a.text || a.pasteOpen)?" open":""}>
       <summary>Or paste it as text</summary>
       <div class="field" style="margin:10px 0 0"><textarea id="aiText" rows="6" spellcheck="false" placeholder="e.g.&#10;Mon — Push: Bench 4x6-8, Incline DB 3x10, Lateral raise 4x15&#10;Wed — Pull: Deadlift 3x5, Pull-ups 4xAMRAP, Curls 3x12">${esc(a.text)}</textarea></div>
     </details>`;
-  if(a.files.length || a.text)
-    h += `<div class="btn-row"><button class="btn small" id="aiGo" style="flex:1">Read my plan</button></div>`;
+  /* ALWAYS RENDERED, never conditionally. Rendering it only once there was something to
+     read meant the first character typed changed the shape of the screen, and the only
+     way to change the shape of the screen here is to re-render it — which destroys the
+     textarea you are typing into, drops focus to <body>, and on a phone closes the
+     keyboard. Typing "Bench 4x8" left "B". It is disabled until there is something to
+     read instead, which is the same information with none of the consequences. */
+  const canRead = !!(a.files.length || String(a.text||"").trim());
+  h += `<div class="btn-row"><button class="btn small${canRead?"":" ai-wait"}" id="aiGo" style="flex:1"${
+    canRead?"":" disabled"}>Read my plan</button></div>`;
   /* No way out of this screen during first-time setup, because there is nothing behind
      it: the app has no plan yet and no way to make one except this. Afterwards, when the
      importer is something you opened deliberately from the Program tab, it closes. */
@@ -8370,14 +8398,45 @@ function bindAIImport(){
   on("aiBackQ", ()=>{ a.qi = Math.max(0, aiVisibleQuestions().length - 1); a.stage = "questions"; renderAIImport(); });
   on("aiToReview", ()=>{ if(aiBuildResult()) a.stage = "review"; renderAIImport(); });
 
+  /* Opening or closing the paste box changes whether this screen scrolls, so it has to be
+     remembered rather than read off the DOM — the next render would otherwise slam it
+     shut and take the scrolling with it. */
+  const det = host.querySelector(".ai-paste");
+  if(det){
+    a.pasteOpen = det.open;
+    det.ontoggle = ()=>{
+      a.pasteOpen = det.open;
+      const w = $("#aiFull");
+      if(!w) return;
+      const pasting = det.open || !!String(a.text||"").trim();
+      w.classList.toggle("is-static", !pasting && a.stage === "hero");
+      w.classList.toggle("has-paste", pasting);
+    };
+  }
   const ta = host.querySelector("#aiText");
-  // Deliberately does not re-render: re-rendering on every keystroke would take the
-  // caret and the keyboard with it.
+  /* NOTHING HERE MAY RE-RENDER. Not on every keystroke, and — the bug this replaces —
+     not on the first one either: the button used to appear when the box stopped being
+     empty, and making it appear meant re-rendering, which threw away the textarea
+     mid-word and took focus and the on-screen keyboard with it.
+
+     The button is always in the DOM now, so its state is a property to set rather than
+     a screen to rebuild. */
   if(ta) ta.oninput = ()=>{
-    const had = !!a.text.trim();
+    const had = !!String(a.text||"").trim();
     a.text = ta.value;
     a.parts = null;
-    if(had !== !!a.text.trim()) renderAIImport();   // the "Read my plan" button appears
+    const now = !!a.text.trim();
+    if(had === now) return;                        // nothing to change but the text
+    const go = host.querySelector("#aiGo");
+    if(!go) return;
+    const ready = now || a.files.length > 0;
+    go.disabled = !ready;
+    go.classList.toggle("ai-wait", !ready);
+    /* And bring it into view the moment it becomes usable. On a phone the keyboard owns
+       the bottom third of the screen, so a button below the box you are typing in is
+       behind the keyboard — which is what "the text is blocking the button" actually
+       was. Only on the transition, or it would yank the page on every keystroke. */
+    if(ready && go.scrollIntoView) go.scrollIntoView({block:"nearest"});
   };
 
   /* The question pages. Choosing an answer moves on by itself after the tick has had a
