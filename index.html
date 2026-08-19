@@ -300,24 +300,26 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   border:1px solid var(--acc-line);border-radius:5px;padding:1px 5px;
   vertical-align:middle;margin-left:5px;cursor:pointer;line-height:1.5;
 }
-/* The cue sits with the set it governs, indented under it in the accent so it reads as
-   an instruction attached to that row rather than another line of the card's body copy. */
-.tech-cue{
-  font-size:12.5px;line-height:1.45;color:var(--dim);
-  margin:2px 0 8px;padding-left:9px;border-left:2px solid var(--acc-line);
-}
-.tech-cue b{color:var(--acc);font-weight:600}
-/* The strip naming what kind of set this is, sitting directly on top of the row with no
-   gap so the two read as one object rather than as a label floating near a set. */
+/* NAMING THE SET, QUIETLY. This started as a filled, bordered, full-width uppercase bar
+   clamped to the top of the row, which is a lot of furniture to say one word — three sets
+   of it in a card and the sets themselves stopped being the thing you looked at. It is
+   now one light line: a small accent dot, the name in sentence case, and any detail
+   trailing off in the dim tone. No fill, no border, no shouting. It still sits tight
+   against its row, because which set it refers to is the entire point. */
 .set-tag{
-  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-  margin:0 0 -2px 0;padding:3px 8px;
-  border-left:2px solid var(--acc-line);border-radius:6px 6px 0 0;
-  background:var(--acc-soft);
-  font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  display:flex;align-items:baseline;gap:6px;
+  /* Sits ABOVE the set it describes, so the space above it has to beat the space below
+     it clearly — otherwise the line reads as a footnote on the previous set. */
+  margin:11px 0 2px 2px;
+  font:11.5px var(--sans);line-height:1.3;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.set-tag::before{
+  content:"";flex:none;width:5px;height:5px;border-radius:50%;
+  background:var(--acc);transform:translateY(-1px);
 }
 .set-tag b{color:var(--acc);font-weight:600}
-.set-tag-match{font-style:normal;color:var(--dim)}
+.set-tag-match{font-style:normal;color:var(--dim);overflow:hidden;text-overflow:ellipsis}
 /* A matched set is the stronger limb doing the weaker limb's number, so the row is
    marked as taking its instruction from somewhere other than the plan. */
 .set.is-matched .idx{color:var(--acc)}
@@ -2461,7 +2463,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.0";
+const APP_VERSION = "3.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9430,9 +9432,6 @@ function viewToday(){
     const ins = insight(e.name, occ);
     h += `<div class="ex-head"><b>${esc(e.name)}${supersetBadge(supersetInfo(rp.map(x=>x.chosen), rpi))}${techBadges(e)}${other?'<span class="alt-badge">⇄</span>':''}</b><span class="ex-target">${e.sets}×${esc(e.reps)}${e.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(e.rpe))+'</span>':""}</span></div>`;
     h += supersetNoteHTML(supersetInfo(rp.map(x=>x.chosen), rpi));
-    /* Previewing the day, not doing it, so the cue names the set it belongs to instead of
-       sitting against a row that is not rendered here. */
-    h += techPlanNoteHTML(e);
     if(warmupKindFor(rp.map(x=>x.chosen), rpi))
       h += warmupHTML(e, warmupKindFor(rp.map(x=>x.chosen), rpi),
                       {workoutId: wid, anyDay: isFinisher || sharedAcrossDays(e.name), occ});
@@ -9728,7 +9727,13 @@ function setPrescription(entry, si){
     if(past.k === "amrap") out.reps = "max";
   }
   const shown = on[0];
-  if(shown) out.techLabel = TECHNIQUES[shown.k].label;
+  if(shown){
+    out.techLabel = TECHNIQUES[shown.k].label;
+    /* The plan's own words about running it, which used to sit in the cue block under the
+       set. Carried here so deleting that block cost nothing — it is the one part of the
+       cue the badge's tooltip and the glossary could not already tell you. */
+    out.techDetail = shown.detail || "";
+  }
 
   /* Then the weaker-side rule, which overrides both, because it is a cap on the set
      rather than a description of how to take it. */
@@ -14228,29 +14233,10 @@ function techBadges(e){
     }>${esc(T.badge)}</span>`;
   }).join("");
 }
-/* One line per technique in force on this set, in the technique's own words where the
-   document gave them and the app's plain-English cue where it did not. */
-function techCueHTML(e, idx, total){
-  const on = techFor(e, idx, total);
-  if(!on.length) return "";
-  return `<div class="tech-cue">` + on.map(t=>{
-    const T = TECHNIQUES[t.k];
-    return `<div><b>${esc(T.label)}</b> ${esc(t.detail || T.cue)}</div>`;
-  }).join("") + `</div>`;
-}
-/* The plan view lists an exercise without rendering its set rows, so the cue has to say
-   which set it lands on rather than being positioned against one. */
-function techPlanNoteHTML(e){
-  const list = techList(e);
-  if(!list.length) return "";
-  const n = parseInt(e.sets, 10) || 0;
-  return `<div class="tech-cue">` + list.map(t=>{
-    const T = TECHNIQUES[t.k];
-    const where = T.applies === "all" ? "every set"
-      : (n > 1 ? "set " + n : "the last set");
-    return `<div><b>${esc(T.label)}</b> on ${where} — ${esc(t.detail || T.cue)}</div>`;
-  }).join("") + `</div>`;
-}
+/* The prose cues that used to live here — one block under the set rows, one under the
+   exercise in the day preview — are gone rather than merely unused. Between the badge on
+   the exercise head and the label on the set itself, a technique was being announced
+   three times, and the third was a paragraph piling up at the bottom of every card. */
 /* A short summary for the Program tab, where there is no per-set context to hang a cue
    on and the useful thing is simply which techniques this exercise carries. */
 function techSummary(e){
@@ -14310,18 +14296,28 @@ function setRowHTML(en, ei, si, last, idxLabel){
 function setTagHTML(en, si, rx){
   rx = rx || setPrescription(en, si);
   const bits = [];
-  if(rx.techLabel) bits.push(`<b>${esc(rx.techLabel)}</b>`);
+  let title = "";
+  if(rx.techLabel){
+    bits.push(`<b>${esc(rx.techLabel)}</b>`);
+    if(rx.techDetail) bits.push(`<i class="set-tag-match">${esc(rx.techDetail)}</i>`);
+    title = rx.techLabel + (rx.techDetail ? " — " + rx.techDetail : "");
+  }
   if(rx.match != null) bits.push(`<i class="set-tag-match">${esc(rx.why)} · ${rx.match} rep${rx.match===1?"":"s"}</i>`);
   else if(rx.why) bits.push(`<i class="set-tag-match">${esc(rx.why)}</i>`);
   if(!bits.length) return "";
-  return `<div class="set-tag">${bits.join("")}</div>`;
+  /* Titled as well as shown, because the line truncates rather than wrapping — a long
+     instruction from a plan should shorten on screen, not push the set row down. */
+  return `<div class="set-tag"${title ? ` title="${attrSafe(title)}"` : ""}>${bits.join("")}</div>`;
 }
-/* Whatever the technique adds to THIS row: the cue for it, and — where the technique has
-   pieces — a place to log them. Both come out of setRowHTML so the flat view and the
-   superset round view get them without either having to know they exist. */
+/* What the technique adds to THIS row, which is now only the thing you cannot get from
+   the label: somewhere to log the pieces. The prose cue that used to sit here is gone —
+   the set is already named by setTagHTML() directly above it and by the badge in the
+   exercise head, and a third statement of "this is a drop set" underneath the set was
+   just noise stacking up at the bottom of every card. What the plan SAID about running
+   it survives on the badge's tooltip and in the glossary entry behind it. */
 function techRowHTML(en, ei, si){
   const total = (en.sets || []).length;
-  let h = techCueHTML(en, si, total);
+  let h = "";
   const sub = techSub(en, si, total);
   if(sub){
     const T = TECHNIQUES[sub.k];
