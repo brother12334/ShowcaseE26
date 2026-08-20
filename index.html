@@ -2530,7 +2530,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.5";
+const APP_VERSION = "3.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4364,11 +4364,18 @@ function migrate(){
 
   recomputeCycle(false);
 }
-function inferCycleStart(){
+/* `refNow` is the point the nine-day recency rule is measured from, and it defaults to
+   right now, which is correct for a running app: coming back after three weeks off SHOULD
+   open a fresh cycle. It is not correct for a restore, where the newest session in the
+   file is the end of the log rather than a gap in it — measured against the real clock,
+   every session in a backup written last month fails the cutoff on the first iteration,
+   the walk stops with no anchor, and the cycle silently restarts from today. Restores
+   pass the newest session's own timestamp instead. */
+function inferCycleStart(refNow){
   // walk history backwards; sessions still fitting in one cycle belong to the current one
   const cap = {};
   ROTATION.forEach(id=>{ cap[id] = (cap[id]||0)+1; });
-  const now = Date.now();
+  const now = refNow || Date.now();
   let anchor = null, total = 0;
   const sess = [...S.sessions].sort((a,b)=>b.startedAt-a.startedAt);
   const floor = (S.lastCycle && S.lastCycle.end) ? S.lastCycle.end : 0;
@@ -15886,11 +15893,35 @@ function adoptBackup(d, mode){
   }
   S.fresh = false;
   S.savedAt = Date.now();
+
+  /* WHERE YOU WERE IN THE CYCLE, WHICH A RESTORE USED TO THROW AWAY.
+
+     migrate() re-infers cycleStart whenever `cycleV2` is missing, and `cycleV2` is
+     missing from every backup written before that flag existed — which is exactly the
+     old-version file somebody is restoring. So the file's own cycleStart, the one fact
+     that says how far through the rotation they were, was discarded on the way in.
+     Then recomputeCycle() derived "days done this cycle" from a start of today, found
+     nothing, and opened the plan at day one for somebody who had almost finished it.
+
+     A cycleStart that arrived IN THE FILE is real and is kept. Marking cycleV2 here is
+     what says so — it is an upgrade marker, and this state has just been upgraded. */
+  const fileCycle = d.cycleStart != null && d.program;
+  if(fileCycle) S.cycleV2 = true;
+
   /* IN THIS ORDER. applySplit() rebuilds DAYS/ROTATION from whatever split just arrived,
      and migrate() is what upgrades an old file's shapes — it has to run against the new
      split or its plan-shape guard repairs the plan to fit the OLD one. */
   applySplit();
   migrate();
+
+  /* No cycleStart in the file at all: rebuild one, but anchored on the end of the log
+     rather than on the wall clock, or the nine-day recency rule throws away a backup
+     that is merely a fortnight old. */
+  if(!fileCycle && (S.sessions||[]).length){
+    const newest = S.sessions.reduce((t,x)=> Math.max(t, x.startedAt||0), 0);
+    if(newest) S.cycleStart = inferCycleStart(newest);
+  }
+  /* And derive the ticks from the sessions, which is the part that was always right. */
   recomputeCycle(false);
   save();
   queueSync();                                   // and up to the account, if there is one
