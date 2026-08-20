@@ -137,8 +137,8 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 /* A slot the rotation has already moved past. The schedule is fixed, so these are
    history, not choices: they stay visible (you still want to see what you've done)
    but they don't take a tap. */
-.plate.past{cursor:default}
-.plate.past:active{transform:none}
+.plate.past,.plate.locked{cursor:default}
+.plate.past:active,.plate.locked:active{transform:none}
 .pcheck{
   position:absolute;top:-4px;right:-4px;width:20px;height:20px;border-radius:50%;
   background:var(--ok);color:#0d1a10;font-size:13px;font-weight:700;
@@ -2529,7 +2529,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.7";
+const APP_VERSION = "3.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -2815,6 +2815,7 @@ function isRestDay(date){ return restDaysThisCycle().indexOf(date) > -1; }
    on a previous cycle actually having happened so a brand-new log does not open on a
    rest day nobody earned. */
 function restsFloat(){ return trainPrefs().restMode === "floating"; }
+function daysFree(){ return trainPrefs().dayOrder === "any"; }
 /* Each rest slot as "how many training days come before it", with a trailing one
    wrapped to the front of the next cycle. Sorted, because the wrap reorders them. */
 function restSchedule(){
@@ -3589,6 +3590,12 @@ const PREF_DEFAULTS = {
      turns them back into credits you spend whenever you like, and is only set when a
      document actually says the rest days are yours to place. */
   restMode: "scheduled",  // scheduled | floating
+  /* WHICH DAY YOU MAY TRAIN. "fixed" is the default for the same reason "scheduled" is:
+     a rotation written as an order is prescribing an order, and the day you are allowed
+     to skip is the day at the far end that then never gets trained. "any" lets you pick
+     from whatever the cycle has left, and is only set when a document says the sessions
+     can be done in any order. */
+  dayOrder: "fixed",      // fixed | any
   barMode: "total",       // total (bar + plates) | plates (plates only)
   barWeight: null         // what YOUR bar weighs. Never assumed — asked, or left unset.
 };
@@ -7214,6 +7221,7 @@ function aiSystemPrompt(){
 "2. If the programme repeats the same sessions every week, describe those sessions once. Put week-to-week differences in 'weeklyChanges' rather than inventing extra days.",
 "3. 'restDaysPerCycle' only when the document actually says how the week is laid out. Otherwise leave it null and set stated.schedule false.",
 "3b. 'restDaysFlexible' true ONLY where the document says in as many words that the rest days are the lifter's to place \u2014 'take rest days as needed', 'train 4 days a week, any days you like', 'schedule the off days to suit you'. A plan that simply never mentions rest days is NOT saying this: leave it false. Naming fixed days (\u2018Mon/Wed/Fri\u2019) or writing rest into the rotation is the opposite of flexible.",
+"3c. 'daysAnyOrder' true ONLY where the document says the SESSIONS themselves may be performed in any order \u2014 'do these in whatever order suits your week', 'the three workouts can be done on any days'. Listing sessions as Day 1, Day 2, Day 3, or as Push then Pull then Legs, is prescribing an order, not permitting any: leave it false. Silence is false.",
 "4. 'weeks' is how many weeks the programme runs, if it says. 'goal' ONLY if the document says what it is for — a title like \"12-Week Hypertrophy Block\" or a line saying it is a strength or fat-loss programme counts; a plan that merely looks like one does not. Otherwise 'unstated'.",
 "",
 "EXERCISES",
@@ -7267,6 +7275,8 @@ const AI_PLAN_SCHEMA = {
     restDaysPerCycle:{type:"INTEGER", nullable:true},
     restDaysFlexible:{type:"BOOLEAN",
                       description:"true only if the document says the rest days are the lifter's to place"},
+    daysAnyOrder:    {type:"BOOLEAN",
+                      description:"true only if the document says the sessions may be done in any order"},
     stated:{
       type:"OBJECT",
       properties:{
@@ -7359,7 +7369,7 @@ const AI_PLAN_SCHEMA = {
     }
   },
   required:["understood","days"],
-  propertyOrdering:["understood","problem","planName","goal","weeks","unit","restDaysPerCycle","restDaysFlexible","stated",
+  propertyOrdering:["understood","problem","planName","goal","weeks","unit","restDaysPerCycle","restDaysFlexible","daysAnyOrder","stated",
                     "phases","deloadWeeks","testingWeeks","weeklyChanges","progressionRules",
                     "specialInstructions","planNotes","warnings","days"]
 };
@@ -7794,6 +7804,7 @@ function aiPlanToProgram(doc, answers){
      default, because a written rotation that includes rest is stating a schedule; only a
      document that says the days are the lifter's to place turns them back into credits. */
   if(doc.restDaysFlexible === true) prefs.restMode = "floating";
+  if(doc.daysAnyOrder === true) prefs.dayOrder = "any";
   if(ans.sides) prefs.sides = ans.sides;
   if(ans.startSide) prefs.startSideFlip = ans.startSide === "flip";
   if(ans.warmups) prefs.warmups = ans.warmups;
@@ -8537,6 +8548,8 @@ function aiReviewHTML(){
   if(p.warmups) push("warmups", "Warm-ups", {auto:"Added before your first working sets", planOnly:"Only where a plan prescribes them", manual:"You manage them"}[p.warmups]);
   if(p.restMode) push("restDays", "Rest days", p.restMode === "floating"
     ? "Yours to place, as your plan says" : "Fixed points in the rotation");
+  if(p.dayOrder) push("restDays", "Workout order", p.dayOrder === "any"
+    ? "Any order, as your plan says" : "In the order your plan writes them");
   if(p.sides) push("sides", "Side tracking", {separate:"Each side tracked separately", matchWeaker:"Held to the weaker side", both:"Both sides in one set"}[p.sides]);
   if(ans.startSide) push("startSide", "Starting side", p.startSideFlip ? "Alternates each cycle" : "Always the right");
   if(ans.barMode) push("barMode", "Barbell weight", p.barMode === "plates" ? "Plates only" : "Total, on a " + (p.barWeight||"?") + " lb bar");
@@ -9354,9 +9367,17 @@ function slotWeekday(slotIndex){
 
    A slot is PAST when the cycle has already spent it: either it is checked off, or the
    pointer has moved beyond it. Those plates still render (the strip is the clearest
-   picture of where you are in the week) but they no longer take a tap. Jumping FORWARD
-   is still allowed, because equipment being occupied is a real thing and the order of
-   what's left is yours; going backwards is not, because there is nothing left there.
+   picture of where you are in the week) but they no longer take a tap, because there is
+   nothing left there.
+
+   AND FORWARD JUMPS ARE NOT FREE EITHER, which is the half this used to allow. Skipping
+   ahead was justified as "equipment being occupied is real, and the order of what's left
+   is yours" — but the order of what is left is the PLAN'S, not yours, in every programme
+   that bothers to write one down. Push/pull/legs is an order for a reason, and the day
+   you skip past is the day that ends up never being trained. So under the default the
+   only selectable slot is the one the cycle is actually on. `dayOrder: "any"` restores
+   free choice among the days still to come, and an import sets it only where the
+   document says the sessions can be done in any order.
 
    Starting the cycle over is still one tap away, under "reset cycle". */
 function slotIsPast(i){
@@ -9367,6 +9388,13 @@ function slotIsPast(i){
      the pointer back to the top of the rotation on a wrap. */
   if(!S.cycleDone.length) return false;
   return i < S.pointer;
+}
+/* A slot you cannot train today because the rotation has not reached it. Distinct from
+   PAST: nothing has been spent, it simply is not its turn. */
+function slotIsLocked(i){
+  if(daysFree()) return false;
+  if(slotIsPast(i)) return false;              // past owns its own message
+  return i !== S.pointer;
 }
 function plateStrip(){
   const cur = S.pointer;
@@ -9420,13 +9448,16 @@ function plateStrip(){
        has moved past, is a day the cycle has spent, so it is rendered as a record rather
        than as something you can jump back onto. See slotIsPast(). */
     const past = slotIsPast(i);
-    const cls = "plate" + (i===cur && !restNow ?" cur":"") + (done?" done":"") + (past?" past":"");
+    const locked = slotIsLocked(i);
+    const cls = "plate" + (i===cur && !restNow ?" cur":"") + (done?" done":"")
+              + (past?" past":"") + (locked?" locked":"");
     /* aria-disabled, not disabled: a past plate still has to take the tap so it can say
        WHY nothing happened. A hard-disabled button swallows the tap silently, and
        "I pressed it and the app ignored me" is indistinguishable from a bug. */
     html += `<button class="${cls}" data-slot="${i}" style="background:${m.color}"${
-      past?' aria-disabled="true"':""}
-      aria-label="${m.name}, ${wd}${done?", done":past?", already passed this cycle":""}">${m.short}<small>${wd}</small>${
+      past||locked?' aria-disabled="true"':""}
+      aria-label="${m.name}, ${wd}${done?", done":past?", already passed this cycle"
+        :locked?", not yet — the rotation is on "+dayName(ROTATION[cur]):""}">${m.short}<small>${wd}</small>${
       done?'<span class="pcheck">&#10003;</span>':""}</button>`;
   });
   html += "</div>";
@@ -9751,7 +9782,9 @@ function viewToday(){
       <span class="dot" style="background:${m.color};width:17px;height:17px"></span>
       <h3 style="font-size:26px">${m.name} day</h3>
     </div>
-    <div class="sub">Next up in your rotation. The schedule only runs forwards, so you can skip ahead to a day you haven't done yet, but not back onto one the cycle has already spent.</div>
+    <div class="sub">${daysFree()
+      ? "Next up in your rotation. Your plan lets the days be done in any order, so you can tap any day the cycle still has left — just not one it has already spent."
+      : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them."}</div>
   </div>`;
   h += deloadBannerHTML();
   h += sleepWindowHTML(wid);
@@ -11396,6 +11429,15 @@ function viewSync(){
         (restSchedule().map(r=> r.after === 0 ? "one between cycles"
           : "one after " + r.after + " training day" + (r.after===1?"":"s")).join(", ") || "none") +
         ". The day comes round on its own, and you can still train through it."}</div>
+    <div class="sub" style="margin:16px 0 8px">And whether the <b>workouts</b> have to be
+      done in the order your plan writes them.</div>
+    <div class="seg">
+      <button class="${!daysFree()?"on":""}" data-dayorder="fixed">My plan's order</button>
+      <button class="${daysFree()?"on":""}" data-dayorder="any">Any order</button>
+    </div>
+    <div class="sub" style="margin:10px 0 16px">${daysFree()
+      ? "Tap any day the cycle still has left. Days it has already spent stay closed."
+      : "Only the day the rotation is on can be started. Skipping ahead is how the day at the far end never gets trained."}</div>
     <div class="sub" style="margin:4px 0 10px">A past day with no session logged is recorded as a rest day for you — the ones marked <b>auto</b> below. Add or remove any of them; a day you remove stays removed.</div>
     ${restLog.length ? `<div class="rl-list">${restLog.map(d=>`<span class="rl-chip${isAutoRest(d)?" auto":""}">${fmtDate(d)}${isAutoRest(d)?`<i class="rl-auto">auto</i>`:""}<button data-rmrest="${d}" aria-label="Remove">✕</button></span>`).join("")}</div>` : `<div class="sub" style="margin-bottom:8px">None logged yet.</div>`}
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
@@ -11479,13 +11521,17 @@ function bind(){
       if(S.active){ toast("Finish or discard the current workout first"); return; }
       const slot = parseInt(p.dataset.slot,10);
       if(isNaN(slot)) return;
-      // The rotation is fixed and only runs forwards, so a spent slot is not selectable.
-      // See slotIsPast(): re-running a day you've done is how the day at the far end of
-      // the cycle stops getting trained.
+      /* A spent slot is not selectable, and under the default neither is one the
+         rotation has not reached: re-running a day you have done, or jumping past one
+         you have not, are the two ways the day at the far end stops getting trained. */
       if(slotIsPast(slot)){
         toast(S.cycleDone.includes(slot)
           ? "Already done this cycle. The rotation only moves forward"
           : "That day has passed. The rotation only moves forward");
+        return;
+      }
+      if(slotIsLocked(slot)){
+        toast(dayName(ROTATION[S.pointer]) + " comes first — your plan sets the order");
         return;
       }
       S.pointer = slot;
@@ -11963,6 +12009,11 @@ function bind(){
     S.experience = b.dataset.exp;
     save(); queueSync(); render();
     toast(b.dataset.exp==="auto" ? "Experience set from your history" : "Targets scaled for "+b.dataset.exp);
+  });
+  document.querySelectorAll("[data-dayorder]").forEach(b=> b.onclick=()=>{
+    trainPrefs().dayOrder = b.dataset.dayorder;
+    save(); queueSync(); render();
+    toast(daysFree() ? "Workouts can be done in any order" : "Workouts follow your plan's order");
   });
   document.querySelectorAll("[data-restmode]").forEach(b=> b.onclick=()=>{
     trainPrefs().restMode = b.dataset.restmode;
