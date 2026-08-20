@@ -2522,7 +2522,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.3";
+const APP_VERSION = "3.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4133,6 +4133,12 @@ function load(){
     const raw = localStorage.getItem(dataKey());
     if(raw){ return JSON.parse(raw); }
   }catch(e){}
+  return defaultState();
+}
+/* Split out of load() so a RESTORE can get at it. "Replace everything with this file"
+   needs somewhere clean to lay the file over, and calling load() for that would hand
+   back the very data being replaced. */
+function defaultState(){
   // Brand-new profile: start from the default program, inherit the shared token and
   // whatever gist/repo was registered for this person.
   const p = (PROF && PROF.list.find(x=>x.id===PROF.activeId)) || {};
@@ -11167,12 +11173,16 @@ function viewSync(){
     </div>
   </div>
   <div class="card">
-    <h3>Backup</h3>
+    <h3>Backup &amp; transfer</h3>
+    <div class="sub" style="margin:4px 0 10px">One file with your whole log in it: every workout,
+      your plan, your split and your settings. It's also how you move an older copy of Element 26
+      into this one — export there, import here, and it merges into what's already on this account.
+      No credentials are ever written into the file.</div>
     <div class="btn-row">
-      <button class="btn ghost small" id="exportBtn">Export JSON</button>
-      <button class="btn ghost small" id="importBtn">Import JSON</button>
+      <button class="btn ghost small" id="exportBtn">Export my data</button>
+      <button class="btn ghost small" id="importBtn">Import a file</button>
     </div>
-    <input type="file" id="importFile" accept=".json" style="display:none">
+    <input type="file" id="importFile" accept=".json,application/json" style="display:none">
   </div>
   <div class="card">
     <h3 class="danger">Danger zone</h3>
@@ -14878,12 +14888,38 @@ async function gistFetch(path, opts={}){
   }
   return res.json();
 }
-function payload(){
-  return JSON.stringify({setup:S.setup||null, splitId:S.splitId||DEFAULT_SPLIT, customSplit:S.customSplit||null, program:S.program, pointer:S.pointer, cycleStart:S.cycleStart, cycleDone:S.cycleDone, restDays:S.restDays||[], restLog:S.restLog||[], restDeleted:S.restDeleted||[], restAuto:S.restAuto||[], lastCycle:S.lastCycle||null, lastReview:S.lastReview||null, checkins:S.checkins||{}, exAliases:S.exAliases||{}, stalls:S.stalls||{}, deload:S.deload||null,
-    blockStart:S.blockStart||null, planStart:S.planStart||null, wakeTime:S.wakeTime||null, sleepTarget:S.sleepTarget||null,
-    asymRetired:S.asymRetired||{}, asymRetest:S.asymRetest||null,
-    volWindow:S.volWindow||"cycle", askWhy:S.askWhy!==false, deleted:(S.deleted||[]).slice(-500), planLog:(S.planLog||[]).slice(-500), sessions:S.sessions, savedAt:S.savedAt}, null, 1);
+/* EVERY FIELD A RESTORE NEEDS, and the list is checked against the state rather than
+   remembered: `prefs` and `importMeta` were missing from this for a long time, which
+   meant exporting and re-importing silently threw away every answer somebody gave the
+   plan importer — warm-ups, side handling, effort target, the lot. A backup that loses
+   settings is not a backup, it is a partial one that looks complete.
+
+   `active` is deliberately absent: a half-logged workout belongs to the device it is
+   being logged on, and restoring one onto another device resumes a session somebody is
+   not in. `sync` is absent too — the GitHub token is a credential and has no business in
+   a file that gets emailed around. */
+const BACKUP_FIELDS = [
+  "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
+  "restDays","restLog","restDeleted","restAuto","lastCycle","lastReview","checkins",
+  "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
+  "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
+  "viewMode","cycleV2","sessions","savedAt"
+];
+/* Trimmed on the way out, because these three are append-only logs that would otherwise
+   grow a backup without bound. History is not trimmed, ever. */
+const BACKUP_CAPS = {deleted:500, planLog:500};
+
+function backupObject(){
+  const o = {};
+  BACKUP_FIELDS.forEach(k=>{ if(S[k] !== undefined) o[k] = S[k]; });
+  Object.keys(BACKUP_CAPS).forEach(k=>{ o[k] = (S[k]||[]).slice(-BACKUP_CAPS[k]); });
+  if(!Array.isArray(o.sessions)) o.sessions = [];
+  /* Stamped so a file can say what made it. An old export has no stamp at all, which is
+     itself the signal that it predates this and needs migrating on the way in. */
+  o.e26 = {app:"Element 26", version: APP_VERSION, exportedAt: Date.now()};
+  return o;
 }
+function payload(){ return JSON.stringify(backupObject(), null, 1); }
 async function connectGist(){
   S.sync.token = $("#tokenIn").value.trim();
   S.sync.gistId = $("#gistIn").value.trim();
@@ -15697,27 +15733,138 @@ function exportJSON(){
   a.click();
   URL.revokeObjectURL(a.href);
 }
+/* ---------- bringing an older log in ----------
+
+   WHAT THIS REPLACES. The old importJSON restored seven fields out of the thirty this
+   app stores — program, pointer, cycleStart, checkins, restLog, planLog, sessions — and
+   dropped the rest on the floor: your split, your custom split, your importer answers,
+   rest days, exercise renames, stalls, deloads, asymmetry state. It also never ran
+   migrate(), so a file written by an older version was adopted in its old shape and the
+   screens that walk it threw. And it always REPLACED, which is the wrong default for
+   somebody whose sentence is "I want my old history in here" — that is a merge.
+
+   Sessions are merged by id, falling back to startedAt for files old enough to predate
+   session ids. The date-keyed logs are merged as sets. Everything else is a scalar or a
+   map, where "the file wins for anything it actually carries" is the only sane rule. */
+
+function backupLooksReal(d){
+  if(!d || typeof d !== "object") return false;
+  return Array.isArray(d.sessions) || (d.program && typeof d.program === "object");
+}
+const uniqDates = (a, b)=> Array.from(new Set([].concat(a||[], b||[]).filter(Boolean))).sort();
+
+/* One merged log out of two. `incoming` wins on conflicts for settings, because the
+   person just chose to bring it in; history is unioned rather than chosen between,
+   because two sessions on different days are both true. */
+function mergeBackup(into, d){
+  const stats = {added:0, updated:0, kept:(into.sessions||[]).length};
+
+  const keyOf = x=> x && (x.id != null ? "i" + x.id : x.startedAt != null ? "t" + x.startedAt : null);
+  const byKey = new Map();
+  (into.sessions||[]).forEach(x=>{ const k = keyOf(x); if(k) byKey.set(k, x); });
+  (d.sessions||[]).forEach(x=>{
+    const k = keyOf(x);
+    if(!k){ into.sessions.push(x); stats.added++; return; }
+    if(byKey.has(k)){
+      /* Same session in both. The one that was finished later is the one that was
+         edited later, so it is the one to keep. */
+      const cur = byKey.get(k);
+      if((x.finishedAt||0) > (cur.finishedAt||0)){
+        into.sessions[into.sessions.indexOf(cur)] = x;
+        byKey.set(k, x);
+        stats.updated++;
+      }
+    } else {
+      into.sessions.push(x); byKey.set(k, x); stats.added++;
+    }
+  });
+  into.sessions.sort((x,y)=> (x.startedAt||0) - (y.startedAt||0));
+
+  ["restDays","restLog","restDeleted","restAuto","deleted","planLog"].forEach(k=>{
+    if(d[k]) into[k] = uniqDates(into[k], d[k]);
+  });
+  ["checkins","exAliases","stalls","asymRetired","prefs"].forEach(k=>{
+    if(d[k] && typeof d[k] === "object") into[k] = Object.assign({}, into[k]||{}, d[k]);
+  });
+  /* The plan and everything that describes it comes across whole or not at all: half of
+     one programme and half of another is not a programme. */
+  if(d.program && typeof d.program === "object"){
+    ["program","splitId","customSplit","importMeta","pointer","cycleStart","cycleDone",
+     "lastCycle","deload","blockStart","planStart"].forEach(k=>{
+      if(d[k] !== undefined) into[k] = d[k];
+    });
+  }
+  ["setup","lastReview","wakeTime","sleepTarget","asymRetest","volWindow","askWhy",
+   "experience","viewMode"].forEach(k=>{ if(d[k] !== undefined && d[k] !== null) into[k] = d[k]; });
+  return stats;
+}
+
+/* Adopt a parsed backup into the profile that is open. `mode` is "merge" or "replace".
+   Returns a short human sentence about what happened, or throws. */
+function adoptBackup(d, mode){
+  if(!backupLooksReal(d)) throw new Error("that file isn't an Element 26 backup");
+  const before = (S.sessions||[]).length;
+  let stats;
+  if(mode === "replace"){
+    const keepSync = S.sync;                       // never carried in a file, never lost
+    S = defaultState(); S.sync = keepSync;
+    S.sessions = [];
+    stats = mergeBackup(S, d);
+    stats.kept = 0;
+  } else {
+    if(!Array.isArray(S.sessions)) S.sessions = [];
+    stats = mergeBackup(S, d);
+  }
+  S.fresh = false;
+  S.savedAt = Date.now();
+  /* IN THIS ORDER. applySplit() rebuilds DAYS/ROTATION from whatever split just arrived,
+     and migrate() is what upgrades an old file's shapes — it has to run against the new
+     split or its plan-shape guard repairs the plan to fit the OLD one. */
+  applySplit();
+  migrate();
+  recomputeCycle(false);
+  save();
+  queueSync();                                   // and up to the account, if there is one
+  render();
+  const after = (S.sessions||[]).length;
+  return mode === "replace"
+    ? "Restored " + after + " workout" + (after===1?"":"s")
+    : "Brought in " + stats.added + " workout" + (stats.added===1?"":"s")
+        + (stats.updated ? ", updated " + stats.updated : "")
+        + " — " + after + " total" + (before ? " (was " + before + ")" : "");
+}
+
 function importJSON(e){
   const file = e.target.files[0];
+  e.target.value = "";
   if(!file) return;
   const r = new FileReader();
   r.onload = ()=>{
-    try{
-      const d = JSON.parse(r.result);
-      if(!d.program || !Array.isArray(d.sessions)) throw new Error("not an Element 26 file");
-      S.program = d.program;
-      S.pointer = d.pointer||0;
-      if(d.cycleStart) S.cycleStart = d.cycleStart;
-      if(d.checkins) S.checkins = d.checkins;
-      if(Array.isArray(d.restLog)) S.restLog = d.restLog;
-      if(Array.isArray(d.planLog)) S.planLog = d.planLog;
-      S.sessions = d.sessions;
-      recomputeCycle(false);
-      save(); queueSync(); render(); toast("Imported ✓");
-    }catch(err){ toast("Import failed: "+err.message); }
+    let d;
+    try{ d = JSON.parse(r.result); }
+    catch(err){ toast("That file isn't readable JSON."); return; }
+    if(!backupLooksReal(d)){ toast("That file isn't an Element 26 backup."); return; }
+    const have = (S.sessions||[]).length;
+    const incoming = (d.sessions||[]).length;
+    /* Merge is offered first and is the default, because "I want my old training in
+       here" is what people are actually doing with this. Replace stays available for a
+       genuine restore-this-device, and says plainly what it costs. */
+    let mode = "merge";
+    if(have){
+      mode = confirm(
+        "This file has " + incoming + " workout" + (incoming===1?"":"s") + ".\n\n" +
+        "OK — merge it into the " + have + " already here, keeping both.\n" +
+        "Cancel — replace everything on this profile with the file.")
+        ? "merge" : "replace";
+      if(mode === "replace" && !confirm(
+        "Replace all " + have + " workouts on this profile with the file's " + incoming + "?\n\n" +
+        "This cannot be undone.")) return;
+    }
+    try{ toast(adoptBackup(d, mode) + " ✓"); }
+    catch(err){ toast("Import failed: " + err.message); }
   };
+  r.onerror = ()=> toast("Couldn't read that file.");
   r.readAsText(file);
-  e.target.value = "";
 }
 
 /* =====================================================================
