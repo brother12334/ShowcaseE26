@@ -437,13 +437,12 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
    are aiming at and the number you log sit in the same cell. Muted, because it is a
    reference value and the input is the thing you interact with. */
 /* ================= TEMPORARY-RULE BANNERS =================
-   Deload, sleep window, drift and the two expiring rules. All four share a shape: a
+   Deload, the sleep window and the two expiring rules. All of them share a shape: a
    coloured left edge naming the constraint, the consequence in readable type, and the
    reasoning underneath in grey. They sit above the exercise list because every one of
    them changes what you should do BEFORE the first set, not after. */
 .deload-card{border-left:4px solid var(--back);background:linear-gradient(180deg,rgba(79,124,201,.08),transparent)}
 .sleep-card{border-left:4px solid var(--bad);background:linear-gradient(180deg,rgba(209,88,79,.08),transparent)}
-.drift-card{border-left:4px solid var(--bad);background:linear-gradient(180deg,rgba(209,88,79,.06),transparent)}
 .rule-card{border-left:3px solid var(--acc);background:linear-gradient(180deg,var(--acc-soft),transparent);padding:12px 14px}
 .rule-row{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;color:var(--dim);padding:4px 0}
 .rule-row + .rule-row{border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
@@ -2530,7 +2529,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.6";
+const APP_VERSION = "3.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -2795,7 +2794,94 @@ function restDaysThisCycle(){
 }
 function restCreditsLeft(){ return Math.max(0, REST_CREDITS - restDaysThisCycle().length); }
 function isRestDay(date){ return restDaysThisCycle().indexOf(date) > -1; }
-function isRestToday(){ return isRestDay(todayStr()); }
+
+/* ================= WHERE THE REST DAYS FALL =================
+
+   They used to be pure credits: two a cycle, spend them by tapping a plate whenever you
+   felt like it. That is the right model for the minority of programmes that genuinely
+   leave it open, and the wrong one for everything else. "Push, pull, legs, rest, push,
+   pull, legs, rest" is a schedule — the rest is at a POSITION in the rotation, and being
+   asked to choose it turns a decision the plan already made back into homework.
+
+   So the layout is read as what it plainly says. A `rest` entry sitting after three
+   training days means the rest comes after three training days, and the app simply says
+   so on the day. Tapping is only how it works under `restMode: "floating"`, which an
+   import sets when the document says the rest days are the lifter's to place.
+
+   THE TRAILING REST WRAPS, and it has to. A layout ending in `rest` puts that rest after
+   the last training day of the cycle — but the cycle rolls over the moment the last
+   training day is logged, so a rest waiting at the end would never come round. It is
+   the gap BETWEEN cycles, so it is counted as due at the start of the next one, guarded
+   on a previous cycle actually having happened so a brand-new log does not open on a
+   rest day nobody earned. */
+function restsFloat(){ return trainPrefs().restMode === "floating"; }
+/* Each rest slot as "how many training days come before it", with a trailing one
+   wrapped to the front of the next cycle. Sorted, because the wrap reorders them. */
+function restSchedule(){
+  const out = [];
+  let trained = 0;
+  CYCLE_LAYOUT.forEach(k=>{
+    if(k === "rest") out.push({after: trained, wrapped: false});
+    else trained++;
+  });
+  out.forEach(r=>{ if(r.after >= ROTATION.length){ r.after = 0; r.wrapped = true; } });
+  return out.sort((a,b)=> a.after - b.after);
+}
+/* Each scheduled rest, and whether it has happened yet.
+
+   COUNTING RESTS DOES NOT WORK HERE, and that was the first attempt. Rest days also get
+   filled in automatically for past days nobody trained on (see fillMissedRestDays), so a
+   week away from the gym records rest days and would have spent both of the cycle's
+   scheduled ones before the first training day of it. Come back, train three days, and
+   the rest the plan puts after day three would never arrive — the schedule silently
+   consumed by a layoff that happened before it started.
+
+   So a rest is tied to ITS OWN POINT in the rotation instead: the one after three
+   training days is satisfied by a rest taken on or after the day the third training day
+   was logged, and by nothing else. A wrapped rest — the one between cycles — anchors to
+   the cycle's own start. Dates are YYYY-MM-DD, so they compare as strings. */
+function restStatus(){
+  const sched = restSchedule();
+  const done = (S.cycleDone || []).length;
+  const rests = restDaysThisCycle();
+  const inCycle = (S.sessions || [])
+    .filter(x=> x && x.startedAt >= S.cycleStart)
+    .sort((a,b)=> a.startedAt - b.startedAt);
+  let firstOpen = -1;
+  const out = sched.map((r, i)=>{
+    const blocked = r.wrapped && !S.lastCycle;   // no cycle has closed, nothing to rest from
+    const reached = !blocked && done >= r.after;
+    /* The day this rest hangs off: the cycle's start for a wrapped one, otherwise the
+       day its last preceding training day was actually logged. */
+    const anchorMs = r.after === 0
+      ? S.cycleStart
+      : (inCycle[r.after - 1] ? inCycle[r.after - 1].startedAt : null);
+    const anchor = anchorMs == null ? null : dayKey(anchorMs);
+    const on = anchor == null ? null : rests.filter(d=> d >= anchor)[0] || null;
+    const satisfied = !!on;
+    if(reached && !satisfied && firstOpen < 0) firstOpen = i;
+    return {after: r.after, wrapped: r.wrapped, reached, satisfied, date: on};
+  });
+  out.forEach((x, i)=>{ x.due = (i === firstOpen); });
+  return out;
+}
+/* The scheduled rest that is due right now, or -1. */
+function restDueIndex(){
+  if(restsFloat()) return -1;
+  const i = restStatus().findIndex(x=> x.due);
+  return i;
+}
+/* Today is a rest day if one was recorded, or if the schedule says so and you have not
+   already trained or opted out of it. Computed rather than written: nothing is saved
+   until the day is actually over, which is what fillMissedRestDays() is for. */
+function scheduledRestToday(){
+  if(restDueIndex() < 0) return false;
+  const today = todayStr();
+  if(restTombstones().indexOf(today) > -1) return false;      // you said you would train
+  if((S.sessions || []).some(x=> x && x.date === today)) return false;
+  return true;
+}
+function isRestToday(){ return isRestDay(todayStr()) || scheduledRestToday(); }
 function takeRestDay(date){
   const list = restDaysThisCycle();
   if(list.indexOf(date) > -1) return false;
@@ -3497,6 +3583,12 @@ const PREF_DEFAULTS = {
   effort: "auto",         // auto | reserve | close | failure — only used where a plan gives no target
   progression: "ask",     // auto | ask | hold — what happens when a load is ready to go up
   restDefault: null,      // seconds; null = judge each set on its own (restTargetFor)
+  /* WHERE THE REST DAYS FALL. "scheduled" is the default because it is what almost
+     every written programme means: the rest sits at a fixed point in the rotation —
+     three days on, one off — and the plan, not the person, decides when. "floating"
+     turns them back into credits you spend whenever you like, and is only set when a
+     document actually says the rest days are yours to place. */
+  restMode: "scheduled",  // scheduled | floating
   barMode: "total",       // total (bar + plates) | plates (plates only)
   barWeight: null         // what YOUR bar weighs. Never assumed — asked, or left unset.
 };
@@ -7121,6 +7213,7 @@ function aiSystemPrompt(){
 "1. One entry in 'days' is ONE TRAINING SESSION in the rotation, in the order it is performed. Do not create a day for rest. If the source names its sessions (Push, Pull, Upper A, Chest and Triceps, Day 1), keep those names exactly.",
 "2. If the programme repeats the same sessions every week, describe those sessions once. Put week-to-week differences in 'weeklyChanges' rather than inventing extra days.",
 "3. 'restDaysPerCycle' only when the document actually says how the week is laid out. Otherwise leave it null and set stated.schedule false.",
+"3b. 'restDaysFlexible' true ONLY where the document says in as many words that the rest days are the lifter's to place \u2014 'take rest days as needed', 'train 4 days a week, any days you like', 'schedule the off days to suit you'. A plan that simply never mentions rest days is NOT saying this: leave it false. Naming fixed days (\u2018Mon/Wed/Fri\u2019) or writing rest into the rotation is the opposite of flexible.",
 "4. 'weeks' is how many weeks the programme runs, if it says. 'goal' ONLY if the document says what it is for — a title like \"12-Week Hypertrophy Block\" or a line saying it is a strength or fat-loss programme counts; a plan that merely looks like one does not. Otherwise 'unstated'.",
 "",
 "EXERCISES",
@@ -7172,6 +7265,8 @@ const AI_PLAN_SCHEMA = {
     weeks:           {type:"INTEGER", nullable:true},
     unit:            {type:"STRING",  enum:["lb","kg","percent","none"]},
     restDaysPerCycle:{type:"INTEGER", nullable:true},
+    restDaysFlexible:{type:"BOOLEAN",
+                      description:"true only if the document says the rest days are the lifter's to place"},
     stated:{
       type:"OBJECT",
       properties:{
@@ -7264,7 +7359,7 @@ const AI_PLAN_SCHEMA = {
     }
   },
   required:["understood","days"],
-  propertyOrdering:["understood","problem","planName","goal","weeks","unit","restDaysPerCycle","stated",
+  propertyOrdering:["understood","problem","planName","goal","weeks","unit","restDaysPerCycle","restDaysFlexible","stated",
                     "phases","deloadWeeks","testingWeeks","weeklyChanges","progressionRules",
                     "specialInstructions","planNotes","warnings","days"]
 };
@@ -7624,9 +7719,10 @@ function aiPlanToProgram(doc, answers){
   if(!days.length) throw new Error("There were no training days in that.");
   const names = days.map((d,i)=> aiTrim(d.name, 28) || ("Day " + (i+1)));
 
-  /* Rest days are a budget, not a schedule (see the note on the split). The document's
-     own figure wins; where it did not give one the person was asked, and only if they
-     had nothing to say does it fall back to the remainder of a seven-day week. */
+  /* HOW MANY rest days a cycle gets. The document's own figure wins; where it did not
+     give one the person was asked, and only if they had nothing to say does it fall back
+     to the remainder of a seven-day week. Where they FALL is decided separately, by
+     prefs.restMode below. */
   let rests;
   // `== null` deliberately, not a truthiness test and not Number() on its own: the
   // document declining to say gives null, and Number(null) is a perfectly finite 0,
@@ -7694,6 +7790,10 @@ function aiPlanToProgram(doc, answers){
   const stated = doc.stated || {};
   const anyPlanWarmups = aiAllExercises(doc).some(x=> Array.isArray(x.warmupSets) && x.warmupSets.length);
   const prefs = {};
+  /* WHERE the rests fall, which is a different question from HOW MANY. Scheduled is the
+     default, because a written rotation that includes rest is stating a schedule; only a
+     document that says the days are the lifter's to place turns them back into credits. */
+  if(doc.restDaysFlexible === true) prefs.restMode = "floating";
   if(ans.sides) prefs.sides = ans.sides;
   if(ans.startSide) prefs.startSideFlip = ans.startSide === "flip";
   if(ans.warmups) prefs.warmups = ans.warmups;
@@ -8435,6 +8535,8 @@ function aiReviewHTML(){
   if(ans.rest) push("rest", "Rest between sets", ans.rest === "fixed" ? aiRestWord(p.restDefault) + " after every set"
                     : ans.rest === "free" ? "Untimed, your call" : "Judged per set");
   if(p.warmups) push("warmups", "Warm-ups", {auto:"Added before your first working sets", planOnly:"Only where a plan prescribes them", manual:"You manage them"}[p.warmups]);
+  if(p.restMode) push("restDays", "Rest days", p.restMode === "floating"
+    ? "Yours to place, as your plan says" : "Fixed points in the rotation");
   if(p.sides) push("sides", "Side tracking", {separate:"Each side tracked separately", matchWeaker:"Held to the weaker side", both:"Both sides in one set"}[p.sides]);
   if(ans.startSide) push("startSide", "Starting side", p.startSideFlip ? "Alternates each cycle" : "Always the right");
   if(ans.barMode) push("barMode", "Barbell weight", p.barMode === "plates" ? "Plates only" : "Total, on a " + (p.barWeight||"?") + " lb bar");
@@ -9269,17 +9371,46 @@ function slotIsPast(i){
 function plateStrip(){
   const cur = S.pointer;
   const taken = restDaysThisCycle();
+  /* restSchedule() sorts, and the trailing rest wraps to the front, so the n-th rest in
+     the LAYOUT is not the n-th in the schedule. This maps one to the other. */
+  const schedStatus = restStatus();
+  const layoutRestSlot = (function(){
+    const order = [];
+    let trained = 0;
+    CYCLE_LAYOUT.forEach(k=>{
+      if(k === "rest") order.push(trained >= ROTATION.length ? 0 : trained);
+      else trained++;
+    });
+    return order.map(after=> schedStatus.findIndex(x=> x.after === after));
+  })();
+  /* With a rest due, TODAY is the rest and the training day is merely next. Marking
+     both as current asks you to work out which of two highlighted plates you are on. */
+  const restNow = !restsFloat() && schedStatus.some(x=> x.due);
   let html = '<div class="plates-wrap"><div class="plates">';
   let restSeen = 0;
   CYCLE_LAYOUT.forEach((key, slot)=>{
     const wd = slotWeekday(slot);
     if(key === "rest"){
       const idx = restSeen++;
-      const date = taken[idx] || null;
-      const isToday = date === todayStr();
-      html += `<button class="plate rest${isToday?" cur":""}${date?" done":""}" data-rest="${idx}"
-        aria-label="Rest ${idx+1} of ${REST_CREDITS}, ${wd}${date?", used "+date:", available"}"
-        >R<small>${wd}</small>${date?'<span class="pcheck">&#10003;</span>':""}</button>`;
+      /* Under a scheduled rotation this plate is a marker, not a control: the plan has
+         already said where the rest goes, so there is nothing here to choose. It still
+         takes the tap, so a press can explain itself rather than doing nothing.
+
+         Which slot a plate IS differs between the two modes. Floating rests are spent in
+         the order they are taken, so the n-th plate is the n-th date. Scheduled ones sit
+         at fixed points, so the plate asks the schedule about its own point — and the
+         trailing rest wraps to the front, so the order is not the layout's order. */
+      const fixed = !restsFloat();
+      const st = fixed ? (schedStatus[layoutRestSlot[idx]] || {}) : null;
+      const date = fixed ? (st.date || null) : (taken[idx] || null);
+      const due = fixed && !!st.due;
+      const isToday = date === todayStr() || due;
+      html += `<button class="plate rest${isToday?" cur":""}${date?" done":""}${fixed&&!due?" past":""}"
+        data-rest="${idx}" data-restsched="${fixed ? layoutRestSlot[idx] : -1}"
+        aria-label="Rest ${idx+1} of ${REST_CREDITS}, ${wd}${
+          date ? ", taken " + date : due ? ", due today" : fixed ? ", scheduled" : ", available"}"
+        >R<small>${fixed && !date ? (due ? "today" : wd) : wd}</small>${
+        date?'<span class="pcheck">&#10003;</span>':""}</button>`;
       return;
     }
     const i = ROTATION.indexOf(key);
@@ -9289,7 +9420,7 @@ function plateStrip(){
        has moved past, is a day the cycle has spent, so it is rendered as a record rather
        than as something you can jump back onto. See slotIsPast(). */
     const past = slotIsPast(i);
-    const cls = "plate" + (i===cur?" cur":"") + (done?" done":"") + (past?" past":"");
+    const cls = "plate" + (i===cur && !restNow ?" cur":"") + (done?" done":"") + (past?" past":"");
     /* aria-disabled, not disabled: a past plate still has to take the tap so it can say
        WHY nothing happened. A hard-disabled button swallows the tap silently, and
        "I pressed it and the app ignored me" is indistinguishable from a bug. */
@@ -9300,9 +9431,16 @@ function plateStrip(){
   });
   html += "</div>";
   const left = restCreditsLeft();
+  const restWord = restsFloat()
+    ? (left === REST_CREDITS ? REST_CREDITS+" rest"+(REST_CREDITS===1?"":"s")+" available"
+       : left ? left+" rest left" : "rests all used")
+    /* Scheduled: the count is not a budget you are spending, it is where you are in a
+       rotation that already includes them. */
+    : (REST_CREDITS
+        ? (restDueIndex() > -1 ? "rest day today" : REST_CREDITS+" rest"+(REST_CREDITS===1?"":"s")+" a cycle, scheduled")
+        : "no rest days in this cycle");
   html += `<div class="cycle-row"><span class="num">${S.cycleDone.length} of ${ROTATION.length} done &middot; ${
-    left === REST_CREDITS ? REST_CREDITS+" rests available"
-    : left ? left+" rest left" : "both rests used"}</span><span>${
+    restWord}</span><span>${
     S.lastReview?'<button id="lastReviewBtn">last review</button> ':''}<button id="cycleReset">reset cycle</button></span></div>`;
   return html + "</div>";
 }
@@ -9584,10 +9722,16 @@ function viewToday(){
   }
 
   if(isRestToday()){
+    /* A scheduled rest is the plan speaking, a taken one is you. Saying which stops the
+       screen reading as the app having decided something on your behalf. */
+    const sched = !isRestDay(todayStr()) && scheduledRestToday();
     h += checkinCard();
     h += `<div class="card" style="text-align:center;padding:34px 20px">
       <h3 style="font-size:26px">Rest day</h3>
-      <div class="sub" style="margin-top:8px">Recovery is where the growth happens. Your rotation picks back up tomorrow with <b>${m.name}</b>.</div>
+      <div class="sub" style="margin-top:8px">${sched
+        ? `Your plan puts a rest here, after ${S.cycleDone.length} training day${S.cycleDone.length===1?"":"s"}.`
+        : "Recovery is where the growth happens."}
+        Your rotation picks back up tomorrow with <b>${m.name}</b>.</div>
     </div>`;
     h += `<div class="btn-row"><button class="btn ghost" id="undoRestBtn">Actually, train today</button></div>`;
     return h;
@@ -9611,7 +9755,6 @@ function viewToday(){
   </div>`;
   h += deloadBannerHTML();
   h += sleepWindowHTML(wid);
-  h += driftHTML();
   h += asymRetestHTML();
   h += ruleBannerHTML();
   // The one thing worth changing today, taken from the grade of your last session of
@@ -11241,6 +11384,18 @@ function viewSync(){
 
   h += `  <div class="card">
     <h3>Rest days</h3>
+    <div class="sub" style="margin:4px 0 10px">Your split gives you
+      <b>${REST_CREDITS} a cycle</b>. This setting is about <b>when</b> they fall.</div>
+    <div class="seg">
+      <button class="${!restsFloat()?"on":""}" data-restmode="scheduled">Where my plan puts them</button>
+      <button class="${restsFloat()?"on":""}" data-restmode="floating">When I choose</button>
+    </div>
+    <div class="sub" style="margin:10px 0 16px">${restsFloat()
+      ? "Rests are credits. Tap a rest plate on Today to spend one, whenever you want it."
+      : "Rests sit at fixed points in the rotation \u2014 " +
+        (restSchedule().map(r=> r.after === 0 ? "one between cycles"
+          : "one after " + r.after + " training day" + (r.after===1?"":"s")).join(", ") || "none") +
+        ". The day comes round on its own, and you can still train through it."}</div>
     <div class="sub" style="margin:4px 0 10px">A past day with no session logged is recorded as a rest day for you — the ones marked <b>auto</b> below. Add or remove any of them; a day you remove stays removed.</div>
     ${restLog.length ? `<div class="rl-list">${restLog.map(d=>`<span class="rl-chip${isAutoRest(d)?" auto":""}">${fmtDate(d)}${isAutoRest(d)?`<i class="rl-auto">auto</i>`:""}<button data-rmrest="${d}" aria-label="Remove">✕</button></span>`).join("")}</div>` : `<div class="sub" style="margin-bottom:8px">None logged yet.</div>`}
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
@@ -11355,6 +11510,17 @@ function bind(){
     const taken = restDaysThisCycle();
     const date = taken[slot] || null;
     const today = todayStr();
+    /* Scheduled rests are not chosen, so there is nothing to tap them for — but the
+       press still has to answer for itself. A plate that silently ignores you is
+       indistinguishable from a broken one. */
+    if(!restsFloat()){
+      const st = restStatus();
+      const mine = st[parseInt(rp.dataset.restsched, 10)] || {};
+      toast(mine.due ? "Today is your scheduled rest day"
+          : mine.satisfied ? "That rest is already taken"
+          : "Your plan schedules this rest — it comes round on its own");
+      return;
+    }
     if(date === today){
       if(confirm("Cancel today's rest day? The credit goes back.")){
         releaseRestDay(today, true);
@@ -11373,7 +11539,10 @@ function bind(){
   });
   const ur = $("#undoRestBtn");
   if(ur) ur.onclick = ()=>{
-    // decided to train after all, so this was never a rest day: unlog it entirely
+    /* Decided to train after all, so this was never a rest day: unlog it entirely.
+       releaseRestDay writes the tombstone, which is also what tells a SCHEDULED rest to
+       stand down — that one was never stored, so there is nothing to remove, only
+       something to say no to. */
     releaseRestDay(todayStr(), true);
     save(); queueSync(); render();
   };
@@ -11794,6 +11963,11 @@ function bind(){
     S.experience = b.dataset.exp;
     save(); queueSync(); render();
     toast(b.dataset.exp==="auto" ? "Experience set from your history" : "Targets scaled for "+b.dataset.exp);
+  });
+  document.querySelectorAll("[data-restmode]").forEach(b=> b.onclick=()=>{
+    trainPrefs().restMode = b.dataset.restmode;
+    save(); queueSync(); render();
+    toast(restsFloat() ? "Rest days are yours to place" : "Rest days follow your plan");
   });
   document.querySelectorAll("[data-askwhy]").forEach(b=> b.onclick=()=>{
     S.askWhy = b.dataset.askwhy === "on";
@@ -13852,52 +14026,6 @@ function ruleBannerHTML(){
   if(!bits.length) return "";
   return `<div class="card rule-card">` + bits.map(b=>
     `<div class="rule-row"><span class="rule-k">${esc(b.k)}</span><span>${esc(b.v)}</span></div>`).join("") + `</div>`;
-}
-
-/* =====================================================================
-   DRIFT GUARD
-
-   The original diagnosis was never "days aren't pinned to the calendar" — it was that
-   muscle groups were going 8 to 11 days between sessions. That is the thing worth
-   catching. With six days plus one rest day, a normal week has every muscle back
-   inside 3-4 days, so 5+ means you have genuinely slipped rather than merely shuffled.
-   ===================================================================== */
-const DRIFT_DAYS = 5;
-function driftReport(){
-  const now = Date.now();
-  const last = {};
-  S.sessions.forEach(s=>{
-    (s.entries || []).forEach(e=>{
-      const mm = musclesFor(e.name);
-      if(!mm) return;
-      const worked = (e.sets || []).some(isWorkingSet);
-      if(!worked) return;
-      Object.keys(mm).forEach(m=>{
-        if(mm[m] < 0.5) return;           // assisting is not training
-        if(!last[m] || s.startedAt > last[m]) last[m] = s.startedAt;
-      });
-    });
-  });
-  const stale = [];
-  MKEYS.forEach(m=>{
-    if(GROUPS[m].optional) return;
-    if(!last[m]) return;                  // never trained is a weak point, not drift
-    const days = (now - last[m]) / DAY_MS;
-    if(days >= DRIFT_DAYS) stale.push({m, days: Math.floor(days)});
-  });
-  return stale.sort((a,b)=>b.days - a.days);
-}
-function driftHTML(){
-  const stale = driftReport();
-  if(!stale.length) return "";
-  const top = stale.slice(0, 4);
-  return `<div class="card drift-card">
-    <div class="fc-k" style="color:var(--bad)">Drifting</div>
-    <div class="fc-do">${top.map(x=>esc(gName(x.m)) + " " + x.days + " days").join(" · ")}${
-      stale.length > 4 ? " and " + (stale.length - 4) + " more" : ""}</div>
-    <div class="fc-sub">On a six-day rotation every muscle should come round inside 3 to 4 days.
-      Anything past ${DRIFT_DAYS} means the rotation has slipped, not just shifted.</div>
-  </div>`;
 }
 
 /* ---------- the banners these rules put on Today ---------- */
