@@ -1066,6 +1066,12 @@ body.onboarding #app{padding:0}
   border:1px solid var(--line);background:var(--card2);color:var(--dim);font-size:13px;line-height:1.5;
 }
 .ai-go-off{display:none}
+/* The quiet way out of the first-run screen, for somebody who already has an account
+   somewhere else. Deliberately understated: uploading a plan is what most people are
+   here to do, and this must not compete with it. */
+.ai-restore{display:block;width:100%;text-align:center;margin-top:18px;padding:8px;
+  color:var(--faint);font-size:13px}
+.ai-restore:hover{color:var(--dim)}
 .ai-paste{margin-top:14px}
 /* Vertical only. A textarea defaults to resize:both, so the drag handle in its corner
    could be pulled sideways out of the card, and pulled down far enough to shove the
@@ -2473,6 +2479,8 @@ body.cele-open{overflow:hidden}
 <!-- The plan importer's file picker. Everything Gemini can read inline, plus .json so an
      Element 26 export restores through the same button. -->
 <input type="file" id="obFile" multiple accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf,text/plain,text/csv,text/markdown,.json,.txt,.md,.csv,.tsv" style="display:none">
+<!-- Restore is its own input so the picker offers files, not the camera roll. -->
+<input type="file" id="obBackupFile" accept=".json,application/json" style="display:none">
 <nav>
   <!-- Duotone accent: every glyph is pure outline, all the time. The only thing that
        changes when a tab is active is colour and the soft accent circle behind the
@@ -2522,7 +2530,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.4";
+const APP_VERSION = "3.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8182,6 +8190,12 @@ function aiHeroHTML(){
   /* No way out of this screen during first-time setup, because there is nothing behind
      it: the app has no plan yet and no way to make one except this. Afterwards, when the
      importer is something you opened deliberately from the Program tab, it closes. */
+  /* A WAY IN THAT ISN'T "UPLOAD A PLAN". Somebody who already uses Element 26 and is
+     moving to a new phone has nothing to upload — their plan is inside the backup file
+     along with everything they have ever logged — and this screen is the only way
+     through first-run, so without this they had to import a plan they already own just
+     to reach the app and restore over the top of it. */
+  h += `<button class="linklike ai-restore" id="aiRestore">Already use Element 26? Restore a backup</button>`;
   if(!a.ob) h += `<div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Not now</button></div>`;
   return h;
 }
@@ -8552,6 +8566,13 @@ function bindAIImport(){
   });
 
   on("aiPick", ()=>{ const f = $("#obFile"); if(f) f.click(); });
+  on("aiRestore", ()=>{ const f = $("#obBackupFile"); if(f) f.click(); });
+  const bf = $("#obBackupFile");
+  if(bf) bf.onchange = e=>{
+    const file = (e.target.files || [])[0];
+    e.target.value = "";
+    if(file) aiTryBackup(file, true);
+  };
   all("[data-airm]", b=> b.onclick = ()=>{
     a.files.splice(parseInt(b.dataset.airm, 10), 1);
     a.parts = null;
@@ -8604,15 +8625,63 @@ function aiQNext(){
 /* A .json file gets one chance to be an Element 26 export before it is treated as
    something to read. If it is, no API call is made at all — no screening, no extraction,
    and none of the questions, because a backup already carries its own answers. */
-function aiTryBackup(file){
+/* RESTORING A WHOLE ACCOUNT FROM THE FIRST-RUN SCREEN.
+
+   This used to read a backup for its PROGRAM and nothing else — the file went through
+   the plan-review screen and out the other side as "a plan somebody imported", and
+   finishOnboarding() then reset the pointer, the cycle and the rest days and never
+   looked at `sessions` at all. Somebody restoring on a new phone got their plan and lost
+   every workout they had ever logged, which is the opposite of what a backup is for.
+
+   A file carrying sessions is therefore not a plan, it is an account, and it takes the
+   short way: adopt it whole and go straight into the app. Onboarding is over at that
+   point by definition — there is a plan and there is history — so it is ended directly
+   rather than through finishOnboarding(), whose whole job is setting up someone who has
+   neither, and which would wipe exactly what was just restored. */
+function aiRestoreWholeBackup(d){
+  const n = (d.sessions || []).length;
+  const have = (S.sessions || []).length;
+  if(!confirm("Restore " + n + " workout" + (n===1?"":"s") + " from this file"
+      + (have ? ", merged into the " + have + " already here" : "") + "?")) return;
+  let msg;
+  try{ msg = adoptBackup(d, "merge"); }
+  catch(err){ AI_IMP.err = "Couldn't restore that file: " + err.message; renderAIImport(); return; }
+  /* needsOnboarding() is `no setup AND no sessions`. The sessions settle it, but a
+     profile still wants a name and a goal, and the file may predate `setup` entirely. */
+  if(!S.setup) S.setup = {name: accountName(), goal:"muscle", level:"intermediate",
+                          gear:"full", at: Date.now()};
+  OB = null;
+  save(); queueSync();
+  TAB = "today";
+  closeAIImport();                       // renders the app proper
+  toast(msg + " ✓");
+}
+
+function aiTryBackup(file, restoring){
   const r = new FileReader();
   r.onload = ()=>{
     let d = null;
     try{ d = JSON.parse(String(r.result)); }catch(e){}
+    /* History present means this is somebody's account, not a document. Checked before
+       the program is, because a backup has both and the account reading is the right
+       one. */
+    if(d && Array.isArray(d.sessions) && d.sessions.length){ aiRestoreWholeBackup(d); return; }
     const prog = d && (d.program || d);
-    const days = prog && typeof prog === "object"
-      ? Object.keys(prog).filter(k=> k !== "finisher" && Array.isArray(prog[k]) && prog[k].length)
+    /* A day is an array of EXERCISES, and an exercise has a name. Testing only for "a
+       non-empty array" let any JSON at all through — {"items":[1,2,3]} was read as a
+       training day called "items" and taken to the review screen. */
+    const days = prog && typeof prog === "object" && !Array.isArray(prog)
+      ? Object.keys(prog).filter(k=> k !== "finisher" && Array.isArray(prog[k]) && prog[k].length
+          && prog[k].every(x=> x && typeof x === "object" && typeof x.name === "string" && x.name))
       : [];
+    /* Came in through "Restore a backup" and turned out not to be one. Sending it to the
+       plan reader instead would be answering a question nobody asked. */
+    if(restoring && !days.length){
+      AI_IMP.err = "That doesn't look like an Element 26 backup. Export one from your other "
+                 + "device with Settings \u2192 Backup & transfer.";
+      renderAIImport();
+      return;
+    }
     if(!days.length){
       AI_IMP.files = AI_IMP.files.concat([file]).slice(0, 6);
       AI_IMP.err = "";
