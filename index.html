@@ -2547,7 +2547,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "4.2";
+const APP_VERSION = "4.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4049,6 +4049,138 @@ function pickExercise(key, gear){
   // Nothing in your gear can cover this job: fall back to the bodyweight option if the
   // slot has one, and only then to the head of the list.
   return hit || list.find(x=>x.gear === "bodyweight") || list[0] || null;
+}
+/* =====================================================================
+   THE MACHINE IS TAKEN
+
+   A busy gym breaks a plan in the dullest possible way: somebody is on the pec deck and
+   will be for another twenty minutes. The choice is to stand about, to skip the movement,
+   or to do the version you CAN get to — and only the third is training. Skipping already
+   had a button; this gives the third one a button too.
+
+   It is a SESSION-ONLY substitution. The plan is not edited, because the machine being
+   busy today says nothing about what the programme should be tomorrow. Next week the
+   card asks for the machine again.
+
+   What counts as swappable is decided by equipment, not by taste. A movement tied to one
+   station — a machine, a cable stack, the Smith rack — is the one that can be occupied,
+   so those are the ones that offer alternatives. Free weights are not offered a swap:
+   there is always another pair of dumbbells.
+
+   The alternatives come out of EX_LIBRARY, which already groups movements by the JOB
+   they do rather than by name, so the substitute is a real substitute — same slot, same
+   muscles, same place in the session. Dumbbell first, since that is what the request is
+   for and what a busy gym always has spare, then barbell, then bodyweight so that the
+   three slots with no dumbbell answer (leg extension, leg curl, cable crunch) still have
+   one. */
+const SWAP_STATION_GEAR = ["machine","cable","smith"];
+const SWAP_PREFERENCE   = ["dumbbell","barbell","bodyweight"];
+// GEAR_LABEL describes a whole gym ("Dumbbells only"), which is the wrong voice for one
+// line under one movement.
+const SWAP_GEAR_WORD = {dumbbell:"dumbbells", barbell:"barbell", bodyweight:"no equipment"};
+let _EX_SLOT_IX = null;
+/* THREE KEYS PER MOVEMENT, tried tightest first. canonEx() is the app's real
+   canonicaliser and is deliberately left alone — history matching, PR detection and the
+   alias table all run on it, so loosening it to help this one lookup would be a change
+   with a very long blast radius. These extra two keys live here and are used here.
+
+     canonEx     "Lat Pulldown"        the app's own normal form
+     squash      "latpulldown"         punctuation and spacing gone, so "Lat Pull-Down"
+                                       and "Pushup"/"Push-Up" land together
+     sorted      "chest machine press" word order gone, so "Machine Chest Press" finds
+                                       "Chest Press Machine"
+
+   Getting this wrong is cheap in both directions: a miss means no swap button on a
+   movement that could have had one, and a stray hit means an alternative offered that
+   somebody simply does not pick. Neither touches stored data.
+
+   Built on first use rather than at load: EX_LIBRARY is a const, and this file has been
+   killed twice by reading one before its declaration. */
+function swapSquash(n){ return canonEx(n).replace(/[^a-z0-9]/g, ""); }
+function swapSorted(n){ return canonEx(n).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean).sort().join(" "); }
+function exSlotIndex(){
+  if(_EX_SLOT_IX) return _EX_SLOT_IX;
+  const exact = {}, squash = {}, sorted = {};
+  Object.keys(EX_LIBRARY).forEach(key=>{
+    EX_LIBRARY[key].forEach(x=>{
+      const rec = {key: key, gear: x.gear, name: x.name};
+      const c = canonEx(x.name), q = swapSquash(x.name), o = swapSorted(x.name);
+      if(!exact[c])  exact[c]  = rec;
+      if(!squash[q]) squash[q] = rec;
+      if(!sorted[o]) sorted[o] = rec;
+    });
+  });
+  _EX_SLOT_IX = {exact: exact, squash: squash, sorted: sorted};
+  return _EX_SLOT_IX;
+}
+function exSlotFor(name){
+  const ix = exSlotIndex();
+  return ix.exact[canonEx(name)] || ix.squash[swapSquash(name)] || ix.sorted[swapSorted(name)] || null;
+}
+/* The alternatives for a name, best first, or [] if there is nothing to offer. */
+function swapOptionsFor(name){
+  const hit = exSlotFor(name);
+  if(!hit) return [];                                   // not a movement we know
+  if(SWAP_STATION_GEAR.indexOf(hit.gear) < 0) return []; // free weights: nothing to queue for
+  const here = swapSquash(name);
+  return (EX_LIBRARY[hit.key] || [])
+    .filter(x=> SWAP_STATION_GEAR.indexOf(x.gear) < 0 && swapSquash(x.name) !== here)
+    .slice()
+    .sort((a,b)=> SWAP_PREFERENCE.indexOf(a.gear) - SWAP_PREFERENCE.indexOf(b.gear));
+}
+// Is this entry worth offering a swap on at all? Used to decide whether to draw the button.
+function canSwapEntry(en){
+  if(!en) return false;
+  if(en.swapFrom) return true;               // already swapped: at least offer the way back
+  return swapOptionsFor(en.name).length > 0;
+}
+/* Do it. Two shapes, and the difference matters because sets already logged were done on
+   the ORIGINAL movement and must stay attributed to it.
+
+   Nothing logged yet — the usual case, you walked up and it was busy — is a rename in
+   place: same sets, same reps, same target, different movement.
+
+   Sets already logged — you got two in and someone took the station between them — SPLITS
+   the entry. The original keeps the sets that were really done on it and the remainder
+   moves to a new entry under the new name. Recording three dumbbell sets as machine sets
+   would quietly corrupt the load history for both movements. A superset leg cannot be
+   split without breaking the pair, so that one case says so instead. */
+function applySwap(ei, newName, cue){
+  const a = S.active;
+  if(!a) return false;
+  const en = a.entries[ei];
+  if(!en) return false;
+  const from = en.swapFrom || en.name;
+  const backToOriginal = swapSquash(newName) === swapSquash(from);
+  const filled = en.sets.filter(st=> st.done || st.weight !== "" || st.reps !== "").length;
+
+  if(filled > 0){
+    if(supersetInfo(a.entries, ei)){
+      toast("Already logged sets on this one — it's half of a superset, so it can't be split");
+      return false;
+    }
+    const rest = en.sets.length - filled;
+    if(rest <= 0){ toast("Every set on this one is already logged"); return false; }
+    en.sets = en.sets.slice(0, filled);
+    const moved = Object.assign({}, en, {
+      name: newName,
+      swapFrom: backToOriginal ? undefined : from,
+      note: cue || undefined,
+      /* The prescribed load and the warm-up ramp built off it belong to the movement
+         that is no longer being done. A machine's working weight is not a dumbbell's. */
+      planWeight: undefined, warmups: undefined, warm: undefined, warmupNote: undefined,
+      sets: Array.from({length: rest}, ()=>({weight:"",reps:"",rpe:"",done:false}))
+    });
+    a.entries.splice(ei + 1, 0, moved);
+    a.focusIdx = ei + 1;
+    return true;
+  }
+
+  en.name = newName;
+  en.swapFrom = backToOriginal ? undefined : from;
+  en.note = cue || undefined;
+  en.planWeight = undefined; en.warmups = undefined; en.warm = undefined; en.warmupNote = undefined;
+  return true;
 }
 /* Build a full programme for a split. Pure: it reads nothing from S, so onboarding can
    preview a plan before anything is saved. */
@@ -10035,6 +10167,7 @@ function viewActiveSession(){
           <span class="icon-btns ex-ctl">
             <button data-exup="${ei}" aria-label="Move earlier">↑</button>
             <button data-exdown="${ei}" aria-label="Move later">↓</button>
+            ${canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Station busy? Swap ${esc(en.name)} for something free">⇄</button>`:""}
             <button data-exskip="${ei}" aria-label="Skip today">✕</button>
           </span>
         </span>
@@ -10358,7 +10491,9 @@ function viewFocusSession(){
   const ll = lastBox(a.workoutId, en.name, anyDay, occ);
   h += `<div class="card ex focus">
     <div class="ex-head"><b class="focus-name">${esc(en.name)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b>
-      <span class="icon-btns ex-ctl"><button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
+      <span class="icon-btns ex-ctl">${
+        canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Station busy? Swap ${esc(en.name)} for something free">⇄</button>`:""
+      }<button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
     </div>
     <div class="ex-target" style="margin:2px 0 10px">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</div>`;
   h += supersetNoteHTML(supersetInfo(a.entries, ei));
@@ -10382,6 +10517,53 @@ function viewFocusSession(){
     </div>`;
   }
   return h + focusFooter(a, atEnd);
+}
+/* The picker. One card per alternative, each saying what it is and how to do it, so the
+   choice can be made from the card rather than from memory. Drawn as buttons rather than
+   a select: this gets tapped mid-set with one hand and a phone that has been on the
+   floor. */
+function openSwapModal(ei){
+  const a = S.active;
+  if(!a) return;
+  const en = a.entries[ei];
+  if(!en) return;
+  /* Once swapped, the entry IS a dumbbell movement, and a dumbbell movement offers no
+     swaps of its own — so the options are still the original's. Otherwise the second
+     press showed only the way back, and somebody who found the dumbbells gone too had
+     nowhere left to go. */
+  const from = en.swapFrom || en.name;
+  const opts = swapOptionsFor(from).filter(x=> swapSquash(x.name) !== swapSquash(en.name));
+  /* The way back to what the plan actually asked for goes first: "the machine freed up"
+     is at least as common as the machine being busy. */
+  if(en.swapFrom){
+    const orig = exSlotFor(en.swapFrom);
+    const lib = orig ? (EX_LIBRARY[orig.key]||[]).find(x=> swapSquash(x.name) === swapSquash(en.swapFrom)) : null;
+    opts.unshift({name: en.swapFrom, gear: (orig&&orig.gear)||"", cue: (lib&&lib.cue)||"", back: true});
+  }
+  if(!opts.length){ toast("No alternative for this one"); return; }
+  const filled = en.sets.filter(st=> st.done || st.weight !== "" || st.reps !== "").length;
+  const rows = opts.map((o, i)=>`
+    <button class="btn ghost swap-opt" data-swappick="${i}" style="text-align:left;width:100%;margin-bottom:8px;padding:12px 14px">
+      <b style="display:block">${o.back?"↩ ":""}${esc(o.name)}</b>
+      <span class="sub" style="display:block;margin-top:3px;text-transform:none;letter-spacing:0">${
+        o.back ? "what your plan asked for" : esc(SWAP_GEAR_WORD[o.gear] || o.gear)
+      }${o.cue?" &middot; "+esc(o.cue):""}</span>
+    </button>`).join("");
+  showModal(`<h3>Swap ${esc(en.name)}</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">${
+      filled
+        ? "The "+filled+" set"+(filled===1?"":"s")+" you've already logged stay on "+esc(en.name)+". The rest move to whatever you pick."
+        : "Just for today. Your plan still asks for "+esc(en.swapFrom || en.name)+" next time."}</div>
+    ${rows}
+    <button class="btn ghost small" id="closeModal" style="margin-top:6px">Never mind</button>`);
+  $("#modal").querySelectorAll("[data-swappick]").forEach(b=> b.onclick = ()=>{
+    const o = opts[parseInt(b.dataset.swappick, 10)];
+    if(!o) return;
+    if(applySwap(ei, o.name, o.cue)){
+      hideModal(); save(); render();
+      toast(o.back ? "Back to "+o.name : "Swapped to "+o.name);
+    }
+  });
 }
 function focusNoteCardHTML(a){
   return `<div class="card">
@@ -11937,6 +12119,12 @@ function bind(){
     harvestActive();
     [S.active.entries[i], S.active.entries[i+1]] = [S.active.entries[i+1], S.active.entries[i]];
     save(); render();
+  });
+  document.querySelectorAll("[data-exswap]").forEach(b=> b.onclick=()=>{
+    /* Harvested HERE and not in the picker: harvestActive is scoped to bind(), and
+       anything typed into the open card has to be banked before the entry is split. */
+    harvestActive();
+    openSwapModal(parseInt(b.dataset.exswap, 10));
   });
   document.querySelectorAll("[data-exskip]").forEach(b=> b.onclick=()=>{
     const i = parseInt(b.dataset.exskip,10);
@@ -14883,6 +15071,7 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
         <span class="icon-btns ex-ctl">
           <button data-addset="${p.ei}" aria-label="Add a set to ${esc(p.en.name)}">+</button>
           <button data-rmset="${p.ei}" aria-label="Remove a set from ${esc(p.en.name)}">−</button>
+          ${canSwapEntry(p.en)?`<button data-exswap="${p.ei}" aria-label="Station busy? Swap ${esc(p.en.name)} for something free">⇄</button>`:""}
           <button data-exskip="${p.ei}" aria-label="Skip ${esc(p.en.name)} today">✕</button>
         </span>
       </div>
