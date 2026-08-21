@@ -2529,7 +2529,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.8";
+const APP_VERSION = "3.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9432,13 +9432,18 @@ function plateStrip(){
       const st = fixed ? (schedStatus[layoutRestSlot[idx]] || {}) : null;
       const date = fixed ? (st.date || null) : (taken[idx] || null);
       const due = fixed && !!st.due;
+      /* A scheduled rest is not written down until the day is over — fillMissedRestDays
+         records it tomorrow, once there is no longer any chance of you training. That is
+         the right moment to WRITE it and the wrong moment to SHOW it: today is your rest
+         day, so it gets its tick today, exactly like a training day you have finished. */
+      const resting = !!date || (due && scheduledRestToday());
       const isToday = date === todayStr() || due;
-      html += `<button class="plate rest${isToday?" cur":""}${date?" done":""}${fixed&&!due?" past":""}"
+      html += `<button class="plate rest${isToday?" cur":""}${resting?" done":""}${fixed&&!due?" past":""}"
         data-rest="${idx}" data-restsched="${fixed ? layoutRestSlot[idx] : -1}"
         aria-label="Rest ${idx+1} of ${REST_CREDITS}, ${wd}${
           date ? ", taken " + date : due ? ", due today" : fixed ? ", scheduled" : ", available"}"
         >R<small>${fixed && !date ? (due ? "today" : wd) : wd}</small>${
-        date?'<span class="pcheck">&#10003;</span>':""}</button>`;
+        resting?'<span class="pcheck">&#10003;</span>':""}</button>`;
       return;
     }
     const i = ROTATION.indexOf(key);
@@ -9764,7 +9769,11 @@ function viewToday(){
         : "Recovery is where the growth happens."}
         Your rotation picks back up tomorrow with <b>${m.name}</b>.</div>
     </div>`;
-    h += `<div class="btn-row"><button class="btn ghost" id="undoRestBtn">Actually, train today</button></div>`;
+    /* No "actually, train today". A rest day the plan scheduled is not a prompt, and
+       offering to undo it on the same screen that announces it turns a decision already
+       made back into a question. The way out is still there and still one tap — under
+       `restMode: "floating"` the rest plate cancels the day it is on — it is just not
+       sitting under the words telling you to rest. */
     return h;
   }
 
@@ -11583,15 +11592,6 @@ function bind(){
       save(); queueSync(); render();
     }
   });
-  const ur = $("#undoRestBtn");
-  if(ur) ur.onclick = ()=>{
-    /* Decided to train after all, so this was never a rest day: unlog it entirely.
-       releaseRestDay writes the tombstone, which is also what tells a SCHEDULED rest to
-       stand down — that one was never stored, so there is nothing to remove, only
-       something to say no to. */
-    releaseRestDay(todayStr(), true);
-    save(); queueSync(); render();
-  };
   const crb = $("#clearRestBtn");
   if(crb) crb.onclick = ()=>{
     // frees a credit but keeps the day in the permanent rest log: you did rest that
