@@ -2547,7 +2547,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "4.0";
+const APP_VERSION = "4.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -2866,9 +2866,22 @@ function restStatus(){
   const inCycle = (S.sessions || [])
     .filter(x=> x && x.startedAt >= S.cycleStart)
     .sort((a,b)=> a.startedAt - b.startedAt);
+  /* A rest DATE belongs to one slot and one slot only. Each slot used to pick the first
+     rest at or after its own anchor independently, and neighbouring anchors are usually
+     only a day or two apart, so a single day off satisfied both of the cycle's rests at
+     once — the second one was marked taken by a day already spent on the first, and it
+     never came round. Claimed dates are struck off as the schedule is walked, which is
+     safe in one pass because restSchedule() sorts by position in the rotation. */
+  const claimed = [];
   let firstOpen = -1;
   const out = sched.map((r, i)=>{
-    const blocked = r.wrapped && !S.lastCycle;   // no cycle has closed, nothing to rest from
+    /* A wrapped rest is the gap BETWEEN cycles, so it is only real if a cycle actually
+       ended. Two ways that is not the case: nothing has closed yet on a new log, or this
+       cycle was started by hand — resetting the cycle, importing a plan, changing split.
+       Starting a cycle deliberately IS the decision to train, and opening it on a rest
+       day nobody earned is what made "reset cycle" appear to do nothing at all: the
+       reset re-armed this rest every time it was pressed. */
+    const blocked = r.wrapped && (!S.lastCycle || !!S.cycleManual);
     const reached = !blocked && done >= r.after;
     /* The day this rest hangs off: the cycle's start for a wrapped one, otherwise the
        day its last preceding training day was actually logged. */
@@ -2876,10 +2889,20 @@ function restStatus(){
       ? S.cycleStart
       : (inCycle[r.after - 1] ? inCycle[r.after - 1].startedAt : null);
     const anchor = anchorMs == null ? null : dayKey(anchorMs);
-    const on = anchor == null ? null : rests.filter(d=> d >= anchor)[0] || null;
+    const on = (blocked || anchor == null)
+      ? null
+      : (rests.filter(d=> d >= anchor && claimed.indexOf(d) < 0)[0] || null);
+    if(on) claimed.push(on);
     const satisfied = !!on;
-    if(reached && !satisfied && firstOpen < 0) firstOpen = i;
-    return {after: r.after, wrapped: r.wrapped, reached, satisfied, date: on};
+    /* A REST IS ONLY DUE AT ITS OWN MOMENT, and this is what made the strip stick. A
+       rest nobody took stayed "due" for ever: due suppresses the current-day highlight
+       on every training plate, so training through a scheduled rest left the cycle
+       pointing at that rest plate permanently, with no way forward and no way back. The
+       rotation moving past its position is the answer — train on the day the rest fell
+       and the rest did not happen, so it is spent rather than owed. */
+    const missed = reached && !satisfied && done > r.after;
+    if(reached && !satisfied && !missed && firstOpen < 0) firstOpen = i;
+    return {after: r.after, wrapped: r.wrapped, reached, satisfied, missed, date: on};
   });
   out.forEach((x, i)=>{ x.due = (i === firstOpen); });
   return out;
@@ -7007,7 +7030,7 @@ function finishOnboarding(){
      it to match an answer they gave two screens ago. Without an import there is nothing
      to write: the starter programme they are already on stays as it is. */
   if(o.imported) adoptImportedPlan(o.imported);
-  S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = [];
+  S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = []; S.cycleManual = true;
   OB = null;
   save(); queueSync(); render();
   toast("You're all set. Your first workout is ready.");
@@ -9190,7 +9213,7 @@ async function aiUsePlan(){
   applySplit();
   invalidateTableOrigin();
   invalidateMultiDay();
-  S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = [];
+  S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = []; S.cycleManual = true;
   const lines = ["Plan imported: " + r.customSplit.name,
                  "Rotation is now " + DAYS.map(dayName).join(" → ")];
   if(r.meta && (r.meta.deloadWeeks||[]).length) lines.push("Deload weeks kept from your document");
@@ -9349,7 +9372,7 @@ function switchSplit(id){
     merged[d] = Array.isArray(oldProgram[d]) && oldProgram[d].length ? oldProgram[d] : (fresh[d] || []);
   });
   S.program = merged;
-  S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = [];
+  S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = []; S.cycleManual = true;
   logPlanChange("programme", null, splitName(),
     ["Schedule changed to " + splitName(), "Rotation is now " + DAYS.map(dayName).join(" → ")],
     {note:"Logged workouts were not affected."});
@@ -9507,7 +9530,18 @@ function plateStrip(){
       if(k === "rest") order.push(trained >= ROTATION.length ? 0 : trained);
       else trained++;
     });
-    return order.map(after=> schedStatus.findIndex(x=> x.after === after));
+    /* One plate per schedule entry. A layout ending in more than one rest — which the
+       default four-day split does, so that four training days plus three rests make a
+       seven-day week — wraps BOTH of them to position 0, and matching purely on
+       position handed both plates the same entry. The second rest then had no plate at
+       all: on the day it came due nothing on the strip was marked current, so the cycle
+       looked stuck with no day to start. Entries are claimed as they are matched. */
+    const taken = [];
+    return order.map(after=>{
+      const j = schedStatus.findIndex((x, k)=> x.after === after && taken.indexOf(k) < 0);
+      if(j > -1) taken.push(j);
+      return j;
+    });
   })();
   /* With a rest due, TODAY is the rest and the training day is merely next. Marking
      both as current asks you to work out which of two highlighted plates you are on. */
@@ -11416,7 +11450,6 @@ let ADV_OPEN = false;
 function viewSync(){
   if(ADV_OPEN) return viewAdvanced();
   const c = S.sync;
-  const restLog = (S.restLog||[]).slice().sort();
   let h = `<div class="hdr"><h1>Setup</h1>${hdrRight(`<span class="date num">v${APP_VERSION}</span>`)}</div>
   <div class="card">
     <h3>Account</h3>
@@ -11522,35 +11555,27 @@ function viewSync(){
     </div>`:""}
   </div>`;
 
+  /* THE REST DAY CARD IS GONE, deliberately. It offered three things and none of them
+     was a decision worth putting to somebody: where the rests fall (the plan already
+     says, and an import reads it), and a hand-editable list of rest dates (the app fills
+     those in itself, the morning after a day nobody trained). A setting that only ever
+     restates what the app already worked out is a way to get the two out of step. Rests
+     are scheduled, recorded and ticked without being asked about.
+
+     `restMode` itself still exists and is still honoured — an import sets it to
+     "floating" when the document says the rest days are the lifter's to place. It is
+     just no longer a switch on this screen. */
   h += `  <div class="card">
-    <h3>Rest days</h3>
-    <div class="sub" style="margin:4px 0 10px">Your split gives you
-      <b>${REST_CREDITS} a cycle</b>. This setting is about <b>when</b> they fall.</div>
-    <div class="seg">
-      <button class="${!restsFloat()?"on":""}" data-restmode="scheduled">Where my plan puts them</button>
-      <button class="${restsFloat()?"on":""}" data-restmode="floating">When I choose</button>
-    </div>
-    <div class="sub" style="margin:10px 0 16px">${restsFloat()
-      ? "Rests are credits. Tap a rest plate on Today to spend one, whenever you want it."
-      : "Rests sit at fixed points in the rotation \u2014 " +
-        (restSchedule().map(r=> r.after === 0 ? "one between cycles"
-          : "one after " + r.after + " training day" + (r.after===1?"":"s")).join(", ") || "none") +
-        ". The day comes round on its own, and you can still train through it."}</div>
-    <div class="sub" style="margin:16px 0 8px">And whether the <b>workouts</b> have to be
+    <h3>Workout order</h3>
+    <div class="sub" style="margin:4px 0 10px">Whether the <b>workouts</b> have to be
       done in the order your plan writes them.</div>
     <div class="seg">
       <button class="${!daysFree()?"on":""}" data-dayorder="fixed">My plan's order</button>
       <button class="${daysFree()?"on":""}" data-dayorder="any">Any order</button>
     </div>
-    <div class="sub" style="margin:10px 0 16px">${daysFree()
+    <div class="sub" style="margin:10px 0 0">${daysFree()
       ? "Tap any day the cycle still has left. Days it has already spent stay closed."
       : "Only the day the rotation is on can be started. Skipping ahead is how the day at the far end never gets trained."}</div>
-    <div class="sub" style="margin:4px 0 10px">A past day with no session logged is recorded as a rest day for you — the ones marked <b>auto</b> below. Add or remove any of them; a day you remove stays removed.</div>
-    ${restLog.length ? `<div class="rl-list">${restLog.map(d=>`<span class="rl-chip${isAutoRest(d)?" auto":""}">${fmtDate(d)}${isAutoRest(d)?`<i class="rl-auto">auto</i>`:""}<button data-rmrest="${d}" aria-label="Remove">✕</button></span>`).join("")}</div>` : `<div class="sub" style="margin-bottom:8px">None logged yet.</div>`}
-    <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
-      <input type="date" class="timein" id="restDateIn" aria-label="Rest day date" value="${todayStr()}" style="flex:1;min-height:44px;padding:11px 12px;font-size:15px">
-      <button class="btn small" id="addRestBtn" style="width:auto;padding:11px 20px">Add</button>
-    </div>
   </div>
   <div class="card">
     <h3>Backup &amp; transfer</h3>
@@ -11652,6 +11677,15 @@ function bind(){
       S.cycleStart = Date.now();
       S.cycleDone = [];
       S.restDays = [];
+      /* Back to the top of the rotation, for the same reason recomputeCycle() does it:
+         a fresh cycle that opens halfway along has everything before it looking spent,
+         and the strip will not move backwards to let you at it. */
+      S.pointer = 0;
+      S.override = null;
+      /* Started by hand, so the between-cycles rest has already been had — see the note
+         in restStatus(). Without this the reset lands straight back on that rest day and
+         pressing it again just re-arms it. */
+      S.cycleManual = true;
       save(); queueSync(); render();
     }
   };
@@ -12016,20 +12050,6 @@ function bind(){
   const docB = $("#docBtn");
   if(docB) docB.onclick = downloadDoc;
 
-  const addRest = $("#addRestBtn");
-  if(addRest) addRest.onclick = ()=>{
-    const d = $("#restDateIn").value;
-    if(!d){ toast("Pick a date first"); return; }
-    if(!S.restLog.includes(d)){ S.restLog.push(d); S.restLog.sort(); save(); queueSync(); render(); toast("Rest day logged"); }
-    else toast("That day's already logged");
-  };
-  document.querySelectorAll("[data-rmrest]").forEach(b=> b.onclick=()=>{
-    const d = b.dataset.rmrest;
-    if(!confirm("Remove rest day "+fmtDate(d)+"?")) return;
-    releaseRestDay(d, true);   // tombstoned, so a sync cannot resurrect it
-    save(); queueSync(); render();
-  });
-
   document.querySelectorAll(".sess").forEach(c=>{
     c.onclick = e=>{
       const d = e.target.dataset || {};
@@ -12112,11 +12132,6 @@ function bind(){
     trainPrefs().dayOrder = b.dataset.dayorder;
     save(); queueSync(); render();
     toast(daysFree() ? "Workouts can be done in any order" : "Workouts follow your plan's order");
-  });
-  document.querySelectorAll("[data-restmode]").forEach(b=> b.onclick=()=>{
-    trainPrefs().restMode = b.dataset.restmode;
-    save(); queueSync(); render();
-    toast(restsFloat() ? "Rest days are yours to place" : "Rest days follow your plan");
   });
   document.querySelectorAll("[data-askwhy]").forEach(b=> b.onclick=()=>{
     S.askWhy = b.dataset.askwhy === "on";
@@ -12411,6 +12426,8 @@ function recomputeCycle(announce){
     S.cycleStart = Date.now();
     S.cycleDone = [];
     S.restDays = [];
+    // rolled over on its own, so the rest between cycles is genuinely owed
+    S.cycleManual = false;
     /* Back to the top of the rotation. The pointer used to be left wherever the last
        session put it, so the cycle that had just closed on Legs B opened the new one on
        Legs B again — the rotation's own wrap-around was the one place it did not run in
@@ -15268,7 +15285,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "restDays","restLog","restDeleted","restAuto","lastCycle","lastReview","checkins",
+  "cycleManual","restDays","restLog","restDeleted","restAuto","lastCycle","lastReview","checkins",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
