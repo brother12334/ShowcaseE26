@@ -47,6 +47,12 @@ const ALLOWED_ORIGINS = [
 ];
 
 const MAX_BODY = 4 * 1024 * 1024;      // a very long training history is ~1 MB of JSON
+/* Account creation is the one route that makes something out of nothing, so it is the
+   one worth abusing: a loop against it fills the namespace and burns the free tier.
+   Capped per client address per hour. Deliberately coarse — KV is eventually consistent
+   and this is a damper, not a quota — and deliberately not applied to the authenticated
+   routes, where the credential is already the limit. */
+const NEW_ACCOUNTS_PER_HOUR = 20;
 const ID_RE = /^E26-[0-9A-Z]{4}-[0-9A-Z]{4}$/;
 const KEY_RE = /^[a-f0-9]{32,64}$/;
 const ID_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -116,16 +122,34 @@ export default {
     const origin = request.headers.get("Origin") || "";
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors(origin) });
     if (!ALLOWED_ORIGINS.length) return json({ error: "not configured" }, 500, origin);
-    if (origin && !ALLOWED_ORIGINS.includes(origin)) return json({ error: "forbidden" }, 403, origin);
+    /* A MISSING Origin USED TO PASS, and that was the hole. The check was written as
+       "if you claim an origin, it must be one of mine", which is exactly backwards for a
+       service whose only legitimate caller is a browser page: a browser always sends
+       Origin on a cross-origin request, so the only callers with no Origin at all are
+       scripts. POST /account needs no credential by definition, so that combination was
+       an open account factory. Now the header is required, like the plan-reader proxy
+       next door has always required it. Testing by hand means passing -H 'Origin: ...',
+       which is what proxy/README.md already tells you to do. */
+    if (!ALLOWED_ORIGINS.includes(origin)) return json({ error: "forbidden" }, 403, origin);
     if (!env || !env.E26_ACCOUNTS) return json({ error: "storage not bound" }, 500, origin);
 
     const url = new URL(request.url);
+    /* Exact, not endsWith. "/x/account" matched the create route under the old test and
+       would have kept matching anything somebody appended a known suffix to. */
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
     /* CREATE. The only route that mints anything. The id and key are generated HERE,
        never accepted from the caller, so a client cannot claim an id it likes the look
        of or pick a weak key. The key is returned exactly once, in this response. */
-    if (path.endsWith("/account") && request.method === "POST") {
+    if (path === "/account" && request.method === "POST") {
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      const bucket = "rate:new:" + ip + ":" + Math.floor(Date.now() / 3600000);
+      const seen = Number(await env.E26_ACCOUNTS.get(bucket)) || 0;
+      if (seen >= NEW_ACCOUNTS_PER_HOUR) {
+        return json({ error: "too many accounts created, try again later" }, 429, origin);
+      }
+      // expirationTtl so the counters clean themselves up rather than accumulating
+      await env.E26_ACCOUNTS.put(bucket, String(seen + 1), { expirationTtl: 7200 });
       let body = {};
       try { body = await request.json(); } catch (e) {}
       const name = String(body.name || "").replace(/\s+/g, " ").trim().slice(0, 32);
@@ -141,7 +165,7 @@ export default {
     /* VERIFY. Used when signing in on a second device. Answers 401 for a bad pair and
        says nothing about which half was wrong — "no such id" and "wrong key" are the
        same answer, so this cannot be used to test whether an id exists. */
-    if (path.endsWith("/session") && request.method === "POST") {
+    if (path === "/session" && request.method === "POST") {
       let body = {};
       try { body = await request.json(); } catch (e) {}
       const id = String(body.id || "").trim().toUpperCase();
@@ -159,7 +183,7 @@ export default {
        ID on its own must not be able to do anything at all, least of all this. Removes
        the account record and its blob; there is no soft-delete and nothing to restore
        from, which is what the app tells the person before it calls this. */
-    if (path.endsWith("/account") && request.method === "DELETE") {
+    if (path === "/account" && request.method === "DELETE") {
       const who = await auth(request, env);
       if (!who) return json({ error: "unauthorized" }, 401, origin);
       await env.E26_ACCOUNTS.delete("data:" + who.id);
@@ -168,7 +192,7 @@ export default {
     }
 
     /* THE DATA. One blob per account, addressed by the credential and nothing else. */
-    if (path.endsWith("/data")) {
+    if (path === "/data") {
       const who = await auth(request, env);
       if (!who) return json({ error: "unauthorized" }, 401, origin);
 

@@ -145,7 +145,7 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--bg);
 }
 .cycle-row{display:flex;justify-content:space-between;align-items:center;margin:26px 2px 0;color:var(--faint);font-size:12px}
-.cycle-row button{background:none;border:none;color:var(--faint);font:11px var(--mono);text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;padding:4px}
+.cycle-row button{background:none;border:none;color:var(--faint);font:11px var(--mono);text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;padding:6px 5px;min-height:24px}
 .feel-row{display:flex;gap:9px;margin-top:8px}
 .feel-btn{
   width:52px;height:52px;font-size:27px;border-radius:12px;cursor:pointer;
@@ -161,7 +161,11 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   background:var(--card2);color:var(--text);font-family:var(--mono);font-size:16px;text-align:center;appearance:none;
 }
 .rest-note{margin:2px 0 12px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card2);font-size:13px;color:var(--dim);text-align:center}
-.linklike{background:none;border:none;color:var(--dim);text-decoration:underline;cursor:pointer;font-size:13px;padding:0}
+/* padding, not font-size: these read as inline links and should keep doing so, but a
+   14px-tall tap target is under any reasonable minimum. inline-block is what lets the
+   padding actually enlarge the hit area on an inline element. */
+.linklike{background:none;border:none;color:var(--dim);text-decoration:underline;cursor:pointer;
+  font-size:13px;padding:5px 2px;display:inline-block;min-height:24px}
 .restore-card{border:1px solid var(--acc-line);background:linear-gradient(180deg,var(--acc-soft),transparent)}
 .restore-card h3{color:var(--acc)}
 .seg{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
@@ -1276,8 +1280,17 @@ nav button:active{transform:scale(.94)}
 .rpe-help,.term{cursor:help;text-decoration:underline dotted;text-underline-offset:3px;text-decoration-thickness:1px}
 .term{color:inherit;font:inherit;position:relative}
 .term:active{color:var(--acc)}
+/* display:none UNTIL IT IS WANTED, not merely opacity:0.
+
+   An absolutely positioned pseudo-element still has a box, and that box still counts
+   towards the scrollable overflow of its ancestors even at zero opacity. This tooltip is
+   up to 72vw wide and centred on the word, so a term near the right edge pushed the
+   whole PAGE sideways — 38px of horizontal scroll on the Body tab at 320px, on a
+   tooltip nobody could see. With no box there is nothing to overflow, and the two rules
+   below turn it into one only when it is actually being shown. The fade is lost in
+   exchange, which is a fair trade for a page that does not scroll sideways. */
 .term[data-tip]::after{
-  content:attr(data-tip);
+  content:attr(data-tip);display:none;
   position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%) translateY(4px);
   width:max-content;max-width:min(270px,72vw);
   background:var(--card2);color:var(--text);border:1px solid var(--line);
@@ -1288,16 +1301,16 @@ nav button:active{transform:scale(.94)}
   opacity:0;pointer-events:none;transition:opacity .16s, transform .16s;z-index:70;
 }
 .term[data-tip]::before{
-  content:"";position:absolute;left:50%;bottom:calc(100% + 3px);
+  content:"";display:none;position:absolute;left:50%;bottom:calc(100% + 3px);
   border:5px solid transparent;border-top-color:var(--line);
   transform:translateX(-50%);opacity:0;transition:opacity .16s;z-index:71;
 }
 @media (hover:hover){
-  .term[data-tip]:hover::after{opacity:1;transform:translateX(-50%) translateY(0)}
-  .term[data-tip]:hover::before{opacity:1}
+  .term[data-tip]:hover::after{display:block;opacity:1;transform:translateX(-50%) translateY(0)}
+  .term[data-tip]:hover::before{display:block;opacity:1}
 }
-.term[data-tip]:focus-visible::after{opacity:1;transform:translateX(-50%) translateY(0)}
-.term[data-tip]:focus-visible::before{opacity:1}
+.term[data-tip]:focus-visible::after{display:block;opacity:1;transform:translateX(-50%) translateY(0)}
+.term[data-tip]:focus-visible::before{display:block;opacity:1}
 
 /* toast */
 #toast{
@@ -2068,6 +2081,11 @@ body.cele-open{overflow:hidden}
   text-transform:uppercase;color:var(--text);
 }
 .bm-lead-v{display:flex;align-items:flex-start;gap:10px;margin-top:9px;font-size:15.5px;line-height:1.45;color:var(--dim)}
+/* A flex item will not shrink below the width of its longest unbreakable run unless it
+   is told it may, and this row carries muscle and day names that can be long. Without
+   min-width:0 the sentence pushed the card wider than the phone and the whole PAGE
+   scrolled sideways — measured at 320px, the narrowest screen still in use. */
+.bm-lead-v > span{min-width:0;overflow-wrap:anywhere}
 .bm-lead-v b{color:var(--text)}
 .bm-dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;margin-top:5px}
 /* ranked list */
@@ -2529,7 +2547,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "3.9";
+const APP_VERSION = "4.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4232,14 +4250,30 @@ function syncProfileRecord(){
   saveProfiles();
 }
 
+/* The savedAt of the copy THIS tab last read or wrote. Anything else on disk means
+   somebody else wrote in the meantime, and "somebody else" is almost always the same
+   person with the app open in a second tab or beside the installed PWA.
+
+   DECLARED HERE, ABOVE load(), and not beside persist() where it is used. load() runs on
+   the very next line and writes to it; a `let` further down the file is in its temporal
+   dead zone at that moment, and reading or writing one there does not give undefined, it
+   THROWS — taking the entire script down before a single screen renders. Same trap the
+   auto-rest backfill and the change log both carry a note about. */
+let DISK_STAMP = 0;
 let S = load();
 applySplit();     // DAYS / ROTATION / CYCLE_LAYOUT / REST_CREDITS, from the chosen split
 migrate();
 function load(){
   try{
     const raw = localStorage.getItem(dataKey());
-    if(raw){ return JSON.parse(raw); }
+    if(raw){
+      const d = JSON.parse(raw);
+      // remember what we read, so persist() can tell another tab's write from our own
+      DISK_STAMP = Number(d && d.savedAt) || 0;
+      return d;
+    }
   }catch(e){}
+  DISK_STAMP = 0;
   return defaultState();
 }
 /* Split out of load() so a RESTORE can get at it. "Replace everything with this file"
@@ -4491,8 +4525,72 @@ function inferCycleStart(refNow){
   const d = new Date(); d.setHours(0,0,0,0);
   return d.getTime();
 }
+/* WHY WRITING IS NOT JUST setItem.
+
+   TWO TABS USED TO EAT EACH OTHER. Every save serialised this tab's whole in-memory
+   state over the key. Log a workout in tab B, then let tab A save anything at all — a
+   check-in, a rest day, a plan edit — and tab A's older copy of `sessions` replaced tab
+   B's newer one. The workout was gone, with no error and nothing to recover from; a
+   reload just loaded the surviving copy. That is the silent data loss this whole file
+   is meant to prevent.
+
+   So a write is now read-merge-write. It reuses the same merge the gist sync has always
+   used between devices, because a second tab IS another device as far as this state is
+   concerned: sessions union by id and honour tombstones, the append-only logs union,
+   check-ins merge, and the plan is taken from whichever copy claims the newer edit.
+
+   QUOTA IS HANDLED RATHER THAN THROWN. setItem throws once the origin is full, and it
+   was throwing out of save(), which is called from the middle of finishWorkout — so a
+   full disk lost the session AND broke the screen. It cannot make room safely (every key
+   here is somebody's training), so it reports honestly instead of pretending. */
+function mergeDiskInto(disk){
+  if(!disk || typeof disk !== "object") return;
+  const tomb = new Set([...(S.deleted||[]), ...(disk.deleted||[])]);
+  if(Array.isArray(disk.sessions)) S.sessions = mergeSessions(S.sessions||[], disk.sessions, tomb);
+  S.deleted = [...tomb];
+  ["restLog","restDays","restDeleted","restAuto"].forEach(k=>{
+    if(Array.isArray(disk[k])) S[k] = [...new Set([...(S[k]||[]), ...disk[k]])].sort();
+  });
+  if(Array.isArray(S.restDeleted) && S.restDeleted.length){
+    S.restDays = (S.restDays||[]).filter(d=> S.restDeleted.indexOf(d) < 0);
+    S.restLog  = (S.restLog||[]).filter(d=> S.restDeleted.indexOf(d) < 0);
+  }
+  if(Array.isArray(disk.planLog)) S.planLog = mergePlanLog(S.planLog, disk.planLog);
+  if(disk.checkins && typeof disk.checkins === "object") S.checkins = Object.assign({}, disk.checkins, S.checkins||{});
+  if(disk.exAliases && typeof disk.exAliases === "object") S.exAliases = Object.assign({}, disk.exAliases, S.exAliases||{});
+  if(disk.stalls && typeof disk.stalls === "object") S.stalls = mergeStalls(S.stalls, disk.stalls);
+  /* The PLAN is one document, not a set, so it cannot be unioned — the newer edit wins.
+     An in-progress workout is never taken from disk: it belongs to the tab logging it. */
+  if((Number(disk.savedAt)||0) > (Number(S.savedAt)||0) && disk.program && typeof disk.program === "object"){
+    S.program = disk.program;
+    if(disk.customSplit !== undefined) S.customSplit = disk.customSplit;
+    if(disk.splitId !== undefined) S.splitId = disk.splitId;
+    if(disk.prefs && typeof disk.prefs === "object") S.prefs = Object.assign({}, S.prefs||{}, disk.prefs);
+  }
+}
 function persist(){
-  localStorage.setItem(dataKey(), JSON.stringify(S));
+  const key = dataKey();
+  try{
+    const raw = localStorage.getItem(key);
+    if(raw){
+      const disk = JSON.parse(raw);
+      const theirs = Number(disk && disk.savedAt) || 0;
+      if(theirs && theirs !== DISK_STAMP) mergeDiskInto(disk);
+    }
+  }catch(e){ /* unreadable disk copy: better to write ours than to refuse to save */ }
+  try{
+    localStorage.setItem(key, JSON.stringify(S));
+    DISK_STAMP = Number(S.savedAt) || 0;
+  }catch(err){
+    /* Almost always QuotaExceededError. Say so once, plainly, rather than throwing out
+       of whatever was mid-flight. */
+    if(!persist._warned){
+      persist._warned = true;
+      try{ toast("Storage is full — export your data from Settings"); }catch(e){}
+    }
+    return false;
+  }
+  return true;
 }
 function save(){
   // marks a real user-driven change: advance savedAt so this device wins the merge
@@ -8448,7 +8546,7 @@ function aiQuestionHTML(){
   if(q.type === "number"){
     const cur = aiQNum(val, q.def);
     h += `<div class="ai-numwrap">
-      <input class="ai-num" id="aiNum" inputmode="decimal" value="${cur == null ? "" : cur}" placeholder="${q.def}">
+      <input class="ai-num" id="aiNum" inputmode="decimal" value="${esc(cur == null ? "" : cur)}" placeholder="${esc(q.def)}">
       <span class="ai-numunit">${esc(q.unit||"")}</span>
     </div>
     <div class="ai-picks">${(q.picks||[]).map(p=>
@@ -9184,7 +9282,7 @@ function trainPrefsCardHTML(){
     ${seg("data-prefbar", p.barMode, [
       {v:"total", t:"Bar + plates"}, {v:"plates", t:"Plates only"}])}
     ${p.barMode === "total" ? `<div class="field" style="margin:10px 0 0"><label>Your bar weighs</label>
-      <input id="prefBarW" inputmode="decimal" value="${p.barWeight == null ? "" : p.barWeight}"
+      <input id="prefBarW" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
         placeholder="e.g. 45 — leave blank if you'd rather not say"></div>` : ""}
   </div>`;
   return h;
@@ -9461,8 +9559,8 @@ function plateStrip(){
        "I pressed it and the app ignored me" is indistinguishable from a bug. */
     html += `<button class="${cls}" data-slot="${i}" style="background:${m.color}"${
       past||locked?' aria-disabled="true"':""}
-      aria-label="${m.name}, ${wd}${done?", done":past?", already passed this cycle"
-        :locked?", not yet — the rotation is on "+dayName(ROTATION[cur]):""}">${m.short}<small>${wd}</small>${
+      aria-label="${esc(m.name)}, ${wd}${done?", done":past?", already passed this cycle"
+        :locked?", not yet — the rotation is on "+esc(dayName(ROTATION[cur])):""}">${esc(m.short)}<small>${wd}</small>${
       done?'<span class="pcheck">&#10003;</span>':""}</button>`;
   });
   html += "</div>";
@@ -9670,9 +9768,9 @@ function checkinCard(){
   return `<div class="card">
     <div class="ex-head" style="margin-bottom:8px"><b style="font-family:var(--disp);font-size:17px;text-transform:uppercase;letter-spacing:.04em">Daily check-in</b><span class="sub num">${logged?"✓ logged":"optional · 5 seconds"}</span></div>
     <div class="ci-row">
-      <div class="ci-field"><label>Weight (lb)</label><input id="ciW" inputmode="decimal" value="${ci.weight??""}" placeholder=" "></div>
-      <div class="ci-field"><label>Sleep (hrs)</label><input id="ciS" inputmode="decimal" value="${ci.sleep??""}" placeholder=" "></div>
-      <div class="ci-field"><label>Energy</label><select id="ciE"><option value=""> </option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option ${String(ci.energy)===String(n)?"selected":""}>${n}</option>`).join("")}</select></div>
+      <div class="ci-field"><label>Weight (lb)</label><input id="ciW" inputmode="decimal" value="${esc(ci.weight??"")}" placeholder=" "></div>
+      <div class="ci-field"><label>Sleep (hrs)</label><input id="ciS" inputmode="decimal" value="${esc(ci.sleep??"")}" placeholder=" "></div>
+      <div class="ci-field"><label>Energy</label><select id="ciE" aria-label="Energy level out of 10"><option value=""> </option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option ${String(ci.energy)===String(n)?"selected":""}>${n}</option>`).join("")}</select></div>
     </div>
   </div>`;
 }
@@ -9767,7 +9865,7 @@ function viewToday(){
       <div class="sub" style="margin-top:8px">${sched
         ? `Your plan puts a rest here, after ${S.cycleDone.length} training day${S.cycleDone.length===1?"":"s"}.`
         : "Recovery is where the growth happens."}
-        Your rotation picks back up tomorrow with <b>${m.name}</b>.</div>
+        Your rotation picks back up tomorrow with <b>${esc(m.name)}</b>.</div>
     </div>`;
     /* No "actually, train today". A rest day the plan scheduled is not a prompt, and
        offering to undo it on the same screen that announces it turns a decision already
@@ -9789,7 +9887,7 @@ function viewToday(){
   h += `<div class="card">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span class="dot" style="background:${m.color};width:17px;height:17px"></span>
-      <h3 style="font-size:26px">${m.name} day</h3>
+      <h3 style="font-size:26px">${esc(m.name)} day</h3>
     </div>
     <div class="sub">${daysFree()
       ? "Next up in your rotation. Your plan lets the days be done in any order, so you can tap any day the cycle still has left — just not one it has already spent."
@@ -9833,7 +9931,7 @@ function viewToday(){
   });
   h += `</div>`;
 
-  h += `<button class="btn" id="startBtn">Start ${m.name} workout</button>`;
+  h += `<button class="btn" id="startBtn">Start ${esc(m.name)} workout</button>`;
   /* No "do a different workout" button. The rotation is an order, and an always-there
      escape hatch turns it into a menu: the day you skip is the day that stops getting
      trained. If you genuinely need to jump, tapping a plate above still moves the
@@ -9874,7 +9972,7 @@ function viewActiveSession(){
   let h = `<div class="card">
     <div style="display:flex;align-items:center;gap:10px">
       <span class="dot" style="background:${m.color};width:17px;height:17px"></span>
-      <h3 style="font-size:24px">${m.name}, in progress</h3>
+      <h3 style="font-size:24px">${esc(m.name)}, in progress</h3>
     </div>
     <div class="sub">Started ${new Date(a.startedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}. Fill sets as you go, tapping ✓ on an empty row copies last time's numbers. Tap <span class="rpe-help">RPE</span> anywhere to see what it means.</div>
   </div>`;
@@ -10149,7 +10247,7 @@ function rpeTargetChipHTML(entry, si, rx){
 }
 function rpeOptions(v){
   const opts = ["","6","6.5","7","7.5","8","8.5","9","9.5","10"];
-  return opts.map(o=>`<option value="${o}" ${String(v??"")===o?"selected":""}>${o===""?"RPE":o}</option>`).join("");
+  return opts.map(o=>`<option value="${esc(o)}" ${String(v??"")===o?"selected":""}>${o===""?"RPE":o}</option>`).join("");
 }
 
 /* ---------- focus mode ---------- */
@@ -11152,7 +11250,7 @@ function viewHistory(){
     h += `<div class="card sess" data-sess="${s.id}">
       <div class="row1">
         <div style="display:flex;align-items:center;gap:9px">
-          <span class="dot" style="background:${m.color}"></span><b>${m.name}</b>
+          <span class="dot" style="background:${m.color}"></span><b>${esc(m.name)}</b>
         </div>
         <span style="display:flex;align-items:center;gap:8px">
           ${q?`<span class="sc-badge" style="color:${qc};background:${qc}22">${q.grade} · ${Math.round(q.pct*100)}%</span>`:""}
@@ -11191,7 +11289,7 @@ function hasAltExercises(){
 }
 function viewProgram(){
   let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>
-  <div class="sub" style="margin:-8px 2px 14px">Your rotation: ${ROTATION.map(w=>dayName(w)).join(" → ")}.${
+  <div class="sub" style="margin:-8px 2px 14px">Your rotation: ${esc(ROTATION.map(w=>dayName(w)).join(" → "))}.${
     hasAltExercises() ? " Exercises marked ⇄ alternate automatically every other session of that day." : ""
   } Targets show <span class="rpe-help">RPE</span>, tap to see what it means.</div>
   <div class="btn-row" style="margin-bottom:10px">
@@ -11209,7 +11307,7 @@ function viewProgram(){
     const m = dayMeta(wid);
     h += `<div class="card">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px">
-        <span class="dot" style="background:${m.color}"></span><h3>${m.name}</h3>
+        <span class="dot" style="background:${m.color}"></span><h3>${esc(m.name)}</h3>
         <button class="linklike" data-renameday="${wid}" style="margin-left:auto;font-size:12.5px">rename</button>
       </div>`;
     // `|| []` rather than a bare index: a day key can legitimately be missing for a
@@ -11367,7 +11465,7 @@ function viewSync(){
 
     <div class="field" style="margin-bottom:6px"><label>Wake time, only if you have a fixed one</label>
       <div style="display:flex;gap:8px;align-items:stretch">
-        <input type="time" class="timein" id="wakeIn" value="${esc(S.wakeTime||"")}" style="flex:1">
+        <input type="time" class="timein" id="wakeIn" aria-label="Wake time" value="${esc(S.wakeTime||"")}" style="flex:1">
         ${S.wakeTime ? `<button class="btn ghost small" id="wakeClear" style="flex-shrink:0;width:auto;padding:0 14px">Clear</button>` : ""}
       </div></div>
     <div class="sub" style="margin:0 0 10px;font-size:12.5px;color:var(--faint)">
@@ -11450,7 +11548,7 @@ function viewSync(){
     <div class="sub" style="margin:4px 0 10px">A past day with no session logged is recorded as a rest day for you — the ones marked <b>auto</b> below. Add or remove any of them; a day you remove stays removed.</div>
     ${restLog.length ? `<div class="rl-list">${restLog.map(d=>`<span class="rl-chip${isAutoRest(d)?" auto":""}">${fmtDate(d)}${isAutoRest(d)?`<i class="rl-auto">auto</i>`:""}<button data-rmrest="${d}" aria-label="Remove">✕</button></span>`).join("")}</div>` : `<div class="sub" style="margin-bottom:8px">None logged yet.</div>`}
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
-      <input type="date" class="timein" id="restDateIn" value="${todayStr()}" style="flex:1;min-height:44px;padding:11px 12px;font-size:15px">
+      <input type="date" class="timein" id="restDateIn" aria-label="Rest day date" value="${todayStr()}" style="flex:1;min-height:44px;padding:11px 12px;font-size:15px">
       <button class="btn small" id="addRestBtn" style="width:auto;padding:11px 20px">Add</button>
     </div>
   </div>
@@ -12142,6 +12240,14 @@ function bind(){
 
 /* ---------- workout flow ---------- */
 function startWorkout(wid){
+  /* The same shape of problem from the other end: tapping "start" repeatedly built a
+     fresh session object each time, discarding the sets already logged into the previous
+     one. A session already in progress IS the session you are in. */
+  if(S.active){
+    if(S.active.workoutId === wid) return;
+    toast("Finish or discard the workout you're in first");
+    return;
+  }
   // lock in this session's starting arm now, so it can't shift if the session count
   // changes later (e.g. resuming from history splices a session out of the list).
   const side = startSideFor(wid);
@@ -12215,7 +12321,14 @@ function resumeSession(id){
   toast("Workout resumed, finish again when you're done");
 }
 function finishWorkout(){
+  /* FINISHING TWICE. The first call ends by setting S.active to null, so a second one
+     dereferenced null and threw an uncaught TypeError — which on a phone reads as the app
+     dying at the exact moment it was told to save. The confirm() dialog usually blocks
+     the second tap and the re-render usually removes the button, but "usually" is not a
+     guard: a slow frame, a double-tap delivered as two events, or any other caller is
+     enough. There is nothing to finish twice, so the second call simply returns. */
   const a = S.active;
+  if(!a) return;
   const logged = a.entries.some(e=>e.sets.some(st=>st.done || st.reps));
   if(!logged){
     if(!confirm("No sets logged yet, finish anyway?")) return;
@@ -12427,15 +12540,15 @@ function openExEditor(wid, idx){
   const e = isNew ? ex("",3,"8-10","",null,"") : S.program[wid][idx];
   const alt = e.alt || ex("",3,"8-10","",null,"");
   const dayLabel = wid==="finisher" ? "session" : widName(wid).toLowerCase()+" day";
-  let h = `<h3>${isNew?"Add":"Edit"} exercise, ${widName(wid)}</h3>
+  let h = `<h3>${isNew?"Add":"Edit"} exercise, ${esc(widName(wid))}</h3>
   <div class="field"><label>Name</label><input id="f_name" value="${esc(e.name)}"></div>
   <div class="field"><label>Sets / rep range</label><div class="duo">
-    <input id="f_sets" inputmode="numeric" value="${e.sets}" placeholder="sets">
+    <input id="f_sets" inputmode="numeric" value="${esc(e.sets)}" placeholder="sets">
     <input id="f_reps" value="${esc(e.reps)}" placeholder="8-10">
   </div></div>
   <div class="field"><label>Target RPE / starting weight (lb)</label><div class="duo">
     <input id="f_rpe" value="${esc(e.rpe)}" placeholder="8-9">
-    <input id="f_weight" inputmode="decimal" value="${e.weight??""}" placeholder="optional">
+    <input id="f_weight" inputmode="decimal" value="${esc(e.weight??"")}" placeholder="optional">
   </div></div>
   <div class="field"><label>Note</label><input id="f_note" value="${esc(e.note)}" placeholder="per dumbbell, tempo, etc."></div>
   <div class="field"><label>Sides</label>
@@ -12450,12 +12563,12 @@ function openExEditor(wid, idx){
   <div id="altFields" style="display:${e.alt?"block":"none"};border-top:1px solid var(--line);padding-top:12px">
     <div class="field"><label>Alternate name</label><input id="g_name" value="${esc(alt.name)}"></div>
     <div class="field"><label>Sets / rep range</label><div class="duo">
-      <input id="g_sets" inputmode="numeric" value="${alt.sets}" placeholder="sets">
+      <input id="g_sets" inputmode="numeric" value="${esc(alt.sets)}" placeholder="sets">
       <input id="g_reps" value="${esc(alt.reps)}" placeholder="5-8">
     </div></div>
     <div class="field"><label>Target RPE / starting weight (lb)</label><div class="duo">
       <input id="g_rpe" value="${esc(alt.rpe)}" placeholder="8-9">
-      <input id="g_weight" inputmode="decimal" value="${alt.weight??""}" placeholder="blank = bodyweight">
+      <input id="g_weight" inputmode="decimal" value="${esc(alt.weight??"")}" placeholder="blank = bodyweight">
     </div></div>
     <div class="field"><label>Note</label><input id="g_note" value="${esc(alt.note)}" placeholder=""></div>
   </div>
@@ -12606,7 +12719,7 @@ function openSessionEditor(id){
   if(s) renderSessEditor(s);
 }
 function renderSessEditor(s){
-  let h = `<h3>Edit session, ${dayName(s.workoutId)}, ${fmtDate(s.date)}</h3>
+  let h = `<h3>Edit session, ${esc(dayName(s.workoutId))}, ${fmtDate(s.date)}</h3>
   <div class="field"><label>Session note</label><input id="sessNoteEdit" value="${esc(s.note||"")}" placeholder="optional"></div>
   <div class="field"><label>How did it feel?</label>
     <div class="feel-row" style="margin-top:2px">${FEELS.map((f,i)=>`<button class="feel-btn ${s.feel===i+1?"on":""}" data-feele="${i+1}">${f}</button>`).join("")}</div>
@@ -12645,8 +12758,8 @@ function renderSessEditor(s){
   const drawSets = ()=>{
     $("#newSets").innerHTML = `<div class="set-labels"><span>set</span><span>lbs</span><span>reps</span><span>rpe</span><span></span></div>` +
       newSets.map((st,i)=>`<div class="set"><span class="idx">${i+1}</span>
-        <input inputmode="decimal" data-ns="${i}" data-f="weight" value="${st.weight}" placeholder="lbs">
-        <input inputmode="numeric" data-ns="${i}" data-f="reps" value="${st.reps}" placeholder="reps">
+        <input inputmode="decimal" data-ns="${i}" data-f="weight" value="${esc(st.weight)}" placeholder="lbs">
+        <input inputmode="numeric" data-ns="${i}" data-f="reps" value="${esc(st.reps)}" placeholder="reps">
         <select data-ns="${i}" data-f="rpe">${rpeOptions(st.rpe)}</select><span></span></div>`).join("");
     document.querySelectorAll("#newSets input, #newSets select").forEach(el=>{
       el.onchange = ()=>{ newSets[el.dataset.ns][el.dataset.f] = el.value; };
@@ -14663,8 +14776,8 @@ function setRowHTML(en, ei, si, last, idxLabel){
     : (last && last[si] && last[si].reps ? last[si].reps : "reps");
   return `${setTagHTML(en, si, rx)}<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}">
     <span class="idx">${idx}${sideChip(en, si)}</span>
-    <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${st.weight??""}" placeholder="${last&&last[si]&&last[si].weight!=null&&last[si].weight!==""?last[si].weight:"lbs"}">
-    <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${st.reps??""}" placeholder="${esc(String(repsPh))}">
+    <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(last&&last[si]&&last[si].weight!=null&&last[si].weight!==""?last[si].weight:"lbs")}">
+    <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}">
     ${rpeOn ? `<span class="rpe-cell">${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-f="rpe">${rpeOptions(st.rpe)}</select></span>` : ""}
     <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-f="done">✓</button>
   </div>${prBadgeRow(st, ei, si)}${techRowHTML(en, ei, si)}`;
@@ -14705,8 +14818,8 @@ function techRowHTML(en, ei, si){
     const rows = Array.isArray(en.sets[si].sub) ? en.sets[si].sub : [];
     h += rows.map((r,ri)=>`<div class="sub-set">
       <span class="sub-i">${esc(T.subLabel)} ${ri+1}</span>
-      <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="weight" value="${r.weight??""}" placeholder="lbs" aria-label="${esc(T.subLabel)} ${ri+1} weight">
-      <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="reps" value="${r.reps??""}" placeholder="reps" aria-label="${esc(T.subLabel)} ${ri+1} reps">
+      <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="weight" value="${esc(r.weight??"")}" placeholder="lbs" aria-label="${esc(T.subLabel)} ${ri+1} weight">
+      <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="reps" value="${esc(r.reps??"")}" placeholder="reps" aria-label="${esc(T.subLabel)} ${ri+1} reps">
       <button data-subdel="${ei}:${si}:${ri}" aria-label="Remove ${esc(T.subLabel)} ${ri+1}">✕</button>
     </div>`).join("");
     h += `<button class="sub-add" data-subadd="${ei}:${si}">+ ${esc(T.subLabel)}</button>`;
@@ -14930,7 +15043,7 @@ function buildWrappedSlides(r){
   });
   // 3, workouts + day breakdown
   const dayChips = Object.keys((cur.perDay)||{}).filter(k=>cur.perDay[k])
-    .map(k=>`<span class="wr-daychip"><span class="dot" style="background:${DH[k]||"#9b99a0"}"></span>${dayName(k)} ×${cur.perDay[k]}</span>`).join("");
+    .map(k=>`<span class="wr-daychip"><span class="dot" style="background:${DH[k]||"#9b99a0"}"></span>${esc(dayName(k))} ×${esc(cur.perDay[k])}</span>`).join("");
   slides.push({
     bg:"linear-gradient(160deg,#0c4a37,#4f7cc9)",
     html:`<div class="wr-kicker">You showed up</div>
@@ -15724,7 +15837,8 @@ function buildReportInner(){
   const first = sessions[0], lastS = sessions[sessions.length-1];
   const counts = {};
   sessions.forEach(s=>{ counts[s.workoutId]=(counts[s.workoutId]||0)+1; });
-  const countLine = joinList(Object.keys(counts).map(k=>counts[k]+" "+dayName(k).toLowerCase()+" "+(counts[k]===1?"session":"sessions")));
+  const countLine = joinList(Object.keys(counts).map(k=>
+    counts[k]+" "+esc(dayName(k).toLowerCase())+" "+(counts[k]===1?"session":"sessions")));
 
   /* Programme edits, placed in the timeline where they happened rather than collected in
      an appendix. Read top to bottom, the report now says "these sessions, then the card
@@ -15777,7 +15891,7 @@ function buildReportInner(){
     }
     if(s.quality) metaBits.push("Quality score: "+s.quality.total+"/"+s.quality.max+" ("+s.quality.grade.replace("−","-")+")");
     if(s.note) metaBits.push("Note: "+esc(s.note));
-    body += `<h2>${longDate(s.date)}, ${m.name} Day</h2>
+    body += `<h2>${longDate(s.date)}, ${esc(m.name)} Day</h2>
     ${metaBits.length?`<p class="meta">${metaBits.join(" · ")}</p>`:""}
     <table><thead><tr><th>Exercise</th><th>Set</th><th>Side</th><th>Weight (lb)</th><th>Reps</th><th>RPE</th><th>Rest</th></tr></thead><tbody>`;
     s.entries.forEach(e=>{
@@ -15898,8 +16012,16 @@ function buildCSV(){
     });
     rows.push(Array(maxSets+1).fill(""));
   });
+  /* FORMULA INJECTION. This file is written to a GitHub repo and then opened in Excel
+     or Sheets, and a cell beginning = + - or @ is not text to a spreadsheet, it is code:
+     an exercise renamed to =HYPERLINK(...) or a note starting with @ becomes a live
+     formula in whatever the person opens it with. Names and notes are free text, so the
+     leading character is neutralised with an apostrophe, which spreadsheets strip on
+     display. Numeric-looking cells are left alone so a negative number stays a number. */
+  const deFormula = v =>
+    (/^[=+\-@\t\r]/.test(v) && !/^-?\d+(\.\d+)?$/.test(v)) ? "'" + v : v;
   return rows.map(r=>r.map(v=>{
-    v = String(v==null?"":v);
+    v = deFormula(String(v==null?"":v));
     return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
   }).join(",")).join("\n");
 }
