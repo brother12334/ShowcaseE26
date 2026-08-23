@@ -186,6 +186,10 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 @keyframes ghostPulse{50%{opacity:.3}}
 .bplate.drop{animation:plateDrop .5s cubic-bezier(.24,1.3,.4,1) both}
 @keyframes plateDrop{0%{transform:translateY(-72px) rotate(-14deg);opacity:0}55%{transform:translateY(5px) rotate(2deg);opacity:1}80%{transform:translateY(-3px)}100%{transform:none;opacity:1}}
+.swap-or{margin:4px 0 10px;font:11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);text-align:center}
+.swap-results{display:flex;flex-direction:column;gap:6px;max-height:230px;overflow-y:auto}
+.swap-hit{text-align:left;width:100%;padding:10px 13px;font-size:14px}
+.swap-note{margin:2px 0 6px;font:12px var(--mono);color:var(--faint);letter-spacing:.03em;overflow-wrap:anywhere}
 .bar-chip{display:flex;align-items:center;gap:8px;width:100%;margin-top:10px;padding:8px 11px;
   background:var(--card2);border:1px solid var(--line);border-radius:9px;color:var(--dim);
   font:12px var(--mono);letter-spacing:.05em;text-transform:uppercase;cursor:pointer;min-height:36px}
@@ -2574,7 +2578,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "4.6";
+const APP_VERSION = "4.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4188,6 +4192,19 @@ const SWAP_PREFERENCE   = ["dumbbell","barbell","bodyweight"];
 // GEAR_LABEL describes a whole gym ("Dumbbells only"), which is the wrong voice for one
 // line under one movement.
 const SWAP_GEAR_WORD = {dumbbell:"dumbbells", barbell:"barbell", bodyweight:"no equipment"};
+/* WHY, and it is asked because the answer changes what the log MEANS. A movement swapped
+   because the gym does not have it is a plan meeting reality; one swapped because it hurt
+   is a signal worth seeing again in three weeks; one swapped because the rack was busy is
+   noise. Read back months later, "did dumbbell press instead of bench" with no reason is
+   a mystery. It is optional — a tap to skip — because an answer nobody wanted to give is
+   worth less than no answer. */
+const SWAP_REASONS = [
+  {code:"nogym", short:"not at this gym",  label:"This gym doesn't have it"},
+  {code:"busy",  short:"station busy",     label:"It was taken"},
+  {code:"pain",  short:"was bothering me", label:"It was bothering me"},
+  {code:"pref",  short:"chose to",         label:"Wanted something else"}
+];
+const SWAP_REASON_BY_CODE = SWAP_REASONS.reduce((o,r)=>{ o[r.code]=r; return o; }, {});
 let _EX_SLOT_IX = null;
 /* THREE KEYS PER MOVEMENT, tried tightest first. canonEx() is the app's real
    canonicaliser and is deliberately left alone — history matching, PR detection and the
@@ -4238,12 +4255,12 @@ function swapOptionsFor(name){
     .slice()
     .sort((a,b)=> SWAP_PREFERENCE.indexOf(a.gear) - SWAP_PREFERENCE.indexOf(b.gear));
 }
-// Is this entry worth offering a swap on at all? Used to decide whether to draw the button.
-function canSwapEntry(en){
-  if(!en) return false;
-  if(en.swapFrom) return true;               // already swapped: at least offer the way back
-  return swapOptionsFor(en.name).length > 0;
-}
+/* EVERY exercise is switchable, not only the ones tied to a station. The station case —
+   somebody is on the pec deck — is the one with a good automatic answer, so it still gets
+   its shortlist. But "this gym doesn't have it" applies to a barbell, a bench, a cable
+   attachment, anything; a plan written for one gym meets another gym on holiday. So the
+   button is always there and the shortlist is a convenience inside it, not the gate. */
+function canSwapEntry(en){ return !!en; }
 /* Do it. Two shapes, and the difference matters because sets already logged were done on
    the ORIGINAL movement and must stay attributed to it.
 
@@ -4255,7 +4272,7 @@ function canSwapEntry(en){
    moves to a new entry under the new name. Recording three dumbbell sets as machine sets
    would quietly corrupt the load history for both movements. A superset leg cannot be
    split without breaking the pair, so that one case says so instead. */
-function applySwap(ei, newName, cue){
+function applySwap(ei, newName, cue, why){
   const a = S.active;
   if(!a) return false;
   const en = a.entries[ei];
@@ -4275,6 +4292,7 @@ function applySwap(ei, newName, cue){
     const moved = Object.assign({}, en, {
       name: newName,
       swapFrom: backToOriginal ? undefined : from,
+      swapWhy: backToOriginal ? undefined : (why || undefined),
       note: cue || undefined,
       /* The prescribed load and the warm-up ramp built off it belong to the movement
          that is no longer being done. A machine's working weight is not a dumbbell's. */
@@ -4288,6 +4306,7 @@ function applySwap(ei, newName, cue){
 
   en.name = newName;
   en.swapFrom = backToOriginal ? undefined : from;
+  en.swapWhy = backToOriginal ? undefined : (why || undefined);
   en.note = cue || undefined;
   en.planWeight = undefined; en.warmups = undefined; en.warm = undefined; en.warmupNote = undefined;
   return true;
@@ -10298,6 +10317,7 @@ function viewActiveSession(){
           </span>
         </span>
       </div>`;
+    h += swapNoteHTML(en);
     h += supersetNoteHTML(supersetInfo(a.entries, ei));
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(ll) h += ll;
@@ -10612,6 +10632,21 @@ function openBarModal(){
     toast(said.join(", "));
   };
 }
+/* The line under a switched exercise: what it replaced, and why if a why was given.
+   Shown on the card and carried into the log, because a swap you cannot see is a swap
+   you will not remember making. */
+function swapLabel(en){
+  if(!en || !en.swapFrom) return "";
+  const w = en.swapWhy;
+  const bits = [];
+  if(w && w.code && SWAP_REASON_BY_CODE[w.code]) bits.push(SWAP_REASON_BY_CODE[w.code].short);
+  if(w && w.text) bits.push(w.text);
+  return "instead of " + en.swapFrom + (bits.length ? " \u2014 " + bits.join(", ") : "");
+}
+function swapNoteHTML(en){
+  const t = swapLabel(en);
+  return t ? `<div class="swap-note">\u21c4 ${esc(t)}</div>` : "";
+}
 function plateLoaderHTML(a){
   const total = a.entries.length;
   const doneMain = a.entries.filter(e=>!e.fin && e.sets.length && e.sets.every(st=>st.done)).length;
@@ -10690,6 +10725,7 @@ function viewFocusSession(){
         canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Station busy? Swap ${esc(en.name)} for something free">⇄</button>`:""
       }<button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
     </div>
+    ${swapNoteHTML(en)}
     <div class="ex-target" style="margin:2px 0 10px">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</div>`;
   h += supersetNoteHTML(supersetInfo(a.entries, ei));
   if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
@@ -10717,13 +10753,20 @@ function viewFocusSession(){
    choice can be made from the card rather than from memory. Drawn as buttons rather than
    a select: this gets tapped mid-set with one hand and a phone that has been on the
    floor. */
+/* THE PICKER. Two steps, because they are two questions: what instead, and why. Asking
+   both on one screen makes the second one feel like a form to get past; asked after the
+   choice is made, it is one tap on a screen that has already done its job.
+
+   Step one offers the shortlist first — same slot, same job, different equipment — then
+   a search over every movement the app knows. Search rather than a long list: this gets
+   used standing in a gym, and scrolling four hundred names one-handed is not a feature. */
 function openSwapModal(ei){
   const a = S.active;
   if(!a) return;
   const en = a.entries[ei];
   if(!en) return;
   /* Once swapped, the entry IS a dumbbell movement, and a dumbbell movement offers no
-     swaps of its own — so the options are still the original's. Otherwise the second
+     shortlist of its own — so the options are still the original's. Otherwise the second
      press showed only the way back, and somebody who found the dumbbells gone too had
      nowhere left to go. */
   const from = en.swapFrom || en.name;
@@ -10735,30 +10778,91 @@ function openSwapModal(ei){
     const lib = orig ? (EX_LIBRARY[orig.key]||[]).find(x=> swapSquash(x.name) === swapSquash(en.swapFrom)) : null;
     opts.unshift({name: en.swapFrom, gear: (orig&&orig.gear)||"", cue: (lib&&lib.cue)||"", back: true});
   }
-  if(!opts.length){ toast("No alternative for this one"); return; }
   const filled = en.sets.filter(st=> st.done || st.weight !== "" || st.reps !== "").length;
   const rows = opts.map((o, i)=>`
     <button class="btn ghost swap-opt" data-swappick="${i}" style="text-align:left;width:100%;margin-bottom:8px;padding:12px 14px">
-      <b style="display:block">${o.back?"↩ ":""}${esc(o.name)}</b>
+      <b style="display:block">${o.back?"\u21a9 ":""}${esc(o.name)}</b>
       <span class="sub" style="display:block;margin-top:3px;text-transform:none;letter-spacing:0">${
         o.back ? "what your plan asked for" : esc(SWAP_GEAR_WORD[o.gear] || o.gear)
       }${o.cue?" &middot; "+esc(o.cue):""}</span>
     </button>`).join("");
-  showModal(`<h3>Swap ${esc(en.name)}</h3>
+  showModal(`<h3>Switch ${esc(en.name)}</h3>
     <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">${
       filled
         ? "The "+filled+" set"+(filled===1?"":"s")+" you've already logged stay on "+esc(en.name)+". The rest move to whatever you pick."
         : "Just for today. Your plan still asks for "+esc(en.swapFrom || en.name)+" next time."}</div>
-    ${rows}
-    <button class="btn ghost small" id="closeModal" style="margin-top:6px">Never mind</button>`);
+    ${rows ? rows + `<div class="swap-or">or pick anything else</div>` : ""}
+    <div class="field" style="margin:0 0 10px">
+      <input id="swapSearch" placeholder="Search every exercise\u2026" autocomplete="off"></div>
+    <div id="swapResults" class="swap-results"></div>
+    <button class="btn ghost small" id="closeModal" style="margin-top:10px">Never mind</button>`);
+
+  const pick = (name, cue)=> askSwapWhy(ei, name, cue, null);
   $("#modal").querySelectorAll("[data-swappick]").forEach(b=> b.onclick = ()=>{
     const o = opts[parseInt(b.dataset.swappick, 10)];
-    if(!o) return;
-    if(applySwap(ei, o.name, o.cue)){
-      hideModal(); save(); render();
-      toast(o.back ? "Back to "+o.name : "Swapped to "+o.name);
-    }
+    if(o) askSwapWhy(ei, o.name, o.cue, o.back ? "back" : null);
   });
+
+  const box = $("#modal").querySelector("#swapResults");
+  const input = $("#modal").querySelector("#swapSearch");
+  const here = swapSquash(en.name);
+  const draw = ()=>{
+    const q = canonEx(input.value.trim());
+    if(q.length < 2){
+      box.innerHTML = `<div class="sub" style="text-transform:none;letter-spacing:0">Type two letters to search, or use a name of your own.</div>`;
+      return;
+    }
+    /* Matches that START with what was typed come first: typing "row" should offer
+       Barbell Row before Cable Reverse Rear Delt Fly, which merely contains it. */
+    const all = aiVocabulary().filter(n=> swapSquash(n) !== here);
+    const starts = [], has = [];
+    all.forEach(n=>{ const c = canonEx(n);
+      if(c.startsWith(q)) starts.push(n); else if(c.indexOf(q) > -1) has.push(n); });
+    const hits = starts.concat(has).slice(0, 12);
+    box.innerHTML = hits.length
+      ? hits.map(n=>`<button class="btn ghost swap-hit" data-swapname="${esc(n)}">${esc(n)}</button>`).join("")
+      : `<button class="btn ghost swap-hit" data-swapraw="1">Use \u201c${esc(input.value.trim())}\u201d as typed</button>`;
+    box.querySelectorAll("[data-swapname]").forEach(b=> b.onclick = ()=> pick(b.dataset.swapname, null));
+    const raw = box.querySelector("[data-swapraw]");
+    if(raw) raw.onclick = ()=> pick(input.value.trim().slice(0, 60), null);
+  };
+  input.oninput = draw;
+  draw();
+}
+/* STEP TWO. Skippable, and the skip is a real button rather than a dismissal, so nobody
+   has to guess whether closing the sheet cancels the switch itself. */
+function askSwapWhy(ei, name, cue, back){
+  const a = S.active;
+  if(!a || !a.entries[ei]) return;
+  const commit = why=>{
+    if(applySwap(ei, name, cue, why)){
+      hideModal(); save(); render();
+      toast(back ? "Back to " + name : "Switched to " + name);
+    } else {
+      hideModal();
+    }
+  };
+  // Going back to what the plan asked for needs no explanation; it IS the explanation.
+  if(back) return commit(null);
+  showModal(`<h3>Why the switch?</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Doing
+      ${esc(name)} instead. This is kept with the session so the log still makes sense months
+      from now \u2014 skip it if you'd rather not.</div>
+    ${SWAP_REASONS.map(r=>`<button class="btn ghost swap-opt" data-swapwhy="${r.code}"
+        style="text-align:left;width:100%;margin-bottom:8px;padding:12px 14px">${esc(r.label)}</button>`).join("")}
+    <div class="field" style="margin:2px 0 10px">
+      <input id="swapWhyNote" placeholder="anything worth remembering (optional)" autocomplete="off"></div>
+    <button class="btn ghost small" id="swapWhySkip">Just switch it</button>`);
+  const noteOf = ()=>{
+    const el = $("#modal").querySelector("#swapWhyNote");
+    return el && el.value.trim() ? el.value.trim().slice(0, 120) : null;
+  };
+  $("#modal").querySelectorAll("[data-swapwhy]").forEach(b=> b.onclick = ()=>
+    commit({code: b.dataset.swapwhy, text: noteOf()}));
+  $("#modal").querySelector("#swapWhySkip").onclick = ()=>{
+    const t = noteOf();
+    commit(t ? {code:null, text:t} : null);
+  };
 }
 function focusNoteCardHTML(a){
   return `<div class="card">
@@ -13335,6 +13439,52 @@ function topE1RM(sets){
    doesn't undo it. Same for a comparison drawn from another rotation day, or a movement
    that ran later in the session, which are context for the advice rather than reasons
    the number shouldn't count.                                                        */
+/* TIME OFF, AND WHAT IT IS FAIR TO EXPECT AFTER IT.
+
+   Coming back from a week away and lifting less than you did before it is not going
+   backwards, it is what detraining looks like — and the grade was reading it as
+   regression, which is both wrong and the most demoralising moment to be wrong at. The
+   first session back is the one somebody most needs to be told "that was fine".
+
+   Missed TRAINING days are the measure, not calendar days: the skip log already
+   separates a day the rotation wanted a session on from a rest the plan scheduled, so
+   three scheduled rests in a row are not a layoff and two missed sessions are. Counted
+   backwards from the day before the session, and it stops at the first day that was not
+   skipped, so it is a run rather than a tally — two missed days a fortnight apart are
+   two ordinary misses, not a break.
+
+   Logs written before skips were recorded have nothing to count, so a long gap between
+   sessions stands in. That needs a wider bar than a missed day does, because a rotation
+   with three rests in it can legitimately leave five days between sessions. */
+const LAYOFF_MIN_SKIPS = 2;      // missed sessions in a row before it counts as a break
+const LAYOFF_MIN_GAP_DAYS = 9;   // fallback for logs with no skip data at all
+function layoffBefore(sess){
+  if(!sess || !sess.date) return null;
+  const dayMs = 86400e3;
+  const at = new Date(sess.date + "T12:00:00").getTime();
+  if(!isFinite(at)) return null;
+  const skips = new Set(S.skipLog || []);
+  let run = 0;
+  for(let i = 1; i <= 60; i++){
+    if(!skips.has(dayKey(at - i*dayMs))) break;
+    run++;
+  }
+  // the previous session, whichever day of the rotation it was
+  let prevAt = 0;
+  (S.sessions || []).forEach(x=>{
+    if(x && x.id !== sess.id && x.startedAt < sess.startedAt && x.startedAt > prevAt) prevAt = x.startedAt;
+  });
+  const gap = prevAt ? Math.round((at - prevAt)/dayMs) : 0;
+  if(run >= LAYOFF_MIN_SKIPS) return {skipped: run, gap: gap};
+  if(!run && gap >= LAYOFF_MIN_GAP_DAYS) return {skipped: 0, gap: gap};
+  return null;
+}
+function layoffPhrase(l){
+  if(!l) return "";
+  return l.skipped
+    ? l.skipped + " session" + (l.skipped === 1 ? "" : "s") + " missed in a row before this one"
+    : l.gap + " days since your previous session";
+}
 function downContext(sess, entry, idx, prior){
   const excuses = [], context = [];
 
@@ -13357,7 +13507,12 @@ function downContext(sess, entry, idx, prior){
       ", so today's sets were aimed at a different target");
   }
 
-  // 3, you said at the time that the set did what it was supposed to
+  // 3, you had been away: detraining is not regression, and is not graded as it
+  const lay = layoffBefore(sess);
+  if(lay) excuses.push("you came back from a break \u2014 " + layoffPhrase(lay) +
+    ", and strength dips over time off without anything having gone wrong");
+
+  // 4, you said at the time that the set did what it was supposed to
   const codes = [...new Set((entry.sets||[]).map(st=>st.why && st.why.code).filter(Boolean))];
   const exempt = codes.filter(c=>REASON_EXEMPT[c] && REASON_BY_CODE[c]);
   if(exempt.length){
@@ -13464,6 +13619,12 @@ function scoreWorkout(sess){
     const earned = 20 * ((up.length + (held.length + excused.length)*0.62)/cmp.length);
     why.push(up.length+" of "+cmp.length+" lifts went up, "+held.length+" held, "+down.length+" went down"+
       (excused.length ? ", and "+excused.length+" came in lower for a reason that isn't going backwards" : "")+".");
+    /* Named explicitly rather than left inside the per-lift excuses, because it applies
+       to the whole session and it is the thing somebody most wants to hear on the day
+       they come back. */
+    const layoff = layoffBefore(sess);
+    if(layoff) why.push("You'd been away \u2014 " + layoffPhrase(layoff) +
+      ". Lifts that came in under where you left them are scored as holding, not as going backwards.");
     if(prs.length) why.push("Personal record"+(prs.length>1?"s":"")+" today: "+
       [...new Set(prs.map(p=>p.name))].join(", ")+".");
     const fmtRow = r=>r.name+" ("+Math.round(r.b)+"→"+Math.round(r.a)+" est. 1RM)";
@@ -16342,7 +16503,8 @@ function buildReportInner(){
       if(!sets.length) return;
       sets.forEach(({st,i}, row)=>{
         const side = e.startSide ? sideForSet(e.startSide, i) : null;
-        body += `<tr>${row===0?`<td rowspan="${sets.length}"><b>${esc(e.name)}</b></td>`:""}
+        body += `<tr>${row===0?`<td rowspan="${sets.length}"><b>${esc(e.name)}</b>${
+          e.swapFrom?`<br><span class="sm">${esc(swapLabel(e))}</span>`:""}</td>`:""}
           <td class="c">${row+1}</td>
           <td class="c">${side ? esc((e.altStyle==="cross" ? side+" on top" : side)) : " "}</td>
           <td class="c">${st.weight!=null&&st.weight!==""?esc(st.weight):"bodyweight"}</td>
@@ -16353,6 +16515,11 @@ function buildReportInner(){
     });
     body += `</tbody></table>`;
     if(vol>0) body += `<p class="meta">Total working volume: ${Math.round(vol).toLocaleString()} lb.</p>`;
+    /* A session read cold, months later, needs to know this one followed a break —
+       otherwise a run of lighter numbers reads as somebody getting worse. */
+    const lay = layoffBefore(s);
+    if(lay) body += `<p class="meta"><b>Returning from a break:</b> ${esc(layoffPhrase(lay))}. Loads immediately
+      after time off are expected to sit under where they were left, and are not counted as regression.</p>`;
     /* Anything flagged at the time. A coach reading this needs to know that a short set
        was a deliberate stop or a tweak, not a failed rep, and that is exactly the
        context a table of numbers loses. */
