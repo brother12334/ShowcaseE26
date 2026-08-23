@@ -286,6 +286,7 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 /* A day the app filled in for you, marked as such. It is a reading of your history, not
    a choice you made, and the two should never look identical. */
 .rl-chip.auto{border-style:dashed}
+.rl-chip.skip-chip{border-style:dashed;color:var(--faint);text-decoration:line-through}
 .rl-auto{font-style:normal;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border:1px solid var(--line);border-radius:5px;padding:1px 4px}
 .ss-badge{display:inline-block;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--bg);background:var(--dim);border-radius:5px;padding:2px 6px;vertical-align:middle;margin-left:5px}
 .ss-card{border-left:3px solid var(--dim)}
@@ -2547,7 +2548,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "4.3";
+const APP_VERSION = "4.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -2874,7 +2875,17 @@ function restStatus(){
      safe in one pass because restSchedule() sorts by position in the rotation. */
   const claimed = [];
   let firstOpen = -1;
-  const out = sched.map((r, i)=>{
+  /* TWO PASSES OVER THE DATES, and the order is the point. A slot the rotation has
+     actually reached gets first refusal on the days you rested; only then do the slots
+     it has not reached take what is left, purely so a rest genuinely taken between
+     cycles keeps its tick after you start training again.
+
+     One pass in schedule order was wrong because the between-cycles slots sit at
+     position 0 and anchor on the cycle's own start, so they claimed the EARLIEST rest
+     days every time — including the day that belonged to the rest the plan had actually
+     reached. That slot then read as unsatisfied, the gap filler kept owing rests, and a
+     six-day absence recorded three rest days where the plan had reached one. */
+  const meta = sched.map(r=>{
     /* A wrapped rest is the gap BETWEEN cycles, so it is only real if a cycle actually
        ended. Two ways that is not the case: nothing has closed yet on a new log, or this
        cycle was started by hand — resetting the cycle, importing a plan, changing split.
@@ -2882,17 +2893,35 @@ function restStatus(){
        day nobody earned is what made "reset cycle" appear to do nothing at all: the
        reset re-armed this rest every time it was pressed. */
     const blocked = r.wrapped && (!S.lastCycle || !!S.cycleManual);
-    const reached = !blocked && done >= r.after;
+    /* A WRAPPED REST IS THE GAP BETWEEN CYCLES, so it is only reachable while the new
+       cycle has not started yet. Testing it as `done >= 0` made it permanently reachable
+       — true on the day the cycle opens and just as true four training days in — and two
+       things fell out of that. The strip could name a between-cycles rest as due in the
+       middle of a cycle, and a long absence spent those rests on days the rotation had
+       sessions on: train twice, vanish for six days, and the gap filler recorded three
+       rest days because three were nominally "reachable", when the plan had reached
+       exactly one of them. Train a single day and the gap between cycles is over. */
+    const reached = !blocked && (r.wrapped ? done === 0 : done >= r.after);
     /* The day this rest hangs off: the cycle's start for a wrapped one, otherwise the
        day its last preceding training day was actually logged. */
     const anchorMs = r.after === 0
       ? S.cycleStart
       : (inCycle[r.after - 1] ? inCycle[r.after - 1].startedAt : null);
     const anchor = anchorMs == null ? null : dayKey(anchorMs);
-    const on = (blocked || anchor == null)
-      ? null
-      : (rests.filter(d=> d >= anchor && claimed.indexOf(d) < 0)[0] || null);
-    if(on) claimed.push(on);
+    return {r: r, blocked: blocked, reached: reached, anchor: anchor};
+  });
+  const claimFor = m=>{
+    if(m.blocked || m.anchor == null) return null;
+    const d = rests.filter(x=> x >= m.anchor && claimed.indexOf(x) < 0)[0] || null;
+    if(d) claimed.push(d);
+    return d;
+  };
+  const dates = new Array(meta.length).fill(null);
+  meta.forEach((m, i)=>{ if(m.reached)  dates[i] = claimFor(m); });
+  meta.forEach((m, i)=>{ if(!m.reached) dates[i] = claimFor(m); });
+  const out = meta.map((m, i)=>{
+    const r = m.r, reached = m.reached;
+    const on = dates[i];
     const satisfied = !!on;
     /* A REST IS ONLY DUE AT ITS OWN MOMENT, and this is what made the strip stick. A
        rest nobody took stayed "due" for ever: due suppresses the current-day highlight
@@ -2948,6 +2977,42 @@ function takeRestDay(date){
    re-adopted it from the remote copy and the rest day came back on the next reload.
    `S.restDeleted` is a tombstone list, exactly like `S.deleted` for sessions: the
    deletion itself is the thing that syncs, so it survives the merge. */
+/* ---------- A SKIPPED DAY IS NOT A REST DAY ----------
+   The gap filler used to call every missed day a rest, and that quietly lied twice over.
+   A rest is a day the plan asked you to take off, and taking it is doing the programme
+   as written. A day the rotation had a PUSH on, that came and went with nothing logged,
+   is a session you did not do — the opposite thing. Recording it as rest spent one of
+   the cycle's rest credits on a day that had never budgeted for one, put a tick on the
+   strip for a day nothing happened, and left the log unable to tell adherence from a
+   plan being followed exactly.
+
+   So the two are separated. Whether a missed day is one or the other is not guesswork:
+   the rotation already says which days it had rests on, and restStatus() already answers
+   "is a rest owed at this point". Owed, and the day fills it. Not owed, and the day was
+   a training day nobody trained — a skip.
+
+   A skip costs no credit, gets no tick and takes no place in the cycle. It is kept
+   because it is true, and because a report of somebody's training that silently omits
+   the sessions they missed is a report about a different person. `S.skipLog` is
+   all-time, like `S.restLog`; nothing needs a per-cycle copy, because a skip is not a
+   thing the cycle is counting. */
+function skipLog(){
+  if(!Array.isArray(S.skipLog)) S.skipLog = [];
+  return S.skipLog;
+}
+function isSkipDay(date){ return skipLog().indexOf(date) > -1; }
+function takeSkipDay(date){
+  const l = skipLog();
+  if(l.indexOf(date) > -1) return false;
+  l.push(date); l.sort();
+  return true;
+}
+/* Is one of the cycle's scheduled rests actually owed right now? Under a floating plan
+   the rests are credits rather than positions, so "owed" is simply "not all spent". */
+function restOwedNow(){
+  if(restsFloat()) return restCreditsLeft() > 0;
+  return restStatus().some(x=> x.reached && !x.satisfied && !x.missed);
+}
 function restTombstones(){
   if(!Array.isArray(S.restDeleted)) S.restDeleted = [];
   return S.restDeleted;
@@ -2963,6 +3028,13 @@ function releaseRestDay(date, alsoUnlog){
     const t = restTombstones();
     if(t.indexOf(date) < 0) t.push(date);
   }
+}
+/* Removing a skipped day means "I did train that day", so it is tombstoned with exactly
+   the same list the rest days use — one answer to "leave this date alone", not two. */
+function releaseSkipDay(date){
+  S.skipLog = skipLog().filter(d=> d !== date);
+  const t = restTombstones();
+  if(t.indexOf(date) < 0) t.push(date);
 }
 /* ---------- REST DAYS YOU DID NOT HAVE TO DECLARE ----------
    A day with no session logged on it was a rest day. That is not an inference, it is
@@ -3038,9 +3110,15 @@ function fillMissedRestDays(now){
     if(d === today) break;                 // the day is not over yet
     if(trained[d]) continue;               // you trained, that is not a rest day
     if(tomb.indexOf(d) > -1) continue;     // you said it was not one, and meant it
-    if(isRestDay(d)) continue;             // already recorded
-    takeRestDay(d);                        // no-op once the split's credits are spent
-    if(auto.indexOf(d) < 0){ auto.push(d); added++; }
+    if(isRestDay(d) || isSkipDay(d)) continue;   // already recorded, as one or the other
+    /* Asked fresh on every iteration, because takeRestDay() below changes the answer:
+       a gap longer than the rests the plan owes fills those rests first, in order, and
+       everything after them is a skipped training day. */
+    if(restOwedNow() && takeRestDay(d)){
+      if(auto.indexOf(d) < 0){ auto.push(d); added++; }
+    } else if(takeSkipDay(d)){
+      added++;
+    }
   }
   if(added){ auto.sort(); }
   return added;
@@ -4577,6 +4655,7 @@ function migrate(){
   if(!S.viewMode) S.viewMode = "regular";
   if(!S.checkins) S.checkins = {};
   if(!Array.isArray(S.restLog)) S.restLog = [];
+  if(!Array.isArray(S.skipLog)) S.skipLog = [];
   if(!Array.isArray(S.deleted)) S.deleted = [];
   if(!S.stalls || typeof S.stalls !== "object") S.stalls = {};
   // which single-limb movements have already had their gap close and retired the rule
@@ -4607,12 +4686,19 @@ function migrate(){
     S.restDays = S.restDays.filter(d=>S.restDeleted.indexOf(d) < 0);
     S.restLog = (S.restLog||[]).filter(d=>S.restDeleted.indexOf(d) < 0);
     S.restAuto = S.restAuto.filter(d=>S.restDeleted.indexOf(d) < 0);
+    S.skipLog = (S.skipLog||[]).filter(d=>S.restDeleted.indexOf(d) < 0);
   }
   /* Every edit to the programme, dated. Nothing recorded the shape of the plan over
      time, so a lift that "went backwards" after a rep range changed looked identical to
      one that went backwards on its own, and the printed report described seven months of
      training as though the card had never moved. Starts empty on an existing install:
      there is no way to recover edits that were never written down. */
+  /* Belt and braces after a merge from an older device: a date recorded as a rest on
+     one and a skip on the other must not be both. Rest wins — it is the entry that
+     carries a credit and a tick, so the ambiguity resolves toward the record something
+     downstream is already counting. */
+  if(skipLog().length && (S.restLog||[]).length)
+    S.skipLog = skipLog().filter(d=> S.restLog.indexOf(d) < 0);
   if(!Array.isArray(S.planLog)) S.planLog = [];
   if(!S.volWindow) S.volWindow = "cycle";   // Body tab accumulates over the cycle by default
   if(S.askWhy === undefined) S.askWhy = true;   // ask what happened when a set collapses
@@ -4703,12 +4789,13 @@ function mergeDiskInto(disk){
   const tomb = new Set([...(S.deleted||[]), ...(disk.deleted||[])]);
   if(Array.isArray(disk.sessions)) S.sessions = mergeSessions(S.sessions||[], disk.sessions, tomb);
   S.deleted = [...tomb];
-  ["restLog","restDays","restDeleted","restAuto"].forEach(k=>{
+  ["restLog","restDays","restDeleted","restAuto","skipLog"].forEach(k=>{
     if(Array.isArray(disk[k])) S[k] = [...new Set([...(S[k]||[]), ...disk[k]])].sort();
   });
   if(Array.isArray(S.restDeleted) && S.restDeleted.length){
     S.restDays = (S.restDays||[]).filter(d=> S.restDeleted.indexOf(d) < 0);
     S.restLog  = (S.restLog||[]).filter(d=> S.restDeleted.indexOf(d) < 0);
+    S.skipLog  = (S.skipLog||[]).filter(d=> S.restDeleted.indexOf(d) < 0);
   }
   if(Array.isArray(disk.planLog)) S.planLog = mergePlanLog(S.planLog, disk.planLog);
   if(disk.checkins && typeof disk.checkins === "object") S.checkins = Object.assign({}, disk.checkins, S.checkins||{});
@@ -7219,6 +7306,7 @@ function adoptImportedPlan(d){
   if(Array.isArray(d.sessions) && d.sessions.length) S.sessions = d.sessions;
   if(d.checkins) S.checkins = d.checkins;
   if(d.restLog) S.restLog = d.restLog;
+  if(d.skipLog) S.skipLog = d.skipLog;
   /* The preferences the import settled — how sides are handled, whether warm-ups are
      generated, whether deloads are volunteered — travel with the plan. Without this the
      answers somebody gave the importer during onboarding would be collected and then
@@ -11457,6 +11545,14 @@ function viewHistory(){
     <div class="sub" style="margin:-2px 0 10px">Every day you've rested, across all cycles. Add or remove rest days in <b>Settings</b>.</div>
     ${rl.length ? `<div class="rl-list">${rl.map(d=>`<span class="rl-chip" style="padding:5px 12px">${fmtDate(d)}</span>`).join("")}</div>` : `<div class="sub" style="margin-bottom:2px">None logged yet.</div>`}
   </div>`;
+  const sk = (S.skipLog||[]).slice().sort();
+  if(sk.length){
+    h += `<div class="card">
+      <div class="ex-head" style="margin-bottom:8px"><b style="font-family:var(--disp);font-size:16px;text-transform:uppercase;letter-spacing:.04em">Skipped days</b><span class="sub num">${sk.length} total</span></div>
+      <div class="sub" style="margin:-2px 0 10px">Days the rotation had a session on that went unlogged. They cost you no rest day and hold no place in the cycle \u2014 the workout is still waiting.</div>
+      <div class="rl-list">${sk.map(d=>`<span class="rl-chip skip-chip" style="padding:5px 12px">${fmtDate(d)}</span>`).join("")}</div>
+    </div>`;
+  }
   [...S.sessions].reverse().forEach(s=>{
     const m = dayMeta(s.workoutId);
     const vol = s.entries.reduce((t,e)=>t+e.sets.reduce((u,st)=>u+((parseFloat(st.weight)||0)*(parseFloat(st.reps)||0)),0),0);
@@ -15458,7 +15554,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","restDeleted","restAuto","lastCycle","lastReview","checkins",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
@@ -15641,6 +15737,8 @@ async function pullFromGist(){
     S.stalls = mergeStalls(S.stalls, remote.stalls);
     USER_ALIASES = S.exAliases; invalidateTableOrigin();
     S.restDeleted = [...new Set([...(S.restDeleted||[]), ...(remote.restDeleted||[])])];
+      S.skipLog = [...new Set([...(S.skipLog||[]), ...(remote.skipLog||[])])]
+        .filter(d=> restTombstones().indexOf(d) < 0).sort();
       S.restLog = [...new Set([...(S.restLog||[]), ...(remote.restLog||[])])]
         .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
     /* Which days were auto-filled travels with them, or the same day reads as your own
@@ -15716,6 +15814,8 @@ async function syncNow(announce){
       S.stalls = mergeStalls(S.stalls, remote.stalls);
       USER_ALIASES = S.exAliases; invalidateTableOrigin();
       S.restDeleted = [...new Set([...(S.restDeleted||[]), ...(remote.restDeleted||[])])];
+      S.skipLog = [...new Set([...(S.skipLog||[]), ...(remote.skipLog||[])])]
+        .filter(d=> restTombstones().indexOf(d) < 0).sort();
       S.restLog = [...new Set([...(S.restLog||[]), ...(remote.restLog||[])])]
         .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
     /* Which days were auto-filled travels with them, or the same day reads as your own
@@ -15737,6 +15837,8 @@ async function syncNow(announce){
       S.stalls = mergeStalls(S.stalls, remote.stalls);
       USER_ALIASES = S.exAliases; invalidateTableOrigin();
       S.restDeleted = [...new Set([...(S.restDeleted||[]), ...(remote.restDeleted||[])])];
+      S.skipLog = [...new Set([...(S.skipLog||[]), ...(remote.skipLog||[])])]
+        .filter(d=> restTombstones().indexOf(d) < 0).sort();
       S.restLog = [...new Set([...(S.restLog||[]), ...(remote.restLog||[])])]
         .filter(d=>S.restDeleted.indexOf(d) < 0).sort();
     /* Which days were auto-filled travels with them, or the same day reads as your own
@@ -16022,6 +16124,20 @@ function joinList(arr){
   if(arr.length<=1) return arr.join("");
   return arr.slice(0,-1).join(", ")+", and "+arr[arr.length-1];
 }
+/* SKIPPED DAYS GET THEIR OWN PARAGRAPH, not a footnote. A training history that lists
+   only the sessions somebody did is a history of their best intentions; the days the
+   rotation came round and nothing happened are the other half of the same story, and
+   they are the half a coach reads first. Stated plainly, counted, and dated, with the
+   distinction from a rest day spelled out — an outside reader has no way of knowing this
+   app separates the two unless it says so. */
+function skipReportHTML(){
+  const sk = (S.skipLog||[]).slice().sort();
+  if(!sk.length) return "";
+  return `<p><b>${sk.length} training day${sk.length===1?"":"s"} skipped.</b> ${
+    sk.length===1?"This is a day":"These are days"} the rotation had a session on that
+    went unlogged \u2014 distinct from the rest days above, which the programme schedules
+    and which cost nothing to take: ${joinList(sk.map(d=>longDate(d)))}.</p>`;
+}
 function buildReportInner(){
   const sessions = [...S.sessions].sort((a,b)=>a.startedAt-b.startedAt);
   const first = sessions[0], lastS = sessions[sessions.length-1];
@@ -16059,6 +16175,7 @@ function buildReportInner(){
   let body = `<h1>Training History Report</h1>
   <p class="meta">Prepared ${new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"})} · Element 26</p>
   <p>This report covers <b>${sessions.length}</b> logged training ${sessions.length===1?"session":"sessions"} from ${longDate(first.date)} through ${longDate(lastS.date)}, comprising ${countLine}.${(S.restLog&&S.restLog.length)?" Rest days taken: "+joinList(S.restLog.slice().sort().map(d=>longDate(d)))+".":""}</p>
+  ${skipReportHTML()}
   ${changes.length?`<p>The programme was edited <b>${changes.length}</b> time${changes.length===1?"":"s"} over this period. Each edit is shown in place, between the sessions it sits between, so a change in the numbers after one of them can be read against it. Edits made before ${longDate(changes[0].date)} were not recorded.</p>`:""}
   <hr>`;
 
@@ -16188,6 +16305,12 @@ function buildCSV(){
   if(S.restLog && S.restLog.length){
     S.restLog.slice().sort().forEach(d=>{
       rows.push([d+", REST DAY", ...Array(Math.max(0,maxSets)).fill("")]);
+    });
+    rows.push(Array(maxSets+1).fill(""));
+  }
+  if(S.skipLog && S.skipLog.length){
+    S.skipLog.slice().sort().forEach(d=>{
+      rows.push([d+", SKIPPED", ...Array(Math.max(0,maxSets)).fill("")]);
     });
     rows.push(Array(maxSets+1).fill(""));
   }
@@ -16347,7 +16470,7 @@ function mergeBackup(into, d){
   });
   into.sessions.sort((x,y)=> (x.startedAt||0) - (y.startedAt||0));
 
-  ["restDays","restLog","restDeleted","restAuto","deleted","planLog"].forEach(k=>{
+  ["restDays","restLog","skipLog","restDeleted","restAuto","deleted","planLog"].forEach(k=>{
     if(d[k]) into[k] = uniqDates(into[k], d[k]);
   });
   ["checkins","exAliases","stalls","asymRetired","prefs"].forEach(k=>{
