@@ -1763,7 +1763,14 @@ body.cele-open{overflow:hidden}
    middle, and settles — a linear rotation would read as a UI spin. -65deg on top of the
    logo's own -25deg tilt is a true vertical bar. transform-box:fill-box pivots on the
    mark's own bounding-box centre, which is what keeps this from reading as a swing. */
-.mk-spin{transform-box:fill-box;transform-origin:center;animation:mkSpin 2s linear both}
+/* THE ROTATION CENTRE IS PINNED IN USER UNITS, not derived from the group's bounding
+   box. fill-box + center measured whatever .mk-spin happened to contain, so the centre
+   moved the moment anything was added to the group — and the glint had to be added to
+   it. The number is not a tuned value: the mark has 180-degree rotational symmetry about
+   (50,46) — rotate(-25 50 50) then translate(0 -4) — so its bounding box is centred
+   there by construction, and the measured fill-box centre is exactly 50,46. This says
+   the same thing, and keeps saying it whatever the group holds. */
+.mk-spin{transform-origin:50px 46px;animation:mkSpin 2s linear both}
 @keyframes mkSpin{
   0%    {transform:rotate(0)}
   58.5% {transform:rotate(0); animation-timing-function:cubic-bezier(.42,0,.45,1)}
@@ -2472,16 +2479,28 @@ body.cele-open{overflow:hidden}
             <polygon points="26,26 44,38 44,62 26,74 8,62 8,38" fill="currentColor"></polygon>
             <polygon points="74,26 92,38 92,62 74,74 56,62 56,38" fill="currentColor"></polygon>
           </g>
-          </g>
-          <!-- One specular sweep along the bar's own axis, clipped to the silhouette. Same
-               wrapper trick: the tilt is on a static <g>, the travel is on the rect. The
-               glint lives outside .mk-spin so the fall's rotation cannot drag its
-               rotation centre off the dumbbell's own bounding box — it has long since
-               finished by the time anything rotates. -->
+          <!-- One specular sweep along the bar's own axis, clipped to the silhouette.
+               Same wrapper trick as everywhere else here: the tilt is on a static <g>,
+               the travel is on the rect.
+
+               IT LIVES INSIDE .mk-spin, and that is the whole point. #mkShape is a fixed,
+               un-rotated silhouette, and a clip-path resolves in the user space of the
+               element referencing it — so with the glint OUTSIDE the spinning group the
+               clip stayed still while the dumbbell turned underneath it. The sweep runs
+               1.00s to 1.45s and the fall's rotation starts at 1.17s, so for most of its
+               life the highlight was being clipped to where the mark used to be: a white
+               wedge hanging in empty space off the top corner. Inside the group, the clip
+               and the metal turn together and the shine cannot leave the object.
+
+               This is only safe because .mk-spin's rotation centre is pinned in user
+               units above. While it was derived from the group's bounding box, putting
+               the glint in here would have dragged the centre from (50,46) to about
+               (35,56) and sent the whole fall wheeling off-axis. -->
           <g class="mk-glint" clip-path="url(#mkShape)">
             <g transform="translate(0 -4) rotate(-25 50 50)">
               <rect class="mk-glint-band" x="0" y="18" width="17" height="64" fill="url(#mkGlintGrad)"></rect>
             </g>
+          </g>
           </g>
         </g>
         </g>
@@ -2548,7 +2567,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "4.4";
+const APP_VERSION = "4.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
