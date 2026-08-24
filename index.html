@@ -189,6 +189,12 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .swap-or{margin:4px 0 10px;font:11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);text-align:center}
 .swap-results{display:flex;flex-direction:column;gap:6px;max-height:230px;overflow-y:auto}
 .swap-hit{text-align:left;width:100%;padding:10px 13px;font-size:14px}
+.ss-tag{display:inline-block;font:11px var(--mono);letter-spacing:.06em;color:var(--bg);
+  background:var(--acc);border-radius:4px;padding:1px 5px;vertical-align:1px}
+.ss-pair{margin:3px 0 0;font:11.5px var(--mono);color:var(--faint);letter-spacing:.03em;overflow-wrap:anywhere}
+.tech-tag{display:inline-block;margin-left:6px;font:10.5px var(--mono);letter-spacing:.07em;
+  text-transform:uppercase;color:var(--acc);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.sub-list{color:var(--faint)}
 .swap-note{margin:2px 0 6px;font:12px var(--mono);color:var(--faint);letter-spacing:.03em;overflow-wrap:anywhere}
 /* The exercise name, when there is a bar behind it. It has to keep reading as the
    heading it already is — same font, same size, same colour, inheriting all three — so
@@ -303,6 +309,11 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 #reportOverlay .rep-scroll th,#reportOverlay .rep-scroll td{border:1px solid #999;padding:5px 9px;text-align:left;vertical-align:top;color:#111}
 #reportOverlay .rep-scroll th{background:#eee;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
 #reportOverlay .rep-scroll td.c{text-align:center;font-variant-numeric:tabular-nums}
+#reportOverlay .rep-scroll .sstag{display:inline-block;background:#c98a4b;color:#fff;border-radius:3px;padding:0 5px;font-family:var(--mono);font-size:11px;font-weight:600}
+#reportOverlay .rep-scroll .setcell{white-space:nowrap}
+#reportOverlay .rep-scroll tr.subrow td{background:#f6f6f4;color:#444;border-top:1px dotted #bbb}
+#reportOverlay .rep-scroll .legend{border-left:3px solid #c98a4b;background:#faf7f3;padding:7px 12px;margin:8px 0 4px}
+#reportOverlay .rep-scroll .legend p{margin:3px 0;font-size:12.5px;color:#333}
 #reportOverlay .rep-scroll hr{border:none;border-top:1px solid #bbb;margin:18px 0}
 #reportOverlay .rep-scroll .planchg{border-left:3px solid #111;background:#f4f2ee;padding:9px 14px;margin:20px 0;font-size:14px;color:#111}
 #reportOverlay .rep-scroll .planchg ul{margin:5px 0 0;padding-left:18px}
@@ -2600,7 +2611,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "4.9";
+const APP_VERSION = "5.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10283,7 +10294,14 @@ function setListHTML(e){
     // never leaves you staring at a collapsed row with no idea what happened.
     const r = st.why && REASON_BY_CODE[st.why.code];
     const flag = r ? ` <span title="${attrSafe(r.label + (st.why.note ? " — "+st.why.note : ""))}">${r.icon}</span>` : "";
-    parts.push(chip + esc(fmtSet(st)) + flag);
+    /* The drops, mini-sets and bursts hang off the set they were taken from, so they are
+       printed there too. Logged and then invisible is the worst of both: the work went in
+       and the log showed a single set of 8, which reads as a lighter session than it was. */
+    const subs = subSetsFor(e, i);
+    const tail = subs.length
+      ? ` <span class="sub-list">(${esc(subs.map(x=> x.label + " " + fmtSet(x)).join(", "))})</span>`
+      : "";
+    parts.push(chip + esc(fmtSet(st)) + flag + tail);
   });
   return parts.join("&nbsp; · &nbsp;") || " ";
 }
@@ -11800,15 +11818,17 @@ function viewHistory(){
       </div>
       <div class="sub num" style="margin-top:2px">${s.entries.length} exercises · ${Math.round(vol).toLocaleString()} lb total${s.feel?' · '+FEELS[s.feel-1]:''}${nPr?' · 🔥 '+nPr+' PR'+(nPr>1?"s":""):''}</div>
       ${s.note?`<div class="sub" style="margin-top:4px;font-style:italic">"${esc(s.note)}"</div>`:""}
-      <div class="detail">${s.entries.map((e,i)=>
-        `<div class="exline"><b>${esc(e.name)}</b>
+      <div class="detail">${((ssm)=> s.entries.map((e,i)=>
+        `<div class="exline"><b>${ssm[i]?`<span class="ss-tag">${ssm[i].letter}${ssm[i].pos}</span> `:""}${esc(e.name)}</b>${
+            techTextList(e).map(t=>`<span class="tech-tag">${esc(t)}</span>`).join("")}
           <span class="icon-btns ex-ctl" style="float:right;margin-top:-4px">
             <button data-hup="${s.id}:${i}" aria-label="Move earlier">↑</button>
             <button data-hdown="${s.id}:${i}" aria-label="Move later">↓</button>
           </span>
           ${swapNoteHTML(e)}
+          ${ssm[i] && ssm[i].pos === 1 ? `<div class="ss-pair">superset with ${esc(ssm[i].partner)} \u2014 alternated, minimal rest between</div>` : ""}
           <br><span class="num">${setListHTML(e)}</span></div>`
-      ).join("")}
+      ).join(""))(supersetMap(s.entries))}
       <div class="btn-row" style="margin-top:8px">
         <button class="btn ghost small" data-scoresess="${s.id}">${q?"Quality "+q.grade:"Grade it"}</button>
         <button class="btn ghost small" data-editsess="${s.id}">Edit session</button>
@@ -15309,6 +15329,44 @@ function supersetNoteHTML(info){
    The cue is deliberately shown against the SET it governs, not the exercise. Nearly all
    of these are last-set instructions, and a drop-set cue sitting at the top of a card of
    four sets reads as though it applies to all four.                                  */
+/* WHICH ENTRIES ARE PAIRED, and under what name. A superset is stored as a flag on the
+   first leg and nothing at all on the second, which is enough to render a live card but
+   not enough to read a log back: two exercises listed one after another look exactly
+   like two exercises done one after another. So the pairs get LETTERS — A1/A2, B1/B2 —
+   the way a written programme labels them, and every place that lists a session can say
+   which lines belong together instead of hoping the reader infers it. */
+function supersetMap(entries){
+  const out = (entries || []).map(()=> null);
+  let n = 0;
+  (entries || []).forEach((e, i)=>{
+    if(!e || !e.superset || !entries[i+1]) return;
+    const letter = String.fromCharCode(65 + (n++ % 26));
+    out[i]     = {letter: letter, pos: 1, of: 2, partner: entries[i+1].name};
+    out[i + 1] = {letter: letter, pos: 2, of: 2, partner: e.name};
+  });
+  return out;
+}
+/* Every technique on an exercise, as plain text: "Drop set", or "Drop set (strip 20%)"
+   where the plan said how to run it. Used by the log and the report, both of which are
+   read cold and neither of which can show a tooltip. */
+function techTextList(e){
+  return techList(e).map(t=>{
+    const T = TECHNIQUES[t.k];
+    return T.label + (t.detail ? " (" + t.detail + ")" : "");
+  });
+}
+/* The sub-sets logged under one set, already labelled in the technique's own language,
+   or [] if this set had none. Reading them needs the exercise, because which technique
+   owns a set depends on where that set falls. */
+function subSetsFor(e, si){
+  const st = (e.sets || [])[si];
+  if(!st || !Array.isArray(st.sub) || !st.sub.length) return [];
+  const t = techSub(e, si, (e.sets || []).length);
+  const label = t ? TECHNIQUES[t.k].subLabel : "extra";
+  return st.sub
+    .filter(r=> r && (r.reps !== "" && r.reps != null || r.weight !== "" && r.weight != null))
+    .map((r, i)=> ({label: label + " " + (i + 1), weight: r.weight, reps: r.reps}));
+}
 function techBadges(e){
   return techList(e).map(t=>{
     const T = TECHNIQUES[t.k];
@@ -16445,6 +16503,34 @@ function skipReportHTML(){
     went unlogged \u2014 distinct from the rest days above, which the programme schedules
     and which cost nothing to take: ${joinList(sk.map(d=>longDate(d)))}.</p>`;
 }
+/* WHAT THE SHORTHAND IN THIS SESSION MEANS, printed with the session that uses it.
+
+   A report goes to somebody who does not have the app: a coach, a physio, a training
+   partner. "A1 / A2" and "drop set" are obvious to whoever did the work and opaque to
+   whoever is reading it, and a legend buried on the last page is a legend nobody reads.
+   So each session explains only the shorthand IT used, immediately under its own table,
+   and a session of plain straight sets prints nothing at all. */
+function sessionTechLegend(sess){
+  const bits = [];
+  const ssm = supersetMap(sess.entries || []);
+  const letters = [];
+  ssm.forEach(x=>{ if(x && x.pos === 1) letters.push(x.letter); });
+  if(letters.length){
+    bits.push("<b>Superset " + esc(letters.join(", ")) + ".</b> The two movements sharing a letter were "
+      + "alternated \u2014 a set of one, then a set of the other, with rest taken only after the pair. "
+      + "They are listed separately so each keeps its own loads, but they were not done as separate blocks.");
+  }
+  const seen = {};
+  (sess.entries || []).forEach(e=> techList(e).forEach(t=>{ seen[t.k] = true; }));
+  Object.keys(seen).forEach(k=>{
+    const T = TECHNIQUES[k];
+    bits.push("<b>" + esc(T.label) + ".</b> " + esc(T.cue) +
+      (T.sub ? " Each " + esc(T.subLabel) + " is listed on its own line under the set it came from, marked \u21b3."
+             : " It changes how the set is taken rather than adding pieces to it."));
+  });
+  if(!bits.length) return "";
+  return `<div class="legend">${bits.map(b=>`<p>${b}</p>`).join("")}</div>`;
+}
 function buildReportInner(){
   const sessions = [...S.sessions].sort((a,b)=>a.startedAt-b.startedAt);
   const first = sessions[0], lastS = sessions[sessions.length-1];
@@ -16505,26 +16591,50 @@ function buildReportInner(){
     }
     if(s.quality) metaBits.push("Quality score: "+s.quality.total+"/"+s.quality.max+" ("+s.quality.grade.replace("−","-")+")");
     if(s.note) metaBits.push("Note: "+esc(s.note));
+    const ssm = supersetMap(s.entries);
     body += `<h2>${longDate(s.date)}, ${esc(m.name)} Day</h2>
     ${metaBits.length?`<p class="meta">${metaBits.join(" · ")}</p>`:""}
     <table><thead><tr><th>Exercise</th><th>Set</th><th>Side</th><th>Weight (lb)</th><th>Reps</th><th>RPE</th><th>Rest</th></tr></thead><tbody>`;
-    s.entries.forEach(e=>{
+    s.entries.forEach((e, ei)=>{
       // keep the original index so the L/R attribution stays correct after filtering
       const sets = e.sets.map((st,i)=>({st,i})).filter(x=>x.st.reps||x.st.weight);
       if(!sets.length) return;
+      const pair = ssm[ei];
+      const techs = techTextList(e);
+      /* The name cell has to span the DROP AND CLUSTER ROWS TOO, not just the sets. Sub
+         rows are rows; counting only the parent sets left the rowspan short and the
+         table's remaining cells slid up a line each. */
+      const rowCount = sets.reduce((t, x)=> t + 1 + subSetsFor(e, x.i).length, 0);
       sets.forEach(({st,i}, row)=>{
         const side = e.startSide ? sideForSet(e.startSide, i) : null;
-        body += `<tr>${row===0?`<td rowspan="${sets.length}"><b>${esc(e.name)}</b>${
+        const onThisSet = techFor(e, i, e.sets.length).map(t=> TECHNIQUES[t.k].badge);
+        body += `<tr${pair?` class="ssrow"`:""}>${row===0?`<td rowspan="${rowCount}">${
+          pair?`<span class="sstag">${esc(pair.letter + pair.pos)}</span> `:""}<b>${esc(e.name)}</b>${
+          pair?`<br><span class="sm">Superset ${esc(pair.letter)}, ${pair.pos} of ${pair.of} \u2014 alternated with ${esc(pair.partner)}, minimal rest between</span>`:""}${
+          techs.length?`<br><span class="sm"><b>${esc(techs.join("; "))}</b></span>`:""}${
           e.swapFrom?`<br><span class="sm">${esc(swapLabel(e))}</span>`:""}</td>`:""}
-          <td class="c">${row+1}</td>
+          <td class="c setcell">${row+1}${onThisSet.length?`<br><span class="sm">${esc(onThisSet.join(", "))}</span>`:""}</td>
           <td class="c">${side ? esc((e.altStyle==="cross" ? side+" on top" : side)) : " "}</td>
           <td class="c">${st.weight!=null&&st.weight!==""?esc(st.weight):"bodyweight"}</td>
           <td class="c">${esc(st.reps||"")}</td>
           <td class="c">${esc(st.rpe||" ")}</td>
           <td class="c">${st.rest?esc(fmtClock(st.rest)):" "}</td></tr>`;
+        /* Each drop, mini-set or burst gets its own row under the set it came off, so the
+           work is on the page instead of collapsed into a single line that reads lighter
+           than the set actually was. */
+        subSetsFor(e, i).forEach(sub=>{
+          body += `<tr class="subrow">
+            <td class="c setcell sm">\u21b3 ${esc(sub.label)}</td>
+            <td class="c"> </td>
+            <td class="c">${sub.weight!=null&&sub.weight!==""?esc(sub.weight):"bodyweight"}</td>
+            <td class="c">${esc(sub.reps||"")}</td>
+            <td class="c"> </td>
+            <td class="c"> </td></tr>`;
+        });
       });
     });
     body += `</tbody></table>`;
+    body += sessionTechLegend(s);
     if(vol>0) body += `<p class="meta">Total working volume: ${Math.round(vol).toLocaleString()} lb.</p>`;
     /* A session read cold, months later, needs to know this one followed a break —
        otherwise a run of lighter numbers reads as somebody getting worse. */
@@ -16558,6 +16668,17 @@ function buildReportHTML(){
     th,td{border:1px solid #999;padding:5px 9px;text-align:left;vertical-align:top}
     th{background:#eee;font-size:9pt;text-transform:uppercase;letter-spacing:.05em}
     td.c{text-align:center;font-variant-numeric:tabular-nums}
+    .sstag{display:inline-block;background:#c98a4b;color:#fff;border-radius:3px;padding:0 5px;
+      font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9pt;font-weight:600;vertical-align:1px}
+    /* The Set column now carries words as well as a number — "drop set", "cluster 2" —
+       and left to size itself it broke every one of them across two lines. Targeted by
+       CLASS, not by nth-child: only the first row of each exercise carries the rowspanned
+       name cell, so the set cell is the second child on that row and the first on every
+       row after it. Counting positions styled half the column. */
+    .setcell{white-space:nowrap}
+    tr.subrow td{background:#f6f6f4;color:#444;border-top:1px dotted #bbb}
+    .legend{border-left:3px solid #c98a4b;background:#faf7f3;padding:7px 12px;margin:8px 0 4px}
+    .legend p{margin:3px 0;font-size:10pt;color:#333}
     tr{page-break-inside:avoid}
     hr{border:none;border-top:1px solid #bbb;margin:18px 0}
     .planchg{border-left:3px solid #111;background:#f4f2ee;padding:9px 14px;margin:20px 0;font-size:11pt;page-break-inside:avoid}
