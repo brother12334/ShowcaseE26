@@ -248,14 +248,19 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
    its content's min-content width without it. Once the name became a button with a
    nowrap weight pill inside, that min-content width grew past the row and pushed the
    swap and skip controls onto a line of their own. */
-/* flex:1 1 0, and the ZERO is the part that matters. A wrapping flex container breaks
-   lines using each item's HYPOTHETICAL size — its flex-basis — and only then flexes what
-   is on each line, so with basis:auto the heading measured itself at max-content (the
-   full name plus the weight pill), overflowed the row on paper, and pushed the swap and
-   skip controls onto a line of their own before any shrinking was attempted. Basis zero
-   means it never forces the break; it takes the space the controls leave and wraps its
-   own text inside that. min-width:0 lets it actually get that small. */
 .ex-head b{font-size:15px;font-weight:600;min-width:0;flex:1 1 0}
+/* THE CONTROLS SIT UNDER THE NAME, on a row of their own with the set target. Sharing
+   the heading's line meant a long name, a weight pill, a rep target and four icon
+   buttons all competing for 328px, and the result read as a toolbar with an exercise
+   somewhere in it. Given its own row the name is just a name again, and the controls
+   line up in the same place on every card whatever the name above them is doing. */
+.ex-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  flex-wrap:wrap;margin:2px 0 8px}
+.ex-bar .ex-target{min-width:0}
+/* A superset leg's heading is itself a wrapping flex row, so the controls row has to be
+   told to take a whole line of it — otherwise it lines up BESIDE the name like any other
+   flex item and the leg goes back to looking like the thing this change was undoing. */
+.ss-leg-h .ex-bar{flex:1 0 100%}
 .ex-target{color:var(--dim);font-size:13px;font-family:var(--mono);white-space:nowrap}
 .ex-note{color:var(--faint);font-size:12.5px;margin-top:-4px;margin-bottom:8px}
 .ex-last{
@@ -2595,7 +2600,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "4.8";
+const APP_VERSION = "4.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10322,15 +10327,14 @@ function viewActiveSession(){
     const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
     const ll = lastBox(a.workoutId, en.name, anyDay, occ);
     h += `<div class="card ex${supersetInfo(a.entries, ei)?' ss-card':''}">
-      <div class="ex-head"><b>${exNameHTML(en)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b>
-        <span style="display:flex;align-items:center;gap:8px">
-          <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</span>
-          <span class="icon-btns ex-ctl">
-            <button data-exup="${ei}" aria-label="Move earlier">↑</button>
-            <button data-exdown="${ei}" aria-label="Move later">↓</button>
-            ${canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Station busy? Swap ${esc(en.name)} for something free">⇄</button>`:""}
-            <button data-exskip="${ei}" aria-label="Skip today">✕</button>
-          </span>
+      <div class="ex-head"><b>${exNameHTML(en)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b></div>
+      <div class="ex-bar">
+        <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</span>
+        <span class="icon-btns ex-ctl">
+          <button data-exup="${ei}" aria-label="Move earlier">↑</button>
+          <button data-exdown="${ei}" aria-label="Move later">↓</button>
+          ${canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">⇄</button>`:""}
+          <button data-exskip="${ei}" aria-label="Skip today">✕</button>
         </span>
       </div>`;
     h += swapNoteHTML(en);
@@ -10733,13 +10737,14 @@ function viewFocusSession(){
   const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
   const ll = lastBox(a.workoutId, en.name, anyDay, occ);
   h += `<div class="card ex focus">
-    <div class="ex-head"><b class="focus-name">${exNameHTML(en)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b>
-      <span class="icon-btns ex-ctl">${
-        canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Station busy? Swap ${esc(en.name)} for something free">⇄</button>`:""
-      }<button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
-    </div>
+    <div class="ex-head"><b class="focus-name">${exNameHTML(en)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b></div>
     ${swapNoteHTML(en)}
-    <div class="ex-target" style="margin:2px 0 10px">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</div>`;
+    <div class="ex-bar" style="margin:4px 0 10px">
+      <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</span>
+      <span class="icon-btns ex-ctl">${
+        canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">⇄</button>`:""
+      }<button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
+    </div>`;
   h += supersetNoteHTML(supersetInfo(a.entries, ei));
   if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
   if(ll) h += ll;
@@ -15463,12 +15468,14 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
     h += `<div class="ss-leg">
       <div class="ss-leg-h">
         <b>${exNameHTML(p.en)}</b>
-        <span class="ex-target">${p.en.sets.length}×${esc(p.en.reps||"")}</span>
-        <span class="icon-btns ex-ctl">
-          <button data-addset="${p.ei}" aria-label="Add a set to ${esc(p.en.name)}">+</button>
-          <button data-rmset="${p.ei}" aria-label="Remove a set from ${esc(p.en.name)}">−</button>
-          ${canSwapEntry(p.en)?`<button data-exswap="${p.ei}" aria-label="Station busy? Swap ${esc(p.en.name)} for something free">⇄</button>`:""}
-          <button data-exskip="${p.ei}" aria-label="Skip ${esc(p.en.name)} today">✕</button>
+        <span class="ex-bar">
+          <span class="ex-target">${p.en.sets.length}×${esc(p.en.reps||"")}</span>
+          <span class="icon-btns ex-ctl">
+            <button data-addset="${p.ei}" aria-label="Add a set to ${esc(p.en.name)}">+</button>
+            <button data-rmset="${p.ei}" aria-label="Remove a set from ${esc(p.en.name)}">−</button>
+            ${canSwapEntry(p.en)?`<button data-exswap="${p.ei}" aria-label="Switch ${esc(p.en.name)} for something else">⇄</button>`:""}
+            <button data-exskip="${p.ei}" aria-label="Skip ${esc(p.en.name)} today">✕</button>
+          </span>
         </span>
       </div>
       ${p.en.note?`<div class="ex-note">${esc(p.en.note)}</div>`:""}
