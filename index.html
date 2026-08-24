@@ -190,13 +190,19 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .swap-results{display:flex;flex-direction:column;gap:6px;max-height:230px;overflow-y:auto}
 .swap-hit{text-align:left;width:100%;padding:10px 13px;font-size:14px}
 .swap-note{margin:2px 0 6px;font:12px var(--mono);color:var(--faint);letter-spacing:.03em;overflow-wrap:anywhere}
-.bar-chip{display:flex;align-items:center;gap:8px;width:100%;margin-top:10px;padding:8px 11px;
-  background:var(--card2);border:1px solid var(--line);border-radius:9px;color:var(--dim);
-  font:12px var(--mono);letter-spacing:.05em;text-transform:uppercase;cursor:pointer;min-height:36px}
-.bar-chip:hover,.bar-chip:focus-visible{border-color:var(--acc);color:var(--text)}
-.bar-chip-ic{color:var(--acc);font-size:15px;line-height:1}
-.bar-chip-go{margin-left:auto;color:var(--faint)}
-.bar-chip:hover .bar-chip-go,.bar-chip:focus-visible .bar-chip-go{color:var(--acc)}
+/* The exercise name, when there is a bar behind it. It has to keep reading as the
+   heading it already is — same font, same size, same colour, inheriting all three — so
+   the only thing marking it as live is the weight riding after it and a dotted rule
+   under the name itself. A name that suddenly looked like a button would be louder than
+   the exercise. */
+.ex-bar-name{background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;
+  text-transform:inherit;letter-spacing:inherit;cursor:pointer;text-align:left;
+  display:inline-flex;align-items:baseline;gap:7px;flex-wrap:wrap;
+  border-bottom:1px dotted var(--faint);min-height:24px}
+.ex-bar-name:hover,.ex-bar-name:focus-visible{border-bottom-color:var(--acc)}
+.ex-bar-w{font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+  border:1px solid var(--line);border-radius:5px;padding:1px 5px;white-space:nowrap}
+.ex-bar-name:hover .ex-bar-w,.ex-bar-name:focus-visible .ex-bar-w{color:var(--acc);border-color:var(--acc)}
 .loader-label{text-align:center;color:var(--faint);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase}
 .fullbar .bar-shaft,.fullbar .bar-end{background:#8f8f98}
 .fullbar{animation:barGlow 1.6s ease-in-out infinite}
@@ -238,7 +244,18 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 /* exercise + set rows */
 .ex{margin-bottom:14px}
 .ex-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap}
-.ex-head b{font-size:15px;font-weight:600}
+/* min-width:0 because the heading is a flex ITEM, and a flex item will not shrink below
+   its content's min-content width without it. Once the name became a button with a
+   nowrap weight pill inside, that min-content width grew past the row and pushed the
+   swap and skip controls onto a line of their own. */
+/* flex:1 1 0, and the ZERO is the part that matters. A wrapping flex container breaks
+   lines using each item's HYPOTHETICAL size — its flex-basis — and only then flexes what
+   is on each line, so with basis:auto the heading measured itself at max-content (the
+   full name plus the weight pill), overflowed the row on paper, and pushed the swap and
+   skip controls onto a line of their own before any shrinking was attempted. Basis zero
+   means it never forces the break; it takes the space the controls leave and wraps its
+   own text inside that. min-width:0 lets it actually get that small. */
+.ex-head b{font-size:15px;font-weight:600;min-width:0;flex:1 1 0}
 .ex-target{color:var(--dim);font-size:13px;font-family:var(--mono);white-space:nowrap}
 .ex-note{color:var(--faint);font-size:12.5px;margin-top:-4px;margin-bottom:8px}
 .ex-last{
@@ -2578,7 +2595,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "4.7";
+const APP_VERSION = "4.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10285,7 +10302,6 @@ function viewActiveSession(){
       <h3 style="font-size:24px">${esc(m.name)}, in progress</h3>
     </div>
     <div class="sub">Started ${new Date(a.startedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}. Fill sets as you go, tapping ✓ on an empty row copies last time's numbers. Tap <span class="rpe-help">RPE</span> anywhere to see what it means.</div>
-    ${barChipHTML(a)}
   </div>`;
 
   let finLab = false;
@@ -10306,7 +10322,7 @@ function viewActiveSession(){
     const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
     const ll = lastBox(a.workoutId, en.name, anyDay, occ);
     h += `<div class="card ex${supersetInfo(a.entries, ei)?' ss-card':''}">
-      <div class="ex-head"><b>${esc(en.name)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b>
+      <div class="ex-head"><b>${exNameHTML(en)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b>
         <span style="display:flex;align-items:center;gap:8px">
           <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</span>
           <span class="icon-btns ex-ctl">
@@ -10570,66 +10586,64 @@ function rpeOptions(v){
    is a property of the RACK: train somewhere else for a week and the barbell is 20 kg
    instead of 45 lb, or the Smith carriage is 15 where your usual one is 25. Every
    warm-up percentage comes off that figure, so being wrong about it quietly skews the
-   whole session, and the moment you find out is the moment you pick the bar up — mid
-   workout, four screens from Settings.
+   whole session, and the moment you find out is the moment you pick the bar up.
 
-   Shown only when the session actually has a bar in it, and only for the kinds it has.
-   A day of cables and dumbbells gets nothing. */
-function barChipHTML(a){
-  const kinds = sessionBarKinds(a);
-  const p = trainPrefs();
-  const bits = [];
-  if(kinds.barbell && p.barMode === "total") bits.push("bar " + (p.barWeight == null ? "not set" : p.barWeight + " lb"));
-  if(kinds.smith) bits.push("smith " + smithWeight() + " lb");
-  if(!bits.length) return "";
-  return `<button class="bar-chip" id="barChip" aria-label="Change the bar weight for this gym">
-    <span class="bar-chip-ic" aria-hidden="true">\u2261</span>${esc(bits.join(" \u00b7 "))}<span class="bar-chip-go" aria-hidden="true">change</span>
-  </button>`;
+   THE EXERCISE NAME IS THE CONTROL, and this went through a worse design first: a chip
+   in the session header listing every bar the session used. It worked and it was clutter
+   — a permanent strip of numbers above every card, most of them irrelevant to the
+   exercise actually in front of you, and it made you read a list to find the one bar you
+   were holding. Tapping the name of the lift you are ON is the whole interaction, it
+   needs no chrome at all, and it can only ever offer the bar that lift actually uses.
+
+   Only barbell and Smith names are live. A dumbbell press has no bar to weigh, and in
+   plates-only logging the barbell is not in the number either, so there is nothing to
+   change and the name is inert. */
+function barKindFor(name){
+  const n = nrm(name || "");
+  if(/\bsmith\b/.test(n)) return "smith";
+  if(isBarbellLift(n) && trainPrefs().barMode === "total") return "barbell";
+  return null;
 }
-/* One number per kind of bar, and nothing else on the screen. Whatever is typed here is
-   the same preference the Settings screen edits: a heavier bar is a fact about where you
-   train from now on, not about today, and somebody who moves back changes it back from
-   the same place. Said in the sheet rather than assumed. */
-function openBarModal(){
-  const a = S.active;
-  const kinds = a ? sessionBarKinds(a) : {barbell:true, smith:true};
+// The name, made tappable when there is a bar behind it. `ei` is only for the aria label.
+function exNameHTML(en){
+  const kind = barKindFor(en && en.name);
+  if(!kind) return `${esc(en.name)}`;
+  const w = kind === "smith" ? smithWeight() + " lb"
+          : (trainPrefs().barWeight == null ? "not set" : trainPrefs().barWeight + " lb");
+  return `<button class="ex-bar-name" data-barkind="${kind}"
+    aria-label="${esc(en.name)} \u2014 ${kind === "smith" ? "Smith carriage" : "barbell"} ${esc(String(w))}, tap to change"
+    >${esc(en.name)}<span class="ex-bar-w" aria-hidden="true">${esc(String(w))}</span></button>`;
+}
+/* One number, for the one bar the exercise you tapped actually uses. Whatever is typed
+   is the same preference the Settings screen edits, and the sheet says so: a heavier bar
+   is a fact about where you train from now on, not about today, and somebody who moves
+   back changes it back from the same place. */
+function openBarModal(kind){
   const p = trainPrefs();
-  const rows = [];
-  if(kinds.barbell && p.barMode === "total"){
-    rows.push(`<div class="field" style="margin:0 0 12px"><label>Barbell</label>
-      <input id="barModalBar" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
-        placeholder="e.g. 45 \u2014 or 20 kg bars read about 44"></div>`);
-  }
-  if(kinds.smith){
-    rows.push(`<div class="field" style="margin:0 0 12px"><label>Smith machine carriage</label>
-      <input id="barModalSmith" inputmode="decimal" value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
-        placeholder="${SMITH_BAR} if you leave it blank"></div>`);
-  }
-  showModal(`<h3>What are you lifting today?</h3>
-    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Warm-up percentages come off
-      these, so a different gym's bar is worth a moment. This is the same setting as in Settings \u2014 it stays
-      until you change it back.</div>
-    ${rows.join("")}
+  const smith = kind === "smith";
+  const cur = smith ? p.smithWeight : p.barWeight;
+  showModal(`<h3>${smith ? "Smith machine carriage" : "What does this bar weigh?"}</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">${
+      smith
+        ? "Carriages run from about 6 to " + SMITH_BAR + "+ lb depending on the machine, and warm-up percentages come off it."
+        : "Warm-up percentages come off this, so a different gym's bar is worth a moment."
+      } Same setting as in Settings \u2014 it stays until you change it back.</div>
+    <div class="field" style="margin:0 0 12px">
+      <input id="barModalW" inputmode="decimal" value="${esc(cur == null ? "" : cur)}"
+        placeholder="${smith ? SMITH_BAR + " if you leave it blank" : "e.g. 45 \u2014 20 kg bars read about 44"}"></div>
     <button class="btn" id="barModalSave">Save</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
-  const clamp = (el, lo, hi)=>{
-    if(!el) return undefined;                       // field not shown for this session
-    if(el.value.trim() === "") return null;          // cleared: back to the default
-    const v = parseFloat(el.value);
-    if(!isFinite(v)) return null;
-    return Math.max(lo, Math.min(hi, Math.round(v * 10) / 10));
-  };
+  const el = $("#modal").querySelector("#barModalW");
+  el.focus();
   $("#modal").querySelector("#barModalSave").onclick = ()=>{
-    const pr = trainPrefs();
-    const b = clamp($("#modal").querySelector("#barModalBar"), 5, 120);
-    const sm = clamp($("#modal").querySelector("#barModalSmith"), 0, 120);
-    if(b !== undefined) pr.barWeight = b;
-    if(sm !== undefined) pr.smithWeight = sm;
+    const raw = el.value.trim();
+    const v = parseFloat(raw);
+    const val = (raw === "" || !isFinite(v)) ? null
+      : Math.max(smith ? 0 : 5, Math.min(120, Math.round(v * 10) / 10));
+    if(smith) trainPrefs().smithWeight = val; else trainPrefs().barWeight = val;
     hideModal(); save(); queueSync(); render();
-    const said = [];
-    if(b !== undefined) said.push("bar " + (b == null ? "cleared" : b + " lb"));
-    if(sm !== undefined) said.push("smith " + (sm == null ? SMITH_BAR : sm) + " lb");
-    toast(said.join(", "));
+    toast(smith ? "Smith carriage " + smithWeight() + " lb"
+                : (val == null ? "Bar weight cleared" : "Bar " + val + " lb"));
   };
 }
 /* The line under a switched exercise: what it replaced, and why if a why was given.
@@ -10703,7 +10717,6 @@ function viewFocusSession(){
       <span class="num sub" style="font-size:15px">${a.entries.length?ei+1:0} / ${a.entries.length}</span>
     </div>
     ${plateLoaderHTML(a)}
-    ${barChipHTML(a)}
   </div>`;
   if(!en){
     h += `<div class="empty">Nothing left in this session.</div>`;
@@ -10720,7 +10733,7 @@ function viewFocusSession(){
   const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
   const ll = lastBox(a.workoutId, en.name, anyDay, occ);
   h += `<div class="card ex focus">
-    <div class="ex-head"><b class="focus-name">${esc(en.name)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b>
+    <div class="ex-head"><b class="focus-name">${exNameHTML(en)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b>
       <span class="icon-btns ex-ctl">${
         canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Station busy? Swap ${esc(en.name)} for something free">⇄</button>`:""
       }<button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
@@ -11788,6 +11801,7 @@ function viewHistory(){
             <button data-hup="${s.id}:${i}" aria-label="Move earlier">↑</button>
             <button data-hdown="${s.id}:${i}" aria-label="Move later">↓</button>
           </span>
+          ${swapNoteHTML(e)}
           <br><span class="num">${setListHTML(e)}</span></div>`
       ).join("")}
       <div class="btn-row" style="margin-top:8px">
@@ -12427,8 +12441,10 @@ function bind(){
     [S.active.entries[i], S.active.entries[i+1]] = [S.active.entries[i+1], S.active.entries[i]];
     save(); render();
   });
-  const barChip = $("#barChip");
-  if(barChip) barChip.onclick = ()=>{ harvestActive(); openBarModal(); };
+  document.querySelectorAll("[data-barkind]").forEach(b=> b.onclick = ()=>{
+    harvestActive();                      // bank whatever is typed before the re-render
+    openBarModal(b.dataset.barkind);
+  });
   document.querySelectorAll("[data-exswap]").forEach(b=> b.onclick=()=>{
     /* Harvested HERE and not in the picker: harvestActive is scoped to bind(), and
        anything typed into the open card has to be banked before the entry is split. */
@@ -14872,18 +14888,6 @@ function barWeightFor(name){
   if(p.barMode !== "total" || p.barWeight == null) return 0;   // plates-only logging has no bar in the number
   return isBarbellLift(name) ? p.barWeight : 0;
 }
-/* Does this session touch a bar at all, and which kinds? Drives whether the workout
-   screen offers the control and which fields it shows — a day of cable and dumbbell
-   work has no bar to weigh, and a button for it would be noise. */
-function sessionBarKinds(a){
-  const out = {barbell:false, smith:false};
-  ((a && a.entries) || []).forEach(e=>{
-    const n = nrm((e && e.name) || "");
-    if(/\bsmith\b/.test(n)) out.smith = true;
-    else if(isBarbellLift(n)) out.barbell = true;
-  });
-  return out;
-}
 /* The load the ramp is a percentage OF, and where the number came from. `ctx` is how the
    caller says which exercise slot this is, and matches the arguments the "last time" box
    next to it is already built from.
@@ -15458,7 +15462,7 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
   pair.forEach((p, k)=>{
     h += `<div class="ss-leg">
       <div class="ss-leg-h">
-        <b>${esc(p.en.name)}</b>
+        <b>${exNameHTML(p.en)}</b>
         <span class="ex-target">${p.en.sets.length}×${esc(p.en.reps||"")}</span>
         <span class="icon-btns ex-ctl">
           <button data-addset="${p.ei}" aria-label="Add a set to ${esc(p.en.name)}">+</button>
