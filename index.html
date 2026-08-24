@@ -310,7 +310,7 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 #reportOverlay .rep-scroll th{background:#eee;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
 #reportOverlay .rep-scroll td.c{text-align:center;font-variant-numeric:tabular-nums}
 #reportOverlay .rep-scroll .sstag{display:inline-block;background:#c98a4b;color:#fff;border-radius:3px;padding:0 5px;font-family:var(--mono);font-size:11px;font-weight:600}
-#reportOverlay .rep-scroll .setcell{white-space:nowrap}
+#reportOverlay .rep-scroll .setcell,#reportOverlay .rep-scroll .restcell{white-space:nowrap}
 #reportOverlay .rep-scroll tr.subrow td{background:#f6f6f4;color:#444;border-top:1px dotted #bbb}
 #reportOverlay .rep-scroll .legend{border-left:3px solid #c98a4b;background:#faf7f3;padding:7px 12px;margin:8px 0 4px}
 #reportOverlay .rep-scroll .legend p{margin:3px 0;font-size:12.5px;color:#333}
@@ -2611,7 +2611,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "5.0";
+const APP_VERSION = "5.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11826,7 +11826,7 @@ function viewHistory(){
             <button data-hdown="${s.id}:${i}" aria-label="Move later">↓</button>
           </span>
           ${swapNoteHTML(e)}
-          ${ssm[i] && ssm[i].pos === 1 ? `<div class="ss-pair">superset with ${esc(ssm[i].partner)} \u2014 alternated, minimal rest between</div>` : ""}
+          ${ssm[i] && ssm[i].pos === 1 ? `<div class="ss-pair">superset with ${esc(ssm[i].partner)} \u2014 a set of each back to back, rest only after the pair</div>` : ""}
           <br><span class="num">${setListHTML(e)}</span></div>`
       ).join(""))(supersetMap(s.entries))}
       <div class="btn-row" style="margin-top:8px">
@@ -16517,8 +16517,12 @@ function sessionTechLegend(sess){
   ssm.forEach(x=>{ if(x && x.pos === 1) letters.push(x.letter); });
   if(letters.length){
     bits.push("<b>Superset " + esc(letters.join(", ")) + ".</b> The two movements sharing a letter were "
-      + "alternated \u2014 a set of one, then a set of the other, with rest taken only after the pair. "
-      + "They are listed separately so each keeps its own loads, but they were not done as separate blocks.");
+      + "alternated: a set of one, straight into a set of the other, and only then a rest. "
+      + "They are listed separately so each keeps its own loads, but they were not done as separate blocks \u2014 "
+      + "read them a round at a time, set 1 against set 1. "
+      + "<b>The rest column follows that order</b>, which is why the first movement of a pair shows "
+      + "\u201c\u2192\u201d and an arrow to its partner instead of a time: there is no rest at that point, "
+      + "the next movement is. The round's rest is on the second movement's row.");
   }
   const seen = {};
   (sess.entries || []).forEach(e=> techList(e).forEach(t=>{ seen[t.k] = true; }));
@@ -16610,15 +16614,30 @@ function buildReportInner(){
         const onThisSet = techFor(e, i, e.sets.length).map(t=> TECHNIQUES[t.k].badge);
         body += `<tr${pair?` class="ssrow"`:""}>${row===0?`<td rowspan="${rowCount}">${
           pair?`<span class="sstag">${esc(pair.letter + pair.pos)}</span> `:""}<b>${esc(e.name)}</b>${
-          pair?`<br><span class="sm">Superset ${esc(pair.letter)}, ${pair.pos} of ${pair.of} \u2014 alternated with ${esc(pair.partner)}, minimal rest between</span>`:""}${
+          pair?`<br><span class="sm">Superset ${esc(pair.letter)}, ${pair.pos} of ${pair.of} \u2014 alternated with ${esc(pair.partner)}; rest only after the pair</span>`:""}${
           techs.length?`<br><span class="sm"><b>${esc(techs.join("; "))}</b></span>`:""}${
           e.swapFrom?`<br><span class="sm">${esc(swapLabel(e))}</span>`:""}</td>`:""}
-          <td class="c setcell">${row+1}${onThisSet.length?`<br><span class="sm">${esc(onThisSet.join(", "))}</span>`:""}</td>
+          <td class="c setcell">${
+            /* Paired rows are numbered by ROUND, not by set, because a round is the unit
+               that was actually performed: A1 set 1, A2 set 1, rest. The two movements
+               print as separate blocks so each keeps its own loads, and the shared round
+               number is what lets them be read back across the gap. */
+            pair ? "Round " + (row+1) : (row+1)
+          }${onThisSet.length?`<br><span class="sm">${esc(onThisSet.join(", "))}</span>`:""}</td>
           <td class="c">${side ? esc((e.altStyle==="cross" ? side+" on top" : side)) : " "}</td>
           <td class="c">${st.weight!=null&&st.weight!==""?esc(st.weight):"bodyweight"}</td>
           <td class="c">${esc(st.reps||"")}</td>
           <td class="c">${esc(st.rpe||" ")}</td>
-          <td class="c">${st.rest?esc(fmtClock(st.rest)):" "}</td></tr>`;
+          <td class="c restcell">${
+            /* A SUPERSET'S REST BELONGS TO THE PAIR, NOT TO EITHER HALF. The timer only
+               runs once a round is finished, so the rest is recorded against the SECOND
+               movement's set and the first movement's rest cell is empty — which on the
+               page reads as "no rest was taken here", when what happened is "no rest was
+               taken here on purpose, because the next thing was the other exercise". Say
+               that, rather than printing a blank and hoping. */
+            pair && pair.pos === 1 ? `<span class="sm">\u2192 ${esc(pair.letter)}2</span>`
+            : st.rest ? esc(fmtClock(st.rest)) + (pair ? `<br><span class="sm">after pair</span>` : "")
+            : " "}</td></tr>`;
         /* Each drop, mini-set or burst gets its own row under the set it came off, so the
            work is on the page instead of collapsed into a single line that reads lighter
            than the set actually was. */
@@ -16675,7 +16694,7 @@ function buildReportHTML(){
        CLASS, not by nth-child: only the first row of each exercise carries the rowspanned
        name cell, so the set cell is the second child on that row and the first on every
        row after it. Counting positions styled half the column. */
-    .setcell{white-space:nowrap}
+    .setcell,.restcell{white-space:nowrap}
     tr.subrow td{background:#f6f6f4;color:#444;border-top:1px dotted #bbb}
     .legend{border-left:3px solid #c98a4b;background:#faf7f3;padding:7px 12px;margin:8px 0 4px}
     .legend p{margin:3px 0;font-size:10pt;color:#333}
