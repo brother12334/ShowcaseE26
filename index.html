@@ -2611,7 +2611,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "5.1";
+const APP_VERSION = "5.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4305,6 +4305,34 @@ function canSwapEntry(en){ return !!en; }
    moves to a new entry under the new name. Recording three dumbbell sets as machine sets
    would quietly corrupt the load history for both movements. A superset leg cannot be
    split without breaking the pair, so that one case says so instead. */
+/* THE SIDES BELONG TO THE MOVEMENT, NOT TO THE SLOT IT IS SITTING IN.
+
+   Whether a set is taken one limb at a time is a fact about the exercise, and switching
+   the exercise changes it. Swap a bench press for a single-arm dumbbell row and the row
+   needs its L/R marks; swap a single-arm row for a barbell row and the marks have to go,
+   or the log claims you alternated arms on a barbell.
+
+   `sideMode` is cleared for the same reason. It is only ever written from a document
+   saying something like "alternate arms every rep" — a statement about the movement the
+   plan asked for, which is no longer the movement being done.
+
+   WHICH ARM OPENS comes from startSideFor(), the same source every planned unilateral
+   movement uses, so a swapped-in exercise flips with the rotation exactly like a
+   prescribed one: right first this time round, left first the next. The current session
+   is not in S.sessions yet, so this reads the same value startWorkout() read, and the
+   two cannot disagree. */
+function applySwapSides(en){
+  if(!en) return;
+  delete en.sideMode;                    // the old movement's prescription, not the new one's
+  const style = altStyle({name: en.name});
+  if(style){
+    en.altStyle = style;
+    en.startSide = startSideFor(S.active ? S.active.workoutId : null);
+  } else {
+    delete en.altStyle;
+    delete en.startSide;
+  }
+}
 function applySwap(ei, newName, cue, why){
   const a = S.active;
   if(!a) return false;
@@ -4332,6 +4360,7 @@ function applySwap(ei, newName, cue, why){
       planWeight: undefined, warmups: undefined, warm: undefined, warmupNote: undefined,
       sets: Array.from({length: rest}, ()=>({weight:"",reps:"",rpe:"",done:false}))
     });
+    applySwapSides(moved);
     a.entries.splice(ei + 1, 0, moved);
     a.focusIdx = ei + 1;
     return true;
@@ -4342,6 +4371,7 @@ function applySwap(ei, newName, cue, why){
   en.swapWhy = backToOriginal ? undefined : (why || undefined);
   en.note = cue || undefined;
   en.planWeight = undefined; en.warmups = undefined; en.warm = undefined; en.warmupNote = undefined;
+  applySwapSides(en);
   return true;
 }
 /* Build a full programme for a split. Pure: it reads nothing from S, so onboarding can
