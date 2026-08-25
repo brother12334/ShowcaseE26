@@ -2139,7 +2139,13 @@ body.cele-open{overflow:hidden}
 .nb-trend-k{font-size:14px}
 .nb-trend-w{font:11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
 .nb-arrow{font-size:13px}
-.nb-spark{width:100%;height:38px;display:block;margin:7px 0 3px}
+/* 52, not 68. The domains are fixed and honest, so a series sitting at 10% genuinely
+   belongs near the floor — but at 68px tall that left two thirds of every tiredness
+   chart as empty box. Shorter keeps the same shape and stops the emptiness reading as a
+   rendering fault. */
+.nb-spark{width:100%;height:52px;display:block;margin:8px 0 4px}
+.nb-spark-base{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.nb-spark-p{opacity:0;animation:nbFade .35s .62s ease forwards}
 /* pathLength normalises every line to 1 unit, so one keyframe draws any shape. */
 .nb-spark-l{stroke-dasharray:1;stroke-dashoffset:1;pathLength:1;
   animation:nbDraw .8s .22s cubic-bezier(.3,.7,.3,1) forwards}
@@ -2168,7 +2174,32 @@ body.cele-open{overflow:hidden}
 .nb-w-s{font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
 .nb-w-c{color:var(--faint);font-size:18px;flex-shrink:0}
 
-/* 6. the detail */
+/* 6. training load, as sentences */
+.nb-load{display:flex;flex-direction:column}
+.nb-lrow{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:baseline;
+  padding:10px 0;border-top:1px solid var(--line)}
+.nb-lrow:first-of-type{border-top:0}
+.nb-lrow-k{font-size:14px}
+.nb-lrow-v{font-family:var(--disp);font-size:17px;text-align:right;white-space:nowrap}
+.nb-lrow-s{grid-column:1/-1;font-size:12.5px;line-height:1.45;color:var(--dim)}
+.nb-lfoot{margin-top:9px;font-size:12px;color:var(--faint)}
+
+/* 7. the map */
+.nb-map-say{font-size:13px;color:var(--dim);line-height:1.5;margin:2px 0 4px}
+.nb-pick{display:flex;align-items:center;gap:9px;background:var(--card2);border:1px solid var(--line);
+  border-radius:10px;padding:9px 11px;margin-top:9px;animation:nbIn .24s cubic-bezier(.2,.7,.3,1) both}
+.nb-pick-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.nb-pick-t{flex:1 1 0;min-width:0;font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.nb-pick-x{background:none;border:0;color:var(--faint);font-size:19px;line-height:1;cursor:pointer;
+  padding:0 2px;min-width:24px;min-height:24px;flex-shrink:0}
+.nb-pick-x:hover,.nb-pick-x:focus-visible{color:var(--text)}
+.nb-adv{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;margin-top:11px;
+  background:none;border:1px dashed var(--line);border-radius:10px;padding:10px 13px;color:var(--dim);
+  font:inherit;font-size:13px;cursor:pointer;min-height:40px;transition:border-color .16s ease,color .16s ease}
+.nb-adv:hover,.nb-adv:focus-visible{border-color:var(--acc);color:var(--text)}
+.nb-adv-x{font-family:var(--mono);font-size:15px;color:var(--acc)}
+
+/* 8. the detail */
 .nb-more{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
   background:var(--card2);border:1px dashed var(--line);border-radius:12px;padding:13px 15px;
   color:var(--dim);font:inherit;font-size:13.5px;cursor:pointer;min-height:44px;
@@ -2195,7 +2226,8 @@ body.cele-open{overflow:hidden}
   .nb-in,.nb-deep,.nb-why{animation:none}
   .nb-meter i{animation:none;width:var(--w)}
   .nb-spark-l{animation:none;stroke-dashoffset:0}
-  .nb-spark-a,.nb-spark-d{animation:none;opacity:1}
+  .nb-spark-a,.nb-spark-d,.nb-spark-p{animation:none;opacity:1}
+  .nb-pick{animation:none}
   .nb-pulse::after{animation:none;opacity:0}
   .nb-w:hover{transform:none}
 }
@@ -2736,7 +2768,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "5.3";
+const APP_VERSION = "5.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11726,31 +11758,67 @@ function sparkSVG(vals, color, id, domain){
   /* THE SCALE IS GIVEN, NOT DERIVED, and that is the difference between a chart and a
      misleading one. Fitting the line to its own min and max made every series fill the
      box: sleep drifting 7.9h to 7.2h drew as a cliff while the label beside it correctly
-     read "Steady", so the picture and the word disagreed on the same screen. A fixed
-     domain — 0-100 for a percentage, 0-10 for hours — draws a small change small. */
+     read "Steady". A fixed domain draws a small change small. */
   const lo = domain ? domain[0] : (real.length ? Math.min(...real) : 0);
   const hi = domain ? domain[1] : (real.length ? Math.max(...real) : 1);
   const span = (hi - lo) || 1;
-  const W = 100, H = 30, pad = 3;
+  /* A REAL COORDINATE SPACE, NOT A STRETCHED ONE. This was a 100x30 box scaled to about
+     330x38 with preserveAspectRatio="none" — a 3.3x horizontal stretch. The curve
+     smeared sideways and the stroke rendered at two different widths depending on which
+     way the line was travelling, which is why it read as a distorted picture rather than
+     a chart. The viewBox is now close to the space it actually occupies, and the stroke
+     is taken out of the transform with non-scaling-stroke so any residual stretch can
+     never thin it again. */
+  const W = 320, H = 68, padY = 10, padX = 6;
   const xy = pts.map((v, i)=>{
-    const x = pts.length === 1 ? W/2 : (i/(pts.length-1))*W;
-    const y = v == null ? null : H - pad - ((v - lo)/span)*(H - pad*2);
+    const x = padX + (pts.length === 1 ? (W-padX*2)/2 : (i/(pts.length-1))*(W-padX*2));
+    const y = v == null ? null : H - padY - ((v - lo)/span)*(H - padY*2);
     return {x, y};
   }).filter(p=> p.y != null);
-  if(!xy.length) return `<svg class="nb-spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"></svg>`;
+  if(!xy.length){
+    return `<svg class="nb-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <line class="nb-spark-base" x1="${padX}" y1="${H-padY}" x2="${W-padX}" y2="${H-padY}"></line></svg>`;
+  }
   const d = xy.map((p,i)=> (i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" ");
-  const area = d + ` L ${xy[xy.length-1].x.toFixed(1)} ${H} L ${xy[0].x.toFixed(1)} ${H} Z`;
+  const area = d + ` L ${xy[xy.length-1].x.toFixed(1)} ${H-padY} L ${xy[0].x.toFixed(1)} ${H-padY} Z`;
   const last = xy[xy.length-1];
+  /* One dot per day. Seven readings drawn as a bare line is a smear you cannot count;
+     the dots are what make it legible as "a week, one point each". */
+  const dots = xy.map(p=> `<circle class="nb-spark-p" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2" fill="${color}"></circle>`).join("");
   return `<svg class="nb-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
     <defs><linearGradient id="nbg${id}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${color}" stop-opacity=".28"></stop>
+      <stop offset="0" stop-color="${color}" stop-opacity=".22"></stop>
       <stop offset="1" stop-color="${color}" stop-opacity="0"></stop>
     </linearGradient></defs>
+    <line class="nb-spark-base" x1="${padX}" y1="${H-padY}" x2="${W-padX}" y2="${H-padY}"></line>
     <path class="nb-spark-a" d="${area}" fill="url(#nbg${id})"></path>
-    <path class="nb-spark-l" d="${d}" fill="none" stroke="${color}" stroke-width="2"
-      stroke-linecap="round" stroke-linejoin="round"></path>
-    <circle class="nb-spark-d" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2.6" fill="${color}"></circle>
+    <path class="nb-spark-l" d="${d}" fill="none" stroke="${color}" stroke-width="2.2"
+      stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+    ${dots}
+    <circle class="nb-spark-d" cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="3.4" fill="${color}"></circle>
   </svg>`;
+}
+/* The line under the figure in the SIMPLE view: a plain sentence about whatever muscle
+   you tapped, and nothing else. The old drill bar put "Analyse" and "Break it down"
+   beside it, which are the right controls for somebody studying a muscle and clutter for
+   somebody who tapped their chest to see whether it was still sore. Those live in
+   Advanced now. */
+function nbMapPickHTML(A, metric, advanced){
+  if(advanced) return drillBarHTML(A, metric);
+  if(!BODY_FOCUS) return "";
+  const g = BODY_FOCUS;
+  const gm = groupTileMetric(A, g, metric);
+  const queued = (A.cyc && A.cyc.pending[g]) || 0;
+  const line = A.wk[g].sets > 0
+    ? gName(g) + " \u2014 " + (gm.note || gm.txt || "trained recently") + "."
+    : queued > 0
+      ? gName(g) + " hasn't come round yet. It gets " + r1(queued) + " sets on " + dayList(pendingDayNames(A.cyc, g)) + "."
+      : gName(g) + " hasn't had any work " + A.win.short + ".";
+  return `<div class="nb-pick">
+    <span class="nb-pick-dot" style="background:${A.wk[g].sets>0?gm.color:C_GREY}"></span>
+    <span class="nb-pick-t">${esc(line)}</span>
+    <button class="nb-pick-x" id="bmBack" aria-label="Clear selection">\u00d7</button>
+  </div>`;
 }
 /* =====================================================================
    BODY TAB
@@ -11829,36 +11897,12 @@ function viewBody(){
     </div>`:""}
   </div>`;
 
-  /* ---- 4. WHICH WAY AM I GOING? ------------------------------------------------ */
-  const tr = bodyTrends();
-  const maxSets = Math.max(6, ...tr.map(d=>d.sets));
-  const series = [
-    {k:"Tiredness", vals: tr.map(d=>d.fat), goodDown:true, domain:[0,100],
-     foot:"Lower is fresher."},
-    {k:"Sets per day", vals: tr.map(d=>d.sets), goodDown:false, domain:[0,maxSets],
-     foot:"How much work you've been putting in."},
-    {k:"Sleep", vals: tr.map(d=>d.sleep), goodDown:false, domain:[0,10],
-     foot: tr.some(d=>d.sleep!=null) ? "Hours a night, from your check-ins." : "Log it in your daily check-in."}
-  ];
-  h += `<div class="nb-trends nb-in" style="--d:360ms">
-    <div class="nb-sec-k">Last 7 days</div>
-    ${series.map((sv,i)=>{
-      const w = trendWord(sv.vals, sv.goodDown);
-      return `<div class="nb-trend">
-        <div class="nb-trend-h">
-          <span class="nb-trend-k">${esc(sv.k)}</span>
-          <span class="nb-trend-w" style="color:${w.color}">${esc(w.word)} <span class="nb-arrow">${w.arrow}</span></span>
-        </div>
-        ${sparkSVG(sv.vals, w.color, i, sv.domain)}
-        <div class="nb-trend-f">${esc(sv.foot)}</div>
-      </div>`;
-    }).join("")}
-  </div>`;
-
-  /* ---- 5. ANYTHING TO FIX? ----------------------------------------------------- */
+  /* ---- 4. ANYTHING TO FIX? ------------------------------------------------------
+     Above the charts, deliberately: this is the only part of the screen that asks you to
+     do something, and a thing to do outranks a thing to look at. */
   const spanDays = (Date.now() - S.sessions[0].startedAt)/DAY_MS;
   const enoughWP = S.sessions.length >= 4 && spanDays >= 6;
-  h += `<div class="nb-fix nb-in" style="--d:420ms">
+  h += `<div class="nb-fix nb-in" style="--d:360ms">
     <div class="nb-sec-k">Worth a look${enoughWP&&A.weak.length?`<span class="nb-count">${A.weak.length}</span>`:""}</div>`;
   if(!enoughWP){
     h += `<div class="nb-none">Train a few more times and this will start pointing out anything that needs attention. It needs about a week of sessions before it can tell a real gap from a workout that hasn't come round yet.</div>`;
@@ -11880,88 +11924,98 @@ function viewBody(){
   }
   h += `</div>`;
 
-  /* ---- 6. THE DETAIL, FOR ANYONE WHO WANTS IT ---------------------------------- */
-  h += `<button class="nb-more nb-in" data-sec="nbmap" style="--d:480ms">
-    <span>${BODY_OPEN.nbmap?"Hide the muscle map":"See the muscle map and full numbers"}</span>
-    <span class="nb-more-x">${BODY_OPEN.nbmap?"\u2212":"+"}</span>
-  </button>`;
+  /* ---- 5. WHICH WAY AM I GOING? ------------------------------------------------ */
+  const tr = bodyTrends();
+  const maxSets = Math.max(6, ...tr.map(d=>d.sets));
+  const series = [
+    {k:"Tiredness", vals: tr.map(d=>d.fat), goodDown:true, domain:[0,100],
+     foot:"Lower is fresher."},
+    {k:"Sets per day", vals: tr.map(d=>d.sets), goodDown:false, domain:[0,maxSets],
+     foot:"How much work you've been putting in."},
+    {k:"Sleep", vals: tr.map(d=>d.sleep), goodDown:false, domain:[0,10],
+     foot: tr.some(d=>d.sleep!=null) ? "Hours a night, from your check-ins." : "Log it in your daily check-in."}
+  ];
+  h += `<div class="nb-trends nb-in" style="--d:420ms">
+    <div class="nb-sec-k">Last 7 days</div>
+    ${series.map((sv,i)=>{
+      const w = trendWord(sv.vals, sv.goodDown);
+      return `<div class="nb-trend">
+        <div class="nb-trend-h">
+          <span class="nb-trend-k">${esc(sv.k)}</span>
+          <span class="nb-trend-w" style="color:${w.color}">${esc(w.word)} <span class="nb-arrow">${w.arrow}</span></span>
+        </div>
+        ${sparkSVG(sv.vals, w.color, i, sv.domain)}
+        <div class="nb-trend-f">${esc(sv.foot)}</div>
+      </div>`;
+    }).join("")}
+  </div>`;
 
-  if(BODY_OPEN.nbmap){
-    h += `<div class="nb-deep">`;
-    /* Everything below here is the previous Body tab, unchanged in behaviour: the same
-       picker, the same figures, the same drill-downs, the same table. It is behind one
-       tap rather than in front of the answer. */
-    h += `<div class="metric-scroll"><div class="metric-seg">${
+  /* ---- 6. TRAINING LOAD, AT THE TOP LEVEL ---------------------------------------
+     It used to be a grid of four jargon tiles inside a collapsed section, which is a
+     strange place to keep the answer to "am I doing too much". The same four facts, as
+     sentences, in the main flow. */
+  const topFat = MKEYS.slice().sort((a,b)=>A.fat[b]-A.fat[a])[0];
+  const loadRows = [
+    {k:"Sets this week", v:String(t.setsWk),
+     s: t.setsPrev>0
+        ? (t.setsWk===t.setsPrev ? "The same as last week."
+           : (t.setsWk>t.setsPrev?"Up ":"Down ")+Math.abs(Math.round((t.setsWk-t.setsPrev)/t.setsPrev*100))+"% on "+win.prevLabel+".")
+        : "Your first "+win.short.replace(/^this /,"")+" on record.",
+     c:"var(--text)"},
+    {k:"Against your usual", v: t.acwr==null ? "\u2014" : t.acwr.toFixed(1)+"\u00d7",
+     s: t.acwr==null ? "A few more weeks of training and this starts tracking your pace."
+        : t.acwr>1.5 ? "A big jump. Worth holding here rather than adding more."
+        : t.acwr<0.8 ? "Lighter than usual, which is fine for an easy spell."
+        : "A steady, sustainable rate.",
+     c: t.acwr==null ? "var(--dim)" : (t.acwr>1.5||t.acwr<0.8) ? C_WARN : C_OK},
+    {k:"Most worked muscle", v: topFat ? gName(topFat) : "\u2014",
+     s: !topFat ? "" : A.fat[topFat]>=60 ? "Carrying real tiredness \u2014 give it a day."
+        : A.fat[topFat]>=35 ? "Normally tired, nothing unusual."
+        : "Even your hardest-worked muscle is fresh.",
+     c:"var(--text)"},
+    {k:"Anything overdone", v: t.inj>=55 ? "Yes" : "No",
+     s: t.inj>=55 ? "At least one muscle is being pushed harder than it recovers from."
+        : "Nothing is being pushed past what it can recover from.",
+     c: t.inj>=55 ? C_BAD : C_OK}
+  ];
+  h += `<div class="nb-load nb-in" style="--d:470ms">
+    <div class="nb-sec-k">Your training load</div>
+    ${loadRows.map(r=>`<div class="nb-lrow">
+      <span class="nb-lrow-k">${esc(r.k)}</span>
+      <span class="nb-lrow-v" style="color:${r.c}">${esc(r.v)}</span>
+      <span class="nb-lrow-s">${esc(r.s)}</span>
+    </div>`).join("")}
+    <div class="nb-lfoot">Counted over ${esc(win.label)}. Change that in Settings.</div>
+  </div>`;
+
+  /* ---- 7. THE MUSCLE MAP, PLAIN BY DEFAULT --------------------------------------
+     The map is the best thing on this screen and the last version buried it behind a
+     tap. It is back in the main flow showing ONE thing — how tired each muscle is —
+     with no picker above it and a sentence instead of a row of five colour swatches to
+     decode. Everything that made it a control panel is behind Advanced, and Advanced is
+     itself lighter than what it replaced: the picker and the drill controls, and no
+     eighteen-row table at all. */
+  const advanced = !!BODY_OPEN.nbadv;
+  const shownMetric = advanced ? metric : "fatigue";
+  h += `<div class="nb-map nb-in" style="--d:520ms">
+    <div class="nb-sec-k">Your muscles</div>
+    ${advanced ? `<div class="metric-scroll"><div class="metric-seg">${
       METRICS.map(m=>`<button data-metric="${m.id}" class="${m.id===metric?"on":""}">${esc(metricLabel(m.id, win))}</button>`).join("")
-    }</div></div>`;
-    h += `<div class="card bm-card">
-      <div class="bm-oneline">${esc(metricOneLiner(metric, win))}</div>
-      <div class="bm-figs">
-        <div class="bm-fig">${bodyFrontSVG(A, metric)}<div class="bm-fig-label">Front</div></div>
-        <div class="bm-fig">${bodyBackSVG(A, metric)}<div class="bm-fig-label">Back</div></div>
-      </div>
-      <div class="bm-legend">${metricLegend(metric)}<span class="bm-lg"><span class="bm-sw" style="background:${C_GREY}"></span>${A.cyc.complete?"not trained":"not trained yet"}</span></div>
-      ${drillBarHTML(A, metric)}
-    </div>`;
+    }</div></div>` : ""}
+    <div class="nb-map-say">${advanced ? esc(metricOneLiner(shownMetric, win)) : "Green is rested, red needs a break. Tap a muscle to see how it's doing."}</div>
+    <div class="bm-figs">
+      <div class="bm-fig">${bodyFrontSVG(A, shownMetric)}<div class="bm-fig-label">Front</div></div>
+      <div class="bm-fig">${bodyBackSVG(A, shownMetric)}<div class="bm-fig-label">Back</div></div>
+    </div>
+    <div class="bm-legend">${metricLegend(shownMetric)}<span class="bm-lg"><span class="bm-sw" style="background:${C_GREY}"></span>${cyc.complete?"not trained":"not trained yet"}</span></div>
+    ${nbMapPickHTML(A, shownMetric, advanced)}
+    <button class="nb-adv" data-sec="nbadv">
+      <span>${advanced?"Back to the simple view":"Advanced"}</span>
+      <span class="nb-adv-x">${advanced?"\u2212":"+"}</span>
+    </button>
+  </div>`;
 
-    let listBody = "";
-    const shownGroups = GKEYS.filter(g=>!GROUPS[g].optional || A.wk[g].sets > 0);
-    AREA_ORDER.forEach(area=>{
-      const groups = shownGroups.filter(g=>AREA_OF[g]===area);
-      if(!groups.length) return;
-      let rows = "";
-      groups.forEach(g=>{
-        const L = A.lm[g] || adjustedLandmarks(A, g);
-        const gm = muscleMetric(A, g, metric);
-        const trained = A.wk[g].sets > 0;
-        const q = cyc.pending[g] || 0;
-        const val = metric==="volume"
-          ? r1(A.wk[g].sets)+" / "+L.mav+" sets"
-          : (trained ? gm.txt : (q > 0 ? "still to come" : "not trained"));
-        const col = trained ? gm.color : C_GREY;
-        const note = (!trained && q > 0)
-          ? r1(q)+" sets scheduled on "+dayList(pendingDayNames(cyc, g))
-          : (gm.note || "");
-        rows += `<button class="bm-row" data-grow="${g}" style="width:100%;background:none;border:none;border-bottom:1px solid var(--line);text-align:left;color:var(--text);font:inherit">
-          <span class="bm-swatch" style="background:${col}"></span>
-          <span class="bm-name"><span>${esc(gName(g))}</span><small>${esc(GROUP_REGIONS[g].length)} part${GROUP_REGIONS[g].length===1?"":"s"} \u00b7 ${esc(note)}</small></span>
-          <span class="bm-right">
-            <span class="bm-val">${esc(val)}</span>
-            <span class="bm-bar"><i style="width:${Math.max(3,gm.v==null?0:gm.v)}%;background:${col}"></i></span>
-          </span>
-        </button>`;
-      });
-      listBody += `<div class="bm-area">${esc(area)}</div><div class="bm-rank">` + rows + `</div>`;
-    });
-    h += sectionCard("all", "Every muscle",
-      "Your "+shownGroups.length+" major muscle groups. Tap one to open it and, if you want, split it into its parts.",
-      listBody, shownGroups.length);
-
-    const acwrNote = t.acwr==null ? "needs 4 weeks of history to mean anything"
-      : t.acwr > 1.5 ? "you ramped up fast, which is the classic injury warning sign"
-      : t.acwr < 0.8 ? "well under your usual, fine for a light spell"
-      : "a safe, steady rate of change";
-    h += sectionCard("week", "Your training load",
-      "Zoomed out from individual muscles to the whole of you.",
-      `<div class="sys-grid">
-        <div class="sys-tile"><div class="sys-k">${term("hardset","Working sets")} ${esc(win.short)}</div>
-          <div class="sys-v">${t.setsWk}</div>
-          <div class="sys-s">${t.setsPrev>0?(t.setsWk>=t.setsPrev?"+":"")+Math.round((t.setsWk-t.setsPrev)/t.setsPrev*100)+"% vs "+esc(win.prevLabel):"first "+esc(win.short.replace(/^this /,""))+" on record"}</div></div>
-        <div class="sys-tile"><div class="sys-k">${term("acwr","Load change")}</div>
-          <div class="sys-v" style="color:${t.acwr==null?"var(--dim)":(t.acwr>1.5||t.acwr<0.8)?"var(--arms)":"var(--ok)"}">${t.acwr==null?"\u2014":t.acwr.toFixed(2)+"\u00d7"}</div>
-          <div class="sys-s">${acwrNote}</div></div>
-        <div class="sys-tile"><div class="sys-k">Average ${term("fatigue","tiredness")}</div>
-          <div class="sys-v" style="color:${ramp([[0,C_OK],[.5,C_WARN],[1,C_BAD]], t.fat/100)}">${t.fat}%</div>
-          <div class="sys-s">${t.fat>=60?"worn down, a lighter week would pay off":t.fat>=35?"normal mid-block tiredness":"fresh across the board"}</div></div>
-        <div class="sys-tile"><div class="sys-k">Highest ${term("injury","risk flag")}</div>
-          <div class="sys-v" style="color:${ramp([[0,C_OK],[.5,C_WARN],[1,C_BAD]], t.inj/100)}">${t.inj}%</div>
-          <div class="sys-s">${t.inj>=55?"at least one muscle is being pushed too hard":"nothing above moderate"}</div></div>
-      </div>
-      <div class="bm-explain" style="margin-top:12px;color:var(--faint)">Volume is counted over <b>${esc(win.label)}</b>, and your targets are scaled to match. Change this in <b>Settings</b>.</div>`);
-
-    h += `<div class="bm-credit">Anatomy from <a href="https://github.com/melihcolpan/MuscleMap" target="_blank" rel="noopener">MuscleMap</a> by Melih Colpan, MIT licence</div>`;
-    h += `</div>`;
-  }
+  h += `<div class="bm-credit">Anatomy from <a href="https://github.com/melihcolpan/MuscleMap" target="_blank" rel="noopener">MuscleMap</a> by Melih Colpan, MIT licence</div>`;
   h += `</div>`;
   return h;
 }
