@@ -2295,6 +2295,10 @@ body.cele-open{overflow:hidden}
   cursor:pointer;text-align:left;min-height:24px}
 .nb-link:hover,.nb-link:focus-visible{text-decoration:underline}
 
+/* the "you missed a workout, train instead?" offer under a rest-day card */
+.rest-skip{margin-top:12px;border-left:3px solid var(--arms)}
+.rs-k{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--arms);margin-bottom:6px}
+
 /* 8. what you've said — the notes history, shared with the grade card */
 .nb-notes{display:flex;flex-direction:column}
 .nb-note{padding:10px 0 10px 11px;border-top:1px solid var(--line);border-left:3px solid var(--line)}
@@ -3415,6 +3419,13 @@ function skipLog(){
   return S.skipLog;
 }
 function isSkipDay(date){ return skipLog().indexOf(date) > -1; }
+/* The workouts this cycle has already lost. A rest lands differently when the cycle is
+   behind: the point of the rest was to sit between a run of training days, and a cycle
+   that has skipped one has already had its day off. */
+function skipsThisCycle(){
+  const start = S.cycleStart ? dayKey(S.cycleStart) : null;
+  return skipLog().filter(d=> !start || d >= start).sort();
+}
 function takeSkipDay(date){
   const l = skipLog();
   if(l.indexOf(date) > -1) return false;
@@ -10593,7 +10604,12 @@ function plateStrip(){
   })();
   /* With a rest due, TODAY is the rest and the training day is merely next. Marking
      both as current asks you to work out which of two highlighted plates you are on. */
-  const restNow = !restsFloat() && schedStatus.some(x=> x.due);
+  /* AND ONLY IF TODAY IS ACTUALLY THE REST. A rest can be due at its position in the
+     rotation while today is not it — you tapped "train today anyway", which tombstones
+     the date. The strip kept marking the rest plate as current in that case, so the
+     plate strip said Rest and the card underneath it said "Start Upper B". Both now
+     read the same question. */
+  const restNow = !restsFloat() && schedStatus.some(x=> x.due) && isRestToday();
   let html = '<div class="plates-wrap"><div class="plates">';
   let restSeen = 0;
   CYCLE_LAYOUT.forEach((key, slot)=>{
@@ -10617,7 +10633,8 @@ function plateStrip(){
          the right moment to WRITE it and the wrong moment to SHOW it: today is your rest
          day, so it gets its tick today, exactly like a training day you have finished. */
       const resting = !!date || (due && scheduledRestToday());
-      const isToday = date === todayStr() || due;
+      // Due at its position, but today only if today is genuinely being spent on it.
+      const isToday = date === todayStr() || (due && restNow);
       html += `<button class="plate rest${isToday?" cur":""}${resting?" done":""}${fixed&&!due?" past":""}"
         data-rest="${idx}" data-restsched="${fixed ? layoutRestSlot[idx] : -1}"
         aria-label="Rest ${idx+1} of ${REST_CREDITS}, ${wd}${
@@ -10653,7 +10670,7 @@ function plateStrip(){
     /* Scheduled: the count is not a budget you are spending, it is where you are in a
        rotation that already includes them. */
     : (REST_CREDITS
-        ? (restDueIndex() > -1 ? "rest day today" : REST_CREDITS+" rest"+(REST_CREDITS===1?"":"s")+" a cycle, scheduled")
+        ? (restNow ? "rest day today" : REST_CREDITS+" rest"+(REST_CREDITS===1?"":"s")+" a cycle, scheduled")
         : "no rest days in this cycle");
   html += `<div class="cycle-row"><span class="num">${S.cycleDone.length} of ${ROTATION.length} done &middot; ${
     restWord}</span><span>${
@@ -11240,11 +11257,26 @@ function viewToday(){
         : "Recovery is where the growth happens."}
         Your rotation picks back up tomorrow with <b>${esc(m.name)}</b>.</div>
     </div>`;
-    /* No "actually, train today". A rest day the plan scheduled is not a prompt, and
-       offering to undo it on the same screen that announces it turns a decision already
-       made back into a question. The way out is still there and still one tap — under
-       `restMode: "floating"` the rest plate cancels the day it is on — it is just not
-       sitting under the words telling you to rest. */
+    /* Normally there is no "actually, train today" here: a rest day the plan scheduled
+       is not a prompt, and offering to undo it on the same screen that announces it
+       turns a decision already made back into a question.
+
+       A CYCLE THAT HAS ALREADY LOST A DAY is the exception, and it is the whole reason
+       this exists. The rest was put here to sit between training days; if one of those
+       training days never happened, you have had the day off already, and the honest
+       thing is to say so and let you choose. Only shown when a workout in THIS cycle
+       was actually skipped — otherwise the card is exactly what it was. */
+    const missed = skipsThisCycle();
+    if(missed.length && !isRestDay(todayStr()) && REST_SKIP_DISMISSED !== todayStr()){
+      h += `<div class="card rest-skip">
+        <div class="rs-k">You missed ${missed.length === 1 ? "a workout" : missed.length + " workouts"} this cycle</div>
+        <div class="sub">${missed.map(d=>fmtDate(d)).join(", ")} came and went without a session, so you have already had the day off this rest was meant to give you.</div>
+        <div class="btn-row" style="margin-top:14px">
+          <button class="btn small" id="restSkipTrain" style="flex:1">Train ${esc(m.name)} instead</button>
+        </div>
+        <div class="btn-row"><button class="btn ghost small" id="restSkipKeep" style="flex:1">Keep the rest day</button></div>
+      </div>`;
+    }
     return h;
   }
 
@@ -12466,6 +12498,10 @@ function headlineFor(metric, r){
 let BODY_METRIC = "fatigue";
 let BODY_FOCUS = null;   // the muscle group you have selected
 let BODY_EXPAND = false; // whether that group is split into its individual heads
+/* Dismissing the "you missed a workout, train instead?" offer for today. Deliberately
+   NOT persisted: it is a question about this screen right now, not a preference, and it
+   comes back tomorrow if the cycle is still behind. */
+let REST_SKIP_DISMISSED = null;
 let BODY_OPEN = {};      // which collapsible sections are expanded
 function bodyToggle(k){ BODY_OPEN[k] = !BODY_OPEN[k]; render(); }
 /* Re-running a CSS animation on an element that already has the class does nothing at
@@ -13701,6 +13737,20 @@ function bind(){
       save(); queueSync(); render();
     }
   });
+  /* Taking the rest over as a training day. The tombstone is the SAME list the rest
+     schedule already consults — this is not a second mechanism, it is the existing
+     "I said I would train" answer, reached from the rest card rather than a plate. */
+  const rskT = $("#restSkipTrain");
+  if(rskT) rskT.onclick = ()=>{
+    const today = todayStr();
+    const t = restTombstones();
+    if(t.indexOf(today) < 0) t.push(today);
+    save(); queueSync(); render();
+    toast("Rest skipped, training today");
+  };
+  const rskK = $("#restSkipKeep");
+  // Keeping it is the default, so this only has to get the offer off the screen.
+  if(rskK) rskK.onclick = ()=>{ REST_SKIP_DISMISSED = todayStr(); render(); };
   const crb = $("#clearRestBtn");
   if(crb) crb.onclick = ()=>{
     // frees a credit but keeps the day in the permanent rest log: you did rest that
