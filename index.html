@@ -659,8 +659,20 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 
 /* modal */
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:flex-end;justify-content:center;z-index:50}
-.modal-bg.show{display:flex}
+.modal-bg.show{display:flex;animation:fadeIn .18s ease both}
 .modal{background:var(--card);border:1px solid var(--line);border-radius:20px 20px 0 0;padding:20px;width:100%;max-width:600px;max-height:88vh;overflow-y:auto}
+/* A sheet that arrives from the edge it is attached to. Without this the score card was
+   simply present on one frame and absent the next, which on top of a fading celebration
+   is indistinguishable from a glitch. */
+.modal-bg.show .modal{animation:sheetUp .34s cubic-bezier(.2,.9,.25,1) both}
+@keyframes sheetUp{from{transform:translateY(26px);opacity:0}to{transform:translateY(0);opacity:1}}
+/* Blocks of a long card revealed in the order they are read, on a fixed schedule set by
+   --d, rather than all at once. Deterministic: same order, same timing, every time. */
+.rv{animation:rvIn .34s cubic-bezier(.2,.9,.25,1) both;animation-delay:var(--d,0s)}
+@keyframes rvIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
+@media (prefers-reduced-motion: reduce){
+  .modal-bg.show,.modal-bg.show .modal,.rv{animation:none}
+}
 .modal h3{font-size:22px;margin-bottom:12px}
 .modal p{font-size:15px;color:var(--dim);margin:8px 0}
 .modal .rpe-scale{font-family:var(--mono);font-size:14px;line-height:2;color:var(--text)}
@@ -2282,6 +2294,20 @@ body.cele-open{overflow:hidden}
 .nb-link{background:none;border:0;padding:6px 0 0;margin:0;color:var(--acc);font:inherit;font-size:13px;
   cursor:pointer;text-align:left;min-height:24px}
 .nb-link:hover,.nb-link:focus-visible{text-decoration:underline}
+
+/* 8. what you've said — the notes history, shared with the grade card */
+.nb-notes{display:flex;flex-direction:column}
+.nb-note{padding:10px 0 10px 11px;border-top:1px solid var(--line);border-left:3px solid var(--line)}
+.nb-note:first-of-type{border-top:0}
+/* The left rule carries the same three weights the grade uses, so the tab and the card
+   agree at a glance about which notes are the ones that explain a number. */
+.nb-note-hold{border-left-color:var(--dim)}
+.nb-note-watch{border-left-color:var(--arms)}
+.nb-note-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.nb-note-x{font-size:14px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nb-note-d{font:11px var(--mono);color:var(--faint);white-space:nowrap;flex-shrink:0}
+.nb-note-t{font-size:13.5px;color:var(--dim);line-height:1.45;margin-top:2px}
+.nb-note-t i{font-style:italic;color:var(--text)}
 
 /* 4. trends */
 .nb-sec-k{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
@@ -5446,8 +5472,15 @@ function celebrate(kind, wid, volume, onDone){
     el.classList.add("out");
     document.body.classList.remove("cele-open");
     window.scrollTo(0, scrollY);
-    setTimeout(()=>el.remove(), 520);
-    if(onDone && !fired){ fired = true; setTimeout(onDone, 480); }
+    /* THE HANDOFF USED TO OVERLAP. The overlay sits at z-index 100 and the modal at 50,
+       so a score card opened while this was still fading in front of it appeared behind
+       a black wash, half-visible, with its own entrance already part-way through — which
+       is what read as content starting off-screen and popping in at random. Nothing is
+       handed on until the overlay has actually been removed from the document. */
+    setTimeout(()=>{
+      el.remove();
+      if(onDone && !fired){ fired = true; onDone(); }
+    }, 540);
   };
   el.onclick = dismiss;
   // long enough for the whole sequence to land, then it gets out of the way
@@ -5848,6 +5881,10 @@ function addExNote(rec){
     ex: null, code: null, text: "", sessionId: null, workoutId: null
   }, rec || {}));
   if(list.length > 800) S.exNotes = list.slice(-800);
+}
+function notesForSession(sessionId){
+  if(!sessionId) return [];
+  return exNotes().filter(n=> n && n.sessionId === sessionId);
 }
 function notesForExercise(name, sinceMs){
   const k = nrm(name || "");
@@ -11562,6 +11599,15 @@ function setPrescription(entry, si){
     out.techDetail = shown.detail || "";
   }
 
+  /* A load that just went up asks for the BOTTOM of the range, not the top. Written
+     before the weaker-side rule so a measured cap still wins over it. */
+  const rb = rebuildFor(entry);
+  if(rb && !past){
+    out.reps = String(rb.from);
+    out.rebuild = rb;
+    out.why = "new load \u00b7 rebuild from " + rb.from;
+  }
+
   /* Then the weaker-side rule, which overrides both, because it is a cap on the set
      rather than a description of how to take it. */
   if(asymActiveFor(entry) && entry.startSide){
@@ -12919,6 +12965,37 @@ function viewBody(){
       <span class="nb-adv-x">${advanced?"\u2212":"+"}</span>
     </button>
   </div>`;
+
+  /* ---- 8. WHAT YOU'VE SAID ------------------------------------------------------
+     The other half of the picture. Everything above is inferred from numbers; this is
+     the part you told it directly, from the note button in a workout and from the
+     session note on the finish screen. It lives here because this is the tab that
+     answers "how am I doing", and because the next grade reads exactly these records
+     when it decides whether a down week needs explaining. */
+  const recent = exNotes().slice(-40).reverse();
+  h += `<div class="nb-notes nb-in" style="--d:570ms">
+    <div class="nb-sec-k">What you've said${recent.length?`<span class="nb-count">${recent.length}</span>`:""}</div>`;
+  if(!recent.length){
+    h += `<div class="nb-none">Nothing yet. Tap \u270e on any exercise during a workout to note how it felt \u2014 "form felt off", "equipment felt different", anything. Those notes turn up here, and your next grade uses them to explain a number instead of quietly marking you down.</div>`;
+  } else {
+    const show = BODY_OPEN.nbnotes ? recent : recent.slice(0,5);
+    h += show.map(n=>{
+      const k = EX_NOTE_BY_CODE[n.code];
+      const tone = k ? k.weight : "note";
+      return `<div class="nb-note nb-note-${esc(tone)}">
+        <div class="nb-note-h">
+          <span class="nb-note-x">${esc(n.ex || "Whole session")}</span>
+          <span class="nb-note-d">${esc(fmtDate(n.date || todayStr()))}</span>
+        </div>
+        <div class="nb-note-t">${esc(k ? k.label : "")}${k && n.text ? " \u00b7 " : ""}${n.text?`<i>${esc(n.text)}</i>`:""}</div>
+      </div>`;
+    }).join("");
+    if(recent.length > 5){
+      h += `<button class="nb-link" data-sec="nbnotes">${BODY_OPEN.nbnotes?"Show fewer":"Show "+(recent.length-5)+" more"}</button>`;
+    }
+    h += `<div class="nb-lfoot">Read as context, never as an instruction. A note explains a number \u2014 it does not change your loads on its own.</div>`;
+  }
+  h += `</div>`;
 
   h += `<div class="bm-credit">Anatomy from <a href="https://github.com/melihcolpan/MuscleMap" target="_blank" rel="noopener">MuscleMap</a> by Melih Colpan, MIT licence</div>`;
   h += `</div>`;
@@ -14296,6 +14373,14 @@ function finishWorkout(){
   S.active = null;
   // Re-check every logged set for records BEFORE grading, so a PR typed into a row
   // that never got an explicit ✓ still counts, both as a badge and as improvement.
+  /* ONE HISTORY, TWO ENTRY POINTS. The session note has always been typed on the
+     workout screen and then only ever read back on the session card. Mirrored here it
+     reaches the Body tab and the next grade's context alongside the per-exercise
+     notes, which is the whole point of having written it. */
+  if(sessObj.note && !notesForSession(sessObj.id).some(n=> !n.ex)){
+    addExNote({ex: null, code: null, text: sessObj.note,
+      sessionId: sessObj.id, workoutId: sessObj.workoutId, date: sessObj.date});
+  }
   sweepSessionPRs(sessObj);
   // Progression is evaluated once, at finish, against the history as it stood then, and
   // stored on the session so the card says the same thing when you reopen it later.
@@ -14310,6 +14395,10 @@ function finishWorkout(){
       if(applyProgression(p.name, p.to)) p.auto = true;
     });
   }
+  /* AFTER the auto-progression pass, so a session that earned another increase keeps
+     the fresh flag that pass just wrote rather than having it cleared by the reps that
+     earned it. */
+  clearRebuiltEntries(sessObj);
   // graded once, at the moment it's finished, and stored on the session so History
   // shows the same number later even as the surrounding history grows
   sessObj.quality = scoreWorkout(sessObj);
@@ -14952,7 +15041,14 @@ function downContext(sess, entry, idx, prior){
       ", so today's sets were aimed at a different target");
   }
 
-  // 3, you wrote something down about this movement at the time
+  // 3, the load went up in between, so a rep drop is the plan working, not a regression
+  const rbC = rebuildFor(entry);
+  if(rbC && rbC.at > prior.sess.startedAt && rbC.at <= sess.startedAt){
+    excuses.push("the load went up to " + fmtLoad(rbC.weight) + " in between, so the reps were "
+      + "meant to fall back to " + rbC.from + " and rebuild from there");
+  }
+
+  // 4, you wrote something down about this movement at the time
   const nc = noteContextFor(entry.name);
   if(nc && nc.kind.weight === "hold"){
     excuses.push("you noted it at the time \u2014 " + nc.kind.grade);
@@ -14960,12 +15056,12 @@ function downContext(sess, entry, idx, prior){
     context.push("you noted that " + nc.kind.grade);
   }
 
-  // 4, you had been away: detraining is not regression, and is not graded as it
+  // 5, you had been away: detraining is not regression, and is not graded as it
   const lay = layoffBefore(sess);
   if(lay) excuses.push("you came back from a break \u2014 " + layoffPhrase(lay) +
     ", and strength dips over time off without anything having gone wrong");
 
-  // 5, you said at the time that the set did what it was supposed to
+  // 6, you said at the time that the set did what it was supposed to
   const codes = [...new Set((entry.sets||[]).map(st=>st.why && st.why.code).filter(Boolean))];
   const exempt = codes.filter(c=>REASON_EXEMPT[c] && REASON_BY_CODE[c]);
   if(exempt.length){
@@ -15462,6 +15558,23 @@ function scoreCardHTML(q, sess){
       </div>`;
     }
   }
+  /* What you WROTE, as opposed to what you flagged on a set. Same history the Body tab
+     reads and the same records the next grade uses for context, shown here so the card
+     and the tab never disagree about what you said. */
+  const notes = notesForSession(sess && sess.id);
+  if(notes.length){
+    h += `<div class="rev-head">What you noted</div>`;
+    notes.forEach(n=>{
+      const k = EX_NOTE_BY_CODE[n.code];
+      const label = k ? k.label : "Note";
+      h += `<div class="rev-line" style="align-items:flex-start">
+        <b>\u270e ${esc(n.ex || "This session")}</b>
+        <span class="num" style="color:var(--dim);text-align:right">${esc(label)}</span>
+      </div>${n.text?`<div class="sub" style="margin:-4px 0 6px;font-style:italic">"${esc(n.text)}"</div>`:""}`;
+    });
+    h += `<div class="sub" style="margin:-2px 0 8px">Kept in your Body tab. Future grades read these as context \u2014 they explain a number, they don't move your loads on their own.</div>`;
+  }
+
   /* The single most useful thing on this card is the top of this list, so it goes above
      the section breakdown rather than being scattered through it. Ranked by the points
      each one actually cost. */
@@ -15515,9 +15628,21 @@ function scoreCardHTML(q, sess){
   }
   return h;
 }
+/* Reveals a long card top to bottom on a fixed schedule. The delay is capped, so a card
+   with forty blocks in it still finishes arriving in under half a second rather than
+   trickling in for two. */
+function stageReveal(root, step, cap){
+  if(!root || reducedMotion()) return;
+  const kids = Array.prototype.slice.call(root.children);
+  kids.forEach((el,i)=>{
+    el.style.setProperty("--d", Math.min(i * (step||0.035), cap||0.36) + "s");
+    el.classList.add("rv");
+  });
+}
 function openScoreCard(sess, onDone){
   const q = sess.quality || scoreWorkout(sess);
   showModal(scoreCardHTML(q, sess) + `<button class="btn" style="margin-top:18px" id="scDone">Got it</button>`);
+  stageReveal($("#modal"));
   let fired = false;
   MODAL_DISMISS = ()=>{ if(fired) return; fired = true; if(onDone) onDone(); };
   MODAL_REOPEN = ()=> openScoreCard(sess, onDone);
@@ -15876,11 +16001,50 @@ function applyProgression(name, to){
   const v = parseFloat(to);
   if(isNaN(v)) return false;
   e.weight = v;
+  /* THE FLAG HAS TO SURVIVE THE GRADE SCREEN. "Rebuild from 6 reps at the new load" is
+     an instruction about the NEXT session, and said once on a card you close it may as
+     well not exist — the following week the reps have dropped, nothing on screen
+     explains why, and the grade reads it as a regression. Written onto the programme
+     entry it drives the rep target, excuses the drop, and clears itself once the top of
+     the range comes back. */
+  const rr = repRange(e.reps);
+  if(rr) e.rebuild = {from: rr[0], top: rr[1], weight: v, prevWeight: from, at: Date.now()};
   logPlanChange("weight", null, e.name,
     [fmtLoad(from) + " → " + fmtLoad(v)],
-    {note: "Double progression: last set cleared the top of the rep range at target RPE."});
+    {note: "Double progression: last set cleared the top of the rep range at target RPE."
+      + (rr ? " Rebuild from " + rr[0] + " reps at the new load." : "")});
   save(); queueSync();
   return true;
+}
+/* ---------- rebuilding after a load increase ----------
+   Reads the flag applyProgression() wrote, and decides whether it still applies. It
+   lapses on its own three ways: the load moved somewhere else (a different question),
+   six weeks passed (the reps are wherever they are by now), or the top of the range
+   came back at that load, which is the flag's whole purpose being served. */
+const REBUILD_MAX_DAYS = 42;
+function rebuildFor(entry){
+  if(!entry) return null;
+  const src = entry.rebuild ? entry : findProgramEntry(entry.name);
+  const rb = src && src.rebuild;
+  if(!rb || !rb.at || rb.from == null) return null;
+  if(Date.now() - rb.at > REBUILD_MAX_DAYS * DAY_MS) return null;
+  const w = entry.weight == null ? null : parseFloat(entry.weight);
+  if(w != null && !isNaN(w) && rb.weight != null && Math.abs(w - rb.weight) > 0.01) return null;
+  return rb;
+}
+// Called at finish: did this session put the top of the range back at the new load?
+function clearRebuiltEntries(sess){
+  (sess.entries || []).forEach(en=>{
+    const e = findProgramEntry(en.name);
+    const rb = e && e.rebuild;
+    if(!rb || rb.top == null) return;
+    const done = (en.sets || []).filter(st=> st.done || st.reps);
+    const last = done[done.length - 1];
+    if(!last) return;
+    const w = parseFloat(last.weight);
+    if(!isNaN(w) && rb.weight != null && Math.abs(w - rb.weight) > 0.01) return;
+    if((parseFloat(last.reps) || 0) >= rb.top) delete e.rebuild;
+  });
 }
 
 /* =====================================================================
