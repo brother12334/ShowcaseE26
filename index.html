@@ -1007,6 +1007,20 @@ body.onboarding #app{padding:0}
   font-size:13.5px;line-height:1.55;color:var(--dim);text-align:left;margin:0;
 }
 .acct-warn b{color:var(--text);text-transform:uppercase;font-family:var(--disp);letter-spacing:.06em;font-size:12.5px}
+/* the pounds-or-kilos step, straight after the account is made */
+.unit-pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0 20px}
+.unit-opt{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:20px 12px;border-radius:14px;border:1px solid var(--line);
+  background:var(--card2);color:var(--text);cursor:pointer;
+  transition:border-color .18s ease,background .18s ease,transform .18s ease;
+}
+.unit-opt:hover{transform:translateY(-1px)}
+.unit-opt.on{border-color:var(--acc);background:var(--card)}
+.unit-opt b{font-family:var(--disp);font-size:30px;font-weight:700;line-height:1}
+.unit-opt span{font-size:14px}
+.unit-opt i{font-style:normal;font:11px var(--mono);color:var(--faint);letter-spacing:.04em}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -4195,8 +4209,17 @@ const PREF_DEFAULTS = {
      barWeight, which meant a barbell and a Smith machine shared one figure — and they
      have nothing to do with each other: a barbell is 45 lb almost everywhere, while a
      counterbalanced carriage runs anywhere from 6 to 35 depending on the machine. Null
-     means "the usual", which is SMITH_BAR. */
-  smithWeight: null
+     means "the usual", which is smithBarDefault(). */
+  smithWeight: null,
+  /* POUNDS OR KILOS, AND NOTHING IS CONVERTED. This is a label, not a conversion.
+     Every number in your log is the number you typed, which is the number written on
+     the plate in front of you; the app only has to know what to CALL it, and what a
+     sensible jump looks like in it. Converting a history would mean rewriting numbers
+     you entered yourself, and a 2.5 lb rounding error compounding through five years
+     of e1RMs is a worse outcome than a label. What the unit genuinely changes is the
+     increment table and the default bar weights, and those are handled where they
+     live. */
+  units: "lb"             // lb | kg
 };
 function trainPrefs(){
   if(typeof S === "undefined" || !S) return PREF_DEFAULTS;
@@ -4206,6 +4229,18 @@ function trainPrefs(){
 /* How this particular movement's sides are handled. An exercise carries `sideMode` only
    when the source document said so in as many words — "alternate arms every rep, rest
    after both arms" is a fact about the programme and outranks any preference. */
+/* The word for a load, everywhere one is printed. */
+function unitWord(){ return trainPrefs().units === "kg" ? "kg" : "lb"; }
+function inKg(){ return trainPrefs().units === "kg"; }
+/* An amount that was written for pounds, restated as the nearest sensible jump in
+   kilos. Not a conversion: 5 lb is 2.27 kg and nobody owns a 2.27 kg plate, so it maps
+   to the 2.5 kg pair that a kilo gym actually stocks. */
+const LB_TO_KG_STEP = {1.25:0.5, 2.5:1.25, 5:2.5, 10:5, 20:10, 25:10, 45:20};
+function stepInUnits(lbAmount){
+  if(!inKg()) return lbAmount;
+  const m = LB_TO_KG_STEP[lbAmount];
+  return m != null ? m : Math.round(lbAmount * 0.4535924 * 4) / 4;
+}
 function sideModeFor(e){
   if(e && e.sideMode) return e.sideMode;
   return trainPrefs().sides || PREF_DEFAULTS.sides;
@@ -5423,7 +5458,7 @@ function celebrate(kind, wid, volume, onDone){
     <div class="cele-stack">
       <div class="slam" style="background:${color}">${esc(plateTxt)}</div>
       <div class="cele-text">${text}</div>
-      ${volume>0 ? `<div class="cele-vol"><span class="vol-num">0</span> lb moved</div>` : ""}
+      ${volume>0 ? `<div class="cele-vol"><span class="vol-num">0</span> ${unitWord()} moved</div>` : ""}
     </div>
     <div class="cele-hint">tap to continue</div>`;
 
@@ -5968,7 +6003,7 @@ function askSetReason(entry, st, miss){
       $("#modalBg").classList.remove("show");
       resolve(v);
     };
-    const setTxt = (st.weight!=null && st.weight!=="" ? st.weight+" lb" : "bodyweight")+" × "+miss.reps+" reps";
+    const setTxt = (st.weight!=null && st.weight!=="" ? st.weight+" "+unitWord() : "bodyweight")+" × "+miss.reps+" reps";
     $("#modal").innerHTML = `
       <h3>What happened there?</h3>
       <div class="sub" style="margin:-4px 0 4px">
@@ -6530,11 +6565,11 @@ function insight(exName, occ){
   if(t0.w > t1.w){
     return {tag:"Trend", msg: t1.w===0
       ? "Added load to a bodyweight movement, see how it holds"
-      : "Moved up from "+t1.w+" lb last session, see how it holds"};
+      : "Moved up from "+t1.w+" "+unitWord()+" last session, see how it holds"};
   }
   if(t0.w === t1.w){
     const tOld = top(h[h.length-1]);
-    const at = isBw ? "" : "at "+t0.w+" lb ";
+    const at = isBw ? "" : "at "+t0.w+" "+unitWord()+" ";
     if(tOld.w===t0.w && t0.r - tOld.r >= 2){
       return {tag:"Trend", msg:"Reps climbing "+at+"("+tOld.r+" → "+t0.r+")"+(isBw
         ? ", bodyweight is getting comfortable"
@@ -7440,7 +7475,7 @@ function weakPoints(A){
         ? "Take a lighter week here: about half the sets, same loads."
         : "Change the stimulus rather than the amount of it.",
       "Volume is fine, but estimated strength is "+(dropped ? "down "+Math.abs(Math.round(g.strP*100))+"%" : "flat")+
-        " versus the previous 3 weeks"+(g.bestPrev ? " ("+Math.round(g.bestPrev)+" → "+Math.round(g.bestNow)+" lb est. 1RM)" : "")+".",
+        " versus the previous 3 weeks"+(g.bestPrev ? " ("+Math.round(g.bestPrev)+" → "+Math.round(g.bestNow)+" "+unitWord()+" est. 1RM)" : "")+".",
       "More sets is the wrong lever when the sets you already do aren't converting. "+
       (dropped
         ? "A stall with falling strength is nearly always accumulated fatigue rather than too little work, so cut the sets by about half, keep the loads, and rebuild from there."
@@ -7850,6 +7885,26 @@ function viewAccount(){
     return h + `</div>`;
   }
 
+  /* ASKED BEFORE ANYTHING ELSE, because every number the app is about to show is in
+     one unit or the other and there is no neutral way to print a load. It is one tap
+     and it is changeable in Settings, so nothing here is a commitment. */
+  if(a.step === "units"){
+    const u = trainPrefs().units === "kg" ? "kg" : "lb";
+    h += `<div class="acct-art" aria-hidden="true"><span class="acct-ring"></span><span class="acct-key">${u === "kg" ? "kg" : "lb"}</span></div>
+      <h1 class="ob-hero-h">Pounds<br>or kilos?</h1>
+      <p class="ob-hero-p">Whatever your gym labels its plates in. This is what Element 26 will
+        call every load it shows you, and it decides how big a sensible jump looks.</p>
+      <div class="unit-pick">
+        <button class="unit-opt${u==="lb"?" on":""}" data-unitpick="lb">
+          <b>lb</b><span>Pounds</span><i>45 lb bar, 5 lb jumps</i></button>
+        <button class="unit-opt${u==="kg"?" on":""}" data-unitpick="kg">
+          <b>kg</b><span>Kilos</span><i>20 kg bar, 2.5 kg jumps</i></button>
+      </div>
+      <button class="btn" id="acctUnitsGo">Continue</button>
+      <div class="acct-small">Change it any time in <b>Settings \u2192 How you train</b>.</div>`;
+    return h + `</div>`;
+  }
+
   if(a.step === "signin"){
     h += `<h1 class="ob-hero-h">Sign in</h1>
       <p class="ob-hero-p">Enter the Element 26 ID you saved, and the recovery key from
@@ -7959,8 +8014,19 @@ function bindAccount(){
       if(row){ row.classList.remove("nudge"); void row.offsetWidth; row.classList.add("nudge"); }
       return;
     }
-    ACCT_UI = null;
+    /* Units before the plan flow, not after it. The import asks what your bar weighs
+       and offers picks in a unit, so it has to already know which one. */
     accountPush();
+    a.step = "units";
+    render();
+  });
+  document.querySelectorAll("[data-unitpick]").forEach(b=> b.onclick = ()=>{
+    trainPrefs().units = b.dataset.unitpick;
+    save(); queueSync(); render();
+  });
+  on("acctUnitsGo", ()=>{
+    ACCT_UI = null;
+    save(); queueSync();
     /* Straight into the plan flow. A brand-new account has nothing in it, and the first
        thing anybody should be asked for is the programme they already train on. */
     if(needsOnboarding()) startOnboarding();
@@ -9178,16 +9244,20 @@ function aiBuildQuestions(doc, result){
       detected:"not in your plan",
       def:null, rec:{v:"total", why:"it's how most people and most plans write it"},
       options:[
-        {v:"total",  t:"Yes, bar and plates together", s:"You'd write 135 for an empty 45 lb bar with a 45 on each side."},
-        {v:"plates", t:"No, just the plates", s:"You'd write 90 for that same bar — only what you loaded onto it."}
+        {v:"total",  t:"Yes, bar and plates together",
+         s: inKg() ? "You'd write 60 for an empty 20 kg bar with a 20 on each side."
+                   : "You'd write 135 for an empty 45 lb bar with a 45 on each side."},
+        {v:"plates", t:"No, just the plates",
+         s: inKg() ? "You'd write 40 for that same bar — only what you loaded onto it."
+                   : "You'd write 90 for that same bar — only what you loaded onto it."}
       ]
     });
     qs.push({
       id:"barWeight", type:"number", title:"What does your bar weigh?",
-      sub:"Most gym barbells are 45 lb, but not all of them. If you're not sure, 45 is the safe answer.",
+      sub:"Most gym barbells are " + barDefault() + " " + unitWord() + ", but not all of them. If you're not sure, " + barDefault() + " is the safe answer.",
       when: a=> a.barMode === "total",
-      def:45, unit:"lb", min:5, max:120,
-      picks:[45, 35, 33, 25, 15]
+      def: barDefault(), unit: unitWord(), min: inKg() ? 2 : 5, max: inKg() ? 60 : 120,
+      picks: inKg() ? [20, 15, 12, 10, 7] : [45, 35, 33, 25, 15]
     });
   }
 
@@ -9676,7 +9746,7 @@ function aiReviewHTML(){
       if(e.sideMode === "both") bits.push("both sides per set");
       else if(altStyle(e)) bits.push("L / R");
       if(e.rest) bits.push(aiRestWord(e.rest[0]) + " rest");
-      return `<div class="ob-ex"><span>${esc(e.name)}${e.weight!=null?` <i style="color:var(--faint)">${e.weight} lb</i>`:""}${
+      return `<div class="ob-ex"><span>${esc(e.name)}${e.weight!=null?` <i style="color:var(--faint)">${e.weight} ${unitWord()}</i>`:""}${
         bits.length?`<br><span class="ai-src">${esc(bits.join(" · "))}</span>`:""}</span>
         <i class="num">${e.sets}×${esc(e.reps)}${e.rpe && !e.rpeAssumed ? " @" + esc(String(e.rpe)) : ""}</i></div>`;
     }).join("");
@@ -9715,7 +9785,7 @@ function aiReviewHTML(){
     ? "Any order, as your plan says" : "In the order your plan writes them");
   if(p.sides) push("sides", "Side tracking", {separate:"Each side tracked separately", matchWeaker:"Held to the weaker side", both:"Both sides in one set"}[p.sides]);
   if(ans.startSide) push("startSide", "Starting side", p.startSideFlip ? "Alternates each cycle" : "Always the right");
-  if(ans.barMode) push("barMode", "Barbell weight", p.barMode === "plates" ? "Plates only" : "Total, on a " + (p.barWeight||"?") + " lb bar");
+  if(ans.barMode) push("barMode", "Barbell weight", p.barMode === "plates" ? "Plates only" : "Total, on a " + (p.barWeight||"?") + " " + unitWord() + " bar");
   if(p.deloads && !(m.deloadWeeks||[]).length) push("deloads", "Deloads", p.deloads === "auto" ? "Element 26 tells you when one's due" : "Not prompted");
   if(ans.restDays) push("restDays", "Rest days", r.customSplit.layout.filter(x=>x==="rest").length + " a cycle");
   if(ans.units) push("units", "Units", ans.units === "convert" ? "Converted from kg to lb" : "Loads left out");
@@ -10311,7 +10381,12 @@ function trainPrefsCardHTML(){
   const seg = (attr, val, opts)=> `<div class="seg">` + opts.map(o=>
     `<button class="${val === o.v ? "on" : ""}" ${attr}="${esc(o.v)}">${esc(o.t)}</button>`).join("") + `</div>`;
   let h = `<div class="card">
-    <h3>How you train</h3>`;
+    <h3>How you train</h3>
+    <div class="sub" style="margin:4px 0 8px">The unit your gym labels its plates in. Nothing already logged
+      is converted or rewritten \u2014 the numbers stay exactly as you typed them, this only changes what they
+      are called and how big a sensible jump is.</div>
+    ${seg("data-prefunits", p.units === "kg" ? "kg" : "lb", [
+      {v:"lb", t:"Pounds"}, {v:"kg", t:"Kilos"}])}`;
   if(anyUni){
     h += `<div class="sub" style="margin:4px 0 8px">One-limb movements. <b>Separately</b> marks each set L or R;
       <b>match weaker</b> also holds both sides to whatever the weaker one manages; <b>together</b> counts a set
@@ -10355,7 +10430,7 @@ function trainPrefsCardHTML(){
     ${p.sleepPrompt === false ? "" : `<div class="field" style="margin:10px 0 0"><label>My night starts at</label>
       <input type="time" id="prefSleepT" class="timein" value="${esc(p.sleepTime || "22:30")}" aria-label="Sleep time"></div>`}
     <div class="sub" style="margin:14px 0 8px">Barbell loads. Whether the number you log includes the bar, and
-    what your bar weighs — Element 26 takes its warm-up percentages off that, and it doesn't assume 45 lb.</div>
+    what your bar weighs — Element 26 takes its warm-up percentages off that, and it doesn't assume ${barDefault()} ${unitWord()}.</div>
     ${seg("data-prefbar", p.barMode, [
       {v:"total", t:"Bar + plates"}, {v:"plates", t:"Plates only"}])}
     ${p.barMode === "total" ? `<div class="field" style="margin:10px 0 0"><label>Your bar weighs</label>
@@ -10363,7 +10438,7 @@ function trainPrefsCardHTML(){
         placeholder="e.g. 45 — leave blank if you'd rather not say"></div>` : ""}
     <div class="field" style="margin:10px 0 0"><label>Smith machine carriage</label>
       <input id="prefSmithW" inputmode="decimal" value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
-        placeholder="${SMITH_BAR} if you leave it blank — they vary from about 6 to 35"></div>
+        placeholder="${smithBarDefault()} if you leave it blank — they vary from about 6 to 35"></div>
     <div class="sub" style="margin:8px 0 0">Both are also reachable from the workout screen itself, for the day
       you train somewhere the bar is a different weight.</div>
   </div>`;
@@ -11120,7 +11195,7 @@ function drawCheckinSheet(){
       <div class="ci-k">Bodyweight <span class="ci-opt">optional</span></div>
       <div class="ci-wrow">
         <input id="ciSheetW" class="ci-w" inputmode="decimal" value="${esc(v.weight??"")}" placeholder="\u2014" aria-label="Bodyweight in pounds">
-        <span class="ci-unit">lb</span>
+        <span class="ci-unit">${unitWord()}</span>
       </div>
     </div>
 
@@ -11715,8 +11790,8 @@ function barKindFor(name){
 function exNameHTML(en){
   const kind = barKindFor(en && en.name);
   if(!kind) return `${esc(en.name)}`;
-  const w = kind === "smith" ? smithWeight() + " lb"
-          : (trainPrefs().barWeight == null ? "not set" : trainPrefs().barWeight + " lb");
+  const w = kind === "smith" ? smithWeight() + " " + unitWord()
+          : (trainPrefs().barWeight == null ? "not set" : trainPrefs().barWeight + " " + unitWord());
   return `<button class="ex-bar-name" data-barkind="${kind}"
     aria-label="${esc(en.name)} \u2014 ${kind === "smith" ? "Smith carriage" : "barbell"} ${esc(String(w))}, tap to change"
     >${esc(en.name)}<span class="ex-bar-w" aria-hidden="true">${esc(String(w))}</span></button>`;
@@ -11732,12 +11807,12 @@ function openBarModal(kind){
   showModal(`<h3>${smith ? "Smith machine carriage" : "What does this bar weigh?"}</h3>
     <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">${
       smith
-        ? "Carriages run from about 6 to " + SMITH_BAR + "+ lb depending on the machine, and warm-up percentages come off it."
+        ? "Carriages run from about " + (inKg()?"3":"6") + " to " + smithBarDefault() + "+ " + unitWord() + " depending on the machine, and warm-up percentages come off it."
         : "Warm-up percentages come off this, so a different gym's bar is worth a moment."
       } Same setting as in Settings \u2014 it stays until you change it back.</div>
     <div class="field" style="margin:0 0 12px">
       <input id="barModalW" inputmode="decimal" value="${esc(cur == null ? "" : cur)}"
-        placeholder="${smith ? SMITH_BAR + " if you leave it blank" : "e.g. 45 \u2014 20 kg bars read about 44"}"></div>
+        placeholder="${smith ? smithBarDefault() + " if you leave it blank" : (inKg() ? "e.g. 20 \u2014 most bars" : "e.g. 45 \u2014 20 kg bars read about 44")}"></div>
     <button class="btn" id="barModalSave">Save</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
   const el = $("#modal").querySelector("#barModalW");
@@ -11749,8 +11824,8 @@ function openBarModal(kind){
       : Math.max(smith ? 0 : 5, Math.min(120, Math.round(v * 10) / 10));
     if(smith) trainPrefs().smithWeight = val; else trainPrefs().barWeight = val;
     hideModal(); save(); queueSync(); render();
-    toast(smith ? "Smith carriage " + smithWeight() + " lb"
-                : (val == null ? "Bar weight cleared" : "Bar " + val + " lb"));
+    toast(smith ? "Smith carriage " + smithWeight() + " " + unitWord()
+                : (val == null ? "Bar weight cleared" : "Bar " + val + " " + unitWord()));
   };
 }
 /* The line under a switched exercise: what it replaced, and why if a why was given.
@@ -13312,7 +13387,7 @@ function viewHistory(){
           <span class="sub num">${fmtDate(s.date)}</span>
         </span>
       </div>
-      <div class="sub num" style="margin-top:2px">${s.entries.length} exercises · ${Math.round(vol).toLocaleString()} lb total${s.feel?' · '+FEELS[s.feel-1]:''}${nPr?' · 🔥 '+nPr+' PR'+(nPr>1?"s":""):''}</div>
+      <div class="sub num" style="margin-top:2px">${s.entries.length} exercises · ${Math.round(vol).toLocaleString()} ${unitWord()} total${s.feel?' · '+FEELS[s.feel-1]:''}${nPr?' · 🔥 '+nPr+' PR'+(nPr>1?"s":""):''}</div>
       ${s.note?`<div class="sub" style="margin-top:4px;font-style:italic">"${esc(s.note)}"</div>`:""}
       <div class="detail">${((ssm)=> s.entries.map((e,i)=>
         `<div class="exline"><b>${ssm[i]?`<span class="ss-tag">${ssm[i].letter}${ssm[i].pos}</span> `:""}${esc(e.name)}</b>${
@@ -13380,7 +13455,7 @@ function viewProgram(){
         + (asty === "side"  ? ' <span class="uni-badge">L / R</span>' : '')
         + (asty === "cross" ? ' <span class="uni-badge">crossover</span>' : '')
         + (e.alt ? ' <span class="alt-badge">⇄ '+esc(e.alt.name)+'</span>' : '');
-      let meta = `${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" lb":""}${e.note?" · "+esc(e.note):""}`;
+      let meta = `${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}`;
       if(e.alt) meta += `<br>next ${m.name.toLowerCase()} day: ${esc(nextUp)}`;
       h += `<div class="prog-ex">
         <div><b>${title}</b><div class="meta">${meta}</div></div>
@@ -13406,7 +13481,7 @@ function viewProgram(){
       <div class="sub" style="margin-bottom:6px">Runs at the end of every workout, in this order.</div>`;
     fin.forEach((e,i)=>{
       h += `<div class="prog-ex">
-        <div><b>${esc(e.name)}</b><div class="meta">${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" lb":""}${e.note?" · "+esc(e.note):""}</div></div>
+        <div><b>${esc(e.name)}</b><div class="meta">${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}</div></div>
         <div class="icon-btns">
           <button data-up="finisher:${i}" aria-label="Move up">↑</button>
           <button data-down="finisher:${i}" aria-label="Move down">↓</button>
@@ -13861,7 +13936,7 @@ function bind(){
         const row = el.parentElement;
         const wIn = row.querySelector('[data-f="weight"]');
         const rIn = row.querySelector('[data-f="reps"]');
-        if(!st.weight && wIn.placeholder && wIn.placeholder!=="lbs"){ st.weight=wIn.placeholder; wIn.value=wIn.placeholder; }
+        if(!st.weight && wIn.placeholder && wIn.placeholder!==unitWord()){ st.weight=wIn.placeholder; wIn.value=wIn.placeholder; }
         if(!st.reps && rIn.placeholder && rIn.placeholder!=="reps"){ st.reps=rIn.placeholder; rIn.value=rIn.placeholder; }
         // PR spark, compared against your ALL-TIME best for this exercise, and now
         // recorded on the set so it also shows as a badge and in the session summary.
@@ -14061,6 +14136,8 @@ function bind(){
     b.dataset.prefsides === "both" ? "A set now covers both limbs"
       : b.dataset.prefsides === "matchWeaker" ? "Both sides held to the weaker one"
       : "Each side tracked separately"));
+  document.querySelectorAll("[data-prefunits]").forEach(b=> b.onclick=()=> setPref("units", b.dataset.prefunits,
+    b.dataset.prefunits === "kg" ? "Loads shown in kilos" : "Loads shown in pounds"));
   document.querySelectorAll("[data-prefstart]").forEach(b=> b.onclick=()=> setPref("startSideFlip", b.dataset.prefstart === "flip",
     b.dataset.prefstart === "flip" ? "Starting side swaps each cycle" : "Every session starts on the right"));
   document.querySelectorAll("[data-prefwarm]").forEach(b=> b.onclick=()=> setPref("warmups", b.dataset.prefwarm,
@@ -14081,14 +14158,14 @@ function bind(){
     const v = parseFloat(barW.value);
     trainPrefs().barWeight = barW.value.trim() === "" ? null : Math.max(5, Math.min(120, v || 45));
     save(); queueSync(); render();
-    toast(trainPrefs().barWeight == null ? "Bar weight cleared" : "Bar set to " + trainPrefs().barWeight + " lb");
+    toast(trainPrefs().barWeight == null ? "Bar weight cleared" : "Bar set to " + trainPrefs().barWeight + " " + unitWord());
   };
   const smW = $("#prefSmithW");
   if(smW) smW.onchange = ()=>{
     const v = parseFloat(smW.value);
     trainPrefs().smithWeight = smW.value.trim() === "" || !isFinite(v) ? null : Math.max(0, Math.min(120, Math.round(v*10)/10));
     save(); queueSync(); render();
-    toast("Smith carriage " + smithWeight() + " lb");
+    toast("Smith carriage " + smithWeight() + " " + unitWord());
   };
   const sn = $("#sessNote");
   if(sn) sn.onchange = ()=>{ S.active.note = sn.value; save(); };
@@ -14558,7 +14635,7 @@ const PLAN_FIELDS = [
 const PLAN_PRESCRIPTION_FIELDS = {name:1, sets:1, reps:1, weight:1};
 function planFieldVal(e, k){
   if(!e) return "";
-  if(k === "weight") return (e.weight==null || e.weight==="") ? "bodyweight" : String(e.weight)+" lb";
+  if(k === "weight") return (e.weight==null || e.weight==="") ? "bodyweight" : String(e.weight)+" "+unitWord();
   return String(e[k]==null ? "" : e[k]).trim();
 }
 /* One flat list of what actually differs between two versions of an exercise, including
@@ -14632,7 +14709,7 @@ function openExEditor(wid, idx){
     <input id="f_sets" inputmode="numeric" value="${esc(e.sets)}" placeholder="sets">
     <input id="f_reps" value="${esc(e.reps)}" placeholder="8-10">
   </div></div>
-  <div class="field"><label>Target RPE / starting weight (lb)</label><div class="duo">
+  <div class="field"><label>Target RPE / starting weight (${unitWord()})</label><div class="duo">
     <input id="f_rpe" value="${esc(e.rpe)}" placeholder="8-9">
     <input id="f_weight" inputmode="decimal" value="${esc(e.weight??"")}" placeholder="optional">
   </div></div>
@@ -14652,7 +14729,7 @@ function openExEditor(wid, idx){
       <input id="g_sets" inputmode="numeric" value="${esc(alt.sets)}" placeholder="sets">
       <input id="g_reps" value="${esc(alt.reps)}" placeholder="5-8">
     </div></div>
-    <div class="field"><label>Target RPE / starting weight (lb)</label><div class="duo">
+    <div class="field"><label>Target RPE / starting weight (${unitWord()})</label><div class="duo">
       <input id="g_rpe" value="${esc(alt.rpe)}" placeholder="8-9">
       <input id="g_weight" inputmode="decimal" value="${esc(alt.weight??"")}" placeholder="blank = bodyweight">
     </div></div>
@@ -14847,7 +14924,7 @@ function renderSessEditor(s){
   const drawSets = ()=>{
     $("#newSets").innerHTML = `<div class="set-labels"><span>set</span><span>lbs</span><span>reps</span><span>rpe</span><span></span></div>` +
       newSets.map((st,i)=>`<div class="set"><span class="idx">${i+1}</span>
-        <input inputmode="decimal" data-ns="${i}" data-f="weight" value="${esc(st.weight)}" placeholder="lbs">
+        <input inputmode="decimal" data-ns="${i}" data-f="weight" value="${esc(st.weight)}" placeholder="${unitWord()}">
         <input inputmode="numeric" data-ns="${i}" data-f="reps" value="${esc(st.reps)}" placeholder="reps">
         <select data-ns="${i}" data-f="rpe">${rpeOptions(st.rpe)}</select><span></span></div>`).join("");
     document.querySelectorAll("#newSets input, #newSets select").forEach(el=>{
@@ -15247,7 +15324,7 @@ function scoreWorkout(sess){
         : up.length === 0 && down.length > 0
         ? "Nothing moved up and some lifts went backwards. That is usually accumulated fatigue rather than effort, and a lighter week often unlocks the next jump."
         : up.length === 0
-          ? "Holding is not failing, but pick one lift next session and add either 2.5-5 lb or a single rep. Overload only needs one variable to move."
+          ? "Holding is not failing, but pick one lift next session and add either " + stepInUnits(2.5) + "-" + stepInUnits(5) + " " + unitWord() + " or a single rep. Overload only needs one variable to move."
           : down.length > up.length
             ? "More lifts went backwards than forwards. Look at the running order: whatever sits at the end of the session pays for everything in front of it."
             : down.length
@@ -15430,7 +15507,7 @@ function scoreWorkout(sess){
     add("reprange","Rep-range adherence",10,earned,why,
       painFlag.length ? "You flagged pain on "+painFlag[0].name+". Leave that movement alone until it's settled, and don't chase the reps you missed."
       : heavyFlag.length ? "You said the weight was too heavy on "+heavyFlag[0].name+". Take about 10% off it next session and earn it back from there."
-      : over > under && over > 1 ? "Sets finishing above the range are your cue to add weight. Move those up about 5 lb next session."
+      : over > under && over > 1 ? "Sets finishing above the range are your cue to add weight. Move those up about " + stepInUnits(5) + " " + unitWord() + " next session."
       : under > 1 ? "Dropping below the range means the load is winning. Come down slightly and earn the reps back."
       : null,
       {ex: painFlag.length ? painFlag[0].name
@@ -15468,7 +15545,7 @@ function scoreWorkout(sess){
     if(bad.length) why.push("Steep drop-off on "+bad.slice(0,3).map(d=>d.name+" ("+d.first+"→"+d.last+")").join(", ")+".");
     else why.push("Performance held well across sets, so rest and load were matched to the work.");
     add("fatigue","Fatigue management",10,earned,why,
-      bad.length ? "A collapse like that is nearly always too little rest or too heavy an opening set. Rest longer, or start about 5 lb lighter and hold the reps."
+      bad.length ? "A collapse like that is nearly always too little rest or too heavy an opening set. Rest longer, or start about " + stepInUnits(5) + " " + unitWord() + " lighter and hold the reps."
       : null,
       {ex: bad.length ? bad[0].name : null});
   })();
@@ -15747,29 +15824,35 @@ function openScoreCard(sess, onDone){
    explicit `incr` (the three curls) overrides the class default. */
 function progressionStep(e){
   const n = nrm(e && e.name);
+  const U = unitWord();
+  /* Written in pounds because that is what the class rules were derived from, then
+     restated in whatever you actually train in. stepInUnits() maps to plates a kilo
+     gym stocks rather than converting to a number nobody can load. */
+  const st = (lb, extra)=> Object.assign({amount: stepInUnits(lb)}, extra || {});
   if(e && e.incr != null){
-    return {amount: e.incr, unit: "lb a hand", why: "microplates, deliberately small"};
+    return {amount: e.incr, unit: U + " a hand", why: "microplates, deliberately small"};
   }
   if(/smith/.test(n)){
     const lower = /squat|hip thrust|calf|rdl|deadlift|lunge/.test(n);
     return lower
-      ? {amount: 10, alt: 20, unit: "lb total", why: "Smith bar, lower body, 10 to 20 lb"}
-      : {amount: 10, unit: "lb total", why: "Smith bar, upper body"};
+      ? st(10, {alt: stepInUnits(20), unit: U + " total",
+                why: "Smith bar, lower body, " + stepInUnits(10) + " to " + stepInUnits(20) + " " + U})
+      : st(10, {unit: U + " total", why: "Smith bar, upper body"});
   }
   if(!e || e.weight == null){
-    return {amount: 5, unit: "lb", bodyweight: true,
-            why: "bodyweight movement: add external load once the top of the range clears on the first two sets"};
+    return st(5, {unit: U, bodyweight: true,
+            why: "bodyweight movement: add external load once the top of the range clears on the first two sets"});
   }
   if(/dumbbell|\bdb\b/.test(n)){
     return isCompound(e.name)
-      ? {amount: 5, unit: "lb a hand", why: "dumbbell compound"}
-      : {amount: 2.5, unit: "lb a hand", why: "dumbbell isolation, microplates"};
+      ? st(5,   {unit: U + " a hand", why: "dumbbell compound"})
+      : st(2.5, {unit: U + " a hand", why: "dumbbell isolation, microplates"});
   }
-  return {amount: 5, unit: "lb", why: "one pin on the stack"};
+  return st(5, {unit: U, why: "one pin on the stack"});
 }
 function fmtLoad(v){
   if(v == null) return "bodyweight";
-  return (Math.round(v * 10) / 10) + " lb";
+  return (Math.round(v * 10) / 10) + " " + unitWord();
 }
 
 /* The impossible-load guard.
@@ -16332,7 +16415,7 @@ function needsCalibration(e){
 function calibrateHTML(e){
   return `<div class="cal-note">
     <b>Calibrate this one</b> No baseline yet. Do one feeler set of about
-    ${esc(String(e.calibrate))} lb, take it to roughly the top of the rep range, then log
+    ${esc(String(e.calibrate))} ${unitWord()}, take it to roughly the top of the rep range, then log
     what actually worked. That becomes the starting load.
   </div>`;
 }
@@ -16511,7 +16594,13 @@ const WARM_LIGHT = [{pct:0.55, reps:"5"}];
 
 /* The Smith machine's carriage. The programme's Smith loads include it (see the note on
    defaultProgram); nothing that gets typed into a set row does. */
-const SMITH_BAR = 25;
+/* The usual counterbalanced carriage, in each unit. Not converted from one to the
+   other: 25 lb and 10 kg are both "what a Smith carriage usually weighs" in gyms that
+   label their equipment that way. */
+const SMITH_BAR_LB = 25, SMITH_BAR_KG = 10;
+function smithBarDefault(){ return inKg() ? SMITH_BAR_KG : SMITH_BAR_LB; }
+// What a straight barbell weighs where you train, as a default to offer, not to assume.
+function barDefault(){ return inKg() ? 20 : 45; }
 /* How much of a logged load is bar rather than plates.
 
    It matters because every percentage the app takes — the warm-up ramp above all — has
@@ -16528,7 +16617,7 @@ function isBarbellLift(name){
 }
 function smithWeight(){
   const w = trainPrefs().smithWeight;
-  return w == null ? SMITH_BAR : w;
+  return w == null ? smithBarDefault() : w;
 }
 function barWeightFor(name){
   const p = trainPrefs();
@@ -16597,7 +16686,7 @@ function isBodyweightMovement(name){
 }
 // Round to something you can actually load: dumbbells move in 2.5s, plates in 5s.
 function warmRound(w, name){
-  const step = /dumbbell|\bdb\b/.test(nrm(name)) ? 2.5 : 5;
+  const step = stepInUnits(/dumbbell|\bdb\b/.test(nrm(name)) ? 2.5 : 5);
   return Math.max(step, Math.round(w / step) * step);
 }
 /* Which ramp, if any, this exercise gets. Position in the session decides it: the
@@ -16630,7 +16719,7 @@ function warmupFromPlan(e, ctx){
   return (e.warmups || []).slice(0, 6).map(x=>{
     const pct = Number(x.pct);
     if(isFinite(pct) && pct > 0 && pct < 1 && w > 0)
-      return {label: warmRound(w * pct, e.name) + " lb", reps: String(x.reps || ""), pct: Math.round(pct*100), src:"plan"};
+      return {label: warmRound(w * pct, e.name) + " " + unitWord(), reps: String(x.reps || ""), pct: Math.round(pct*100), src:"plan"};
     return {label: String(x.label || (isFinite(pct) && pct > 0 ? Math.round(pct*100) + "%" : "warm-up")).slice(0,24),
             reps: String(x.reps || ""), src:"plan"};
   }).filter(x=> x.label);
@@ -16656,7 +16745,7 @@ function warmupPlan(e, kind, ctx){
       ? [{label:"light", reps:"8"}, {label:"build up", reps:"5"}, {label:"almost there", reps:"3"}]
       : [{label:"one light set", reps:"5"}];
   }
-  return spec.map(x=>({label: warmRound(w * x.pct, e.name) + " lb", reps: x.reps,
+  return spec.map(x=>({label: warmRound(w * x.pct, e.name) + " " + unitWord(), reps: x.reps,
                        pct: Math.round(x.pct*100), src: src.src}));
 }
 function warmupHTML(e, kind, ctx){
@@ -17050,7 +17139,7 @@ function setRowHTML(en, ei, si, last, idxLabel){
     : (last && last[si] && last[si].reps ? last[si].reps : "reps");
   return `${setTagHTML(en, si, rx)}<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}">
     <span class="idx">${idx}${sideChip(en, si)}</span>
-    <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(last&&last[si]&&last[si].weight!=null&&last[si].weight!==""?last[si].weight:"lbs")}">
+    <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(last&&last[si]&&last[si].weight!=null&&last[si].weight!==""?last[si].weight:unitWord())}">
     <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}">
     ${rpeOn ? `<span class="rpe-cell">${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-f="rpe">${rpeOptions(st.rpe)}</select></span>` : ""}
     <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-f="done">✓</button>
@@ -17092,7 +17181,7 @@ function techRowHTML(en, ei, si){
     const rows = Array.isArray(en.sets[si].sub) ? en.sets[si].sub : [];
     h += rows.map((r,ri)=>`<div class="sub-set">
       <span class="sub-i">${esc(T.subLabel)} ${ri+1}</span>
-      <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="weight" value="${esc(r.weight??"")}" placeholder="lbs" aria-label="${esc(T.subLabel)} ${ri+1} weight">
+      <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="weight" value="${esc(r.weight??"")}" placeholder="${unitWord()}" aria-label="${esc(T.subLabel)} ${ri+1} weight">
       <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-sub="${ri}" data-f="reps" value="${esc(r.reps??"")}" placeholder="reps" aria-label="${esc(T.subLabel)} ${ri+1} reps">
       <button data-subdel="${ei}:${si}:${ri}" aria-label="Remove ${esc(T.subLabel)} ${ri+1}">✕</button>
     </div>`).join("");
@@ -17266,18 +17355,18 @@ function openCycleReviewSimple(r){
   const pct = (r.prevVol && r.prevVol>0) ? Math.round((r.cur.vol - r.prevVol)/r.prevVol*100) : null;
   const dayLine = Object.keys(r.cur.perDay||{}).filter(k=>r.cur.perDay[k]).map(k=>dayName(k)+" ×"+r.cur.perDay[k]).join(" · ");
   let h = `<h3>Cycle review</h3>
-  <div class="rev-stat"><span class="num" style="font-size:26px;font-weight:600">${r.cur.vol.toLocaleString()} lb</span> total volume
+  <div class="rev-stat"><span class="num" style="font-size:26px;font-weight:600">${r.cur.vol.toLocaleString()} ${unitWord()}</span> total volume
     ${pct!=null?`<span class="num" style="color:${pct>=0?"var(--ok)":"var(--bad)"};margin-left:8px">${pct>=0?"+":""}${pct}% vs last cycle</span>`:""}</div>
   <div class="rev-stat">${r.cur.n} workouts, ${esc(dayLine)}</div>
   ${r.cur.avgDurMin?`<div class="rev-stat">Average workout: <span class="num">${r.cur.avgDurMin} min</span></div>`:""}
   ${r.cur.avgFeel?`<div class="rev-stat">Average feel: ${FEELS[Math.min(4,Math.max(0,Math.round(r.cur.avgFeel)-1))]} <span class="num">${r.cur.avgFeel}/5</span></div>`:""}`;
   if(r.moved.length){
     h += `<div class="rev-head">Moved up</div>`;
-    r.moved.forEach(m=>{ h += `<div class="rev-line"><b>${esc(m.name)}</b><span class="num">${m.from} → ${m.to} lb</span></div>`; });
+    r.moved.forEach(m=>{ h += `<div class="rev-line"><b>${esc(m.name)}</b><span class="num">${m.from} → ${m.to} ${unitWord()}</span></div>`; });
   }
   if(r.stalled.length){
     h += `<div class="rev-head">Held steady</div>`;
-    r.stalled.forEach(m=>{ h += `<div class="rev-line"><b>${esc(m.name)}</b><span class="num">${m.w} lb</span></div>`; });
+    r.stalled.forEach(m=>{ h += `<div class="rev-line"><b>${esc(m.name)}</b><span class="num">${m.w} ${unitWord()}</span></div>`; });
   }
   if(!r.moved.length && !r.stalled.length && r.prevVol==null){
     h += `<div class="sub" style="margin-top:10px">First full cycle logged, from the next one on, this review compares against it.</div>`;
@@ -17354,7 +17443,7 @@ function buildWrappedSlides(r){
       bg:"linear-gradient(160deg,#4a0d0d,#d1584f)",
       html:`<div class="wr-kicker">Heaviest weight you touched</div>
         <div class="wr-big"><span id="wrHv">0</span></div>
-        <div class="wr-unit">lb</div>
+        <div class="wr-unit">${unitWord()}</div>
         <div class="wr-sub">on <b>${esc(cur.heaviest.name)}</b>${cur.heaviest.reps?`, for ${cur.heaviest.reps} reps`:""}. 💪</div>`,
       onShow:st=>wrCountUp(st.querySelector("#wrHv"), cur.heaviest.w||0, 1200)
     });
@@ -17365,7 +17454,7 @@ function buildWrappedSlides(r){
       bg:"linear-gradient(160deg,#0c3d1c,#4a9358)",
       html:`<div class="wr-kicker">Getting stronger</div>
         <div class="wr-hero" style="font-size:clamp(26px,9vw,44px)">Lifts that<br>climbed</div>
-        <div class="wr-list">${r.moved.slice(0,5).map(m=>`<div class="wr-row"><span>${esc(m.name)}</span><span class="num">${m.from} → ${m.to} lb</span></div>`).join("")}</div>`
+        <div class="wr-list">${r.moved.slice(0,5).map(m=>`<div class="wr-row"><span>${esc(m.name)}</span><span class="num">${m.from} → ${m.to} ${unitWord()}</span></div>`).join("")}</div>`
     });
   }
   // 7, most-worked movement
@@ -17374,7 +17463,7 @@ function buildWrappedSlides(r){
       bg:"linear-gradient(160deg,#191f5e,#4f7cc9)",
       html:`<div class="wr-kicker">Your most-worked movement</div>
         <div class="wr-hero" style="font-size:clamp(26px,8.5vw,46px)">${esc(cur.topVolEx.name)}</div>
-        <div class="wr-pill">${Math.round(cur.topVolEx.vol).toLocaleString()} lb of total volume</div>`
+        <div class="wr-pill">${Math.round(cur.topVolEx.vol).toLocaleString()} ${unitWord()} of total volume</div>`
     });
   }
   // 8, feel + duration + rest
@@ -17897,7 +17986,7 @@ function planExerciseRow(e, wid, opts){
   if(asty === "side")  bits.push("one limb at a time, alternating L/R each set");
   if(asty === "cross") bits.push("both arms, alternating which crosses on top");
   if(e.note) bits.push(e.note);
-  const load = (e.weight != null && e.weight !== "") ? e.weight + " lb" : "bodyweight";
+  const load = (e.weight != null && e.weight !== "") ? e.weight + " " + unitWord() : "bodyweight";
   return `<tr>
     <td><b>${esc(e.name)}</b>${opts.altOf ? `<br><span class="sm">alternates with ${esc(opts.altOf)}</span>` : ""}</td>
     <td class="c">${esc(String(e.sets))}</td>
@@ -18047,7 +18136,7 @@ function buildPlanInner(){
   heavy work of six reps or fewer, one and a half to three minutes for eight-to-twelve rep work, and
   forty-five seconds to two minutes for high-rep finishing work.</p>
   <p><b>Progression.</b> When every set of an exercise finishes at or above the top of its rep range, add
-  weight, roughly 5&nbsp;lb on upper-body movements and 10&nbsp;lb on lower-body ones, and rebuild the reps
+  weight, roughly ${stepInUnits(5)}&nbsp;${unitWord()} on upper-body movements and ${stepInUnits(10)}&nbsp;${unitWord()} on lower-body ones, and rebuild the reps
   from the bottom of the range. Only one variable has to move for the session to count as progress.</p>
   <p><b>⇄ pairs</b> alternate automatically every other time that day comes round, so both movements keep
   getting trained without lengthening the session.</p>
@@ -18114,7 +18203,7 @@ function longDate(d){
   return new Date(d+"T12:00:00").toLocaleDateString(undefined,{weekday:"long",year:"numeric",month:"long",day:"numeric"});
 }
 function setSentence(st){
-  const w = (st.weight!=null && st.weight!=="") ? st.weight+" lb" : "bodyweight";
+  const w = (st.weight!=null && st.weight!=="") ? st.weight+" "+unitWord() : "bodyweight";
   let s = w+" × "+(st.reps||"?")+" reps";
   if(st.rpe) s += " at RPE "+st.rpe;
   return s;
@@ -18223,7 +18312,7 @@ function buildReportInner(){
     if(s.feel) metaBits.push("Feel: "+FEELS[s.feel-1]+" ("+s.feel+"/5)");
     const ci = (S.checkins||{})[s.date];
     if(ci){
-      if(ci.weight) metaBits.push("Bodyweight: "+esc(ci.weight)+" lb");
+      if(ci.weight) metaBits.push("Bodyweight: "+esc(ci.weight)+" "+unitWord());
       if(ci.sleep) metaBits.push("Sleep: "+esc(ci.sleep)+" h");
       if(ci.energy) metaBits.push("Energy: "+esc(ci.energy)+"/10");
     }
@@ -18232,7 +18321,7 @@ function buildReportInner(){
     const ssm = supersetMap(s.entries);
     body += `<h2>${longDate(s.date)}, ${esc(m.name)} Day</h2>
     ${metaBits.length?`<p class="meta">${metaBits.join(" · ")}</p>`:""}
-    <table><thead><tr><th>Exercise</th><th>Set</th><th>Side</th><th>Weight (lb)</th><th>Reps</th><th>RPE</th><th>Rest</th></tr></thead><tbody>`;
+    <table><thead><tr><th>Exercise</th><th>Set</th><th>Side</th><th>Weight (${unitWord()})</th><th>Reps</th><th>RPE</th><th>Rest</th></tr></thead><tbody>`;
     s.entries.forEach((e, ei)=>{
       // keep the original index so the L/R attribution stays correct after filtering
       const sets = e.sets.map((st,i)=>({st,i})).filter(x=>x.st.reps||x.st.weight);
@@ -18288,7 +18377,7 @@ function buildReportInner(){
     });
     body += `</tbody></table>`;
     body += sessionTechLegend(s);
-    if(vol>0) body += `<p class="meta">Total working volume: ${Math.round(vol).toLocaleString()} lb.</p>`;
+    if(vol>0) body += `<p class="meta">Total working volume: ${Math.round(vol).toLocaleString()} ${unitWord()}.</p>`;
     /* A session read cold, months later, needs to know this one followed a break —
        otherwise a run of lighter numbers reads as somebody getting worse. */
     const lay = layoffBefore(s);
