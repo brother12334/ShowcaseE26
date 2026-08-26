@@ -1400,6 +1400,37 @@ nav button:active{transform:scale(.94)}
 .wp:active,.bm-row:active,.sec-h:active,.nb-w:active,.nb-adv:active,
 .feel-btn:active,.swap-opt:active,.swap-hit:active,.ex-ctl button:active,.more-btn:active{transform:scale(.985)}
 .plate:active:not([aria-disabled="true"]){transform:scale(.94)}
+/* ===================== the sleep prompts =====================
+   The moon is the only illustration in the app, and it earns its place by being the one
+   screen that is not about training: it is what tells you at a glance that this prompt is
+   about the night rather than about your programme. Copper, like everything else. */
+.sl-sheet{text-align:center}
+.sl-sheet > *{animation:ciUp .34s var(--ease) both;animation-delay:var(--d,0ms)}
+.sl-art{display:flex;justify-content:center;margin:2px 0 14px}
+.sl-moon{width:min(56vw,190px);height:auto;overflow:visible}
+/* A slow drift. One cycle is six seconds, three pixels of travel: at the edge of
+   noticing, which is the point — it should feel calm, not animated. */
+@keyframes slFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+.sl-body{animation:slFloat 6s ease-in-out infinite;transform-origin:center}
+@keyframes slBreathe{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+.sl-glow{animation:slBreathe 6s ease-in-out infinite;transform-origin:62px 52px}
+/* Stars arrive one after another rather than together, which is what stops it reading as
+   a graphic that faded in and starts it reading as a sky. */
+@keyframes slTwinkle{from{opacity:0;transform:scale(.4)}to{opacity:.55;transform:none}}
+.sl-star{opacity:0;transform-origin:center;
+  animation:slTwinkle .5s var(--ease) forwards;animation-delay:calc(160ms + var(--i) * 90ms)}
+/* The morning version of the same art: the glow warms and the stars stay out. */
+.sl-dawn .sl-star{animation-name:slTwinkle;animation-duration:.4s;opacity:0;
+  animation-fill-mode:forwards;animation-delay:calc(120ms + var(--i) * 60ms)}
+.sl-dawn .sl-glow{animation-duration:4s}
+.sl-t{font-family:var(--disp);font-size:clamp(22px,6.4vw,27px);letter-spacing:.05em;line-height:1.15}
+.sl-p{margin:9px auto 0;max-width:40ch;color:var(--dim);font-size:13.5px;line-height:1.6}
+.sl-p b{color:var(--text)}
+.sl-go{margin-top:20px}
+@media (prefers-reduced-motion:reduce){
+  .sl-body,.sl-glow{animation:none}
+  .sl-star{animation:none;opacity:.55;transform:none}
+}
 /* ===================== the daily check-in sheet =====================
    Same tokens as everything else: copper accent, mono labels, the app's own card and
    line colours. It reads as a page of Element 26 that happens to open by itself, not as
@@ -2905,7 +2936,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "5.7";
+const APP_VERSION = "5.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4075,6 +4106,11 @@ const PREF_DEFAULTS = {
   /* Whether to ask for the daily check-in on the first open of each day. A prompt
      nobody can turn off is a prompt people learn to dismiss without reading. */
   checkinPrompt: true,
+  /* WHEN YOUR NIGHT STARTS. Not a fixed hour, because "late" is 22:00 for one person and
+     01:00 for another, and being asked "off to bed?" at half past nine is the fastest way
+     to teach somebody to dismiss the app's prompts without reading them. */
+  sleepTime: "22:30",
+  sleepPrompt: true,
   barMode: "total",       // total (bar + plates) | plates (plates only)
   barWeight: null,        // what YOUR bar weighs. Never assumed — asked, or left unset.
   /* THE SMITH CARRIAGE IS ITS OWN NUMBER, and it has to be. It used to fall back to
@@ -10141,6 +10177,13 @@ function trainPrefsCardHTML(){
     ${seg("data-ciprompt", p.checkinPrompt === false ? "off" : "on", [
       {v:"on", t:"Ask me each day"}, {v:"off", t:"Don't ask"}])}
     <div class="btn-row" style="margin:10px 0 0"><button class="btn ghost small" id="ciOpen">Open today's check-in</button></div>
+    <div class="sub" style="margin:14px 0 8px">Sleep time. Open the app after this and it offers to start the
+    clock; open it in the morning and it asks if you've just woken up, so your sleep is measured rather
+    than remembered.</div>
+    ${seg("data-slprompt", p.sleepPrompt === false ? "off" : "on", [
+      {v:"on", t:"Track my sleep"}, {v:"off", t:"Don't"}])}
+    ${p.sleepPrompt === false ? "" : `<div class="field" style="margin:10px 0 0"><label>My night starts at</label>
+      <input type="time" id="prefSleepT" class="timein" value="${esc(p.sleepTime || "22:30")}" aria-label="Sleep time"></div>`}
     <div class="sub" style="margin:14px 0 8px">Barbell loads. Whether the number you log includes the bar, and
     what your bar weighs — Element 26 takes its warm-up percentages off that, and it doesn't assume 45 lb.</div>
     ${seg("data-prefbar", p.barMode, [
@@ -10659,6 +10702,42 @@ function openProfileEditor(id){
 
    Nothing here is required. Save what you answered and leave the rest blank; the app
    already treats a missing figure as missing rather than as zero. */
+/* =====================================================================
+   SLEEP, MEASURED RATHER THAN ESTIMATED
+
+   The check-in asks how long you slept, and the honest answer at 7am is a guess: people
+   round to the nearest hour and round generously. Two taps a night measures it instead —
+   one when you put the phone down, one when you pick it up — and the difference between
+   them is a real number rather than a remembered one.
+
+   HOW IT KNOWS TO ASK. Opening the app after your own stated sleep time, on a night with
+   nothing already recorded, is the signal. That is a setting rather than a constant
+   because "late" is 22:00 for one person and 01:00 for another.
+
+   WHAT IT WILL NOT DO. It does not run in the background, because a web app cannot, and
+   it does not guess. If you set off at 23:10 and next open the app at 07:30 it says "that
+   is 8h 20m — right?" rather than writing 8h 20m down behind you. And if more than
+   fourteen hours have passed the record is thrown away rather than believed: you did not
+   sleep for fifteen hours, you forgot to open the app.
+   ===================================================================== */
+const SLEEP_MIN_HOURS = 2;     // below this it was a nap or a mis-tap, not a night
+const SLEEP_MAX_HOURS = 14;    // above this the record is not evidence of anything
+function sleepWindowNow(){
+  const p = trainPrefs();
+  if(p.sleepPrompt === false) return false;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(p.sleepTime || "22:30"));
+  if(!m) return false;
+  const startMin = parseInt(m[1],10)*60 + parseInt(m[2],10);
+  const now = new Date();
+  const nowMin = now.getHours()*60 + now.getMinutes();
+  /* The window runs from your sleep time to 04:00, crossing midnight, so both halves
+     have to be tested separately — a single "between" comparison is false all night for
+     any sleep time later than 04:00, which is all of them. */
+  return nowMin >= startMin || nowMin < 4*60;
+}
+function fmtClockShort(ms){
+  return new Date(ms).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+}
 const CI_SLEEP = [4,5,6,7,8,9,10];
 /* FIVE STEPS, NOT TEN. Ten dots across a phone is 31px per target, which is under the
    size a thumb can hit reliably and well under what somebody half-awake can. Five are
@@ -10684,6 +10763,45 @@ function greetingWord(){
 /* Called once, after the splash clears. Everything that would make it wrong to ask is
    checked here rather than inside the sheet, so the sheet itself is only ever opened
    when it should be. */
+/* ONE DECISION ABOUT WHAT TO SHOW ON OPEN, so two prompts can never appear at once and
+   the order is never accidental. Waking is asked first because it FILLS IN the sleep
+   figure the check-in would otherwise ask for; asking them the other way round means
+   answering the same question twice in ten seconds. */
+function openingPrompts(){
+  try{
+    if(typeof S === "undefined" || !S || !S.setup) return;
+    if(S.active) return;                                       // mid-workout, not now
+    const pend = S.sleepPend;
+    if(pend && pend.startedAt){
+      const hrs = (Date.now() - pend.startedAt)/3600e3;
+      if(hrs > SLEEP_MAX_HOURS){
+        // Not evidence of anything. Dropped rather than believed.
+        delete S.sleepPend; saveQuiet();
+      } else if(hrs >= SLEEP_MIN_HOURS){
+        /* Straight into the check-in rather than through maybeDailyCheckin(), which
+           would refuse: it skips a day that already has an answer on it, and the wake
+           sheet has just written one. Sleep being measured is exactly why the other two
+           questions still need asking. */
+        openWakeSheet(()=>{
+          const ci = (S.checkins||{})[todayStr()] || {};
+          if(trainPrefs().checkinPrompt === false) return;
+          if(ci.energy || ci.weight) return;         // those two are the ones it asks for
+          S.ciAsked = todayStr(); saveQuiet();
+          openCheckinSheet();
+        });
+        return;
+      }
+      // still inside the night: nothing to ask yet, and definitely not "off to bed?"
+      return;
+    }
+    if(sleepWindowNow() && S.sleepAsked !== todayStr()){
+      S.sleepAsked = todayStr(); saveQuiet();
+      openSleepSheet();
+      return;
+    }
+    maybeDailyCheckin();
+  }catch(e){ /* a greeting must never be the thing that breaks the app */ }
+}
 function maybeDailyCheckin(){
   try{
     if(typeof S === "undefined" || !S || !S.setup) return;    // still in onboarding
@@ -10696,6 +10814,96 @@ function maybeDailyCheckin(){
     S.ciAsked = d; saveQuiet();
     openCheckinSheet();
   }catch(e){ /* a greeting must never be the thing that breaks the app */ }
+}
+/* The moon. Two circles and a mask rather than a drawn crescent, so the shadow can be
+   nudged without redrawing a path, and a soft radial glow behind it. The stars fade in on
+   staggered delays and the whole thing drifts a few pixels — enough to be alive, not
+   enough to be a cartoon. */
+function moonSVG(){
+  const stars = [[18,22,1.1],[38,13,.8],[64,26,1],[86,17,.9],[104,32,.7],[12,52,.8],[112,58,1],[30,72,.7]];
+  return `<svg class="sl-moon" viewBox="0 0 124 96" aria-hidden="true">
+    <defs>
+      <radialGradient id="slGlow" cx="50%" cy="50%" r="50%">
+        <stop offset="0" stop-color="var(--acc)" stop-opacity=".30"></stop>
+        <stop offset="1" stop-color="var(--acc)" stop-opacity="0"></stop>
+      </radialGradient>
+      <mask id="slCut">
+        <rect width="124" height="96" fill="#000"></rect>
+        <circle cx="62" cy="52" r="24" fill="#fff"></circle>
+        <circle cx="50" cy="45" r="22" fill="#000"></circle>
+      </mask>
+    </defs>
+    <circle class="sl-glow" cx="62" cy="52" r="42" fill="url(#slGlow)"></circle>
+    ${stars.map((st,i)=>`<circle class="sl-star" style="--i:${i}" cx="${st[0]}" cy="${st[1]}" r="${st[2]}" fill="var(--text)"></circle>`).join("")}
+    <g class="sl-body"><rect width="124" height="96" fill="var(--acc)" mask="url(#slCut)"></rect></g>
+  </svg>`;
+}
+/* Asked when you open the app after your own sleep time. "Not yet" is a real answer and
+   it stops the asking for the rest of the night — being asked twice in an hour is how a
+   prompt becomes something you swipe away without reading. */
+function openSleepSheet(){
+  showModal(`<div class="sl-sheet">
+    <div class="sl-art" style="--d:0ms">${moonSVG()}</div>
+    <div class="sl-t" style="--d:80ms">Turning in?</div>
+    <div class="sl-p" style="--d:130ms">Tap good night and Element 26 starts the clock. When you
+      open it in the morning it'll ask if you've just woken up, and work out exactly how long you slept
+      \u2014 no guessing at a number over breakfast.</div>
+    <button class="btn sl-go" id="slGo" style="--d:190ms">Good night</button>
+    <div class="ci-alt" style="--d:230ms">
+      <button class="nb-link" id="slNot">Not yet</button>
+      <span class="ci-alt-sep">\u00b7</span>
+      <button class="nb-link" id="slOff">Don't ask at night</button>
+    </div>
+  </div>`);
+  const m = $("#modal");
+  m.querySelector("#slGo").onclick = ()=>{
+    S.sleepPend = {startedAt: Date.now(), date: todayStr()};
+    save(); queueSync(); hideModal();
+    toast("Good night \u2014 clock started " + fmtClockShort(S.sleepPend.startedAt));
+  };
+  m.querySelector("#slNot").onclick = ()=>{ S.sleepAsked = todayStr(); saveQuiet(); hideModal(); };
+  m.querySelector("#slOff").onclick = ()=>{
+    trainPrefs().sleepPrompt = false; save(); queueSync(); hideModal();
+    toast("Won't ask at night. Change it in Settings.");
+  };
+}
+/* The other half. The figure is shown before it is written down, because a measured
+   number somebody disagrees with is worse than an asked one: it is wrong AND it looks
+   authoritative. `then` carries on to the daily check-in so the two never stack up. */
+function openWakeSheet(then){
+  const pend = S.sleepPend;
+  if(!pend){ if(then) then(); return; }
+  const hours = (Date.now() - pend.startedAt)/3600e3;
+  const done = ()=>{ delete S.sleepPend; save(); queueSync(); hideModal(); if(then) then(); };
+  showModal(`<div class="sl-sheet">
+    <div class="sl-art sl-dawn" style="--d:0ms">${moonSVG()}</div>
+    <div class="sl-t" style="--d:80ms">Just woken up?</div>
+    <div class="sl-p" style="--d:130ms">You put the phone down at <b>${esc(fmtClockShort(pend.startedAt))}</b>.
+      If you're up now, that's <b>${esc(fmtHours(hours))}</b> of sleep.</div>
+    <button class="btn sl-go" id="slYes" style="--d:190ms">Yes \u2014 log ${esc(fmtHours(hours))}</button>
+    <div class="ci-alt" style="--d:230ms">
+      <button class="nb-link" id="slEarlier">I woke earlier</button>
+      <span class="ci-alt-sep">\u00b7</span>
+      <button class="nb-link" id="slDrop">Skip</button>
+    </div>
+  </div>`);
+  const m = $("#modal");
+  m.querySelector("#slYes").onclick = ()=>{
+    const d = todayStr();
+    const rec = (S.checkins[d] = S.checkins[d] || {});
+    rec.sleep = String(Math.round(hours*10)/10);
+    toast("Logged " + fmtHours(hours) + " of sleep");
+    done();
+  };
+  /* Woke up an hour ago and only opened the app now: the measured figure is an
+     over-estimate, so it hands over to the chips rather than shaving a guess off it. */
+  m.querySelector("#slEarlier").onclick = ()=>{
+    delete S.sleepPend; save();
+    hideModal();
+    CI_DRAFT = Object.assign({}, (S.checkins||{})[todayStr()] || {});
+    drawCheckinSheet();
+  };
+  m.querySelector("#slDrop").onclick = done;
 }
 let CI_DRAFT = null;
 function openCheckinSheet(){
@@ -13279,6 +13487,16 @@ function bind(){
 
   const ciOpen = $("#ciOpen");
   if(ciOpen) ciOpen.onclick = ()=> openCheckinSheet();
+  document.querySelectorAll("[data-slprompt]").forEach(b=> b.onclick = ()=>{
+    trainPrefs().sleepPrompt = b.dataset.slprompt === "on";
+    save(); queueSync(); render();
+    toast(trainPrefs().sleepPrompt ? "Tracking your sleep" : "Won't ask at night");
+  });
+  const slT = $("#prefSleepT");
+  if(slT) slT.onchange = ()=>{
+    if(/^\d{1,2}:\d{2}$/.test(slT.value)){ trainPrefs().sleepTime = slT.value; save(); queueSync();
+      toast("Night starts at " + slT.value); }
+  };
   document.querySelectorAll("[data-ciprompt]").forEach(b=> b.onclick = ()=>{
     trainPrefs().checkinPrompt = b.dataset.ciprompt === "on";
     save(); queueSync(); render();
@@ -16917,7 +17135,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
@@ -18096,12 +18314,12 @@ function quoteOfTheDay(){
   /* The check-in waits for the splash either way. Asked over the top of the mark coming
      out of the disc it would be the first thing anybody saw of the app and the last
      thing they wanted; asked after, it is the first thing on a settled screen. */
-  if(!sp){ setTimeout(maybeDailyCheckin, 200); return; }
-  if(reducedMotion()){ sp.remove(); setTimeout(maybeDailyCheckin, 200); return; }
+  if(!sp){ setTimeout(openingPrompts, 200); return; }
+  if(reducedMotion()){ sp.remove(); setTimeout(openingPrompts, 200); return; }
   const bye = ()=>{
     if(!sp.isConnected || sp.classList.contains("bye")) return;
     sp.classList.add("bye");
-    setTimeout(()=>{ sp.remove(); maybeDailyCheckin(); }, 480);
+    setTimeout(()=>{ sp.remove(); openingPrompts(); }, 480);
   };
   sp.onclick = bye;
   /* The flight ends at 1.87s and the disc is gone by 2.4s; the screen then sits clean for
