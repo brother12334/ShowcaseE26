@@ -3977,6 +3977,42 @@ const UNILATERAL = {
   "preacher curl": true,              // upper arm over the bench pad, alternating
   "dumbbell bulgarian split squat": true,
 
+  /* --- one-leg-at-a-time lower body ---
+     These read as ordinary squat/lunge names, so the text fallback below never
+     caught them, which meant no startSide was ever assigned and the weaker-side
+     cap in setPrescription could not fire. Declared here instead of inferred. */
+  "bulgarian split squat": true,
+  "split squat": true,
+  "smith bulgarian split squat": true,
+  "smith split squat": true,
+  "barbell split squat": true,
+  "lunge": true,
+  "walking lunge": true,
+  "reverse lunge": true,
+  "forward lunge": true,
+  "dumbbell lunge": true,
+  "barbell lunge": true,
+  "smith reverse lunge": true,
+  "curtsy lunge": true,
+  "step-up": true,
+  "dumbbell step-up": true,
+  "barbell step-up": true,
+  "pistol squat": true,
+  "single-leg press": true,
+  "single-leg leg extension": true,
+  "single-leg leg curl": true,
+  "single-leg rdl": true,
+  "single-leg calf raise": true,
+  "cable kickback": true,
+  "glute kickback": true,
+  "cable glute kickback": true,
+  "single-arm lat pulldown": true,
+  "single-arm cable row": true,
+  "single-arm overhead press": true,
+  "single-arm dumbbell press": true,
+  "single-arm lateral raise": true,
+  "concentration curl": true,
+
   /* --- bilateral, declared explicitly because the text fallback would guess wrong ---
      These two read like single-arm cable accessory work and are not. The face pull
      runs one D-handle a tower with both arms at once, and the V-bar extension is a
@@ -4063,7 +4099,12 @@ function isSingleArm(e){
   const key = tableKey(e.name);
   if(key in UNILATERAL_C) return UNILATERAL_C[key];
   // Unknown exercise (custom / newly added) → fall back to reading name + note.
-  const s = (e.name||"") + " " + (e.note||"");
+  // Structural one-limb movements, read from the NAME only. A note like "45 a side"
+  // must never promote a bilateral lift, so these patterns are deliberately kept
+  // away from the note text.
+  const nm = e.name || "";
+  if(/\bsplit squat|\blunges?\b|\bstep[- ]?ups?\b|\bpistol\b|\bkickbacks?\b|\bskater squat|\bshrimp squat|\bb[- ]?stance\b/i.test(nm)) return true;
+  const s = nm + " " + (e.note||"");
   return /\b(single|one)[- ]?arm\b|\b(single|one)[- ]?leg\b|\bper (arm|leg|side)\b|\beach (arm|leg|side)\b|\bl\s*\/\s*r\b|\bunilateral\b|\balternating\b|alternat[a-z]*\s+(l\/r|arms?|legs?|left|right|side)/i.test(s);
 }
 /* =====================================================================
@@ -5755,6 +5796,78 @@ const REASON_BY_CODE = (function(){ const o={}; SET_REASONS.forEach(r=>o[r.code]
 // for missing its rep range: you either chose to stop, or stopping was correct.
 const REASON_EXEMPT = {deliberate:1, pain:1};
 
+/* =====================================================================
+   EXERCISE NOTES, AND WHY THEY ARE CONTEXT RATHER THAN A CORRECTION
+
+   A number on its own is not evidence of much. "Bench 185x5, down from 195x5" reads as
+   regression; "Bench 185x5, and I wrote 'shoulder felt off' at the time" reads as a
+   session where the load was the sensible call. The app already collects that kind of
+   note per SET, when a set collapses. This collects it per EXERCISE, whenever you want,
+   for the far more common case where nothing collapsed and something still mattered.
+
+   THEY DO NOT MOVE NUMBERS BY THEMSELVES, and that restraint is the design. A note
+   saying "still getting the hang of it" must not quietly add weight, and must not
+   quietly stop the app suggesting it either — it is the reader's context, and the
+   grader's reason to hold rather than to judge. So each note carries a `weight`:
+
+     hold    the session is not evidence of your strength, so a fall is not regression
+             and a rise is not yet a reason to add load
+     watch   worth seeing again, but it does not change today's verdict
+     note    pure context, no effect on anything
+
+   Everything written here lands in one store, S.exNotes, which is also where the notes
+   typed on the Workout Grade screen go. One history, so the Body tab has something to
+   show and the grader has one place to look. */
+const EX_NOTE_KINDS = [
+  {code:"learning",  weight:"hold",  label:"Still getting the hang of it",
+   grade:"you were still learning the movement"},
+  {code:"form",      weight:"hold",  label:"Form felt off",
+   grade:"you said the form felt off"},
+  {code:"strong",    weight:"watch", label:"Felt unusually strong",
+   grade:"you said it felt unusually strong"},
+  {code:"equipment", weight:"hold",  label:"Equipment felt different",
+   grade:"the equipment was not the usual"},
+  {code:"tired",     weight:"hold",  label:"Tired before I started",
+   grade:"you started the session already tired"},
+  {code:"niggle",    weight:"hold",  label:"Something felt tweaky",
+   grade:"you flagged something feeling tweaky"},
+  {code:"good",      weight:"note",  label:"Felt good, nothing to report",
+   grade:"you said it felt good"}
+];
+const EX_NOTE_BY_CODE = EX_NOTE_KINDS.reduce((o,k)=>{ o[k.code]=k; return o; }, {});
+function exNotes(){
+  if(!Array.isArray(S.exNotes)) S.exNotes = [];
+  return S.exNotes;
+}
+/* One record shape for both sources, so nothing downstream has to care which screen it
+   was typed on. `ex` is null for a note about the whole session. */
+function addExNote(rec){
+  const list = exNotes();
+  list.push(Object.assign({
+    id: uid(), at: Date.now(), date: todayStr(),
+    ex: null, code: null, text: "", sessionId: null, workoutId: null
+  }, rec || {}));
+  if(list.length > 800) S.exNotes = list.slice(-800);
+}
+function notesForExercise(name, sinceMs){
+  const k = nrm(name || "");
+  return exNotes().filter(n=> n && n.ex && nrm(n.ex) === k && (!sinceMs || n.at >= sinceMs));
+}
+/* The heaviest thing said about this movement recently, or null. "Recently" is the last
+   three weeks, which is the window the growth and stall rules already work in. */
+function noteContextFor(name){
+  const list = notesForExercise(name, Date.now() - 21*DAY_MS);
+  if(!list.length) return null;
+  const rank = {hold:2, watch:1, note:0};
+  let best = null;
+  list.forEach(n=>{
+    const k = EX_NOTE_BY_CODE[n.code];
+    if(!k) return;
+    if(!best || rank[k.weight] > rank[EX_NOTE_BY_CODE[best.code].weight]) best = n;
+  });
+  return best ? {note: best, kind: EX_NOTE_BY_CODE[best.code]} : null;
+}
+
 /* How far under target is far enough to be worth asking about?
 
    Not an absolute number: 5 reps is a small miss on a 6-10 squat and a collapse on a
@@ -6001,6 +6114,15 @@ function startSideFor(wid){
   return altIndex(wid) === 0 ? "R" : "L";
 }
 function sideWord(side){ return side === "L" ? "LEFT" : "RIGHT"; }
+/* Which limb the alternating hint should name. "Start with your RIGHT arm" is wrong
+   on a Bulgarian split squat, and vague instructions are how somebody ends up doing
+   three sets on one leg. */
+function limbWord(name){
+  const n = name || "";
+  if(/\bsplit squat|\blunges?\b|\bstep[- ]?ups?\b|\bpistol\b|\bkickbacks?\b|\bskater squat|\bshrimp squat|\bsquat\b|\bleg\b|\bcalf\b|\bglute\b|\bhip\b|\brdl\b|\bdeadlift\b|\bhamstring\b|\bquad\b/i.test(n)) return "leg";
+  if(/\bcrunch|\bab\b|\btwist\b|\bside bend\b/i.test(n)) return "side";
+  return "arm";
+}
 function activeVariant(wid, e){
   if(!e.alt) return e;
   return altIndex(wid)===0 ? e : e.alt;
@@ -11133,7 +11255,7 @@ function viewToday(){
     if(needsCalibration(e)) h += calibrateHTML(e);
     h += inlineTipHTML(tips[nrm(e.name)], tipsSeen);
     if(ins) h += `<div class="ex-insight"><span class="ins-tag">${esc(ins.tag)}</span><span>${esc(ins.msg)}</span></div>`;
-    if(altStyle(e)) h += altHintHTML(altStyle(e), startSideFor(wid), e.sets);
+    if(altStyle(e)) h += altHintHTML(altStyle(e), startSideFor(wid), e.sets, e.name);
     h += asymHintHTML(e);
     let subBits = [];
     if(!ll) subBits.push('no sessions logged yet');
@@ -11221,17 +11343,19 @@ function viewActiveSession(){
         <span class="icon-btns ex-ctl">
           <button data-exup="${ei}" aria-label="Move earlier">↑</button>
           <button data-exdown="${ei}" aria-label="Move later">↓</button>
+          <button data-exnote="${ei}" aria-label="Add a note about ${esc(en.name)}">${exNoteMark(en)}</button>
           ${canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">⇄</button>`:""}
           <button data-exskip="${ei}" aria-label="Skip today">✕</button>
         </span>
       </div>`;
     h += swapNoteHTML(en);
+    h += exNoteLineHTML(en);
     h += supersetNoteHTML(supersetInfo(a.entries, ei));
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(ll) h += ll;
     h += inlineTipHTML(tips[nrm(en.name)], tipsSeen);
     if(en.note) h += `<div class="ex-note">${esc(en.note)}</div>`;
-    if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length);
+    if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
     h += asymHintHTML(en);
     h += setLabelsHTML();
     en.sets.forEach((st,si)=>{ h += setRowHTML(en, ei, si, last); });
@@ -11274,7 +11398,8 @@ function asymHintHTML(e){
   return `<div class="asym-hint"><b>Cap both sides at ${cap} reps.</b>
     ${esc(asymGapText(st))} <span class="asym-note">${esc(asymSampleText(st))}.</span></div>`;
 }
-function altHintHTML(style, startSide, nSets){
+function altHintHTML(style, startSide, nSets, exName){
+  const limb = limbWord(exName);
   const n = Math.max(1, Math.min(8, parseInt(nSets,10) || 3));
   const seq = [];
   for(let i=0;i<n;i++){
@@ -11283,7 +11408,7 @@ function altHintHTML(style, startSide, nSets){
   }
   const lead = style === "cross"
     ? `Start with your <b>${sideWord(startSide)}</b> arm crossing on top`
-    : `Start with your <b>${sideWord(startSide)}</b> arm`;
+    : `Start with your <b>${sideWord(startSide)} ${esc(limb)}</b>`;
   /* Whether the opening side moves next session is a preference, so the sentence has to
      follow it — promising a flip that has been turned off is worse than saying nothing. */
   const next = trainPrefs().startSideFlip
@@ -11291,7 +11416,7 @@ function altHintHTML(style, startSide, nSets){
     : ` Every session opens the same way.`;
   const tail = (style === "cross"
     ? `swap which arm is on top every set.`
-    : `alternate every set.`) + next;
+    : `then alternate every set.`) + next;
   return `<div class="arm-hint">
     <div>${lead}, ${tail}</div>
     <div class="alt-seq">${seq.join('<span class="alt-arrow">›</span>')}</div>
@@ -11449,7 +11574,7 @@ function setPrescription(entry, si){
       out.match = n;
       out.reps = n != null ? String(n) : null;
       out.rpe = null;                       // a capped set has no effort target to hit
-      out.why = "match your " + sideWordFull(st.weaker);
+      out.why = "match your " + sideWordFull(st.weaker) + " " + limbWord(entry.name);
     }
   }
   return out;
@@ -11466,11 +11591,13 @@ function rpeTargetChipHTML(entry, si, rx){
     ? "This set ends at failure, whatever the plan's RPE column says"
     : "Target for this set"}">${t}</span>`;
 }
-/* The number a beginner is being asked for, with what it MEANS attached. The column is
-   86px wide, so the meaning cannot live in the closed control — but a native select
-   opens as a full-width picker on both phone platforms, and that is where somebody who
-   does not know the scale is actually looking. So the option text carries it and the
-   closed box still shows the number. */
+/* RPE, named as RPE. Renaming it to "effort" made the column plainer and made the app
+   disagree with every coach, programme and forum post the person using it will ever
+   read — the term is the term, and the job is to teach it rather than to hide it. The
+   meaning still rides on every option, because the column is 86px wide and cannot show
+   it in the closed control, while a native select opens as a full-width picker on both
+   phone platforms, which is exactly where somebody who does not know the scale is
+   looking. */
 const RPE_MEANING = {
   "6":"4+ reps left", "6.5":"3-4 left", "7":"3 reps left", "7.5":"2-3 left",
   "8":"2 reps left", "8.5":"1-2 left", "9":"1 rep left", "9.5":"almost none", "10":"nothing left"
@@ -11478,7 +11605,7 @@ const RPE_MEANING = {
 function rpeOptions(v){
   const opts = ["","6","6.5","7","7.5","8","8.5","9","9.5","10"];
   return opts.map(o=>`<option value="${esc(o)}" ${String(v??"")===o?"selected":""}>${
-    o==="" ? "effort" : esc(o + " \u00b7 " + RPE_MEANING[o])}</option>`).join("");
+    o==="" ? "RPE" : esc(o + " \u00b7 " + RPE_MEANING[o])}</option>`).join("");
 }
 
 /* ---------- focus mode ---------- */
@@ -11568,6 +11695,62 @@ function easeTagHTML(en){
   const days = Math.max(1, Math.ceil((ez.until - Date.now())/DAY_MS));
   return ` <span class="ease-tag" title="${attrSafe(ez.why + " \u2014 " + days + " day" + (days===1?"":"s") + " left")}">easing off</span>`;
 }
+/* A pencil, or a filled one once something has been said. The state has to be visible on
+   the button itself: a note you cannot see you left is a note you write twice. */
+function exNoteMark(en){
+  return (en && en.note && en.noteCode) ? "\u270e\u0332" : "\u270e";
+}
+function exNoteLineHTML(en){
+  if(!en || !en.noteCode) return "";
+  const k = EX_NOTE_BY_CODE[en.noteCode];
+  const bits = [];
+  if(k) bits.push(k.label);
+  if(en.note && (!k || en.note !== k.label)) bits.push(en.note);
+  return bits.length ? `<div class="ex-note ex-note-mine">\u270e ${esc(bits.join(" \u2014 "))}</div>` : "";
+}
+/* Asked as a list rather than an empty box, because standing between sets nobody types a
+   sentence — and because a code is something the grader can read, while free text is
+   only something a person can. The box is there too, for the thing the list did not
+   anticipate. */
+function openExNote(ei){
+  const a = S.active;
+  if(!a || !a.entries[ei]) return;
+  const en = a.entries[ei];
+  showModal(`<h3>${esc(en.name)}</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Anything worth
+      knowing about this one today? It's kept with the session, shows up in your Body tab, and the
+      grade reads it before deciding whether a lighter day was really a step backwards.</div>
+    ${EX_NOTE_KINDS.map(k=>`<button class="btn ghost swap-opt${en.noteCode===k.code?" on":""}"
+       data-exnk="${k.code}" style="text-align:left;width:100%;margin-bottom:8px;padding:12px 14px">${esc(k.label)}</button>`).join("")}
+    <div class="field" style="margin:2px 0 10px">
+      <input id="exNoteText" placeholder="or say it in your own words" autocomplete="off"
+        value="${esc(en.noteCode ? "" : (en.note||""))}"></div>
+    <button class="btn small" id="exNoteSave">Save note</button>
+    ${en.noteCode||en.note?`<button class="nb-link" id="exNoteClear" style="margin-top:10px">Remove this note</button>`:""}
+    <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
+  const m = $("#modal");
+  let picked = en.noteCode || null;
+  m.querySelectorAll("[data-exnk]").forEach(b=> b.onclick = ()=>{
+    picked = (picked === b.dataset.exnk) ? null : b.dataset.exnk;
+    m.querySelectorAll("[data-exnk]").forEach(x=> x.classList.toggle("on", x.dataset.exnk === picked));
+  });
+  m.querySelector("#exNoteSave").onclick = ()=>{
+    const txt = (m.querySelector("#exNoteText").value || "").trim().slice(0, 140);
+    if(!picked && !txt){ toast("Pick one or write something"); return; }
+    const k = picked ? EX_NOTE_BY_CODE[picked] : null;
+    en.noteCode = picked || undefined;
+    en.note = txt || (k ? k.label : "");
+    addExNote({ex: en.name, code: picked, text: txt,
+      sessionId: a.id, workoutId: a.workoutId});
+    save(); hideModal(); render();
+    toast("Noted");
+  };
+  const cl = m.querySelector("#exNoteClear");
+  if(cl) cl.onclick = ()=>{
+    delete en.noteCode; delete en.note;
+    save(); hideModal(); render(); toast("Note removed");
+  };
+}
 function swapNoteHTML(en){
   const t = swapLabel(en);
   return t ? `<div class="swap-note">\u21c4 ${esc(t)}</div>` : "";
@@ -11649,9 +11832,10 @@ function viewFocusSession(){
   h += `<div class="card ex focus">
     <div class="ex-head"><b class="focus-name">${exNameHTML(en)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b></div>
     ${swapNoteHTML(en)}
+    ${exNoteLineHTML(en)}
     <div class="ex-bar" style="margin:4px 0 10px">
       <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}${easeTagHTML(en)}</span>
-      <span class="icon-btns ex-ctl">${
+      <span class="icon-btns ex-ctl"><button data-exnote="${ei}" aria-label="Add a note about ${esc(en.name)}">${exNoteMark(en)}</button>${
         canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">⇄</button>`:""
       }<button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
     </div>`;
@@ -11660,7 +11844,7 @@ function viewFocusSession(){
   if(ll) h += ll;
   h += inlineTipHTML(focusTipsFor(a.workoutId)[nrm(en.name)]);
   if(en.note) h += `<div class="ex-note">${esc(en.note)}</div>`;
-  if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length);
+  if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
   h += setLabelsHTML();
   en.sets.forEach((st,si)=>{ h += setRowHTML(en, ei, si, last); });
   h += `<div style="display:flex;gap:8px;margin-top:4px">
@@ -13683,6 +13867,10 @@ function bind(){
     document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on", x.dataset.tab===t));
     render(); window.scrollTo(0,0); showNav(); replayViewIn();
   });
+  document.querySelectorAll("[data-exnote]").forEach(b=> b.onclick=()=>{
+    harvestActive();
+    openExNote(parseInt(b.dataset.exnote, 10));
+  });
   document.querySelectorAll("[data-exswap]").forEach(b=> b.onclick=()=>{
     /* Harvested HERE and not in the picker: harvestActive is scoped to bind(), and
        anything typed into the open card has to be banked before the entry is split. */
@@ -14764,12 +14952,20 @@ function downContext(sess, entry, idx, prior){
       ", so today's sets were aimed at a different target");
   }
 
-  // 3, you had been away: detraining is not regression, and is not graded as it
+  // 3, you wrote something down about this movement at the time
+  const nc = noteContextFor(entry.name);
+  if(nc && nc.kind.weight === "hold"){
+    excuses.push("you noted it at the time \u2014 " + nc.kind.grade);
+  } else if(nc && nc.kind.weight === "watch"){
+    context.push("you noted that " + nc.kind.grade);
+  }
+
+  // 4, you had been away: detraining is not regression, and is not graded as it
   const lay = layoffBefore(sess);
   if(lay) excuses.push("you came back from a break \u2014 " + layoffPhrase(lay) +
     ", and strength dips over time off without anything having gone wrong");
 
-  // 4, you said at the time that the set did what it was supposed to
+  // 5, you said at the time that the set did what it was supposed to
   const codes = [...new Set((entry.sets||[]).map(st=>st.why && st.why.code).filter(Boolean))];
   const exempt = codes.filter(c=>REASON_EXEMPT[c] && REASON_BY_CODE[c]);
   if(exempt.length){
@@ -16694,7 +16890,7 @@ function rpeTracked(){ return trainPrefs().rpe !== false; }
 // The column headings above a block of set rows, matching whichever row shape is in use.
 function setLabelsHTML(){
   return rpeTracked()
-    ? `<div class="set-labels"><span>set</span><span>lbs</span><span>reps</span><span class="rpe-help" title="Tap for what effort means">target / effort ⓘ</span><span>✓</span></div>`
+    ? `<div class="set-labels"><span>set</span><span>lbs</span><span>reps</span><span class="rpe-help" title="Tap for what RPE means">target / RPE ⓘ</span><span>✓</span></div>`
     : `<div class="set-labels no-rpe"><span>set</span><span>lbs</span><span>reps</span><span>✓</span></div>`;
 }
 
@@ -16775,9 +16971,17 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
       h += setRowHTML(p.en, p.ei, r, meta[k].last, "");
     });
     // the rest belongs to the round, not to either movement
+    /* WHOSE ROUND IS IT. "No rest needed" is only true when nothing follows, and on an
+       uneven pair the final round often belongs to the FIRST movement alone — the second
+       has run out of sets. That round is not the end of the session, the timer correctly
+       starts after it, and the label used to say the opposite. It now asks the same
+       question the timer does rather than assuming the pair ends together. */
     const lastRound = r === rounds - 1;
+    const closer = pair.filter(x=> x.en.sets[r]).slice(-1)[0];
+    const roundIsSessionEnd = lastRound && isLastPairInSession &&
+      closer && closer.ei === a.entries.length - 1;
     h += `<div class="ss-rest">${
-      lastRound && isLastPairInSession
+      roundIsSessionEnd
         ? "Last round of the session, no rest needed"
         : "Rest after this round"
     }</div></div>`;
@@ -17135,7 +17339,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
