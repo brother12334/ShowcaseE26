@@ -98,6 +98,20 @@
      small screen and stays proportionate on a large one instead of just spreading out. */
   --gut:clamp(18px, 5.6vw, 26px);
   --air:clamp(14px, 2.4vh, 22px);
+
+  /* ONE MOTION VOCABULARY FOR THE WHOLE APP. Durations and curves were written inline at
+     the point of use — .15s here, .26s there, three different easings — which is how an
+     interface ends up feeling almost-consistent: nothing is wrong on any single screen
+     and the whole is subtly uneven. Three durations and two curves cover everything this
+     app does, and a change to the feel is now a change to four lines.
+
+     Deliberately short. This is used standing up, between sets, on a phone, and a
+     transition you can perceive as a transition is a transition that is in the way. */
+  --t-fast:.13s;    /* press feedback, hovers, colour changes */
+  --t-mid:.24s;     /* things appearing and disappearing */
+  --t-slow:.42s;    /* progress and value changes, where the movement IS the message */
+  --ease:cubic-bezier(.2,.7,.3,1);        /* settles quickly, no overshoot */
+  --ease-out:cubic-bezier(.33,1,.68,1);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -604,6 +618,10 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 
 .rpe-cell{display:flex;align-items:center;gap:5px;min-width:0}
 .rpe-cell select{flex:1;min-width:0}
+/* The option text carries "8 · 2 reps left" for the picker; the closed box has 86px to
+   work with, so it is told to keep the number and clip the rest rather than squeezing
+   the whole phrase into an unreadable width. */
+.rpe-cell select{text-overflow:clip}
 .rpe-target{
   flex-shrink:0;font-family:var(--mono);font-size:12px;font-weight:600;
   color:var(--acc);background:var(--acc-soft);
@@ -1367,7 +1385,32 @@ nav button:active{transform:scale(.94)}
 
 .fin-label{font-family:var(--disp);font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);border-top:1px dashed var(--line);padding-top:12px;margin:6px 0 10px}
 .syncdot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-left:9px;vertical-align:middle;background:var(--faint)}
+/* THE TAB CHANGE, given a hundredth of a second of continuity. Screens used to swap
+   instantly, which on a phone reads as a flicker rather than as navigation: nothing
+   tells you the content changed on purpose. Content only, never the nav — a nav bar that
+   animates with the page reads as the whole app lurching. */
+@keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+#app.view-in{animation:viewIn var(--t-mid) var(--ease) both}
+/* Anything you can press gets the same small compression. It was on .btn and the nav
+   already; the rows and cards that are also buttons had nothing, so half the app
+   answered a tap and half did not. */
+.wp,.bm-row,.sec-h,.nb-w,.nb-adv,.plate,.feel-btn,.swap-opt,.swap-hit,.ex-ctl button,.more-btn{
+  transition:transform var(--t-fast) var(--ease), border-color var(--t-fast) ease,
+             background var(--t-fast) ease, color var(--t-fast) ease}
+.wp:active,.bm-row:active,.sec-h:active,.nb-w:active,.nb-adv:active,
+.feel-btn:active,.swap-opt:active,.swap-hit:active,.ex-ctl button:active,.more-btn:active{transform:scale(.985)}
+.plate:active:not([aria-disabled="true"]){transform:scale(.94)}
 .empty{color:var(--faint);text-align:center;padding:34px 10px;font-size:15px}
+/* AN EMPTY SCREEN SHOULD ANSWER THREE QUESTIONS, not one. "Nothing logged yet" says what
+   is missing and stops; it does not say why it matters or what to do about it, which is
+   exactly the moment a first-time user decides the app is not for them. Title, what it
+   will hold, why that is worth having, and the button that starts it. */
+.nb-empty{max-width:38ch;margin:0 auto;text-align:center;color:var(--dim)}
+.nb-empty-t{font-family:var(--disp);font-size:17px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--text);margin-bottom:10px}
+.nb-empty p{margin:0 0 9px;font-size:14px;line-height:1.6}
+.nb-empty .nb-empty-w{color:var(--faint);font-size:13px}
+.nb-empty .btn{margin-top:6px}
 .danger{color:var(--bad)}
 a{color:var(--text)}
 
@@ -2222,7 +2265,20 @@ body.cele-open{overflow:hidden}
 @media (min-width:760px){
   .nb-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
+/* ONE REDUCED-MOTION RULE FOR THE WHOLE APP, not per feature. Only the Body tab
+   respected the setting, which meant somebody who had asked their phone to stop moving
+   things got a still Body tab and an app that still slid, scaled and pulsed everywhere
+   else. The blanket rule collapses every animation and transition to effectively
+   instant; the specific rules under it exist only where "instant" would leave an element
+   stuck at its starting value rather than its finished one. */
 @media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+    scroll-behavior:auto!important;
+  }
+  #app.view-in{animation:none}
   .nb-in,.nb-deep,.nb-why{animation:none}
   .nb-meter i{animation:none;width:var(--w)}
   .nb-spark-l{animation:none;stroke-dashoffset:0}
@@ -2768,7 +2824,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "5.4";
+const APP_VERSION = "5.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6983,7 +7039,13 @@ function weakPoints(A){
 /* ================= RENDER ================= */
 let TAB = "today";
 document.querySelectorAll("nav button").forEach(b=>{
-  b.onclick = ()=>{ TAB=b.dataset.tab; document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b)); render(); window.scrollTo(0,0); showNav(); };
+  b.onclick = ()=>{
+    const changed = TAB !== b.dataset.tab;
+    TAB=b.dataset.tab;
+    document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));
+    render(); window.scrollTo(0,0); showNav();
+    if(changed) replayViewIn();
+  };
 });
 /* ---------- tab bar behaviour ----------
    Retracts as you scroll down and comes back the instant you scroll up, so a long tab
@@ -10783,9 +10845,19 @@ function rpeTargetChipHTML(entry, si, rx){
     ? "This set ends at failure, whatever the plan's RPE column says"
     : "Target for this set"}">${t}</span>`;
 }
+/* The number a beginner is being asked for, with what it MEANS attached. The column is
+   86px wide, so the meaning cannot live in the closed control — but a native select
+   opens as a full-width picker on both phone platforms, and that is where somebody who
+   does not know the scale is actually looking. So the option text carries it and the
+   closed box still shows the number. */
+const RPE_MEANING = {
+  "6":"4+ reps left", "6.5":"3-4 left", "7":"3 reps left", "7.5":"2-3 left",
+  "8":"2 reps left", "8.5":"1-2 left", "9":"1 rep left", "9.5":"almost none", "10":"nothing left"
+};
 function rpeOptions(v){
   const opts = ["","6","6.5","7","7.5","8","8.5","9","9.5","10"];
-  return opts.map(o=>`<option value="${esc(o)}" ${String(v??"")===o?"selected":""}>${o===""?"RPE":o}</option>`).join("");
+  return opts.map(o=>`<option value="${esc(o)}" ${String(v??"")===o?"selected":""}>${
+    o==="" ? "effort" : esc(o + " \u00b7 " + RPE_MEANING[o])}</option>`).join("");
 }
 
 /* ---------- focus mode ---------- */
@@ -10928,7 +11000,10 @@ function viewFocusSession(){
     ${plateLoaderHTML(a)}
   </div>`;
   if(!en){
-    h += `<div class="empty">Nothing left in this session.</div>`;
+    h += `<div class="empty nb-empty">
+      <div class="nb-empty-t">That's everything</div>
+      <p>You've been through every exercise on today's card. Finish the workout to save it and get your feedback.</p>
+    </div>`;
     return h + focusFooter(a, true);
   }
   if(_isPair){
@@ -11533,6 +11608,17 @@ let BODY_FOCUS = null;   // the muscle group you have selected
 let BODY_EXPAND = false; // whether that group is split into its individual heads
 let BODY_OPEN = {};      // which collapsible sections are expanded
 function bodyToggle(k){ BODY_OPEN[k] = !BODY_OPEN[k]; render(); }
+/* Re-running a CSS animation on an element that already has the class does nothing at
+   all: the animation is considered already played. Removing the class, forcing a reflow
+   by reading offsetWidth, then re-adding it is the standard way to make it fire again,
+   and it is why this is a function rather than a classList.add at each call site. */
+function replayViewIn(){
+  const el = document.getElementById("app");
+  if(!el) return;
+  el.classList.remove("view-in");
+  void el.offsetWidth;
+  el.classList.add("view-in");
+}
 function sectionCard(key, title, sub, body, count){
   const open = !!BODY_OPEN[key];
   return `<div class="card sec">
@@ -11843,7 +11929,12 @@ function viewBody(){
   const metric = BODY_METRIC;
   let h = `<div class="hdr"><h1>Body</h1>${hdrRight()}</div>`;
   if(!S.sessions.length){
-    return h + `<div class="empty">Log a workout or two and this fills in. It'll tell you how recovered you are, how hard you've been training, and whether anything needs attention.</div>`;
+    return h + `<div class="empty nb-empty">
+      <div class="nb-empty-t">Nothing to show yet</div>
+      <p>Once you've logged a session or two, this tells you how recovered you are, how hard you've been training, and whether anything needs attention.</p>
+      <p class="nb-empty-w">It reads your logged sets \u2014 there's nothing extra to fill in.</p>
+      <button class="btn" data-goto="today">Start your first workout</button>
+    </div>`;
   }
   const A = bodyAnalysis();
   const win = A.win;
@@ -12216,7 +12307,12 @@ function openMuscleDetail(key){
 /* ---------- HISTORY ---------- */
 function viewHistory(){
   let h = `<div class="hdr"><h1>History</h1>${hdrRight(`<span class="date num">${S.sessions.length} sessions</span>`)}</div>`;
-  if(!S.sessions.length) return h + `<div class="empty">Nothing logged yet. Your finished workouts will show up here.</div>`;
+  if(!S.sessions.length) return h + `<div class="empty nb-empty">
+      <div class="nb-empty-t">No workouts yet</div>
+      <p>Every session you finish lands here \u2014 what you lifted, how it went, and how it compares to last time.</p>
+      <p class="nb-empty-w">That history is what lets Element 26 tell you when to add weight.</p>
+      <button class="btn" data-goto="today">Start your first workout</button>
+    </div>`;
   h += `<div class="btn-row" style="margin-bottom:14px">
     <button class="btn ghost small" id="reportBtn">Print / PDF report</button>
     <button class="btn ghost small" id="docBtn">Download Word doc</button>
@@ -12904,6 +13000,15 @@ function bind(){
   document.querySelectorAll("[data-barkind]").forEach(b=> b.onclick = ()=>{
     harvestActive();                      // bank whatever is typed before the re-render
     openBarModal(b.dataset.barkind);
+  });
+  /* An empty state's button has to actually go somewhere, or it is decoration. Routed
+     through the same path the nav buttons use so the tab highlight, the scroll reset and
+     the nav reveal all behave identically. */
+  document.querySelectorAll("[data-goto]").forEach(b=> b.onclick=()=>{
+    const t = b.dataset.goto;
+    TAB = t;
+    document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on", x.dataset.tab===t));
+    render(); window.scrollTo(0,0); showNav(); replayViewIn();
   });
   document.querySelectorAll("[data-exswap]").forEach(b=> b.onclick=()=>{
     /* Harvested HERE and not in the picker: harvestActive is scoped to bind(), and
@@ -13716,7 +13821,10 @@ function renderSessEditor(s){
       </div>
     </div>`).join("");
   } else {
-    h += `<div class="empty">No exercises in this session.</div>`;
+    h += `<div class="empty nb-empty">
+      <div class="nb-empty-t">Nothing logged in this one</div>
+      <p>This session was saved without any sets on it. You can delete it, or edit it to add what you did.</p>
+    </div>`;
   }
   h += `<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:14px">
     <div class="field"><label>Add an exercise</label>
@@ -15913,7 +16021,7 @@ function rpeTracked(){ return trainPrefs().rpe !== false; }
 // The column headings above a block of set rows, matching whichever row shape is in use.
 function setLabelsHTML(){
   return rpeTracked()
-    ? `<div class="set-labels"><span>set</span><span>lbs</span><span>reps</span><span class="rpe-help" title="Tap for what RPE means">target / rpe ⓘ</span><span>✓</span></div>`
+    ? `<div class="set-labels"><span>set</span><span>lbs</span><span>reps</span><span class="rpe-help" title="Tap for what effort means">target / effort ⓘ</span><span>✓</span></div>`
     : `<div class="set-labels no-rpe"><span>set</span><span>lbs</span><span>reps</span><span>✓</span></div>`;
 }
 
