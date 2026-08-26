@@ -1467,6 +1467,20 @@ nav button:active{transform:scale(.94)}
   .ci-chips{gap:4px}
   .ci-chip{font-size:13px}
 }
+/* the "do it for me" block inside a finding */
+.wd-apply{margin-top:14px;padding:13px 14px;border-radius:11px;background:var(--card2);
+  border:1px solid var(--line);border-left:3px solid var(--acc)}
+.wd-apply.is-on{border-left-color:var(--ok)}
+.wd-apply-k{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.wd-apply p{margin:7px 0 0;font-size:13.5px;line-height:1.55;color:var(--dim)}
+.wd-diff{margin:10px 0 12px;display:flex;flex-direction:column;gap:4px;
+  font:12.5px var(--mono);color:var(--text)}
+.wd-diff div{padding:6px 9px;background:var(--bg);border-radius:7px;overflow-wrap:anywhere}
+.wd-apply .btn{margin-top:2px}
+/* An eased movement says so on the card, or the smaller set count reads as the app
+   having quietly lost a set. */
+.ease-tag{display:inline-block;margin-left:7px;font:10.5px var(--mono);letter-spacing:.07em;
+  text-transform:uppercase;color:var(--ok);border:1px solid var(--ok);border-radius:5px;padding:1px 5px}
 .empty{color:var(--faint);text-align:center;padding:34px 10px;font-size:15px}
 /* AN EMPTY SCREEN SHOULD ANSWER THREE QUESTIONS, not one. "Nothing logged yet" says what
    is missing and stops; it does not say why it matters or what to do about it, which is
@@ -2891,7 +2905,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "5.6";
+const APP_VERSION = "5.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -5053,6 +5067,7 @@ function migrate(){
   if(!S.checkins) S.checkins = {};
   if(!Array.isArray(S.restLog)) S.restLog = [];
   if(!Array.isArray(S.skipLog)) S.skipLog = [];
+  if(!S.easeOff || typeof S.easeOff !== "object") S.easeOff = {};
   if(!Array.isArray(S.deleted)) S.deleted = [];
   if(!S.stalls || typeof S.stalls !== "object") S.stalls = {};
   // which single-limb movements have already had their gap close and retired the rule
@@ -5955,13 +5970,211 @@ function activeVariant(wid, e){
   return altIndex(wid)===0 ? e : e.alt;
 }
 function widName(wid){ return wid==="finisher" ? "Finisher" : dayName(wid); }
+/* =====================================================================
+   ACTING ON A FINDING
+
+   The Body tab has always been able to say "cut chest sets by about a third" and then
+   leave you to do it, which is a diagnosis delivered as homework. Every finding that CAN
+   be carried out automatically now carries a button that carries it out.
+
+   TWO KINDS OF CHANGE, AND THE DIFFERENCE MATTERS.
+
+   A shortfall is a fact about the PLAN — too few sets, no direct work at all, one side
+   of a pair neglected — so fixing it edits the plan and the edit is permanent until you
+   change it again. It goes through logPlanChange() like any other edit, so it shows up
+   in the Program tab's history and in the printed report between the sessions it sits
+   between.
+
+   Being pushed past recovery, or stalling, is a fact about RIGHT NOW. Cutting the plan
+   for that would still be cut in three weeks when the reason has gone. Those apply an
+   EASE-OFF instead: a dated, self-expiring projection over the muscle's exercises,
+   applied in resolvedProgram() exactly the way a deload week is, so the stored programme
+   is never touched and it lifts on its own.
+
+   Nothing here invents a number. Every figure comes from the finding that produced it,
+   which came from bodyAnalysis(). */
+const EASE_DAYS = 7;
+function easeMap(){
+  if(!S.easeOff || typeof S.easeOff !== "object") S.easeOff = {};
+  return S.easeOff;
+}
+/* Drops the entries that have run their course. Called wherever the map is read, so an
+   expired ease-off can never quietly go on applying. */
+function activeEases(){
+  const m = easeMap();
+  let changed = false;
+  Object.keys(m).forEach(k=>{ if(!m[k] || !(m[k].until > Date.now())){ delete m[k]; changed = true; } });
+  if(changed) saveQuiet();
+  return m;
+}
+function easeFor(name){
+  const mm = musclesFor(name);
+  if(!mm) return null;
+  const eases = activeEases();
+  let best = null;
+  Object.keys(mm).forEach(k=>{
+    const e = eases[k];
+    // A set that pays into a muscle only a little is not the set that muscle is tired
+    // from; below a third it is assistance, and easing it off would quietly shrink
+    // movements the finding was never about.
+    if(!e || !(mm[k] >= 0.34)) return;
+    if(!best || e.setsMul < best.setsMul) best = e;
+  });
+  return best;
+}
+/* The same shape of projection deloadView() applies, scoped to one muscle's movements. */
+function easeView(list){
+  const eases = activeEases();
+  if(!Object.keys(eases).length) return list;
+  return (list || []).map(e=>{
+    const ez = easeFor(e.name);
+    if(!ez) return e;
+    const sets = Math.max(1, Math.round((e.sets || 1) * ez.setsMul));
+    const out = Object.assign({}, e, {sets: sets, eased: true, easeWhy: ez.why});
+    if(Array.isArray(e.rpes)) out.rpes = e.rpes.slice(0, sets).map(v=> Math.min(v, ez.rpeCap));
+    if(ez.rpeCap) out.rpe = String(Math.max(6, ez.rpeCap - 1)) + "-" + ez.rpeCap;
+    return out;
+  });
+}
+/* Every exercise in the stored programme that trains this muscle, heaviest contributor
+   first. Only movements that genuinely train it: below a third of a set the exercise is
+   assisting, and adding sets to it to fix a chest shortfall would be growing somebody's
+   triceps work and calling it a chest fix. */
+function planEntriesForMuscle(m){
+  const out = [];
+  DAYS.concat(["finisher"]).forEach(wid=>{
+    (S.program[wid] || []).forEach((e, i)=>{
+      const mm = musclesFor(e.name);
+      const frac = mm && mm[m];
+      if(frac >= 0.34) out.push({wid, i, e, frac});
+    });
+  });
+  return out.sort((a,b)=> b.frac - a.frac);
+}
+/* A rep range, shifted one band. A movement that has stalled at 10-12 has stopped
+   answering that question, so it is asked a different one; which direction depends on
+   where it already sits, because "do something else" from 12 reps means heavier and from
+   5 reps means more. Returns null when there is nothing sensible to change. */
+function shiftedRange(reps){
+  const nums = String(reps||"").match(/\d+/g);
+  if(!nums || !nums.length) return null;
+  const lo = parseInt(nums[0],10), hi = nums[1] ? parseInt(nums[1],10) : lo;
+  const mid = (lo+hi)/2;
+  const shift = mid >= 10 ? -4 : mid <= 6 ? 4 : 3;
+  const nlo = Math.max(3, lo + shift), nhi = Math.max(nlo, hi + shift);
+  // A prescription written as one number stays one number. Widening "5" into "9-9" is
+  // not a rep range, it is a rendering accident.
+  return nlo === nhi ? String(nlo) : nlo + "-" + nhi;
+}
+/* WHAT APPLYING A FINDING WOULD DO, worked out before anything is changed so the button
+   can say it and the modal can show it. Returns null when a finding is not something
+   software can carry out — "run the days that carry your calf work" is a fact about
+   which sessions you actually do, and no plan edit fixes it. */
+function findingPlan(w, A){
+  if(!w) return null;
+  const m = w.muscle, M = MUSCLES[m];
+  /* A finding carrying a muscle key this build does not know — a backup written by a
+     different version, say — must not take the whole panel down with it. There is
+     nothing to offer, so offer nothing. */
+  if(!M) return null;
+  const ents = planEntriesForMuscle(m);
+  const lm = (A.lm && A.lm[m]) || GROUPS[m];
+  const name = M.name.toLowerCase();
+
+  if(w.kind === "over" || (w.kind === "stall" && /lighter week/i.test(w.act || ""))){
+    const half = /lighter week/i.test(w.act || "");
+    if(!ents.length) return null;
+    return {
+      mode:"ease",
+      setsMul: half ? 0.5 : 0.66,
+      rpeCap: half ? 8 : 7,
+      label: half ? "Take the lighter week" : "Ease off " + name,
+      does: (half ? "Halves" : "Cuts about a third off") + " the sets on " + ents.length +
+            " " + name + " movement" + (ents.length===1?"":"s") + " and caps the effort target, for " +
+            EASE_DAYS + " days. Your loads and your saved plan are untouched \u2014 it lifts on its own.",
+      list: ents.map(x=> x.e.name + ": " + x.e.sets + " \u2192 " +
+            Math.max(1, Math.round((x.e.sets||1) * (half?0.5:0.66))) + " sets")
+    };
+  }
+  if(w.kind === "under" || w.kind === "balance"){
+    if(!ents.length) return null;
+    const need = Math.max(1, Math.ceil((lm.mev || 0) - ((A.wk[m]||{}).sets || 0) - ((A.cyc&&A.cyc.pending[m])||0)));
+    // Spread over the movements that already train it, one at a time, biggest contributor
+    // first, and never past 6 sets on any one exercise.
+    const adds = [];
+    let left = Math.max(1, Math.min(6, need));
+    for(let pass=0; pass<3 && left>0; pass++){
+      for(const x of ents){
+        if(left <= 0) break;
+        const cur = (adds.find(a=>a.wid===x.wid && a.i===x.i) || {}).to || x.e.sets || 1;
+        if(cur >= 6) continue;
+        const found = adds.find(a=>a.wid===x.wid && a.i===x.i);
+        if(found) found.to = cur + 1; else adds.push({wid:x.wid, i:x.i, name:x.e.name, from:x.e.sets||1, to:cur+1});
+        left--;
+      }
+    }
+    if(!adds.length) return null;
+    const total = adds.reduce((t,a)=> t + (a.to - a.from), 0);
+    return {mode:"sets", adds,
+      label:"Add " + total + " set" + (total===1?"":"s"),
+      does:"Adds " + total + " working set" + (total===1?"":"s") + " of direct " + name +
+           " work to your plan, spread across the movements that already train it. This one sticks until you change it.",
+      list: adds.map(a=> a.name + ": " + a.from + " \u2192 " + a.to + " sets")};
+  }
+  if(w.kind === "stall"){
+    const rows = [];
+    ents.forEach(x=>{
+      const nr = shiftedRange(x.e.reps);
+      if(nr && nr !== String(x.e.reps)) rows.push({wid:x.wid, i:x.i, name:x.e.name, from:String(x.e.reps||""), to:nr});
+    });
+    if(!rows.length) return null;
+    return {mode:"reps", rows,
+      label:"Change the rep range",
+      does:"Moves " + rows.length + " " + name + " movement" + (rows.length===1?"":"s") +
+           " into a different rep range, which is what changes the stimulus without adding more sets. This one sticks until you change it.",
+      list: rows.map(r=> r.name + ": " + r.from + " \u2192 " + r.to + " reps")};
+  }
+  return null;      // "none" needs a new exercise chosen, which is a decision, not a fix
+}
+/* Carry it out. Every path logs what it did, so the change is visible in the Program
+   tab's history and in the printed report rather than appearing out of nowhere. */
+function applyFinding(idx){
+  const A = bodyAnalysis();
+  const w = A.weak[idx];
+  const plan = findingPlan(w, A);
+  if(!plan) return;
+  const M = MUSCLES[w.muscle];
+  if(plan.mode === "ease"){
+    easeMap()[w.muscle] = {until: Date.now() + EASE_DAYS*DAY_MS, setsMul: plan.setsMul,
+      rpeCap: plan.rpeCap, why: w.act, at: Date.now()};
+    logPlanChange("ease", null, M.name, plan.list,
+      {note: plan.label + " \u2014 lifts automatically after " + EASE_DAYS + " days."});
+  } else if(plan.mode === "sets"){
+    plan.adds.forEach(a=>{
+      const e = (S.program[a.wid]||[])[a.i];
+      if(!e) return;
+      e.sets = a.to;
+      if(Array.isArray(e.rpes)) while(e.rpes.length < a.to) e.rpes.push(e.rpes[e.rpes.length-1]);
+    });
+    logPlanChange("programme", null, M.name, plan.list, {note:"Applied from the Body tab."});
+  } else if(plan.mode === "reps"){
+    plan.rows.forEach(r=>{
+      const e = (S.program[r.wid]||[])[r.i];
+      if(e) e.reps = r.to;
+    });
+    logPlanChange("programme", null, M.name, plan.list, {note:"Applied from the Body tab."});
+  }
+  invalidateTableOrigin();
+  save(); queueSync(); hideModal(); render();
+  toast(plan.label + " \u2014 done");
+}
 function resolvedProgram(wid){
   /* The plan AS IT SHOULD BE PERFORMED TODAY, which is not the same object as the plan.
      A deload week halves the sets and caps the targets, and the first two weeks run a
      reduced set count on the five ramp-in movements. Both are projections applied here,
      at the single point every session-building path reads through, so neither can ever
      be half-applied to the stored programme. */
-  const main = deloadView(S.program[wid] || []).map(e0=>{
+  const main = easeView(deloadView(S.program[wid] || [])).map(e0=>{
     const rs = rampedSets(e0);
     const e = (rs !== e0.sets)
       ? Object.assign({}, e0, {sets: rs,
@@ -9923,6 +10136,11 @@ function trainPrefsCardHTML(){
     ${DELOAD_EVERY_WEEKS} weeks and offer it, or stay quiet if your programme schedules its own.</div>
     ${seg("data-prefdeload", p.deloads, [
       {v:"auto", t:"Suggest one"}, {v:"planOnly", t:"Leave it to me"}])}
+    <div class="sub" style="margin:14px 0 8px">The daily check-in \u2014 sleep, energy and bodyweight. It's what your
+    recovery number is adjusted by, and it takes about five seconds.</div>
+    ${seg("data-ciprompt", p.checkinPrompt === false ? "off" : "on", [
+      {v:"on", t:"Ask me each day"}, {v:"off", t:"Don't ask"}])}
+    <div class="btn-row" style="margin:10px 0 0"><button class="btn ghost small" id="ciOpen">Open today's check-in</button></div>
     <div class="sub" style="margin:14px 0 8px">Barbell loads. Whether the number you log includes the bar, and
     what your bar weighs — Element 26 takes its warm-up percentages off that, and it doesn't assume 45 lb.</div>
     ${seg("data-prefbar", p.barMode, [
@@ -10556,22 +10774,14 @@ function drawCheckinSheet(){
   m.querySelector("#ciNever").onclick = ()=>{
     trainPrefs().checkinPrompt = false;
     save(); queueSync(); hideModal();
-    toast("Won't ask again. It's still on the Today tab.");
+    toast("Won't ask again. Open it any time in Settings.");
   };
 }
-function checkinCard(){
-  const ci = S.checkins[todayStr()] || {};
-  const logged = ci.weight || ci.sleep || ci.energy;
-  return `<div class="card">
-    <div class="ex-head" style="margin-bottom:8px"><b style="font-family:var(--disp);font-size:17px;text-transform:uppercase;letter-spacing:.04em">Daily check-in</b><span class="sub num">${logged?"✓ logged":"optional · 5 seconds"}</span></div>
-    <div class="ci-row">
-      <div class="ci-field"><label>Weight (lb)</label><input id="ciW" inputmode="decimal" value="${esc(ci.weight??"")}" placeholder=" "></div>
-      <div class="ci-field"><label>Sleep (hrs)</label><input id="ciS" inputmode="decimal" value="${esc(ci.sleep??"")}" placeholder=" "></div>
-      <div class="ci-field"><label>Energy</label><select id="ciE" aria-label="Energy level out of 10"><option value=""> </option>${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option ${String(ci.energy)===String(n)?"selected":""}>${n}</option>`).join("")}</select></div>
-    </div>
-  </div>`;
-}
-
+/* checkinCard() is gone. It sat two thirds of the way down the Today tab and asked for
+   the same three numbers the daily sheet now asks for on the first open of the day, so
+   keeping both meant the same question in two places disagreeing about which was the
+   real one. The sheet is the only place it is asked; Settings can open it on demand for
+   anyone who has turned the daily prompt off or skipped it. */
 /* =====================================================================
    "SINCE LAST TIME" FEEDBACK, where a grade's advice actually surfaces
 
@@ -10656,7 +10866,6 @@ function viewToday(){
     /* A scheduled rest is the plan speaking, a taken one is you. Saying which stops the
        screen reading as the app having decided something on your behalf. */
     const sched = !isRestDay(todayStr()) && scheduledRestToday();
-    h += checkinCard();
     h += `<div class="card" style="text-align:center;padding:34px 20px">
       <h3 style="font-size:26px">Rest day</h3>
       <div class="sub" style="margin-top:8px">${sched
@@ -10697,7 +10906,6 @@ function viewToday(){
   // The one thing worth changing today, taken from the grade of your last session of
   // THIS day. Sits above the exercise list, while there is still time to act on it.
   h += focusCardHTML(wid);
-  h += checkinCard();
 
   h += `<div class="card">`;
   let finLabeled = false;
@@ -10801,7 +11009,7 @@ function viewActiveSession(){
     h += `<div class="card ex${supersetInfo(a.entries, ei)?' ss-card':''}">
       <div class="ex-head"><b>${exNameHTML(en)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b></div>
       <div class="ex-bar">
-        <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</span>
+        <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}${easeTagHTML(en)}</span>
         <span class="icon-btns ex-ctl">
           <button data-exup="${ei}" aria-label="Move earlier">↑</button>
           <button data-exdown="${ei}" aria-label="Move later">↓</button>
@@ -11143,6 +11351,15 @@ function swapLabel(en){
   if(w && w.text) bits.push(w.text);
   return "instead of " + en.swapFrom + (bits.length ? " \u2014 " + bits.join(", ") : "");
 }
+/* The tag that says why this movement is shorter than usual today. Read live rather
+   than carried on the session entry, because an ease-off can be started or ended while a
+   workout is open and the card should agree with the plan either way. */
+function easeTagHTML(en){
+  const ez = en && easeFor(en.name);
+  if(!ez) return "";
+  const days = Math.max(1, Math.ceil((ez.until - Date.now())/DAY_MS));
+  return ` <span class="ease-tag" title="${attrSafe(ez.why + " \u2014 " + days + " day" + (days===1?"":"s") + " left")}">easing off</span>`;
+}
 function swapNoteHTML(en){
   const t = swapLabel(en);
   return t ? `<div class="swap-note">\u21c4 ${esc(t)}</div>` : "";
@@ -11225,7 +11442,7 @@ function viewFocusSession(){
     <div class="ex-head"><b class="focus-name">${exNameHTML(en)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b></div>
     ${swapNoteHTML(en)}
     <div class="ex-bar" style="margin:4px 0 10px">
-      <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}</span>
+      <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}${easeTagHTML(en)}</span>
       <span class="icon-btns ex-ctl">${
         canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">⇄</button>`:""
       }<button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
@@ -12362,13 +12579,51 @@ function openWeakPoint(idx){
   }
 
   h += `<div class="rev-head">Why this matters</div>
-    <div class="bm-explain">${esc(w.detail)}</div>
-    <div class="btn-row" style="margin-top:16px">
-      <button class="btn small" data-gdetail="${g}">Open ${esc(gName(g))}</button>
+    <div class="bm-explain">${esc(w.detail)}</div>`;
+
+  /* THE FINDING, CARRIED OUT. Shown before the buttons because it is the answer to the
+     question the whole panel is asking, and shown as a list of exact before-and-afters
+     because an app that edits your training plan owes you the diff first. */
+  const already = activeEases()[g];
+  const fp = already ? null : findingPlan(w, A);
+  if(already){
+    const daysLeft = Math.max(1, Math.ceil((already.until - Date.now())/DAY_MS));
+    h += `<div class="wd-apply is-on">
+      <div class="wd-apply-k">Already easing off</div>
+      <p>${esc(gName(g))} sets are reduced and the effort target is capped for another
+        ${daysLeft} day${daysLeft===1?"":"s"}. Your saved plan is untouched \u2014 this lifts on its own.</p>
+      <button class="btn ghost small" id="wdUndo">End it now</button>
+    </div>`;
+  } else if(fp){
+    h += `<div class="wd-apply">
+      <div class="wd-apply-k">Do it for me</div>
+      <p>${esc(fp.does)}</p>
+      <div class="wd-diff">${fp.list.map(x=>`<div>${esc(x)}</div>`).join("")}</div>
+      <button class="btn small" id="wdApply">${esc(fp.label)}</button>
+    </div>`;
+  } else {
+    h += `<div class="wd-apply">
+      <div class="wd-apply-k">Doing it</div>
+      <p>This one isn't something the app can change for you \u2014 it's about which
+        sessions you actually get to, or it needs a movement choosing. Open ${esc(gName(g))}
+        below, or edit the day in <b>Program</b>.</p>
+    </div>`;
+  }
+
+  h += `<div class="btn-row" style="margin-top:16px">
+      <button class="btn ghost small" data-gdetail="${g}">Open ${esc(gName(g))}</button>
       <button class="btn ghost small" id="closeModal">Done</button>
     </div>`;
   showModal(h);
   MODAL_REOPEN = ()=> openWeakPoint(idx);
+  const ap = $("#modal").querySelector("#wdApply");
+  if(ap) ap.onclick = ()=> applyFinding(idx);
+  const un = $("#modal").querySelector("#wdUndo");
+  if(un) un.onclick = ()=>{
+    delete easeMap()[g];
+    save(); queueSync(); hideModal(); render();
+    toast("Back to your normal plan");
+  };
   document.querySelectorAll("#modal [data-gdetail]").forEach(b=> b.onclick=()=>{
     BODY_FOCUS = g; BODY_EXPAND = false;
     openGroupDetail(g);
@@ -13022,17 +13277,12 @@ function bind(){
     setTimeout(()=>{ const t=$("#tokenIn"); if(t) t.focus(); }, 60);
   };
 
-  ["ciW","ciS","ciE"].forEach(id=>{
-    const el = $("#"+id);
-    if(el) el.onchange = ()=>{
-      const d = todayStr();
-      const ci = S.checkins[d] || {};
-      if(id==="ciW") ci.weight = el.value.trim();
-      if(id==="ciS") ci.sleep = el.value.trim();
-      if(id==="ciE") ci.energy = el.value;
-      S.checkins[d] = ci;
-      save(); queueSync();
-    };
+  const ciOpen = $("#ciOpen");
+  if(ciOpen) ciOpen.onclick = ()=> openCheckinSheet();
+  document.querySelectorAll("[data-ciprompt]").forEach(b=> b.onclick = ()=>{
+    trainPrefs().checkinPrompt = b.dataset.ciprompt === "on";
+    save(); queueSync(); render();
+    toast(trainPrefs().checkinPrompt ? "Will ask once a day" : "Won't ask \u2014 open it here any time");
   });
 
   document.querySelectorAll(".set input, .set select").forEach(el=>{
@@ -16667,7 +16917,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
