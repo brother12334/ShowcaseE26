@@ -2366,6 +2366,27 @@ body.cele-open{overflow:hidden}
 .rest-skip{margin-top:12px;border-left:3px solid var(--arms)}
 .rs-k{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--arms);margin-bottom:6px}
 
+/* 7b. side balance — the asymmetry rule's state, and the switch for it */
+.nb-side{display:flex;flex-direction:column}
+.nb-side-say{font-size:14px;color:var(--dim);line-height:1.5;margin:-2px 0 10px}
+.nb-srow{padding:9px 0 9px 11px;border-top:1px solid var(--line);border-left:3px solid var(--line)}
+.nb-srow:first-of-type{border-top:0}
+/* Same three-state vocabulary the rows use in words, carried on the rule so the state
+   is readable without reading. */
+.nb-s-capping{border-left-color:var(--acc)}
+.nb-s-level{border-left-color:var(--ok)}
+.nb-srow-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.nb-srow-n{font-size:14px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nb-srow-t{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);white-space:nowrap;flex-shrink:0}
+.nb-s-capping .nb-srow-t{color:var(--acc)}
+.nb-s-level .nb-srow-t{color:var(--ok)}
+.nb-srow-s{font-size:13px;color:var(--dim);line-height:1.45;margin-top:2px}
+.nb-side-retest{
+  margin-top:12px;padding:12px;border-radius:11px;background:var(--card2);
+  border-left:3px solid var(--arms);font-size:13.5px;color:var(--dim);line-height:1.5;
+}
+.nb-side-retest b{color:var(--text)}
+
 /* 8. what you've said — the notes history, shared with the grade card */
 .nb-notes{display:flex;flex-direction:column}
 .nb-note{padding:10px 0 10px 11px;border-top:1px solid var(--line);border-left:3px solid var(--line)}
@@ -3033,7 +3054,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "5.9";
+const APP_VERSION = "6.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13282,6 +13303,69 @@ function viewBody(){
     </button>
   </div>`;
 
+  /* ---- 7b. SIDE BALANCE ---------------------------------------------------------
+     The asymmetry rule used to exist only as a sentence on Today: "match the weaker
+     side for another 7 days, then re-test", with no way to see what it was doing, no
+     way to turn it on, and — when nothing had been measured yet — a closing line
+     admitting it had nothing to report. A rule you cannot see the state of and cannot
+     act on is indistinguishable from one that is not running.
+
+     So it gets a section, next to the other findings, that answers the three questions
+     it was silently raising: is it on, what has it actually measured, and what do I do
+     about it. Only shown when the plan HAS single-limb work, because with none there is
+     nothing for the rule to be a rule about. */
+  const uni = unilateralInPlan();
+  if(uni.length){
+    const ruleOn = trainPrefs().sides === "matchWeaker";
+    const rows = uni.map(e=>({e, st: sideStats(e.name),
+                              retired: asymRetiredFor(e.name), live: asymActiveFor(e)}));
+    const measured = rows.filter(r=> r.st.ok && r.st.weaker);
+    const capping  = rows.filter(r=> r.live && r.st.ok && r.st.weaker);
+    h += `<div class="nb-side nb-in" style="--d:545ms">
+      <div class="nb-sec-k">Side balance<span class="nb-count">${uni.length}</span></div>
+      <div class="nb-side-say">${
+        !ruleOn
+          ? "Each side is being trained on its own merits. Turn on matching and the stronger side is held to whatever the weaker one managed, so the gap closes instead of widening."
+          : capping.length
+            ? "On. " + capping.length + " movement" + (capping.length===1?" is":"s are") +
+              " having the stronger side capped to the weaker one's reps."
+            : "On, but nothing is being capped yet — it needs a balanced reading on a movement before it can cap anything. Below is what each one still needs."
+      }</div>`;
+    rows.forEach(r=>{
+      const st = r.st;
+      const state = r.retired ? "level" : (r.live && st.ok && st.weaker) ? "capping" : "waiting";
+      h += `<div class="nb-srow nb-s-${state}">
+        <div class="nb-srow-h">
+          <span class="nb-srow-n">${esc(r.e.name)}</span>
+          <span class="nb-srow-t">${r.retired ? "level" : state === "capping" ? "capping" : "measuring"}</span>
+        </div>
+        <div class="nb-srow-s">${esc(
+          st.ok ? asymGapText(st) + (st.confident ? "" : " Provisional.")
+                : "Needs more data: " + st.reason + "."
+        )}</div>
+      </div>`;
+    });
+    h += `<div class="btn-row" style="margin-top:12px">
+      <button class="btn ghost small" id="nbSideRule" style="flex:1">${
+        ruleOn ? "Train each side on its own" : "Match the weaker side"}</button>
+    </div>`;
+    /* The re-test is an ACTION, and it was only ever reachable from a card on Today
+       that appears for a few days and then does not. It belongs wherever the rule's
+       state is shown. */
+    if(asymRetestDue()){
+      h += `<div class="nb-side-retest">
+        <b>The four-week re-test is due.</b> It measures each movement on a balanced
+        window and retires the rule wherever the gap has closed to within
+        ${ASYM_CLOSED_GAP} rep${ASYM_CLOSED_GAP===1?"":"s"}.
+        <button class="btn small" id="nbSideRetest" style="margin-top:10px">Run the re-test</button>
+      </div>`;
+    }
+    h += `<div class="nb-lfoot">A gap is only read from sessions where both sides got the
+      same number of sets, so the opening-side flip cannot show up as an imbalance that
+      is not there.</div>`;
+    h += `</div>`;
+  }
+
   /* ---- 8. WHAT YOU'VE SAID ------------------------------------------------------
      The other half of the picture. Everything above is inferred from numbers; this is
      the part you told it directly, from the note button in a workout and from the
@@ -14473,6 +14557,24 @@ function bind(){
   });
   // a "What to fix" row: show the exercises and numbers the finding came from
   document.querySelectorAll("#app [data-wp]").forEach(b=> b.onclick=()=> openWeakPoint(parseInt(b.dataset.wp,10)));
+  /* The asymmetry rule, switched from the section that shows its state. Writing the
+     same preference the Settings segment writes, rather than a second flag that could
+     drift out of step with it. */
+  const nsr = $("#nbSideRule");
+  if(nsr) nsr.onclick = ()=>{
+    const on = trainPrefs().sides === "matchWeaker";
+    trainPrefs().sides = on ? "separate" : "matchWeaker";
+    save(); queueSync(); render();
+    toast(on ? "Each side trained on its own merits" : "Stronger side now capped to the weaker one");
+  };
+  const nst = $("#nbSideRetest");
+  if(nst) nst.onclick = ()=>{
+    const r = applyAsymRetest();
+    render();
+    toast(r.retired.length
+      ? "Rule retired on " + r.retired.length + " movement" + (r.retired.length===1?"":"s")
+      : "Re-test done, the gaps are still open");
+  };
   const bmb = $("#bmBack");
   if(bmb) bmb.onclick = ()=>{ BODY_FOCUS = null; BODY_EXPAND = false; render(); };
   document.querySelectorAll("[data-mrow]").forEach(r=> r.onclick=()=>{
@@ -16704,20 +16806,28 @@ function ruleBannerHTML(){
   }
   // The asymmetry rule is about single-limb work. With none in the plan, or nothing
   // logged yet, there is nothing for it to be a rule ABOUT.
-  if(asymActive() && unilateralInPlan().length && S.sessions.length){
-    const left = Math.max(0, ASYM_WEEKS - weeksSince(planStartAt()));
-    const measured = unilateralInPlan()
-      .map(e=>({name:e.name, st:sideStats(e.name)}))
-      .filter(x=>x.st.ok && x.st.weaker)
-      .sort((a,b)=>b.st.gap - a.st.gap)
-      .slice(0,2);
-    bits.push({k:"Asymmetry", v:"Match the weaker side on all single-limb work for another " +
-      (left < 1 ? Math.round(left * 7) + " days" : r1(left) + " weeks") + ", then re-test." +
-      (measured.length
-        ? " Widest gap right now: " + measured.map(x=>
-            x.name + " " + r1(x.st.gap) + " rep" + (r1(x.st.gap)===1?"":"s") +
-            (x.st.confident ? "" : " (provisional)")).join(", ") + "."
-        : " No balanced reading yet, so no gap to report.")});
+  /* ONLY WHEN IT IS ACTUALLY CAPPING SOMETHING. This used to announce the rule the
+     moment the plan contained single-limb work, and then admit in its closing sentence
+     that it had measured nothing — "no balanced reading yet, so no gap to report",
+     which is a banner describing its own inability to say anything. Worse, it was the
+     only surface the rule had: no state, no numbers, nothing to press.
+
+     The Body tab's Side balance section owns all of that now — what each movement has
+     measured, what it still needs, and the switch. What is left here is the one thing
+     Today should carry: this rule is changing the reps in front of you right now, on
+     these movements. */
+  if(unilateralInPlan().length && S.sessions.length){
+    const capping = unilateralInPlan()
+      .map(e=>({name:e.name, e, st:sideStats(e.name)}))
+      .filter(x=> x.st.ok && x.st.weaker && asymActiveFor(x.e))
+      .sort((a,b)=> b.st.gap - a.st.gap);
+    if(capping.length){
+      bits.push({k:"Asymmetry", v:"Your stronger side is being held to the weaker one on " +
+        capping.length + " movement" + (capping.length===1?"":"s") + ". Widest gap: " +
+        capping.slice(0,2).map(x=> x.name + " " + r1(x.st.gap) + " rep" +
+          (r1(x.st.gap)===1?"":"s") + (x.st.confident ? "" : ", provisional")).join(", ") +
+        ". Side balance in the Body tab has the rest."});
+    }
   }
   if(!bits.length) return "";
   return `<div class="card rule-card">` + bits.map(b=>
