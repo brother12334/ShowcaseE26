@@ -3054,7 +3054,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.1";
+const APP_VERSION = "6.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4249,7 +4249,15 @@ function isSingleArm(e){
    `sideMode` and `warmups` on an exercise, both written only from the document.
    ===================================================================== */
 const PREF_DEFAULTS = {
-  sides: "matchWeaker",   // separate | matchWeaker | both  (see sideModeFor)
+  /* OFF BY DEFAULT, and it used to be on. Matching the weaker side is a real training
+     decision — it deliberately caps the strong side below what it could do — and the
+     grade has to stop scoring a capped set against a target it removed (see
+     setGovernor). Both of those are correct while the rule is running and wrong while
+     it is merely switched on by default: an exemption nobody asked for is invisible,
+     and "why is my intensity n/a" then has no discoverable answer. It is one tap in
+     Body → Side balance, which is also where its state and its measurements live.
+     Existing profiles keep the old default, see the migration in migrate(). */
+  sides: "separate",      // separate | matchWeaker | both  (see sideModeFor)
   startSideFlip: true,    // flip the opening limb every session of that day
   warmups: "auto",        // auto | planOnly | manual
   deloads: "auto",        // auto | planOnly
@@ -5127,6 +5135,17 @@ function syncProfileRecord(){
    THROWS — taking the entire script down before a single screen renders. Same trap the
    auto-rest backfill and the change log both carry a note about. */
 let DISK_STAMP = 0;
+/* Did the state ON DISK carry an explicit side-handling choice? Read in load() and
+   nowhere else, because trainPrefs() creates S.prefs from PREF_DEFAULTS the first time
+   anything asks for a preference — which happens before migrate() runs. By then every
+   key is populated and "was this ever chosen?" is unanswerable. Captured at the only
+   moment it is still true.
+
+   DECLARED HERE, ABOVE load(), and that is not tidiness. load() is CALLED during this
+   file's own initialisation, so a `let` sitting below it is still in its temporal dead
+   zone at that moment and reading it throws — which kills the whole script, exactly as
+   documented three times over in this file. */
+let DISK_HAD_SIDES = false;
 let S = load();
 applySplit();     // DAYS / ROTATION / CYCLE_LAYOUT / REST_CREDITS, from the chosen split
 migrate();
@@ -5137,10 +5156,12 @@ function load(){
       const d = JSON.parse(raw);
       // remember what we read, so persist() can tell another tab's write from our own
       DISK_STAMP = Number(d && d.savedAt) || 0;
+      DISK_HAD_SIDES = !!(d && d.prefs && typeof d.prefs === "object" && d.prefs.sides != null);
       return d;
     }
   }catch(e){}
   DISK_STAMP = 0;
+  DISK_HAD_SIDES = false;
   return defaultState();
 }
 /* Split out of load() so a RESTORE can get at it. "Replace everything with this file"
@@ -5274,6 +5295,23 @@ function migrate(){
   if(!S.cycleStart || !S.cycleV2){
     S.cycleStart = inferCycleStart();
     S.cycleV2 = true;
+    saveQuiet();
+  }
+  /* THE SIDE-HANDLING DEFAULT FLIPPED, and a default that flips silently rewrites how
+     somebody's plan already behaves. Anything with history on it predates the change,
+     so it is stamped with the old default explicitly and carries on exactly as it was;
+     a genuinely empty log takes the new one. Marked either way, so this runs once.
+
+     BEFORE the block below, which fills every missing preference from PREF_DEFAULTS —
+     run after it, this would only ever see the new default already written in, and the
+     migration would be a no-op that looked like it worked. */
+  if(!S.sidesDefaultV2){
+    const hadHistory = !!S.setup || (Array.isArray(S.sessions) && S.sessions.length > 0);
+    if(hadHistory && !DISK_HAD_SIDES){
+      if(!S.prefs || typeof S.prefs !== "object") S.prefs = {};
+      S.prefs.sides = "matchWeaker";
+    }
+    S.sidesDefaultV2 = true;
     saveQuiet();
   }
   /* Training preferences. An existing profile gets the historical defaults, so nothing
@@ -18065,7 +18103,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
