@@ -3054,7 +3054,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.0";
+const APP_VERSION = "6.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11909,6 +11909,27 @@ function weakerSideRepsThisSession(exName, weakSide){
   });
   return best;
 }
+/* Which rule, if any, is deliberately holding this set below the plan's own numbers.
+   Ordered by how much it overrides: a weaker-side cap replaces the rep target outright,
+   a deload replaces both, an ease-off caps the effort, a rebuild moves the rep target to
+   the bottom of the range. Returns null on an ordinary set, which is nearly all of them. */
+function setGovernor(entry, si){
+  if(!entry) return null;
+  const rx = setPrescription(entry, si);
+  if(rx && rx.match != null) return "weaker";
+  if(deloadActive()) return "deload";
+  if(rx && rx.rebuild) return "rebuild";
+  const ez = easeFor(entry.name);
+  if(ez) return "ease";
+  return null;
+}
+/* What each one means on the grade card, in the section that had to leave it out. */
+const GOV_WHY = {
+  weaker: "held to your weaker side",
+  deload: "on a deload",
+  rebuild: "rebuilding at a new load",
+  ease:   "on an ease-off"
+};
 function setPrescription(entry, si){
   const out = {reps:null, rpe:null, match:null, why:null, tech:null};
   if(!entry) return out;
@@ -14238,6 +14259,19 @@ function bind(){
         // PR spark, compared against your ALL-TIME best for this exercise, and now
         // recorded on the set so it also shows as a badge and in the session summary.
         checkPR(ei, si, el);
+        /* WHAT RULE WAS GOVERNING THIS SET, recorded at the moment it happened.
+           Several rules deliberately make a set smaller than the plan's own numbers —
+           the weaker-side cap holds the strong side to the weak one's reps, a deload
+           stops everything short, an ease-off caps the effort, a load that just went up
+           asks for the bottom of the range. Every one of those is the plan working, and
+           the grade used to read all of them as you missing the target: "the load is
+           likely too heavy for that range" on a set you were TOLD to cut short.
+
+           Stamped rather than re-derived at grade time, because it is a fact about what
+           happened. Re-deriving it would change an old session's grade the moment you
+           switched the preference off. */
+        const gov = setGovernor(entry, si);
+        if(gov) st.gov = gov; else delete st.gov;
         /* The ✓ starts the stopwatch, except in two cases: inside a superset, where
            there is deliberately no rest, and on the very last set of the very last
            exercise, where there is nothing left to rest FOR. Timing the walk to the
@@ -15490,14 +15524,23 @@ function downContext(sess, entry, idx, prior){
       ", so today's sets were aimed at a different target");
   }
 
-  // 3, the load went up in between, so a rep drop is the plan working, not a regression
+  /* 3, a rule was holding this exercise's sets down. The stamp is on the set, written
+     when it was ticked, so this is what was actually governing you at the time rather
+     than what the preferences happen to say now. */
+  const govs = [...new Set((entry.sets||[]).map(st=> st.gov).filter(Boolean))];
+  govs.forEach(g=>{
+    if(GOV_WHY[g]) excuses.push("those sets were " + GOV_WHY[g] +
+      ", so the reps were set by the rule rather than by what you had left");
+  });
+
+  // 4, the load went up in between, so a rep drop is the plan working, not a regression
   const rbC = rebuildFor(entry);
   if(rbC && rbC.at > prior.sess.startedAt && rbC.at <= sess.startedAt){
     excuses.push("the load went up to " + fmtLoad(rbC.weight) + " in between, so the reps were "
       + "meant to fall back to " + rbC.from + " and rebuild from there");
   }
 
-  // 4, you wrote something down about this movement at the time
+  // 5, you wrote something down about this movement at the time
   const nc = noteContextFor(entry.name);
   if(nc && nc.kind.weight === "hold"){
     excuses.push("you noted it at the time \u2014 " + nc.kind.grade);
@@ -15505,12 +15548,12 @@ function downContext(sess, entry, idx, prior){
     context.push("you noted that " + nc.kind.grade);
   }
 
-  // 5, you had been away: detraining is not regression, and is not graded as it
+  // 6, you had been away: detraining is not regression, and is not graded as it
   const lay = layoffBefore(sess);
   if(lay) excuses.push("you came back from a break \u2014 " + layoffPhrase(lay) +
     ", and strength dips over time off without anything having gone wrong");
 
-  // 6, you said at the time that the set did what it was supposed to
+  // 7, you said at the time that the set did what it was supposed to
   const codes = [...new Set((entry.sets||[]).map(st=>st.why && st.why.code).filter(Boolean))];
   const exempt = codes.filter(c=>REASON_EXEMPT[c] && REASON_BY_CODE[c]);
   if(exempt.length){
@@ -15673,13 +15716,26 @@ function scoreWorkout(sess){
      Overshooting is treated as worse than undershooting by design: going harder than
      prescribed is the failure mode a ramped prescription exists to correct. */
   (()=>{
-    const scored = allSets.filter(x=>parseFloat(x.st.rpe) > 0);
+    /* GOVERNED SETS ARE NOT GRADED ON EFFORT AT ALL, and excluding them here rather
+       than in the branches below is the point. A set held to the weaker side has its
+       RPE target removed on purpose — an effort target on a set you are deliberately
+       cutting short is a contradiction, not a goal — so it has no per-set target, falls
+       through to the generic "RPE 7-10 is productive" band, and gets marked down for
+       landing at 6. Which is the app scoring you for obeying it. */
+    const govOut = allSets.filter(x=> parseFloat(x.st.rpe) > 0 && x.st.gov);
+    const scored = allSets.filter(x=> parseFloat(x.st.rpe) > 0 && !x.st.gov);
     const why = [];
     if(!scored.length){
+      const govBits = [...new Set(govOut.map(x=> x.st.gov))].map(k=> GOV_WHY[k]).filter(Boolean);
       add("intensity","Effective intensity",16,0,
-        ["No RPE logged, so how close these sets came to failure can't be assessed."],
-        "RPE is the most informative number you can log: weight and reps say what you lifted, RPE says whether it was hard enough to grow anything.",
-        {na:true, unlock:"Score even the last set of each exercise and this starts counting."});
+        [govOut.length
+          ? "Every scored set was run to a rule (" + govBits.join(", ") + ") rather than to an effort target, so there is no intensity to grade."
+          : "No RPE logged, so how close these sets came to failure can't be assessed."],
+        govOut.length ? null
+          : "RPE is the most informative number you can log: weight and reps say what you lifted, RPE says whether it was hard enough to grow anything.",
+        {na:true, unlock: govOut.length
+          ? "Nothing to do — this section comes back when a set is yours to push."
+          : "Score even the last set of each exercise and this starts counting."});
       return;
     }
     const rpes = scored.map(x=>parseFloat(x.st.rpe));
@@ -15707,7 +15763,7 @@ function scoreWorkout(sess){
       } else {
         /* Under the target because a rule of this app put it there. Full credit, and it
            is not counted as a miss — see the note on effortCapped(). */
-        if(effortCapped(x.e)){ sum += 1; onTarget++; excused++; return; }
+        if(x.st.gov || effortCapped(x.e)){ sum += 1; onTarget++; excused++; return; }
         under++; underNames[x.e.name] = (underNames[x.e.name]||0)+1;
         sum += Math.max(0.3, 1 - (Math.abs(d) - RPE_TOL) * 0.35);
       }
@@ -15732,6 +15788,11 @@ function scoreWorkout(sess){
       " no per-set target, so "+(untargeted.length>1?"they were":"it was")+" graded on the general RPE 7-10 band.");
     why.push("Average RPE "+r1(avg)+" across "+scored.length+" scored sets"+
       (scored.length<nSets?" ("+(nSets-scored.length)+" unscored)":"")+".");
+    if(govOut.length){
+      const govBits = [...new Set(govOut.map(x=> x.st.gov))].map(k=> GOV_WHY[k]).filter(Boolean);
+      why.push(govOut.length+" set"+(govOut.length>1?"s were":" was")+" left out: "+
+        govBits.join(", ")+", so the effort was set by the rule rather than by you.");
+    }
 
     add("intensity","Effective intensity",16,earned,why,
       over > targeted.length*0.35
@@ -15786,7 +15847,7 @@ function scoreWorkout(sess){
   /* 5, REP-RANGE ADHERENCE ---------------------------------------------------- */
   (()=>{
     let inR = 0, under = 0, over = 0, checked = 0, excused = 0;
-    const overEx = {}, underEx = {};
+    const overEx = {}, underEx = {}, govSeen = {};
     allSets.forEach(({e, st})=>{
       const range = repRange(e.reps);
       if(!range) return;
@@ -15796,6 +15857,11 @@ function scoreWorkout(sess){
          reps back" at someone whose shoulder just went. Excused sets leave the
          calculation entirely rather than counting as a miss. */
       if(st.why && REASON_EXEMPT[st.why.code]){ excused++; return; }
+      /* And a set a RULE cut short. Holding the strong side to the weak one's reps is
+         the app's own instruction; scoring it as "the load is likely too heavy for that
+         range" marks you down for following it, and then tells you to drop the weight.
+         Governed sets leave the calculation entirely, exactly like a flagged one. */
+      if(st.gov){ excused++; govSeen[st.gov] = (govSeen[st.gov]||0) + 1; return; }
       checked++;
       const r = parseFloat(st.reps)||0;
       if(r < range[0]){ under++; underEx[e.name] = (underEx[e.name]||0)+1; }
@@ -15806,7 +15872,7 @@ function scoreWorkout(sess){
     if(!checked){
       add("reprange","Rep-range adherence",10,0,
         [excused
-          ? "Every set with a prescribed range was one you flagged as deliberately cut short, so there's nothing here to mark."
+          ? "Every set with a prescribed range was run to a rule or flagged as deliberately cut short, so there's nothing here to mark."
           : "None of today's exercises carry a prescribed rep range."],null,
         {na:true, unlock: excused ? "Nothing to do, this just wasn't a scoreable session for rep ranges."
                                   : "Add a range like 8-12 to these exercises in Program."});
@@ -15819,8 +15885,12 @@ function scoreWorkout(sess){
       (topOf(overEx)?" (mostly "+topOf(overEx)+")":"")+", so that load has become too light.");
     if(under) why.push(under+" set"+(under>1?"s":"")+" fell short"+
       (topOf(underEx)?" (mostly "+topOf(underEx)+")":"")+", so the load is likely too heavy for that range.");
-    if(excused) why.push(excused+" set"+(excused>1?"s":"")+" left out of this, because you flagged "+
-      (excused>1?"them":"it")+" as deliberately cut short or stopped for pain.");
+    if(excused){
+      const govBits = Object.keys(govSeen).map(k=> govSeen[k]+" "+GOV_WHY[k]);
+      why.push(excused+" set"+(excused>1?"s":"")+" left out of this"+
+        (govBits.length ? ", because they were run to a rule rather than to the range ("+govBits.join(", ")+")"
+                        : ", because you flagged "+(excused>1?"them":"it")+" as deliberately cut short or stopped for pain")+".");
+    }
     /* Whatever you told the app is a better explanation than the app's own guess, so a
        logged reason writes the advice for this section. */
     const flags = sessionFlags(sess);
@@ -15843,6 +15913,11 @@ function scoreWorkout(sess){
     entries.forEach(e=>{
       const ws = e.sets.filter(isWorkingSet);
       if(ws.length < 2) return;
+      /* Drop-off measures whether the later sets ran on empty. On an exercise whose
+         every set was governed — matched to the weaker side, run on a deload — the rep
+         count was set by the rule and not by how much was left in the tank, so there is
+         nothing here to read. Excluded rather than scored. */
+      if(ws.every(st=> st.gov)) return;
       const first = parseFloat(ws[0].reps)||0;
       const last = parseFloat(ws[ws.length-1].reps)||0;
       if(!first) return;
