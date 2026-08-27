@@ -3033,7 +3033,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "5.8";
+const APP_VERSION = "5.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14158,11 +14158,16 @@ function bind(){
            there is deliberately no rest, and on the very last set of the very last
            exercise, where there is nothing left to rest FOR. Timing the walk to the
            car was never useful and it polluted the rest-discipline grade. */
-        const lastEntry = ei === S.active.entries.length - 1;
-        const lastSet = si === entry.sets.length - 1;
-        // endsRound() is the superset-aware version of "is there anything left to rest
-        // for": inside a pair only the movement that closes the round starts the clock.
-        if(endsRound(S.active.entries, ei, si) && !(lastEntry && lastSet)) startRest(ei, si);
+        /* "IS THERE ANYTHING LEFT TO REST FOR" IS NOT "AM I ON THE LAST ENTRY".
+           On an uneven superset pair — four sets of one movement against three of the
+           other — the session's final set belongs to the FIRST exercise of the pair,
+           because the partner ran out a round earlier. Testing the entry index said
+           that set was not the end of the session, so the stopwatch started on the walk
+           to the car, and the label above it had already been fixed to say otherwise.
+           The question is asked directly instead: does any set remain after this one. */
+        if(endsRound(S.active.entries, ei, si) && setsRemainAfter(S.active.entries, ei, si)){
+          startRest(ei, si);
+        }
       } else {
         // unchecking: cancel its running timer and clear its recorded rest
         const rt = S.active.restTimer;
@@ -17225,6 +17230,24 @@ function applyAsymRetest(){
    to useless standing in the gym: it tells you a rule applies without telling you what
    it applies to. Both halves are therefore labelled, with the pairing named and the
    rest behaviour spelled out, while the functional flag stays exactly where it was.  */
+/* Whether the session still holds a set after this one — the whole session, not this
+   exercise. A superset pair interleaves, so "later in the list" and "later in the
+   session" are different questions: with A on four sets and B on three, A's set 4 is
+   the last thing you do even though B sits after it in the list. */
+function setsRemainAfter(list, ei, si){
+  if(!list) return false;
+  for(let k = 0; k < list.length; k++){
+    const en = list[k];
+    if(!en || !en.sets) continue;
+    for(let j = 0; j < en.sets.length; j++){
+      /* Round index first, then position in the list: that is the order the session is
+         actually performed in, for a pair and for a straight run alike. */
+      if(j > si) return true;
+      if(j === si && k > ei) return true;
+    }
+  }
+  return false;
+}
 function supersetInfo(list, i){
   const cur = list && list[i];
   if(!cur) return null;
