@@ -1186,6 +1186,18 @@ body.onboarding #app{padding:0}
 .nb-flag-m{font-size:13px;color:var(--dim);line-height:1.45;margin-top:3px}
 .nb-flag-f{font-size:13px;color:var(--text);line-height:1.45;margin-top:4px}
 
+/* cloud sync status */
+.sync-state{display:flex;gap:10px;align-items:flex-start;margin:4px 0 0}
+.sync-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;margin-top:6px;background:var(--faint)}
+.sync-ok{background:var(--ok);box-shadow:0 0 0 3px rgba(74,147,88,.16)}
+.sync-wait{background:var(--arms);box-shadow:0 0 0 3px rgba(201,154,52,.16)}
+.sync-bad{background:var(--bad);box-shadow:0 0 0 3px rgba(209,88,79,.16)}
+.sync-warn{
+  margin-top:12px;padding:11px 12px;border-radius:11px;background:var(--card2);
+  border-left:3px solid var(--arms);font-size:13px;color:var(--dim);line-height:1.5;
+}
+.sync-warn b{color:var(--text)}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -3194,7 +3206,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.3";
+const APP_VERSION = "6.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8455,6 +8467,106 @@ function syncSafeState(){
   const out = Object.assign({}, S);
   if(out.sync) out.sync = Object.assign({}, out.sync, {token: ""});
   return out;
+}
+/* =====================================================================
+   SYNCING ON PURPOSE
+
+   Sync happens on its own, and when it does not there was no way to find out why. The
+   account card said "stored on this device" and stopped there — which is true, and
+   useless, because it does not say whether that is a choice, a failure, or a service
+   that was unreachable on the one morning the account was made.
+
+   TWO DIFFERENT PROBLEMS WEAR THE SAME SYMPTOM, and the fix for each is not the fix for
+   the other:
+
+     the account IS cloud-backed and a sync has not landed — network, a Worker having a
+       bad morning, a device that has been offline. Nothing is wrong with the account and
+       the answer is to try again and see the error if it fails.
+
+     the account is DEVICE-ONLY. Its id and key were minted here, on this device, at a
+       moment when the account service could not be reached, and were never registered
+       against it. No amount of retrying syncs that, because there is nothing on the
+       other end to sync WITH. It has to be registered, and — since the service mints ids
+       and a client that could claim an arbitrary one could claim anybody's — that means
+       a new id. Which is a real consequence and is said in those words rather than
+       discovered later.
+   ===================================================================== */
+function syncStatus(){
+  if(!accountCloudOn()) return {k:"off", msg:"This copy of Element 26 was published without an account service, so everything is stored on this device."};
+  if(!ACCT) return {k:"none", msg:"No account on this device."};
+  if(!ACCT.cloud) return {k:"local", msg:"This account was created on this device and never registered with the account service \u2014 most likely the service could not be reached at the time. Nothing is being backed up."};
+  const at = S && S.cloudAt;
+  return {k:"cloud", at, msg: at
+    ? "Last synced " + relTime(at) + "."
+    : "Registered against the account service, but nothing has synced yet."};
+}
+function relTime(ms){
+  const d = Math.max(0, Date.now() - ms);
+  if(d < 60000) return "just now";
+  if(d < 3600000) return Math.round(d/60000) + " min ago";
+  if(d < 86400000) return Math.round(d/3600000) + "h ago";
+  return Math.round(d/86400000) + " day" + (Math.round(d/86400000)===1?"":"s") + " ago";
+}
+/* One sync, by hand, that reports what actually happened. Pull first so a newer copy
+   from another device is not overwritten by this one, then push.
+
+   NOT `syncNow` — that name is already taken, a thousand lines further down, by the
+   legacy gist backup. Two function DECLARATIONS with one name is not an error and not a
+   warning: the later one silently wins for the whole file, so this returned undefined
+   and pushed nothing while looking completely correct. */
+async function accountSyncNow(){
+  if(!accountCloudOn()) return {ok:false, why:"No account service is configured in this build."};
+  if(!ACCT || !ACCT.cloud) return {ok:false, why:"This account is not registered with the account service."};
+  let res;
+  try{
+    res = await apiFetch("/data", {headers:{"Authorization": accountAuth()}});
+  }catch(e){
+    return {ok:false, why:"Could not reach the account service. Check your connection and try again."};
+  }
+  if(res.status === 401) return {ok:false, why:"The service rejected this account's ID and key. If you changed them elsewhere, sign in again."};
+  if(res.status === 404) return {ok:false, why:"The account service answered, but has no record of this account."};
+  if(!res.ok && res.status !== 204) return {ok:false, why:"The account service answered with an error (" + res.status + ")."};
+  let pulled = false;
+  try{ pulled = await accountPull(); }catch(e){}
+  const pushed = await accountPush();
+  if(!pushed) return {ok:false, why:"Reading your account worked, but writing to it did not. Nothing has been lost \u2014 this device still holds everything."};
+  S.cloudAt = Date.now();
+  save();
+  return {ok:true, pulled};
+}
+/* Registering a device-only account with the service, WITHOUT losing what is on the
+   device. The storage namespace is deliberately left alone: the log lives under it, and
+   changing it would leave every session behind under a name nothing looks at. Only the
+   credentials change. */
+async function connectAccountToCloud(){
+  if(!accountCloudOn()) return {ok:false, why:"No account service is configured in this build."};
+  if(!ACCT) return {ok:false, why:"No account on this device."};
+  if(ACCT.cloud) return {ok:false, why:"This account is already registered."};
+  let j = null;
+  try{
+    const res = await apiFetch("/account", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({name: ACCT.name || "Me"})
+    });
+    j = await res.json().catch(()=>null);
+    if(!res.ok || !j || !j.id || !j.key){
+      return {ok:false, why: res.status === 429
+        ? "The service is rate-limiting new accounts from this connection. Try again in an hour."
+        : "The account service would not register a new account (" + res.status + ")."};
+    }
+  }catch(e){
+    return {ok:false, why:"Could not reach the account service. Check your connection and try again."};
+  }
+  const oldId = ACCT.id;
+  // The namespace stays. Only who this device says it is changes.
+  ACCT = Object.assign({}, ACCT, {id: j.id, key: j.key, cloud: true, createdAt: ACCT.createdAt || Date.now()});
+  try{
+    if(localStorage.getItem(NS0_KEY) === oldId) localStorage.setItem(NS0_KEY, j.id);
+  }catch(e){}
+  saveAccount();
+  const pushed = await accountPush();
+  if(pushed){ S.cloudAt = Date.now(); save(); }
+  return {ok:true, id: j.id, key: j.key, oldId, pushed};
 }
 async function accountPush(){
   const auth = accountAuth();
@@ -14349,6 +14461,46 @@ function viewAdvanced(){
    is a plan that quietly stops matching the document it came from. They live behind a
    button, on their own page, with a way back. */
 let ADV_OPEN = false;
+let SYNC_BUSY = false;
+function syncCardHTML(){
+  const st = syncStatus();
+  if(st.k === "off") return "";
+  const dot = st.k === "cloud" ? (st.at ? "ok" : "wait") : "bad";
+  let h = `<div class="card">
+    <h3>Cloud sync</h3>
+    <div class="sync-state">
+      <span class="sync-dot sync-${dot}"></span>
+      <span><b>${st.k === "cloud" ? "Backed up to your account" : "This device only"}</b>
+        <span class="sub" style="display:block;margin:2px 0 0">${esc(st.msg)}</span></span>
+    </div>`;
+  if(SYNC_BUSY){
+    h += `<div class="ai-busy" style="margin-top:12px"><span class="ai-spin"></span><span>Talking to the account service\u2026</span></div>`;
+    return h + `</div>`;
+  }
+  if(st.k === "cloud"){
+    h += `<div class="btn-row" style="margin-top:12px">
+      <button class="btn ghost small" id="syncNowBtn" style="flex:1">Sync now</button>
+    </div>
+    <div class="sub" style="margin:9px 0 0;font-size:12.5px;color:var(--faint)">
+      Pulls anything newer from your account first, then uploads this device. Your log is
+      never replaced by an older copy.</div>`;
+  } else {
+    h += `<div class="sync-warn">
+      <b>Registering it changes your User ID.</b> The service mints IDs itself \u2014 a copy of the
+      app that could claim any ID it liked could claim yours \u2014 so connecting this account
+      gets a new one. <b>Everything on this device is kept</b> and uploaded as soon as it
+      connects: your plan, every session, your settings. You will be shown the new ID and key,
+      and the old ID stops being usable.
+    </div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn small" id="syncConnectBtn" style="flex:1">Connect this account</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn ghost small" id="syncSignInBtn" style="flex:1">I already have a cloud ID</button>
+    </div>`;
+  }
+  return h + `</div>`;
+}
 function viewSync(){
   if(ADV_OPEN) return viewAdvanced();
   const c = S.sync;
@@ -14380,6 +14532,7 @@ function viewSync(){
       <button class="btn ghost small danger" id="acctDelete">Delete account</button>
     </div>
   </div>
+  ${syncCardHTML()}
   <div class="card">
     <h3>How the app behaves</h3>
     <div class="sub" style="margin:4px 0 10px">Side handling, warm-ups, RPE, progression, your bar and what
@@ -15208,6 +15361,66 @@ function bind(){
   /* The account card. The ID is copyable in one tap because the whole point of it is
      that people keep it somewhere; the key needs a deliberate reveal, because it is the
      credential and a screenshot of this screen should not hand it over. */
+  const snb = $("#syncNowBtn");
+  if(snb) snb.onclick = async ()=>{
+    SYNC_BUSY = true; render();
+    const r = await accountSyncNow();
+    SYNC_BUSY = false; render();
+    if(r.ok) toast(r.pulled ? "Synced \u2014 a newer copy came down first" : "Synced");
+    else showModal(`<h3>Sync didn't go through</h3>
+      <p>${esc(r.why)}</p>
+      <div class="sub" style="margin-top:10px">Nothing has been lost. This device still holds
+        your full log either way.</div>
+      <button class="btn" id="closeModal" style="margin-top:16px">OK</button>`);
+  };
+  const scb = $("#syncConnectBtn");
+  if(scb) scb.onclick = async ()=>{
+    const yes = await askConfirm({
+      title:"Connect this account?",
+      body:"This registers your account with the service and uploads everything on this device. "
+         + "<b>Your User ID will change</b> — the service mints IDs, so it issues a new one. "
+         + "Your plan, your history and your settings all come with you.",
+      meta: ACCT ? "Current ID " + esc(ACCT.id) : "",
+      yes:"Connect and upload", no:"Not now"});
+    if(!yes) return;
+    SYNC_BUSY = true; render();
+    const r = await connectAccountToCloud();
+    SYNC_BUSY = false; render();
+    if(!r.ok){
+      showModal(`<h3>Couldn't connect</h3><p>${esc(r.why)}</p>
+        <div class="sub" style="margin-top:10px">Your account and everything on this device are
+          unchanged.</div>
+        <button class="btn" id="closeModal" style="margin-top:16px">OK</button>`);
+      return;
+    }
+    /* The new credentials, once, in front of them. A new ID that scrolls past in a toast
+       is a new ID nobody has written down. */
+    SHOW_KEY = true;
+    showModal(`<h3>Connected</h3>
+      <p>Everything on this device ${r.pushed ? "has been uploaded to your account" : "will upload on the next sync"}.
+        This is your new ID and key — the old ID (${esc(r.oldId)}) no longer opens anything.</p>
+      <div class="idcard brk" style="margin-top:14px">
+        <div class="idcard-h">Your Element 26 User ID</div>
+        <div class="idcard-id">${esc(r.id)}</div>
+        <div class="idcard-note" style="margin-top:10px">Recovery key</div>
+        <div class="acct-secret" style="word-break:break-all">${esc(r.key)}</div>
+      </div>
+      <div class="acct-warn" style="margin-top:12px"><b>Save both.</b> You need the ID and the key
+        together to sign in on another device. They are always in Setup → Account.</div>
+      <button class="btn" id="closeModal" style="margin-top:16px">I've saved them</button>`);
+  };
+  const ssb = $("#syncSignInBtn");
+  if(ssb) ssb.onclick = async ()=>{
+    const yes = await askConfirm({
+      title:"Sign in with a cloud ID?",
+      body:"Use this if you already have an Element 26 ID and key registered with the service. "
+         + "<b>This device's current log stays where it is</b> and is not deleted, but the app will "
+         + "switch to the account you sign in as.",
+      yes:"Take me to sign in", no:"Cancel"});
+    if(!yes) return;
+    ACCT_UI = {step:"signin", name:"", err:"", busy:false, id:"", key:"", saved:false, inId:"", inKey:""};
+    render();
+  };
   const cid = $("#acctCopyId");
   if(cid) cid.onclick = async ()=>{ toast(await copyText(ACCT ? ACCT.id : "") ? "User ID copied" : "Couldn't copy"); };
   const ckey = $("#acctCopyKey");
@@ -18871,7 +19084,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
