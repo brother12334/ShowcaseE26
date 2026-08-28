@@ -3206,7 +3206,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.4";
+const APP_VERSION = "6.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9116,7 +9116,7 @@ function aiSystemPrompt(){
 "5. 'sets' is the number of working sets as the document writes them. If it prescribes sets PER SIDE ('3 sets each arm'), put 3 and set setsArePerSide true. Do not double it yourself — the app doubles it or not depending on how the person chooses to track sides.",
 "6. 'reps' is exactly as prescribed, as a short string: '8', '6-10', '12-15', 'AMRAP', '30s', '20 each leg'. Never a sentence. If the document gives no rep target at all, use an empty string.",
 "7. 'rpe' or 'rir' ONLY if the document gives them, one per set in order. Never invent effort targets and never convert one into a guess. If the document says 'last set to failure' or 'leave 2 in the tank on the top set', put that in effortNote and leave the numeric arrays empty.",
-"8. 'restSeconds' only if a rest period is stated. A range like '2-3 min' gives restSeconds 120 and restNote '2-3 min'. Otherwise omit both.",
+"8. REST. Fill 'restSeconds' on EVERY exercise the document prescribes a rest for, including when it is prescribed once for all of them. Plans very often state rest ONCE, at the top or under a day heading — 'Rest 2-3 min between sets', 'rest 90s', '2 min compounds / 60s isolation', 'Rest as needed on the main lifts' — and that is a rest for every exercise it covers, not an absence of one. Read it, and write the number onto each exercise it applies to. Where a rule names categories, apply it per category: 'compounds' means the multi-joint lifts of that session, 'isolation' or 'accessories' the single-joint ones. Where a rest is stated for the whole plan or a whole day AS WELL as on individual rows, the row wins for that row. Give a range as its LOW number ('2-3 min' is restSeconds 120) and put the words in restNote. Also set 'defaultRestSeconds' at the top level, and 'restSeconds' on a day, whenever the document states a blanket rest at that level — even after you have already copied it onto the exercises. Only omit all of it if the document genuinely never mentions rest.",
 "9. 'tempo' exactly as written ('3-1-1', '4s eccentric').",
 "10. 'weight' only when an actual load is stated. Give the number as written and set the document's unit in 'unit' at the top level; put percentages of 1RM, band colours or 'moderate' in weightNote instead, with weight null.",
 "11. 'warmupSets' are the warm-up sets THIS DOCUMENT prescribes for this exercise: label them as written ('bar', '50%', '95 lb'), with percent as a fraction (0.5) where it is a percentage, and reps if given. 'warmupNote' is any warm-up instruction in words. If the document prescribes no warm-ups, leave the array empty and set stated.warmups false. The app has its own warm-up behaviour and it must not be applied to a plan that specifies its own.",
@@ -9160,6 +9160,10 @@ const AI_PLAN_SCHEMA = {
                       description:"only if the document states what the programme is for; 'unstated' otherwise"},
     weeks:           {type:"INTEGER", nullable:true},
     unit:            {type:"STRING",  enum:["lb","kg","percent","none"]},
+    defaultRestSeconds:{type:"INTEGER", nullable:true,
+                      description:"a rest period the document states once for the whole plan, in seconds; the low end of a range"},
+    defaultRestNote: {type:"STRING",
+                      description:"that blanket rest as the document words it, e.g. '2-3 min between sets'"},
     restDaysPerCycle:{type:"INTEGER", nullable:true},
     restDaysFlexible:{type:"BOOLEAN",
                       description:"true only if the document says the rest days are the lifter's to place"},
@@ -9204,6 +9208,9 @@ const AI_PLAN_SCHEMA = {
         properties:{
           name: {type:"STRING"},
           notes:{type:"STRING"},
+          restSeconds:{type:"INTEGER", nullable:true,
+                       description:"a rest period stated for this whole session, in seconds"},
+          restNote:{type:"STRING"},
           exercises:{
             type:"ARRAY",
             items:{
@@ -9252,12 +9259,12 @@ const AI_PLAN_SCHEMA = {
           }
         },
         required:["name","exercises"],
-        propertyOrdering:["name","notes","exercises"]
+        propertyOrdering:["name","notes","restSeconds","restNote","exercises"]
       }
     }
   },
   required:["understood","days"],
-  propertyOrdering:["understood","problem","planName","goal","weeks","unit","restDaysPerCycle","restDaysFlexible","daysAnyOrder","stated",
+  propertyOrdering:["understood","problem","planName","goal","weeks","unit","defaultRestSeconds","defaultRestNote","restDaysPerCycle","restDaysFlexible","daysAnyOrder","stated",
                     "phases","deloadWeeks","testingWeeks","weeklyChanges","progressionRules",
                     "specialInstructions","planNotes","warnings","days"]
 };
@@ -9521,8 +9528,19 @@ function aiExercise(x, ctx){
   /* REST. Declared only when the document declares it. Left off otherwise, which routes
      the movement through restTargetFor()'s generic bands — the same ones every custom
      exercise gets — instead of the rest windows written for one particular programme. */
-  const rs = Math.round(Number(x.restSeconds));
-  const rest = isFinite(rs) && rs >= 20 && rs <= 900 ? [rs, Math.min(900, rs + 30)] : null;
+  /* THREE PLACES A REST CAN BE WRITTEN, and a plan usually picks one. A rest on the
+     exercise row wins; failing that the one stated under the day heading; failing that
+     the one stated once at the top of the document. Reading only the row is why a plan
+     whose first line says "Rest 2-3 min between sets" imported with no rests at all —
+     the instruction was there, it was simply not on any row. */
+  const restSrc = [x.restSeconds, ctx.dayRestSeconds, ctx.planRestSeconds]
+    .map(v=> Math.round(Number(v)))
+    .find(v=> isFinite(v) && v >= 20 && v <= 900);
+  const rs = restSrc == null ? NaN : restSrc;
+  const rest = isFinite(rs) ? [rs, Math.min(900, rs + 30)] : null;
+  // Where the words live, so the note says what the document said.
+  const restWords = x.restNote || (isFinite(Math.round(Number(x.restSeconds))) ? "" :
+    (ctx.dayRestNote || ctx.planRestNote || ""));
 
   /* LOAD. Only a stated number. Kilos are converted only if the person asked for it. */
   let weight = null, unitNote = "";
@@ -9568,7 +9586,7 @@ function aiExercise(x, ctx){
   const note = aiNoteJoin([
     x.tempo ? "tempo " + aiTrim(x.tempo, 20) : "",
     x.effortNote,
-    x.restNote ? "rest " + aiTrim(x.restNote, 24) : "",
+    restWords ? "rest " + aiTrim(restWords, 24) : "",
     x.circuitGroup ? "part of circuit " + aiTrim(x.circuitGroup, 16) : "",
     x.sideInstruction,
     x.progression,
@@ -9649,9 +9667,17 @@ function aiPlanToProgram(doc, answers){
   });
   const program = {finisher: []};
   const barbell = [];
-  const shared = {answers: ans, attention, matches, unit, increments, barbell, effortFromPlan: false};
+  /* A blanket rest stated once for the whole document, carried down to every exercise
+     that does not name its own. */
+  const planRestSeconds = Math.round(Number(doc.defaultRestSeconds));
+  const shared = {answers: ans, attention, matches, unit, increments, barbell, effortFromPlan: false,
+                  planRestSeconds: isFinite(planRestSeconds) ? planRestSeconds : null,
+                  planRestNote: aiTrim(doc.defaultRestNote, 40) || ""};
   days.forEach((d, i)=>{
     const dayId = split.days[i].id;
+    const dRest = Math.round(Number(d.restSeconds));
+    shared.dayRestSeconds = isFinite(dRest) ? dRest : null;
+    shared.dayRestNote = aiTrim(d.restNote, 40) || "";
     const raws = d.exercises.slice(0, 20);
     const list = [], kept = [];
     raws.forEach(x=>{
@@ -9724,8 +9750,10 @@ function aiPlanToProgram(doc, answers){
     effortFromPlan = withRir ? "RIR targets" : "RPE targets";
   }
 
+  /* The source travels with the result, so whatever adopts it can keep the document as
+     well as what was made of it. See S.importSrc. */
   return {program, customSplit: split, splitId: null, warnings, attention, matches, meta,
-          prefs, stated, barbellLifts: barbell, effortFromPlan};
+          prefs, stated, barbellLifts: barbell, effortFromPlan, doc, answers: ans};
 }
 
 /* ---------- stage 3: the questions this document actually leaves open ----------
@@ -9821,7 +9849,9 @@ function aiBuildQuestions(doc, result){
 
   /* REST. Only when nothing in the document prescribes any. Rest that IS prescribed is
      kept per exercise and this never appears. */
-  const anyRest = ex.some(x=> aiQNum(x.restSeconds, 0) > 0);
+  const anyRest = ex.some(x=> aiQNum(x.restSeconds, 0) > 0)
+    || aiQNum(doc.defaultRestSeconds, 0) > 0
+    || (Array.isArray(doc.days) && doc.days.some(d=> d && aiQNum(d.restSeconds, 0) > 0));
   if(!anyRest && !stated.rest){
     qs.push({
       id:"rest", title:"How long do you rest between sets?",
@@ -10982,6 +11012,20 @@ async function aiUsePlan(){
     S.setup = Object.assign({name:"Me", level:S.experience||"beginner", gear:"full"}, S.setup || {}, {goal});
   }
   S.importMeta = r.meta || null;
+  /* THE DOCUMENT ITSELF, KEPT. Everything above is what the importer MADE of the plan;
+     this is the plan as it was read. Two things need it. The importer improves — the
+     rest-period pass that reads a blanket "rest 2-3 min" was added long after most plans
+     were imported, and without the source there is no way to apply it except by finding
+     the PDF again. And an answer given during the import ("convert kilos", "how do you
+     track sides") can be reconsidered later, which is only meaningful if the plan can be
+     rebuilt from it.
+
+     Stored with the answers, so a rebuild reproduces the same import exactly, and capped
+     — a very long document is not worth carrying in every backup. */
+  try{
+    const src = JSON.stringify({doc: r.doc || null, answers: r.answers || null, at: Date.now()});
+    S.importSrc = src.length <= 400000 ? JSON.parse(src) : null;
+  }catch(e){ S.importSrc = null; }
   applySplit();
   invalidateTableOrigin();
   invalidateMultiDay();
@@ -11001,6 +11045,49 @@ async function aiUsePlan(){
 /* What the document said about running the programme, kept where it can be read while
    training rather than thrown away at import. Element 26 does not run somebody else's
    periodisation for them — it holds on to it accurately and says so. */
+/* REBUILDING THE PROGRAMME FROM THE DOCUMENT ALREADY READ.
+
+   Distinct from importing again, and both are worth having. Importing again means "here
+   is a different plan". This means "read the same plan again" — which matters because
+   the importer is not fixed: the pass that reads a blanket "Rest 2-3 min between sets"
+   and puts it on every exercise did not exist when most plans were imported, and without
+   this the only way to pick it up is to go and find the PDF.
+
+   It touches the PROGRAMME and nothing else. Sessions, history, notes, flags and the
+   cycle are not derived from the document and are not in its gift. */
+function canRebuildPlan(){
+  return !!(S.importSrc && S.importSrc.doc && Array.isArray(S.importSrc.doc.days) && S.importSrc.doc.days.length);
+}
+function rebuildPlanFromSource(){
+  if(!canRebuildPlan()) return {ok:false, why:"There is no stored plan document to rebuild from."};
+  let r;
+  try{
+    r = aiPlanToProgram(S.importSrc.doc, S.importSrc.answers || {});
+  }catch(e){
+    return {ok:false, why: (e && e.message) || "That document could not be read again."};
+  }
+  if(!r || !r.program) return {ok:false, why:"That document could not be read again."};
+  const before = countPlanRests();
+  const oldFin = Array.isArray(S.program && S.program.finisher) ? S.program.finisher : [];
+  S.program = Object.assign({}, r.program, {finisher: oldFin});
+  if(r.customSplit){ S.customSplit = r.customSplit; S.splitId = null; }
+  S.importMeta = r.meta || null;
+  applySplit();
+  invalidateTableOrigin();
+  invalidateMultiDay();
+  logPlanChange("programme", null, "Whole programme",
+    ["Rebuilt from the imported document"],
+    {note:"Re-read the plan Element 26 already had on file. Your history was not touched."});
+  save(); queueSync();
+  return {ok:true, restsBefore: before, restsAfter: countPlanRests(),
+          exercises: DAYS.reduce((n,d)=> n + (S.program[d]||[]).length, 0)};
+}
+// How many movements currently carry a rest window, so a rebuild can say what it changed.
+function countPlanRests(){
+  let n = 0;
+  DAYS.forEach(d=> (S.program[d]||[]).forEach(e=>{ if(e && Array.isArray(e.rest)) n++; }));
+  return n;
+}
 function importMetaCardHTML(){
   const m = S.importMeta;
   if(!m) return "";
@@ -14336,9 +14423,15 @@ function viewProgram(){
     <button class="btn ghost small" id="planBtn">${ICON.doc} Full plan</button>
     <button class="btn ghost small" id="splitBtn">${ICON.calendar} Schedule</button>
   </div>
-  <div class="btn-row" style="margin-bottom:16px">
-    <button class="btn ghost small" id="aiImportBtn" style="flex:1">✨ Import a plan</button>
+  <div class="btn-row" style="margin-bottom:${canRebuildPlan()?"8px":"16px"}">
+    <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
   </div>
+  ${canRebuildPlan() ? `<div class="btn-row" style="margin-bottom:16px">
+    <button class="btn ghost small" id="planRebuildBtn" style="flex:1">${ICON.refresh} Re-read my plan</button>
+  </div>
+  <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">Builds your programme again
+    from the document you imported, without re-uploading it. Useful after Element 26 gets better at reading
+    plans. Your history, notes and cycle are untouched.</div>` : ""}
   <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
@@ -15161,6 +15254,36 @@ function bind(){
   if(plan) plan.onclick = openPlan;
   const aiB = $("#aiImportBtn");
   if(aiB) aiB.onclick = ()=> openAIImport(false);
+  const reb = $("#planRebuildBtn");
+  if(reb) reb.onclick = async ()=>{
+    const yes = await askConfirm({
+      title:"Re-read your plan?",
+      body:"Element 26 will build your programme again from the document you imported. "
+         + "Anything you have EDITED in the Program tab since will be replaced by what the document says. "
+         + "<b>Your history, notes, flags and cycle are not touched.</b>",
+      meta: S.importSrc && S.importSrc.at ? "Imported " + fmtDate(dayKey(S.importSrc.at)) : "",
+      yes:"Re-read it", no:"Cancel"});
+    if(!yes) return;
+    const r = rebuildPlanFromSource();
+    render();
+    if(!r.ok){
+      showModal(`<h3>Couldn't re-read it</h3><p>${esc(r.why)}</p>
+        <button class="btn" id="closeModal" style="margin-top:16px">OK</button>`);
+      return;
+    }
+    const gained = r.restsAfter - r.restsBefore;
+    showModal(`<h3>Plan re-read</h3>
+      <p>${r.exercises} exercise${r.exercises===1?"":"s"} rebuilt from your document.</p>
+      <div class="sub" style="margin-top:10px">${
+        gained > 0
+          ? "Rest periods now read from the plan on " + r.restsAfter + " movement" + (r.restsAfter===1?"":"s") + ", up from " + r.restsBefore + "."
+          : r.restsAfter
+            ? "Rest periods on " + r.restsAfter + " movement" + (r.restsAfter===1?"":"s") + ", unchanged."
+            : "Your document doesn't state any rest periods, so the app judges each set on its own."
+      }</div>
+      <div class="sub" style="margin-top:8px">Your history, notes and cycle are exactly as they were.</div>
+      <button class="btn" id="closeModal" style="margin-top:16px">Done</button>`);
+  };
   const rep = $("#reportBtn");
   if(rep) rep.onclick = openReport;
   const docB = $("#docBtn");
@@ -19084,7 +19207,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
