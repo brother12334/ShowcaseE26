@@ -606,7 +606,14 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   background:rgba(255,255,255,.05);border-radius:6px;padding:3px 7px;white-space:nowrap;
 }
 .warm-set i{font-style:normal;color:var(--faint)}
+/* A rung with no number behind it yet. Dashed, so it reads as a blank waiting to be
+   filled rather than as a weight the app is asking for. */
+.warm-ph{
+  background:none;border:1px dashed var(--line);color:var(--faint);
+  font-family:inherit;font-style:italic;padding:2px 7px;
+}
 .warm-note{flex-basis:100%;font-size:11.5px;color:var(--faint);line-height:1.35}
+.warm-note b{color:var(--dim);font-weight:600;font-style:normal}
 
 /* The four-week rep-matching rule, on the exercise it governs. */
 .asym-hint{
@@ -3228,7 +3235,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.6";
+const APP_VERSION = "6.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8669,7 +8676,8 @@ const TOUR_STEPS = [
     p: "Weight, reps, and how hard it felt. The first two you know. The third is the one worth learning, and it's the one this app is built around.",
     bits: [
       ["Rep range", "\"8–12\" means work up the range at the same load. When the last set reaches the top of it, the weight goes up and you rebuild from the bottom"],
-      ["Working set", "a real set, not a warm-up. Only these are graded"]
+      ["Working set", "a real set, not a warm-up. Only these are graded"],
+      ["Warm-ups", "before you have logged anything they read \"light\", \"build up\", \"almost there\" \u2014 placeholders, not instructions. One full session and they become real weights off your own working load"]
     ]
   },
   {
@@ -18361,9 +18369,15 @@ function warmupPlan(e, kind, ctx){
         ? [{label:"bodyweight", reps:"8"}, {label:"bodyweight", reps:"5"}]
         : [{label:"bodyweight", reps:"5"}];
     }
+    /* Marked as placeholders, because that is what they are. "light / build up / almost
+       there" is not an instruction the app is confident about — it is the app admitting
+       it does not know what you lift here yet, and the moment one full session is logged
+       every one of these becomes a real number off your own working weight. Rendered
+       differently so they never read as a prescription. */
     return kind === "full"
-      ? [{label:"light", reps:"8"}, {label:"build up", reps:"5"}, {label:"almost there", reps:"3"}]
-      : [{label:"one light set", reps:"5"}];
+      ? [{label:"light", reps:"8", placeholder:true}, {label:"build up", reps:"5", placeholder:true},
+         {label:"almost there", reps:"3", placeholder:true}]
+      : [{label:"one light set", reps:"5", placeholder:true}];
   }
   return spec.map(x=>({label: warmRound(w * x.pct, e.name) + " " + unitWord(), reps: x.reps,
                        pct: Math.round(x.pct*100), src: src.src}));
@@ -18374,7 +18388,7 @@ function warmupHTML(e, kind, ctx){
   return `<div class="warm">
     <span class="warm-tag">Warm-up${kind === "plan" ? " · from your plan" : ""}</span>
     <span class="warm-sets">${plan.map(x=>
-      `<span class="warm-set">${esc(x.label)}${x.reps?` <i>&times;${esc(x.reps)}</i>`:""}</span>`).join("")}</span>
+      `<span class="warm-set${x.placeholder?" warm-ph":""}">${esc(x.label)}${x.reps?` <i>&times;${esc(x.reps)}</i>`:""}</span>`).join("")}</span>
     <span class="warm-note">${
       kind === "plan"
         ? (e && e.warmupNote ? esc(e.warmupNote) + ". Not counted."
@@ -18383,7 +18397,7 @@ function warmupHTML(e, kind, ctx){
         ? (isBodyweightMovement(e && e.name)
             ? (kind === "full" ? "easy reps to warm the joint, no added load. Not counted."
                                : "one easy set. Not counted.")
-            : "work up to your first real set. Once you've logged this one, the ramp uses your own numbers. Not counted.")
+            : "<b>these are placeholders.</b> Element 26 doesn't know what you lift here yet, so it can't give you numbers. Work up to your first real set however you normally would \u2014 log one full session and every rung above becomes a real weight off your own working load. Not counted.")
         /* Saying WHICH load it is aiming at matters on the session you step up: the
            numbers jump, and "your new load" is the difference between that reading as
            the plan working and reading as the app having lost track of your weights. */
