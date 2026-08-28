@@ -1130,6 +1130,39 @@ body.onboarding #app{padding:0}
 .rest-next-n{font-size:18px;font-weight:600;color:rgba(255,255,255,.94);margin-top:4px;line-height:1.25}
 .rest-next-s{font:12.5px var(--mono);color:rgba(255,255,255,.55);margin-top:3px}
 
+/* how sure a line on the grade card is */
+.conf-tag{
+  display:inline-block;font:9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  padding:2px 6px;border-radius:999px;border:1px solid var(--line);
+  color:var(--faint);vertical-align:.12em;margin-left:6px;font-weight:400;white-space:nowrap;
+}
+.conf-provisional{border-color:rgba(201,138,75,.4);color:var(--acc)}
+.conf-likely{color:var(--dim)}
+
+/* the grade card's own caveat, when it has one */
+.sc-conf{
+  display:flex;flex-direction:column;gap:5px;margin:14px 0 4px;padding:12px 13px;
+  border-radius:12px;background:var(--card2);border-left:3px solid var(--acc);
+  font-size:13.5px;color:var(--dim);line-height:1.5;
+}
+.sc-conf-k{
+  display:flex;align-items:center;gap:6px;
+  font:10.5px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--acc);
+}
+
+/* 4b. flags the grades raised, kept and actionable */
+.nb-flags{display:flex;flex-direction:column;gap:9px}
+.nb-flag{padding:11px 12px;border-radius:12px;background:var(--card2);border-left:3px solid var(--line)}
+.nb-flag.sev3{border-left-color:var(--bad)}
+.nb-flag.sev2{border-left-color:var(--arms)}
+.nb-flag.sev1{border-left-color:var(--ok)}
+.nb-flag-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.nb-flag-t{font:10.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.nb-flag-d{font:10.5px var(--mono);color:var(--faint);white-space:nowrap;flex-shrink:0}
+.nb-flag-x{font-size:15px;font-weight:600;margin-top:3px}
+.nb-flag-m{font-size:13px;color:var(--dim);line-height:1.45;margin-top:3px}
+.nb-flag-f{font-size:13px;color:var(--text);line-height:1.45;margin-top:4px}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -13663,6 +13696,48 @@ function viewBody(){
     </button>
   </div>`;
 
+  /* ---- 4b. WHAT YOUR SESSIONS HAVE TOLD YOU ------------------------------------
+     The grade card's conclusions, kept. They used to be read once on the night and then
+     gone; this is the standing record, and the buttons here make the same edits the
+     card's own buttons make. Above the charts for the same reason section 4 is: a thing
+     to do outranks a thing to look at. */
+  const flags = openFlags();
+  const doneFlags = flagLog().filter(f=> f && f.applied).sort((a,b)=> b.at - a.at);
+  if(flags.length || doneFlags.length){
+    h += `<div class="nb-flags nb-in" style="--d:390ms">
+      <div class="nb-sec-k">From your workouts${flags.length?`<span class="nb-count">${flags.length}</span>`:""}</div>`;
+    if(!flags.length){
+      h += `<div class="nb-none nb-ok">Nothing outstanding. Everything the grades have flagged has been dealt with.</div>`;
+    }
+    const showF = BODY_OPEN.nbflags ? flags : flags.slice(0, 4);
+    showF.forEach(f=>{
+      const actionable = (f.to != null) || f.kind === "stall";
+      h += `<div class="nb-flag sev${f.sev}">
+        <div class="nb-flag-h">
+          <span class="nb-flag-t">${esc(f.title)}</span>
+          <span class="nb-flag-d">${esc(fmtDate(f.date))}</span>
+        </div>
+        <div class="nb-flag-x">${esc(f.ex)}${f.conf && f.conf !== "firm"
+          ? `<span class="conf-tag conf-${esc(f.conf)}">${esc((CONF_BANDS.find(b=>b.k===f.conf)||{}).label||"")}</span>` : ""}</div>
+        <div class="nb-flag-m">${esc(f.msg)}</div>
+        ${f.fix?`<div class="nb-flag-f">${esc(f.fix)}</div>`:""}
+        <div class="btn-row" style="margin-top:9px">
+          ${actionable?`<button class="btn small" data-flagdo="${esc(f.id)}" style="flex:1">${
+            f.kind === "stall" ? "Cut a set for now" : "Set it to " + esc(fmtLoad(f.to))}</button>`:""}
+          <button class="btn ghost small" data-flagno="${esc(f.id)}" style="flex:0 0 auto">Dismiss</button>
+        </div>
+      </div>`;
+    });
+    if(flags.length > 4){
+      h += `<button class="nb-link" data-sec="nbflags">${BODY_OPEN.nbflags?"Show fewer":"Show "+(flags.length-4)+" more"}</button>`;
+    }
+    if(doneFlags.length){
+      h += `<div class="nb-lfoot">${doneFlags.length} already acted on. ${
+        esc(doneFlags.slice(0,3).map(f=> f.ex).join(", "))}${doneFlags.length>3?"\u2026":""}</div>`;
+    }
+    h += `</div>`;
+  }
+
   /* ---- 7b. SIDE BALANCE ---------------------------------------------------------
      The asymmetry rule used to exist only as a sentence on Today: "match the weaker
      side for another 7 days, then re-test", with no way to see what it was doing, no
@@ -14934,6 +15009,12 @@ function bind(){
   /* The asymmetry rule, switched from the section that shows its state. Writing the
      same preference the Settings segment writes, rather than a second flag that could
      drift out of step with it. */
+  document.querySelectorAll("#app [data-flagdo]").forEach(b=> b.onclick=()=>{
+    if(applyFlag(b.dataset.flagdo)){ render(); toast("Applied to your programme"); }
+  });
+  document.querySelectorAll("#app [data-flagno]").forEach(b=> b.onclick=()=>{
+    dismissFlag(b.dataset.flagno); render(); toast("Dismissed");
+  });
   const nsr = $("#nbSideRule");
   if(nsr) nsr.onclick = ()=>{
     const on = trainPrefs().sides === "matchWeaker";
@@ -15222,6 +15303,8 @@ function finishWorkout(){
      the fresh flag that pass just wrote rather than having it cleared by the reps that
      earned it. */
   clearRebuiltEntries(sessObj);
+  /* The grade's conclusions become a standing record here, not just a card. */
+  recordFlags(sessObj, sessObj.progression || []);
   // graded once, at the moment it's finished, and stored on the session so History
   // shows the same number later even as the surrounding history grows
   sessObj.quality = scoreWorkout(sessObj);
@@ -16399,6 +16482,25 @@ function scoreCardHTML(q, sess){
     </div>
     <div class="sc-blurb">${scoreBlurb(q)}</div>
   </div>`;
+  /* HOW MUCH OF THIS IS WORTH BELIEVING, said once, at the top, in a sentence — not a
+     percentage and not a badge. Only shown while it is genuinely limiting: once there
+     is history behind most of the session, saying "this is well evidenced" every week
+     is noise. */
+  const confs = (sess && sess.entries || []).map(en=> exerciseConfidence(sess, en));
+  const thin = confs.filter(c=> c.band.k !== "firm").length;
+  if(confs.length && thin){
+    const first = confs.filter(c=> c.before === 0).length;
+    h += `<div class="sc-conf">
+      <span class="sc-conf-k">${ICON.info} How sure is this</span>
+      <span>${
+        first === confs.length
+          ? "This is the first session on record for every movement in it, so the grade below is a description of what you did — not a judgement of how it is going. Nothing here can see a trend yet."
+          : thin === confs.length
+            ? "There is not much history behind these movements yet. The score is real, but the conclusions are early reads rather than findings, and they get firmer every session."
+            : thin + " of " + confs.length + " movements here don't have much history behind them yet. Those lines are marked, and nothing is called a stall until there is enough logged to tell one from a slow week."
+      }</span>
+    </div>`;
+  }
   if(q.prs && q.prs.length){
     h += `<div class="rev-head">Personal records, ${q.prs.length}</div>`;
     q.prs.forEach(p=> h += `<div class="rev-line"><b>${ICON.pr} ${esc(p.name)}</b><span class="num">${esc(p.kind)} · ${esc(p.weight||"bw")}×${esc(p.reps||"")}</span></div>`);
@@ -16622,6 +16724,8 @@ function impossibleLoadCheck(e){
   const suggest = Math.max(0, Math.round((e.weight - step.amount * 2) * 2) / 2);
   return {
     at: worst,
+    to: suggest,                       // the load a flag built from this can actually apply
+    from: e.weight,
     msg: fmtLoad(e.weight) + " for " + range[0] + "-" + range[1] + " reps is not reachable: "
        + "you have already hit RPE " + worst.rpe + " at " + fmtLoad(worst.w)
        + " for only " + worst.reps + " reps.",
@@ -16751,13 +16855,187 @@ function stallVerdict(name){
 
 /* Everything the app wants to say about next session, computed once at finish and
    stored on the session so the card reads the same later. */
+/* =====================================================================
+   HOW MUCH THIS IS WORTH BELIEVING
+
+   Every conclusion on the grade card is drawn from what was logged, and the amount
+   logged varies enormously — a first session against a movement has one data point, a
+   movement you have run for three months has thirty. The card used to state both in the
+   same voice. "The load is wrong here" off a single session is not a finding, it is a
+   guess wearing a finding's clothes, and a beginner has no way to tell which one they
+   are looking at.
+
+   Worse, MISSING data was being read as bad data. An exercise logged with no RPE, or
+   with two of its four sets filled in, produced the same "stalled" and "load is too
+   heavy" verdicts as one that was fully logged and genuinely going nowhere. Absence is
+   not evidence.
+
+   So every conclusion carries a confidence, computed from three things that actually
+   bear on it:
+
+     history    how many previous sessions contain this movement
+     coverage   how much of today's prescription was actually filled in
+     quality    whether the sets carry the numbers the conclusion depends on
+
+   Three bands, and they change what the card is allowed to SAY, not just how it says
+   it: "provisional" states an observation, "likely" states a read, "firm" states a
+   finding. Nothing below `firm` may assert a stall or a wrong load as fact.
+   ===================================================================== */
+const CONF_BANDS = [
+  {k:"provisional", min:0,   label:"Early days",  lead:"Worth noticing",
+   why:"one session is an observation, not a pattern"},
+  {k:"likely",      min:.55, label:"Fair read",   lead:"Looks like",
+   why:"enough logged to see a direction, not enough to be certain"},
+  {k:"firm",        min:.8,  label:"Well evidenced", lead:"",
+   why:"enough consistent history behind it to act on"}
+];
+function confBand(score){
+  let out = CONF_BANDS[0];
+  CONF_BANDS.forEach(b=>{ if(score >= b.min) out = b; });
+  return out;
+}
+/* Sessions before this one that carry the movement, and how completely today was
+   logged. Both are facts about the record, not about the person. */
+function exerciseConfidence(sess, entry){
+  const key = nrm(entry.name);
+  const before = (S.sessions || []).filter(x=>
+    x && x.id !== sess.id && x.startedAt < (sess.startedAt || Infinity) &&
+    (x.entries || []).some(e=> nrm(e.name) === key)).length;
+
+  const sets = entry.sets || [];
+  const filled = sets.filter(st=> st && (st.reps || st.weight));
+  const coverage = sets.length ? filled.length / sets.length : 0;
+  // The numbers a load/effort conclusion actually rests on.
+  const withReps = filled.filter(st=> parseFloat(st.reps) > 0).length;
+  const withRpe  = filled.filter(st=> parseFloat(st.rpe)  > 0).length;
+  const quality = filled.length
+    ? (withReps / filled.length) * (rpeTracked() ? (0.55 + 0.45 * (withRpe / filled.length)) : 1)
+    : 0;
+
+  /* History is the dominant term and saturates at four previous sessions: that is where
+     a rep trend stops being two points and a line through them. */
+  const hist = Math.min(1, before / 4);
+  const score = 0.55 * hist + 0.2 * coverage + 0.25 * quality;
+  const band = confBand(filled.length ? score : 0);
+  return {score, band, before, coverage, quality, logged: filled.length, of: sets.length};
+}
+/* =====================================================================
+   THE FLAG LOG
+
+   Everything the grade concludes used to live and die on one card. "This load is wrong",
+   "this has stalled" — read once, at the end of a workout, when somebody is tired and
+   wants their phone back, and then gone. A week later there is no record that the app
+   ever said it, and no way to act on it.
+
+   So a flag outlives its card. `S.flags` is the permanent record: what was identified,
+   which movement, which session, when, and whether it was acted on. The Body tab is
+   where it is read, because that is the tab that answers "how is my training going".
+
+   ACTING ON ONE CHANGES THE PLAN. A flag marked done that changed nothing would be
+   worse than no flag at all — it would be the app agreeing with you that something is
+   wrong and then doing nothing about it. Every actionable kind writes through the same
+   functions the grade card's own buttons use.
+   ===================================================================== */
+const FLAG_MAX = 400;
+function flagLog(){ if(!Array.isArray(S.flags)) S.flags = []; return S.flags; }
+// One flag per movement per session: re-grading a session must not stack duplicates.
+function flagKey(f){ return (f.sessionId || "") + "|" + nrm(f.ex || "") + "|" + f.kind; }
+function recordFlags(sess, list){
+  const log = flagLog();
+  const seen = new Set(log.map(flagKey));
+  (list || []).forEach(p=>{
+    /* Only the ones worth keeping. A "still working up the range" is the normal state of
+       a lift and would bury the log in noise within a fortnight. */
+    const kinds = [];
+    if(p.kind === "toohard" && p.detail) kinds.push({
+      kind:"load", title:"The load is wrong here", msg:p.detail.msg, fix:p.detail.fix,
+      to: p.detail.to, sev:3});
+    if(p.stall) kinds.push({
+      kind:"stall", title: p.stall.kind === "recovery" ? "Stalled, and it looks like recovery" : "What stalled",
+      msg:p.stall.msg, fix:p.stall.sub, sev: p.stall.kind === "recovery" ? 2 : 3,
+      stallKind: p.stall.kind});
+    if(p.kind === "up" && p.to != null) kinds.push({
+      kind:"up", title:"Ready for more weight", msg:p.msg, fix:p.sub, to:p.to, sev:1});
+    kinds.forEach(k=>{
+      const f = Object.assign({
+        id: uid(), at: sess.finishedAt || Date.now(), date: sess.date || todayStr(),
+        sessionId: sess.id, workoutId: sess.workoutId, ex: p.name,
+        conf: p.conf ? p.conf.band : null,
+        applied: false, dismissed: false
+      }, k);
+      if(seen.has(flagKey(f))) return;
+      seen.add(flagKey(f));
+      log.push(f);
+    });
+  });
+  if(log.length > FLAG_MAX) S.flags = log.slice(-FLAG_MAX);
+}
+function openFlags(){
+  return flagLog().filter(f=> f && !f.applied && !f.dismissed).sort((a,b)=> b.at - a.at);
+}
+/* Doing what the flag says. Each branch goes through the same code the grade card uses,
+   so a flag applied from the Body tab and the same flag applied on the night are the
+   same edit to the same plan. */
+function applyFlag(id){
+  const f = flagLog().find(x=> x && x.id === id);
+  if(!f || f.applied) return false;
+  let ok = false;
+  if((f.kind === "up" || f.kind === "load") && f.to != null){
+    ok = applyProgression(f.ex, f.to, f.kind === "load"
+      ? "Applied from the Body tab: the prescribed range was not reachable at the old load."
+      : "Applied from the Body tab: the last set cleared the top of the range at target RPE.");
+  } else if(f.kind === "stall"){
+    /* The stall protocol, which is a set cut and not a load cut: dropping the weight is
+       what costs you the strength you built getting there. */
+    const e = findProgramEntry(f.ex);
+    if(e && e.sets > 1){
+      const from = e.sets;
+      e.sets = Math.max(1, e.sets - 1);
+      logPlanChange("programme", null, e.name, [from + " → " + e.sets + " sets"],
+        {note: "Stall protocol, applied from the Body tab. Rebuild the sets once the reps move again."});
+      save(); queueSync();
+      ok = true;
+    } else if(e){
+      toast("Already down to one set \u2014 change the load or the movement instead");
+      return false;
+    }
+  }
+  if(ok){ f.applied = true; f.appliedAt = Date.now(); save(); queueSync(); }
+  return ok;
+}
+function dismissFlag(id){
+  const f = flagLog().find(x=> x && x.id === id);
+  if(!f) return;
+  f.dismissed = true; f.dismissedAt = Date.now();
+  save(); queueSync();
+}
 function buildProgression(sess){
   const out = [];
   (sess.entries || []).forEach(en=>{
     const p = progressionFor(sess, en);
     if(!p) return;
+    const conf = exerciseConfidence(sess, en);
+    p.conf = {score: conf.score, band: conf.band.k, before: conf.before,
+              logged: conf.logged, of: conf.of};
+
+    /* WHAT CONFIDENCE IS ALLOWED TO CHANGE.
+
+       A load increase is never gated: it is not an inference, it is arithmetic on sets
+       you just did, and holding somebody back from a weight they earned because the app
+       wants more history would be the app being wrong on purpose.
+
+       A STALL is the opposite. It is a claim about a trend, it is the most consequential
+       thing the card says, and off one session it is unfounded. It is attached only when
+       there is real history behind the movement. */
     const stall = stallVerdict(en.name);
-    if(stall && p.kind !== "up") p.stall = stall;
+    if(stall && p.kind !== "up" && conf.band.k === "firm") p.stall = stall;
+    else if(stall && p.kind !== "up") p.stallHeld = true;
+
+    /* And a "the load is wrong" verdict off a thinly logged session is withdrawn to an
+       observation. impossibleLoadCheck is exempt: it is a contradiction in the numbers
+       themselves — this load cannot produce these reps at any effort — and that is true
+       whether it was seen once or ten times. */
+    if(p.kind === "hold" && conf.band.k === "provisional") p.soft = true;
     out.push(p);
   });
   return out;
@@ -16787,6 +17065,18 @@ function progressionApplied(p){
   if(!e || e.weight == null) return false;
   const now = parseFloat(e.weight), to = parseFloat(p.to);
   return !isNaN(now) && !isNaN(to) && now === to;
+}
+/* How sure the card is about one line, in words a person uses. Shown only where it
+   changes what you should do with the line — never on a load increase, which is
+   arithmetic, and never on "well evidenced", which is the unremarkable case. */
+function confTagHTML(p){
+  const c = p && p.conf;
+  if(!c || c.band === "firm") return "";
+  const b = CONF_BANDS.find(x=> x.k === c.band) || CONF_BANDS[0];
+  const detail = c.before === 0
+    ? "first time this movement has been logged"
+    : c.before + " previous session" + (c.before === 1 ? "" : "s") + " to compare against";
+  return `<span class="conf-tag conf-${esc(c.band)}" title="${attrSafe(b.why + " \u2014 " + detail)}">${esc(b.label)}</span>`;
 }
 function progressionHTML(list){
   if(!list || !list.length) return "";
@@ -16840,6 +17130,18 @@ function progressionHTML(list){
         p.to == null ? "applied" : "now " + esc(fmtLoad(p.to))} ✓</span></div>`;
     });
   }
+  /* Held back rather than dropped. The movement HAS stalled by the numbers, and there
+     is not enough behind it to say so as a finding — so it is said as a thing to keep an
+     eye on, which is what it actually is. */
+  const heldStalls = list.filter(p=> p.stallHeld);
+  if(heldStalls.length){
+    h += `<div class="rev-head">Keep an eye on</div>`;
+    heldStalls.forEach(p=>{
+      h += `<div class="rev-line" style="align-items:flex-start"><b>${esc(p.name)} ${confTagHTML(p)}</b>
+        <span class="num" style="font-size:12.5px;text-align:right">not enough history to call it</span></div>`;
+    });
+    h += `<div class="sub" style="margin:-2px 0 8px">These haven't moved, but there isn't enough logged yet to tell a stall from a slow week. Keep logging them and the grade will say which.</div>`;
+  }
   if(stalls.length){
     h += `<div class="rev-head">Stalled</div>`;
     stalls.forEach(p=>{
@@ -16855,14 +17157,15 @@ function progressionHTML(list){
   if(holds.length){
     h += `<div class="rev-head">Still working up</div>`;
     holds.forEach(p=>{
-      h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">${esc(p.msg)}</span></div>`;
+      h += `<div class="rev-line" style="align-items:flex-start"><b>${esc(p.name)} ${confTagHTML(p)}</b><span class="num" style="font-size:12.5px;text-align:right">${
+        esc(p.soft ? "first look at this one" : p.msg)}</span></div>`;
     });
   }
   return h;
 }
 /* Writing a suggested load into the plan. Goes through the change log, because a load
    that moved on its own without a record is indistinguishable from one you mistyped. */
-function applyProgression(name, to){
+function applyProgression(name, to, why){
   // Adding weight during the week you took off to shed fatigue defeats the deload.
   if(deloadActive()){ toast("Load increases are blocked during a deload"); return false; }
   const e = findProgramEntry(name);
@@ -16878,11 +17181,21 @@ function applyProgression(name, to){
      entry it drives the rep target, excuses the drop, and clears itself once the top of
      the range comes back. */
   const rr = repRange(e.reps);
-  if(rr) e.rebuild = {from: rr[0], top: rr[1], weight: v, prevWeight: from, at: Date.now()};
+  // Only an increase has a range to rebuild UP through; a cut is already at the bottom.
+  if(rr && (from == null || v > from)){
+    e.rebuild = {from: rr[0], top: rr[1], weight: v, prevWeight: from, at: Date.now()};
+  } else if(e.rebuild) delete e.rebuild;
+  /* The change log has to say what actually moved this load. A load CUT because the
+     prescription was unreachable is not a double-progression increase, and filing it as
+     one makes the history unreadable the moment anybody goes looking for why a weight
+     went down. */
+  const down = from != null && v < from;
   logPlanChange("weight", null, e.name,
     [fmtLoad(from) + " → " + fmtLoad(v)],
-    {note: "Double progression: last set cleared the top of the rep range at target RPE."
-      + (rr ? " Rebuild from " + rr[0] + " reps at the new load." : "")});
+    {note: why ? why
+      : down ? "Load reduced to a reachable one for the prescribed rep range."
+      : "Double progression: last set cleared the top of the rep range at target RPE."
+        + (rr ? " Rebuild from " + rr[0] + " reps at the new load." : "")});
   save(); queueSync();
   return true;
 }
@@ -18472,7 +18785,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
