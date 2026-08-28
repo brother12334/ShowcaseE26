@@ -658,7 +658,12 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .ex-ctl button{width:32px;height:32px;font-size:13px}
 
 /* modal */
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:flex-end;justify-content:center;z-index:50}
+/* ABOVE THE CELEBRATION (100) AND THE REST OVERLAY (150). At 50 the grade card opened
+   UNDERNEATH a full-screen overlay that was still fading, which is most of "elements
+   appear from off-screen and pop in at random" — you were watching a sheet arrive
+   through a black wash. It also meant tapping the note button while a rest was running
+   opened a sheet nobody could see. Toasts and PR floats stay above it. */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:flex-end;justify-content:center;z-index:160}
 .modal-bg.show{display:flex;animation:fadeIn .18s ease both}
 .modal{background:var(--card);border:1px solid var(--line);border-radius:20px 20px 0 0;padding:20px;width:100%;max-width:600px;max-height:88vh;overflow-y:auto}
 /* A sheet that arrives from the edge it is attached to. Without this the score card was
@@ -1723,8 +1728,18 @@ a{color:var(--text)}
 @keyframes dotPulse{50%{transform:scale(1.6);opacity:.55}}
 .syncdot.pulse{animation:dotPulse .9s ease-in-out infinite}
 
-@keyframes shakeX{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,70%{transform:translateX(-6px)}40%,60%{transform:translateX(6px)}50%{transform:translateX(-4px)}}
-body.shake{animation:shakeX .55s both}
+@keyframes shakeX{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,70%{transform:translateX(-6px)}40%,60%{transform:translateX(6px)}50%{transform:translateX(-4px)}0%,100%{transform:none}}
+/* NEVER ON <body> WHILE A FIXED OVERLAY IS UP. A transformed ancestor becomes the
+   containing block for position:fixed descendants, so shaking the body took #celebrate
+   out of the viewport and re-centred it in the whole scrollable document — the plate
+   dropped into place, then jumped 500px down the page for the length of the shake and
+   snapped back. That is the "incorrect positioning" on the finish screen, and it was
+   one line away from the confetti that triggered it.
+
+   The impact shake now moves the overlay itself, which is what anybody watching thinks
+   is shaking anyway. body.shake stays for the focus-view plate, where nothing is fixed
+   above it. */
+body.shake,.cele-shake{animation:shakeX .55s both}
 
 /* ================= FINISH SEQUENCE =================
    Staged rather than simultaneous. The old version faded a translucent wash in behind
@@ -2791,10 +2806,24 @@ body.cele-open{overflow:hidden}
 
 /* ================= WORKOUT QUALITY SCORE ================= */
 .sc-hero{display:flex;align-items:center;gap:16px;margin-bottom:4px}
+/* THE ONE THING ON THE CARD WORTH WAITING FOR. The ring sweeps from nothing to the
+   score and the grade letter arrives as it finishes, so the number is revealed rather
+   than simply present. --scp is animated through an @property-registered custom
+   property where the browser supports it, and falls back to appearing at its final
+   value where it does not — never to a ring stuck at zero. */
+@property --scp{syntax:"<percentage>";inherits:false;initial-value:0%}
 .sc-ring{
   position:relative;width:104px;height:104px;flex-shrink:0;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
   background:conic-gradient(var(--scc,var(--ok)) var(--scp,0%), var(--card2) 0);
+  transition:--scp .9s cubic-bezier(.2,.8,.3,1) .12s;
+}
+.sc-grade{opacity:0;transform:scale(.82)}
+.sc-ring.lit .sc-grade{opacity:1;transform:scale(1);
+  transition:opacity .3s ease .55s, transform .42s cubic-bezier(.34,1.5,.6,1) .55s}
+@media (prefers-reduced-motion: reduce){
+  .sc-ring{transition:none}
+  .sc-grade,.sc-ring.lit .sc-grade{opacity:1;transform:none;transition:none}
 }
 .sc-ring::before{content:"";position:absolute;inset:9px;border-radius:50%;background:var(--card)}
 .sc-ring-in{position:relative;text-align:center;line-height:1}
@@ -3147,7 +3176,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.2";
+const APP_VERSION = "6.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -5768,9 +5797,13 @@ function celebrate(kind, wid, volume, onDone){
       c.style.opacity = 0.75+Math.random()*0.25;
       el.appendChild(c);
     }
-    document.body.classList.add("shake");
-    setTimeout(()=>document.body.classList.remove("shake"), 600);
-  }, 1050);
+    el.classList.add("cele-shake");
+    setTimeout(()=>{ if(el.isConnected) el.classList.remove("cele-shake"); }, 600);
+  /* 1220, not 1050. The plate's animation starts at 550ms and runs 620, so it settles at
+     1170 — the old timing threw the confetti while it was still falling, which read as
+     the celebration going off before its own subject had arrived. This lands it on the
+     shockwave, which is the moment the plate hits. */
+  }, 1220);
 
   // the pounds-moved counter rolls up after the plate has settled
   if(volume>0){
@@ -15323,8 +15356,11 @@ function finishWorkout(){
   const _startCele = ()=>{
     if(_celeStarted) return;
     _celeStarted = true;
+    /* No extra delay. celebrate() now hands over only once its overlay has actually
+       been removed from the document, so the 300ms that used to cover the overlap is
+       just dead air between two screens. */
     celebrate(cycleFinished ? "cycle" : "workout", wid, Math.round(vol),
-              ()=> setTimeout(()=>openScoreCard(sessObj, afterScore), 300));
+              ()=> openScoreCard(sessObj, afterScore));
   };
   /* Two frames is what lets the layout settle. But requestAnimationFrame does not fire
      at all in a backgrounded tab, and finishing a workout is exactly when a phone gets
@@ -16474,7 +16510,7 @@ function scoreCardHTML(q, sess){
   const col = gradeColor(q.pct);
   let h = `<h3>Workout quality</h3>
   <div class="sc-hero">
-    <div class="sc-ring" style="--scp:${ringPct}%;--scc:${col}">
+    <div class="sc-ring" data-scp="${ringPct}" style="--scp:0%;--scc:${col}">
       <div class="sc-ring-in">
         <div class="sc-grade" style="color:${col}">${q.grade}</div>
         <div class="sc-total">${q.total}/${q.max}</div>
@@ -16609,6 +16645,18 @@ function openScoreCard(sess, onDone){
   const q = sess.quality || scoreWorkout(sess);
   showModal(scoreCardHTML(q, sess) + `<button class="btn" style="margin-top:18px" id="scDone">Got it</button>`);
   stageReveal($("#modal"));
+  /* On the NEXT frame, so the transition has a start value to run from — set in the same
+     frame as the markup it would simply be the final value with nothing to animate. */
+  const ring = $("#modal").querySelector(".sc-ring");
+  if(ring){
+    const to = ring.dataset.scp || "0";
+    if(reducedMotion()){ ring.style.setProperty("--scp", to + "%"); ring.classList.add("lit"); }
+    else requestAnimationFrame(()=> requestAnimationFrame(()=>{
+      if(!ring.isConnected) return;
+      ring.style.setProperty("--scp", to + "%");
+      ring.classList.add("lit");
+    }));
+  }
   let fired = false;
   MODAL_DISMISS = ()=>{ if(fired) return; fired = true; if(onDone) onDone(); };
   MODAL_REOPEN = ()=> openScoreCard(sess, onDone);
