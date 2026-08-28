@@ -12066,10 +12066,13 @@ function rpeOptions(v){
    plates-only logging the barbell is not in the number either, so there is nothing to
    change and the name is inert. */
 function barKindFor(name){
-  const n = nrm(name || "");
-  if(/\bsmith\b/.test(n)) return "smith";
-  if(isBarbellLift(n) && trainPrefs().barMode === "total") return "barbell";
-  return null;
+  /* The RAW name both times. Passing nrm(name) into isBarbellLift() ran the equipment
+     read over an alias — an aliased "dumbbell rdl" happened to give the right answer
+     here and the wrong one anywhere the alias points the other way. */
+  const eq = equipmentOf(name);
+  if(eq === "smith") return "smith";
+  if(eq === "barbell" && trainPrefs().barMode === "total") return "barbell";
+  return null;   // dumbbells, cables, machines and bodyweight have no bar to weigh
 }
 // The name, made tappable when there is a bar behind it. `ei` is only for the aria label.
 function exNameHTML(en){
@@ -17053,11 +17056,48 @@ function barDefault(){ return inKg() ? 20 : 45; }
    weighs nothing. Both are now yours to state: barMode says which convention you log in,
    barWeight is your bar. Neither is guessed, and with barWeight unset this behaves
    exactly as it always did. */
-function isBarbellLift(name){
-  const n = nrm(name || "");
-  if(/\bsmith\b/.test(n)) return false;                       // its own case, below
-  return /barbell|\bbb\b|bench press|back squat|front squat|deadlift|\brdl\b|romanian|overhead press|military|\bpower clean\b|hip thrust|good morning|pendlay|\bpress\b.*\bbar\b/.test(n);
+/* WHAT YOU ARE ACTUALLY HOLDING.
+
+   isBarbellLift() used to answer this on its own by matching movement PATTERNS —
+   "bench press", "romanian", "overhead press" — which is how "Incline Dumbbell Bench
+   Press" came to be a barbell lift, and how somebody logging a dumbbell press got asked
+   what their bar weighed. The pattern is the movement; it says nothing about the
+   implement. A dumbbell incline press and a barbell incline press are the same movement
+   and different equipment, and only the equipment decides whether there is a bar in the
+   number.
+
+   So the implement is read FIRST, from the words that name an implement, and the
+   movement pattern is only consulted when nothing in the name says what you are holding
+   — which is the case for plan entries written as "Bench Press" and meaning a barbell.
+
+   Ordered most specific first: "Smith Machine Squat" is a Smith lift and not a machine,
+   "Cable Crossover Machine" is a cable. */
+const EQUIP_TESTS = [
+  ["smith",     /\bsmith\b/],
+  ["dumbbell",  /\bdumbbells?\b|\bdb\b|\bd\.?b\.?\b/],
+  ["cable",     /\bcable|\bpulley\b|\bpulldown\b|\bpushdown\b|\bcrossover\b|\brope\b/],
+  ["machine",   /\bmachine\b|\bpec ?deck\b|\bhammer strength\b|\bleg press\b|\bleg extension\b|\bleg curl\b|\bsmith\b|\bselectorized\b|\bplate[- ]loaded\b/],
+  ["kettlebell",/\bkettlebells?\b|\bkb\b/],
+  ["bodyweight",/\bbodyweight\b|\bpull[- ]?ups?\b|\bchin[- ]?ups?\b|\bpush[- ]?ups?\b|\bdips?\b|\bhanging\b|\bplank\b|\bsit[- ]?ups?\b/],
+  ["barbell",   /\bbarbells?\b|\bbb\b|\bez[- ]?bar\b|\btrap ?bar\b|\bhex ?bar\b/]
+];
+/* Movement patterns that mean a barbell WHEN THE NAME NAMES NO IMPLEMENT AT ALL. */
+const BARBELL_BY_DEFAULT = /bench press|back squat|front squat|\bsquat\b|deadlift|\brdl\b|romanian|overhead press|military|\bpower clean\b|\bclean\b|\bsnatch\b|hip thrust|good morning|pendlay|\bbarbell row\b/;
+function equipmentOf(name){
+  /* NOT nrm(). nrm() is canonEx(), which runs the ALIAS table — it exists to match one
+     logged name to another across your history, and it happily rewrites "Romanian
+     Deadlift" to "dumbbell rdl" because that is the entry your plan carries. Excellent
+     for history matching, ruinous here: it would report the implement from somebody
+     else's naming rather than from the words in front of you. structNorm() is the
+     spelling-only pass — it expands db/bb/kb and drops punctuation and nothing more. */
+  const n = structNorm(nrmRaw(name || ""));
+  for(let i = 0; i < EQUIP_TESTS.length; i++){
+    if(EQUIP_TESTS[i][1].test(n)) return EQUIP_TESTS[i][0];
+  }
+  if(BARBELL_BY_DEFAULT.test(n)) return "barbell";
+  return "other";
 }
+function isBarbellLift(name){ return equipmentOf(name) === "barbell"; }
 function smithWeight(){
   const w = trainPrefs().smithWeight;
   return w == null ? smithBarDefault() : w;
@@ -17067,9 +17107,12 @@ function barWeightFor(name){
   /* The Smith's own figure, never the barbell's. Reading barWeight here meant somebody
      who told the app their bar was 55 lb was also telling it their Smith carriage was,
      which is a different machine in a different rack. */
-  if(/\bsmith\b/.test(nrm(name))) return smithWeight();
+  const eq = equipmentOf(name);
+  if(eq === "smith") return smithWeight();
   if(p.barMode !== "total" || p.barWeight == null) return 0;   // plates-only logging has no bar in the number
-  return isBarbellLift(name) ? p.barWeight : 0;
+  /* Only a barbell puts a bar in the number. A dumbbell load is per hand, a machine's is
+     the stack, a cable's is the stack — none of them have an empty-bar weight to add. */
+  return eq === "barbell" ? p.barWeight : 0;
 }
 /* The load the ramp is a percentage OF, and where the number came from. `ctx` is how the
    caller says which exercise slot this is, and matches the arguments the "last time" box
