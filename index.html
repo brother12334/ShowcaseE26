@@ -1198,6 +1198,28 @@ body.onboarding #app{padding:0}
 }
 .sync-warn b{color:var(--text)}
 
+/* onboarding: where you are in a plan you were already running */
+.ob-seg{display:flex;flex-direction:column;gap:9px;margin:16px 0 4px}
+.ob-opt{
+  display:flex;flex-direction:column;align-items:flex-start;gap:2px;
+  padding:14px 15px;border-radius:13px;border:1px solid var(--line);
+  background:var(--card2);color:var(--text);cursor:pointer;text-align:left;width:100%;
+  transition:border-color .16s ease,background .16s ease;
+}
+.ob-opt b{font-size:15px;font-weight:600}
+.ob-opt i{font-style:normal;font-size:13px;color:var(--dim)}
+.ob-opt.on{border-color:var(--acc);background:var(--card)}
+.ob-q{margin-top:18px;text-align:left}
+.ob-q-k{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+.ob-q-s{font-size:12.5px;color:var(--dim);line-height:1.45;margin-top:9px}
+.ob-chips{display:flex;flex-wrap:wrap;gap:7px}
+.ob-chip{
+  padding:10px 14px;border-radius:999px;border:1px solid var(--line);
+  background:var(--card2);color:var(--dim);font-size:13.5px;cursor:pointer;min-height:40px;
+  transition:border-color .16s ease,color .16s ease;
+}
+.ob-chip.on{border-color:var(--acc);color:var(--text)}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -3206,7 +3228,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.5";
+const APP_VERSION = "6.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8761,12 +8783,17 @@ let OB = null;     // the in-progress answers; null when the wizard is closed
    opening a training log already trains on something. Everything those four questions
    fed is either read out of the imported document or asked by the importer itself, in
    context, where the answer means something. */
-const OB_STEPS = ["plan","done"];
+/* "where" sits between accepting the plan and starting: a plan somebody is already
+   three weeks into is not a plan starting today, and assuming it is gets two things
+   wrong that are hard to undo later. See viewOnboarding's "where" step. */
+const OB_STEPS = ["plan","where","done"];
 
 function needsOnboarding(){ return !S.setup && !(S.sessions && S.sessions.length); }
 function startOnboarding(){
   OB = {step:0, name:"", goal:"", level:"intermediate", gear:"full",
-        splitId:DEFAULT_SPLIT, imported:null};
+        splitId:DEFAULT_SPLIT, imported:null,
+        // where they are in a plan they may already be running — see the "where" step
+        started:false, nextDay:0, planAge:0};
   TAB = "today";
   /* Straight into the importer. There used to be a welcome screen in front of it that
      said the same thing, with the same picture and the same button — two first pages for
@@ -8792,7 +8819,23 @@ function finishOnboarding(){
      it to match an answer they gave two screens ago. Without an import there is nothing
      to write: the starter programme they are already on stays as it is. */
   if(o.imported) adoptImportedPlan(o.imported);
-  S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = []; S.cycleManual = true;
+  /* WHERE THEY ARE IN A PLAN THEY WERE ALREADY RUNNING.
+
+     The pointer is moved and the plan's start date is backdated; NO SESSIONS ARE
+     INVENTED. They did not do those workouts in this app, and writing sets into the log
+     that nobody can point at would corrupt every number derived from it — weekly volume,
+     recovery, the ACWR, every grade. The cycle therefore reads "0 of N done" with the
+     pointer on the day they named, which is exactly true: nothing has been logged in
+     this cycle yet, and that is the session coming up.
+
+     Backdating planStart is the substantive half. rampInActive() runs reduced isolation
+     sets for the first two weeks of a plan — right for week one, and lost volume for
+     somebody already in week six. */
+  const nDays = Math.max(1, ROTATION.length);
+  S.pointer = o.started ? Math.max(0, Math.min(nDays - 1, o.nextDay|0)) : 0;
+  S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = []; S.cycleManual = true;
+  const obAge = OB_AGES[Math.max(0, Math.min(OB_AGES.length - 1, o.planAge|0))];
+  S.planStart = (o.started && obAge && obAge.w) ? Date.now() - obAge.w * 7 * DAY_MS : Date.now();
   OB = null;
   save(); queueSync(); render();
   /* The tour comes AFTER the plan is in, not before it. Explaining a rep range against
@@ -8865,6 +8908,14 @@ function adoptImportedPlan(d){
 }
 
 /* ---------- the wizard's screens ---------- */
+/* How long they have been on it, and what each answer actually changes. The weeks are
+   what planStartAt() is set back by, which is what rampInActive() and asymActive() read. */
+const OB_AGES = [
+  {t:"Just started",  w:0,  why:"The first fortnight runs slightly fewer sets on the isolation work, because tendon adapts more slowly than muscle."},
+  {t:"A few weeks",   w:3,  why:"Past the easing-in period, so you get the full set count from your first session."},
+  {t:"A month or two",w:8,  why:"Well past easing in. Element 26 will treat this as an established plan."},
+  {t:"Longer",        w:16, why:"Treated as an established plan from the start."}
+];
 function obCard(kicker, title, sub){
   return `<div class="ob-card">
     ${kicker?`<div class="ob-kick">${esc(kicker)}</div>`:""}
@@ -8906,6 +8957,45 @@ function viewOnboarding(){
     h += `<button class="btn ghost" id="obImport">Import a different plan</button>`;
   }
 
+  if(step === "where"){
+    /* ALREADY RUNNING THIS PLAN IS THE COMMON CASE, and the app used to assume the
+       opposite. Anybody importing a programme they have been on for a month was put at
+       day one of the rotation and treated as a beginner on it, which is wrong twice
+       over: the rotation asks for a session they did on Monday, and the first fortnight
+       of any plan runs REDUCED SETS on the isolation work (rampInActive) because tendon
+       adapts more slowly than muscle. That protection is right for week one and is
+       simply lost volume for somebody in week six.
+
+       Two questions, both skippable, and neither invents any history: nothing is written
+       into the log, because they did not do those sessions IN this app and pretending
+       otherwise would put sets into the volume maths that nobody can point at. */
+    const days = (OB.imported && OB.imported.customSplit && OB.imported.customSplit.days)
+      || (SPLITS[OB.splitId] || SPLITS[DEFAULT_SPLIT]).days;
+    h += obCard("Where you're up to", "Have you already started this plan?",
+      `<p>If you're partway through, say so and Element 26 picks up where you are instead
+       of starting you at day one.</p>`);
+    h += `<div class="ob-seg">
+      <button class="ob-opt${OB.started ? "" : " on"}" data-obstart="no">
+        <b>No, starting it now</b><i>First session is day one</i></button>
+      <button class="ob-opt${OB.started ? " on" : ""}" data-obstart="yes">
+        <b>Yes, I'm partway through</b><i>Tell it where you are</i></button>
+    </div>`;
+    if(OB.started){
+      h += `<div class="ob-q">
+        <div class="ob-q-k">Which session is next?</div>
+        <div class="ob-chips">${days.map((d, i)=>
+          `<button class="ob-chip${(OB.nextDay|0) === i ? " on" : ""}" data-obday="${i}">${esc(d.name)}</button>`).join("")}</div>
+      </div>
+      <div class="ob-q">
+        <div class="ob-q-k">How long have you been running it?</div>
+        <div class="ob-chips">${OB_AGES.map((a, i)=>
+          `<button class="ob-chip${(OB.planAge|0) === i ? " on" : ""}" data-obage="${i}">${esc(a.t)}</button>`).join("")}</div>
+        <div class="ob-q-s">${esc(OB_AGES[OB.planAge|0].why)}</div>
+      </div>`;
+    }
+    h += `<button class="btn" id="obWhereGo">${OB.started ? "That's where I am" : "Start from day one"}</button>`;
+  }
+
   if(step === "done"){
     h += obCard("", "You're set up",
       `<p>Your first session is waiting on the Today tab. Tap an exercise, log your sets, and the app takes it from there.</p>`);
@@ -8924,6 +9014,16 @@ function bindOnboarding(){
   const on = (id, fn)=>{ const el = $("#"+id); if(el) el.onclick = fn; };
   on("obAccept", ()=> obGo(OB.step+1));
   on("obFinish", finishOnboarding);
+  document.querySelectorAll("[data-obstart]").forEach(b=> b.onclick = ()=>{
+    OB.started = b.dataset.obstart === "yes"; render();
+  });
+  document.querySelectorAll("[data-obday]").forEach(b=> b.onclick = ()=>{
+    OB.nextDay = parseInt(b.dataset.obday, 10) || 0; render();
+  });
+  document.querySelectorAll("[data-obage]").forEach(b=> b.onclick = ()=>{
+    OB.planAge = parseInt(b.dataset.obage, 10) || 0; render();
+  });
+  on("obWhereGo", ()=> obGo(OB.step+1));
   /* Every "import" entry point lands in the same place. The importer decides for itself
      whether what you handed it is an Element 26 backup (adopted as-is) or a plan in some
      other form (read by the model), because that distinction is ours to make, not
