@@ -160,14 +160,32 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 }
 .cycle-row{display:flex;justify-content:space-between;align-items:center;margin:26px 2px 0;color:var(--faint);font-size:12px}
 .cycle-row button{background:none;border:none;color:var(--faint);font:11px var(--mono);text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;padding:6px 5px;min-height:24px}
+/* HOW IT FELT. The old rule dimmed an emoji with opacity and grayscale, neither of
+   which does anything useful to a stroked drawing — a grayscale filter on currentColor
+   is a no-op. An unselected face is drawn in the muted text colour and the chosen one
+   takes the tone of its own end of the scale, which is the whole feedback. */
 .feel-row{display:flex;gap:9px;margin-top:8px}
 .feel-btn{
-  width:52px;height:52px;font-size:27px;border-radius:12px;cursor:pointer;
-  background:var(--card2);border:1px solid var(--line);
-  display:flex;align-items:center;justify-content:center;
-  opacity:.45;filter:grayscale(.6);transition:all .15s;
+  flex:1 1 0;min-width:0;aspect-ratio:1;max-width:60px;border-radius:12px;cursor:pointer;
+  background:var(--card2);border:1px solid var(--line);color:var(--faint);
+  display:flex;align-items:center;justify-content:center;padding:0;
+  transition:color .16s ease,border-color .16s ease,background .16s ease,transform .16s var(--ease,ease);
 }
-.feel-btn.on{opacity:1;filter:none;border-color:var(--ok);transform:scale(1.12)}
+.feel-btn .ico{width:60%;height:60%;stroke-width:1.5;vertical-align:middle}
+.feel-btn:hover{color:var(--dim)}
+.feel-btn.on{
+  color:var(--tone,var(--ok));border-color:currentColor;
+  background:color-mix(in srgb, currentColor 12%, var(--card2));
+  transform:translateY(-2px) scale(1.06);
+}
+/* Its own end of the scale. Two coppers and a green, all already in the palette. */
+.feel-btn.f1{--tone:var(--bad)}
+.feel-btn.f2{--tone:var(--arms)}
+.feel-btn.f3{--tone:var(--dim)}
+.feel-btn.f4{--tone:var(--ok)}
+.feel-btn.f5{--tone:var(--ok)}
+.feel-btn.f5.on .ico{stroke-width:1.75}
+@media (prefers-reduced-motion: reduce){ .feel-btn,.feel-btn.on{transition:none;transform:none} }
 .ci-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
 .ci-field label{display:block;color:var(--faint);font:10.5px var(--mono);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px}
 .ci-field input,.ci-field select{
@@ -3869,20 +3887,40 @@ const ICON = {
   info:    svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="1" fill="currentColor" stroke="none"/>'),
   warn:    svgIcon('<path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>')
 };
-/* HOW THE SESSION FELT, as five steps of one drawing rather than five different faces.
-   A face scale asks you to read an expression; this asks you to read a level, which is
-   the question actually being put. The arc fills as it climbs. */
-function feelIcon(n){
-  const lvl = Math.max(1, Math.min(5, parseInt(n, 10) || 3));
-  const bars = [0,1,2,3,4].map(i=>{
-    const on = i < lvl;
-    const h = 4 + i * 3.6;
-    return '<rect x="' + (3 + i * 4.2) + '" y="' + (19 - h) + '" width="2.6" height="' + h +
-           '" rx="1.1" fill="' + (on ? 'currentColor' : 'none') + '" opacity="' + (on ? 1 : .35) + '"/>';
-  }).join("");
-  return '<svg class="ico ico-feel" ' + ICON_BOX + '>' + bars + '</svg>';
-}
+/* HOW THE SESSION FELT.
+
+   Five faces, drawn on the same grid and in the same stroke as everything else, because
+   the question really is "which face is this" and a row of numbers makes you translate
+   before you can answer. They were briefly a climbing bar, which is a LEVEL — a fair
+   drawing of a different question.
+
+   What changes between them is one path: the mouth, from a deep frown through flat to a
+   grin, with the eyes dropping to arcs at the top of the scale so the best one is
+   unmistakable at 20px. Nothing here is an emoji; there is no platform rendering
+   involved and the whole face takes the colour of whatever it sits in. */
+const FEEL_MOUTHS = [
+  "M7.8 17.5Q12 12.5 16.2 17.5",   // 1, rough
+  "M8 16.4Q12 14.1 16 16.4",       // 2, off
+  "M8.4 15.6H15.6",                // 3, fine
+  "M8 14.5Q12 17.1 16 14.5",       // 4, good
+  "M7.3 13.6Q12 19.2 16.7 13.6"    // 5, excellent
+];
 const FEEL_WORDS = ["Rough", "Off", "Fine", "Good", "Excellent"];
+function faceIcon(n){
+  const i = Math.max(1, Math.min(5, parseInt(n, 10) || 3)) - 1;
+  /* Arced eyes on the TOP FACE ONLY. Giving them to 4 as well made 4 and 5 the same
+     drawing at 30px — the mouth depth alone is not enough separation once the eyes
+     match. 4 is a plain smile, 5 is the one that squints. */
+  const eyes = i >= 4
+    ? '<path d="M7.7 10.4Q9.1 8.9 10.5 10.4"/><path d="M13.5 10.4Q14.9 8.9 16.3 10.4"/>'
+    : '<circle cx="9.1" cy="10" r="1.15" fill="currentColor" stroke="none"/>' +
+      '<circle cx="14.9" cy="10" r="1.15" fill="currentColor" stroke="none"/>';
+  return '<svg class="ico ico-feel" ' + ICON_BOX + '>' +
+    '<circle cx="12" cy="12" r="9.2"/>' + eyes +
+    '<path d="' + FEEL_MOUTHS[i] + '"/></svg>';
+}
+// Anywhere a logged feel is REPORTED rather than chosen, it is the same face.
+function feelIcon(n){ return faceIcon(n); }
 
 function attrSafe(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function term(id, label){
@@ -12022,7 +12060,7 @@ function viewActiveSession(){
     <h3 style="font-size:17px">Session note</h3>
     <div class="field" style="margin:8px 0 0"><input id="sessNote" placeholder="optional, how did it go? sleep, tweaks, pump..." value="${esc(a.note||"")}"></div>
     <div class="sub" style="margin-top:12px">How did it feel?</div>
-    <div class="feel-row">${FEELS.map((f,i)=>`<button class="feel-btn ${a.feel===i+1?"on":""}" data-feel="${i+1}">${f}</button>`).join("")}</div>
+    <div class="feel-row">${FEELS.map((f,i)=>`<button class="feel-btn f${i+1} ${a.feel===i+1?"on":""}" data-feel="${i+1}" aria-label="${esc(FEEL_WORDS[i])}" title="${esc(FEEL_WORDS[i])}">${faceIcon(i+1)}</button>`).join("")}</div>
   </div>`;
   h += `<button class="btn" id="finishBtn">Finish workout</button>`;
   h += `<div class="btn-row"><button class="btn ghost" id="discardBtn">Discard</button></div>`;
@@ -12661,7 +12699,7 @@ function viewFocusSession(){
       <h3 style="font-size:17px">Session note</h3>
       <div class="field" style="margin:8px 0 0"><input id="sessNote" placeholder="optional, how did it go?" value="${esc(a.note||"")}"></div>
       <div class="sub" style="margin-top:12px">How did it feel?</div>
-      <div class="feel-row">${FEELS.map((f,i)=>`<button class="feel-btn ${a.feel===i+1?"on":""}" data-feel="${i+1}">${f}</button>`).join("")}</div>
+      <div class="feel-row">${FEELS.map((f,i)=>`<button class="feel-btn f${i+1} ${a.feel===i+1?"on":""}" data-feel="${i+1}" aria-label="${esc(FEEL_WORDS[i])}" title="${esc(FEEL_WORDS[i])}">${faceIcon(i+1)}</button>`).join("")}</div>
     </div>`;
   }
   return h + focusFooter(a, atEnd);
@@ -12786,7 +12824,7 @@ function focusNoteCardHTML(a){
       <h3 style="font-size:17px">Session note</h3>
       <div class="field" style="margin:8px 0 0"><input id="sessNote" placeholder="optional, how did it go?" value="${esc(a.note||"")}"></div>
       <div class="sub" style="margin-top:12px">How did it feel?</div>
-      <div class="feel-row">${FEELS.map((f,i)=>`<button class="feel-btn ${a.feel===i+1?"on":""}" data-feel="${i+1}">${f}</button>`).join("")}</div>
+      <div class="feel-row">${FEELS.map((f,i)=>`<button class="feel-btn f${i+1} ${a.feel===i+1?"on":""}" data-feel="${i+1}" aria-label="${esc(FEEL_WORDS[i])}" title="${esc(FEEL_WORDS[i])}">${faceIcon(i+1)}</button>`).join("")}</div>
     </div>`;
 }
 function focusFooter(a, atEnd){
@@ -15700,7 +15738,7 @@ function renderSessEditor(s){
   let h = `<h3>Edit session, ${esc(dayName(s.workoutId))}, ${fmtDate(s.date)}</h3>
   <div class="field"><label>Session note</label><input id="sessNoteEdit" value="${esc(s.note||"")}" placeholder="optional"></div>
   <div class="field"><label>How did it feel?</label>
-    <div class="feel-row" style="margin-top:2px">${FEELS.map((f,i)=>`<button class="feel-btn ${s.feel===i+1?"on":""}" data-feele="${i+1}">${f}</button>`).join("")}</div>
+    <div class="feel-row" style="margin-top:2px">${FEELS.map((f,i)=>`<button class="feel-btn f${i+1} ${s.feel===i+1?"on":""}" data-feele="${i+1}" aria-label="${esc(FEEL_WORDS[i])}" title="${esc(FEEL_WORDS[i])}">${faceIcon(i+1)}</button>`).join("")}</div>
   </div>`;
   if(s.entries.length){
     h += `<div class="sub" style="margin:2px 0 6px">Use ↑ ↓ to put the exercises back in the order you actually did them.</div>`;
