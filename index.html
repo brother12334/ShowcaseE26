@@ -1341,6 +1341,19 @@ body.onboarding #app{padding:0}
 .rest-tmr-ex i{font-style:normal;font-family:var(--mono);font-size:12.5px;color:var(--dim);white-space:nowrap}
 .rest-tmr-more{font-size:12.5px;color:var(--faint);padding-top:8px}
 
+/* a coaching hint, with its own way out. The padding has to out-specify whatever the
+   hint's own class sets, or the text runs under the dismiss button. */
+.coach-hint{position:relative}
+.arm-hint.coach-hint,.asym-hint.coach-hint{padding-right:36px}
+.coach-x{
+  position:absolute;top:6px;right:6px;width:26px;height:26px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  border:0;background:none;color:var(--faint);cursor:pointer;border-radius:50%;
+  transition:color .15s ease,background .15s ease;
+}
+.coach-x .ico{width:13px;height:13px}
+.coach-x:hover{color:var(--dim);background:rgba(255,255,255,.05)}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -3371,7 +3384,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "7.2";
+const APP_VERSION = "7.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -12658,7 +12671,26 @@ function asymHintHTML(e){
   return `<div class="asym-hint"><b>Cap both sides at ${cap} reps.</b>
     ${esc(asymGapText(st))} <span class="asym-note">${esc(asymSampleText(st))}.</span></div>`;
 }
+/* =====================================================================
+   COACHING HINTS, AND WHY THEY EXPIRE
+
+   "Start with your LEFT leg, then alternate every set. Flips to RIGHT first next time."
+   is a genuinely useful sentence the first time somebody meets a one-limb movement in
+   this app. By the fourth session it is a paragraph sitting on top of every unilateral
+   exercise explaining something the person already does automatically — and the L/R
+   chip on each set row says the same thing in one character, permanently, without
+   costing a block of vertical space on a phone held at arm's length in a gym.
+
+   So this class of hint runs while there is nothing logged yet, and stops on its own
+   once the first session is in the book. It can also be dismissed outright, which is
+   the same switch and simply says so earlier. Nothing is lost either way: the per-set
+   side chips are the actual instruction and they never go anywhere. */
+function coachHintsOn(){
+  if(S.coachOff) return false;
+  return !(S.sessions && S.sessions.length);
+}
 function altHintHTML(style, startSide, nSets, exName){
+  if(!coachHintsOn()) return "";
   const limb = limbWord(exName);
   const n = Math.max(1, Math.min(8, parseInt(nSets,10) || 3));
   const seq = [];
@@ -12677,7 +12709,9 @@ function altHintHTML(style, startSide, nSets, exName){
   const tail = (style === "cross"
     ? `swap which arm is on top every set.`
     : `then alternate every set.`) + next;
-  return `<div class="arm-hint">
+  return `<div class="arm-hint coach-hint">
+    <button class="coach-x" data-coachoff="1" aria-label="Stop showing tips like this"
+      title="Stop showing tips like this">${ICON.close}</button>
     <div>${lead}, ${tail}</div>
     <div class="alt-seq">${seq.join('<span class="alt-arrow">›</span>')}</div>
   </div>`;
@@ -14907,6 +14941,13 @@ function viewAdvanced(){
       <button class="${S.viewMode!=="focus"?"on":""}" data-vmode="regular">Regular</button>
       <button class="${S.viewMode==="focus"?"on":""}" data-vmode="focus">Focus</button>
     </div>
+    <div class="sub" style="margin:14px 0 8px">Coaching tips — the ones that explain how a
+      movement is run, like which side to open a one-limb exercise with. They stop on their own
+      once you've logged a session, and the L/R marks on each set stay either way.</div>
+    <div class="seg">
+      <button class="${S.coachOff?"":"on"}" data-coach="on">Show them</button>
+      <button class="${S.coachOff?"on":""}" data-coach="off">Off</button>
+    </div>
     <div class="sub" style="margin:14px 0 8px">When a set lands far under its target, ask what went wrong. One tap, at most once per exercise, and the answer changes the advice you get rather than just marking you down.</div>
     <div class="seg">
       <button class="${S.askWhy!==false?"on":""}" data-askwhy="on">Ask me</button>
@@ -15513,6 +15554,10 @@ function bind(){
     document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on", x.dataset.tab===t));
     render(); window.scrollTo(0,0); showNav(); replayViewIn();
   });
+  document.querySelectorAll("[data-coachoff]").forEach(b=> b.onclick=()=>{
+    S.coachOff = true; save(); queueSync(); render();
+    toast("Tips like that turned off \u2014 back on in Settings");
+  });
   document.querySelectorAll("[data-exnote]").forEach(b=> b.onclick=()=>{
     NOTE_ORIGIN = b;
     harvestActive();
@@ -15570,6 +15615,11 @@ function bind(){
   }
   const rt = $("#replayTour");
   if(rt) rt.onclick = ()=> startTour();
+  document.querySelectorAll("[data-coach]").forEach(b=> b.onclick=()=>{
+    S.coachOff = b.dataset.coach === "off";
+    save(); queueSync(); render();
+    toast(S.coachOff ? "Coaching tips off" : "Coaching tips back on");
+  });
   document.querySelectorAll("[data-vmode]").forEach(b=> b.onclick=()=>{
     S.viewMode = b.dataset.vmode;
     save(); render();
@@ -19596,7 +19646,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
