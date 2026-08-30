@@ -100,6 +100,162 @@ function sameSecret(a, b) {
   return diff === 0;
 }
 
+/* =====================================================================
+   PUSH NOTIFICATIONS
+
+   Optional on top of optional: leave the two VAPID secrets unset and every route below
+   answers "not configured" and the app hides the whole feature. Nothing else changes.
+
+   WHAT IS STORED, AND WHY IT IS SO LITTLE
+     push:<id>    the push service endpoint for that account's one installed app, plus a
+                  random token. No p256dh, no auth secret — see below.
+     ptok:<token> reverse lookup for that token. It authorises exactly one thing.
+     sched:<id>   the single next reminder: {at, title, body}. One per account, replaced
+                  every time the app recomputes it. There is no queue to drift.
+     pend:<id>    what the service worker is about to come and ask for, for the seconds
+                  between the push landing and the worker reading it. Self-expiring.
+
+   THE PUSH ITSELF CARRIES NO BODY. That is a deliberate trade: an encrypted payload
+   would mean holding each device's key material here, and the notification text would be
+   sitting in KV either way. Payload-less means this service signs a VAPID JWT and POSTs
+   nothing at all; the text is fetched by the service worker over TLS a moment later,
+   against a token that reads one message and cannot touch the training log.
+
+   THE APP DECIDES WHAT IT SAYS. Which day is up, whether a rest is owed, whether you
+   already trained — all of that is rotation logic that already exists in the app and
+   would rot immediately if it were reimplemented here against a copy of the data. So the
+   app computes one sentence and one timestamp and posts them; this stays dumb on
+   purpose, and a change to how the plan works needs no deploy here. */
+const VAPID_TTL = "86400";
+const SCHED_MAX_AHEAD = 60 * 24 * 3600 * 1000;   // sanity bound, not a policy
+const TOKEN_RE = /^[a-f0-9]{32}$/;
+/* Push services are a small, known set. An endpoint is a URL this service will make an
+   authenticated POST to on a schedule, so it is not somewhere a caller gets to point
+   anywhere it likes — that would make this an open relay wearing a Worker. */
+const PUSH_HOSTS = [
+  /(^|\.)push\.apple\.com$/,
+  /(^|\.)googleapis\.com$/,
+  /(^|\.)mozilla\.com$/,
+  /(^|\.)windows\.com$/,
+  /(^|\.)microsoft\.com$/,
+];
+function pushConfigured(env) {
+  return !!(env && env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY);
+}
+function b64uFromBytes(bytes) {
+  let s = "";
+  const b = new Uint8Array(bytes);
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64uToBytes(str) {
+  const s = String(str).replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s + "=".repeat((4 - (s.length % 4)) % 4);
+  const bin = atob(pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function b64uFromString(str) {
+  return b64uFromBytes(new TextEncoder().encode(str));
+}
+/* The private key arrives as the raw 32-byte scalar, base64url — which is exactly what
+   `web-push generate-vapid-keys` prints. WebCrypto will not import that on its own, so
+   the public half is split back into its x and y coordinates and the three are handed
+   over as a JWK. */
+async function vapidKey(env) {
+  const pub = b64uToBytes(env.VAPID_PUBLIC_KEY);
+  if (pub.length !== 65 || pub[0] !== 4) throw new Error("bad VAPID_PUBLIC_KEY");
+  return crypto.subtle.importKey(
+    "jwk",
+    {
+      kty: "EC", crv: "P-256", ext: true,
+      d: String(env.VAPID_PRIVATE_KEY).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_"),
+      x: b64uFromBytes(pub.slice(1, 33)),
+      y: b64uFromBytes(pub.slice(33, 65)),
+    },
+    { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]
+  );
+}
+async function vapidAuth(env, endpoint) {
+  const aud = new URL(endpoint).origin;
+  const head = b64uFromString(JSON.stringify({ typ: "JWT", alg: "ES256" }));
+  const body = b64uFromString(JSON.stringify({
+    aud,
+    exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+    sub: env.VAPID_SUBJECT || "mailto:push@element26.invalid",
+  }));
+  const input = head + "." + body;
+  /* WebCrypto signs ECDSA as raw r||s, which is what the Web Push spec wants. A DER
+     signature here would verify nowhere. */
+  const sig = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" }, await vapidKey(env), new TextEncoder().encode(input)
+  );
+  return "vapid t=" + input + "." + b64uFromBytes(sig) + ", k=" + env.VAPID_PUBLIC_KEY;
+}
+function endpointAllowed(endpoint) {
+  let u;
+  try { u = new URL(endpoint); } catch (e) { return false; }
+  if (u.protocol !== "https:") return false;
+  return PUSH_HOSTS.some(re => re.test(u.hostname));
+}
+/* Returns true if the subscription is gone and should be forgotten. 404 and 410 are the
+   push services' way of saying the app was deleted or the permission revoked; anything
+   else is a bad afternoon and the subscription is kept. */
+async function sendPush(env, endpoint) {
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Authorization": await vapidAuth(env, endpoint),
+      "TTL": VAPID_TTL,
+      "Urgency": "normal",
+      "Content-Length": "0",
+    },
+  });
+  return res.status === 404 || res.status === 410;
+}
+async function forgetPush(env, id) {
+  const raw = await env.E26_ACCOUNTS.get("push:" + id);
+  if (raw) {
+    try { const p = JSON.parse(raw); if (p.token) await env.E26_ACCOUNTS.delete("ptok:" + p.token); } catch (e) {}
+  }
+  await env.E26_ACCOUNTS.delete("push:" + id);
+  await env.E26_ACCOUNTS.delete("sched:" + id);
+  await env.E26_ACCOUNTS.delete("pend:" + id);
+}
+/* One account's due reminder. Called from the cron, one per account, and written so that
+   a double delivery is the worst case rather than a lost one: the schedule is cleared
+   before the send, and a short-lived marker covers KV's eventual consistency across two
+   cron ticks a minute apart. */
+async function fireDue(env, id, at) {
+  const guard = "fired:" + id + ":" + at;
+  if (await env.E26_ACCOUNTS.get(guard)) return;
+  const rawS = await env.E26_ACCOUNTS.get("sched:" + id);
+  if (!rawS) return;
+  let sched;
+  try { sched = JSON.parse(rawS); } catch (e) { await env.E26_ACCOUNTS.delete("sched:" + id); return; }
+  if (!(Number(sched.at) <= Date.now())) return;
+  await env.E26_ACCOUNTS.put(guard, "1", { expirationTtl: 900 });
+  await env.E26_ACCOUNTS.delete("sched:" + id);
+
+  const rawP = await env.E26_ACCOUNTS.get("push:" + id);
+  if (!rawP) return;
+  let sub;
+  try { sub = JSON.parse(rawP); } catch (e) { return; }
+  if (!sub.endpoint) return;
+
+  await env.E26_ACCOUNTS.put("pend:" + id, JSON.stringify({
+    title: sched.title, body: sched.body, tag: sched.tag || "e26-reminder",
+  }), { expirationTtl: 3600 });
+
+  try {
+    if (await sendPush(env, sub.endpoint)) await forgetPush(env, id);
+  } catch (e) {
+    /* A send that throws leaves pend: in place; it expires on its own within the hour
+       and the app will have posted a fresh schedule long before that matters. */
+  }
+}
+
 /* THE ONLY WAY TO IDENTIFY A CALLER. Returns the account, or null. Note what it does
    not accept: an id in the path, an id in the body, an id in a query string. The caller
    presents a credential and the account falls out of it. */
@@ -220,6 +376,104 @@ export default {
       return json({ error: "method not allowed" }, 405, origin);
     }
 
+    /* PUSH: the service worker's one read. Authorised by the subscription token rather
+       than the account credential, because a service worker is the wrong place to keep
+       a recovery key. Reads one message and deletes it — there is nothing here to poll
+       and nothing to accumulate. */
+    if (path === "/push/pending" && request.method === "GET") {
+      const t = String(url.searchParams.get("t") || "").toLowerCase();
+      if (!TOKEN_RE.test(t)) return json({ error: "unauthorized" }, 401, origin);
+      const id = await env.E26_ACCOUNTS.get("ptok:" + t);
+      if (!id) return json({ error: "unauthorized" }, 401, origin);
+      const raw = await env.E26_ACCOUNTS.get("pend:" + id);
+      if (!raw) return json({}, 200, origin);
+      await env.E26_ACCOUNTS.delete("pend:" + id);
+      return new Response(raw, {
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...cors(origin) },
+      });
+    }
+
+    if (path === "/push/subscribe" && request.method === "POST") {
+      if (!pushConfigured(env)) return json({ error: "push not configured" }, 501, origin);
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+      let body = {};
+      try { body = await request.json(); } catch (e) {}
+      const endpoint = String(body.endpoint || "");
+      if (!endpointAllowed(endpoint)) return json({ error: "bad endpoint" }, 400, origin);
+      /* One installed app per account, by design: resubscribing replaces rather than
+         adds, so an app deleted and reinstalled leaves nothing behind to send to. */
+      await forgetPush(env, who.id);
+      const token = randomFrom("abcdef0123456789", 32);
+      await env.E26_ACCOUNTS.put("push:" + who.id, JSON.stringify({ endpoint, token, at: Date.now() }));
+      await env.E26_ACCOUNTS.put("ptok:" + token, who.id);
+      return json({ ok: true, token }, 200, origin);
+    }
+
+    if (path === "/push/unsubscribe" && request.method === "POST") {
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+      await forgetPush(env, who.id);
+      return json({ ok: true }, 200, origin);
+    }
+
+    /* SCHEDULE. Exactly one reminder is stored per account and posting replaces it, so
+       the app can recompute freely — after a session, after a plan change, at launch —
+       without ever having to reason about what it queued last time. Posting no `at`
+       cancels. */
+    if (path === "/push/schedule" && request.method === "POST") {
+      if (!pushConfigured(env)) return json({ error: "push not configured" }, 501, origin);
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+      let body = {};
+      try { body = await request.json(); } catch (e) {}
+      if (body.at == null) {
+        await env.E26_ACCOUNTS.delete("sched:" + who.id);
+        return json({ ok: true, cleared: true }, 200, origin);
+      }
+      const at = Math.round(Number(body.at));
+      if (!isFinite(at) || at > Date.now() + SCHED_MAX_AHEAD) return json({ error: "bad time" }, 400, origin);
+      const title = String(body.title || "Element 26").slice(0, 80);
+      const text = String(body.body || "").slice(0, 200);
+      const tag = String(body.tag || "e26-reminder").slice(0, 40);
+      await env.E26_ACCOUNTS.put(
+        "sched:" + who.id,
+        JSON.stringify({ at, title, body: text, tag }),
+        { metadata: { at }, expirationTtl: Math.max(120, Math.ceil((at - Date.now()) / 1000) + 7 * 86400) }
+      );
+      return json({ ok: true, at }, 200, origin);
+    }
+
     return json({ error: "not found" }, 404, origin);
+  },
+
+  /* The cron. Configure it in wrangler.accounts.toml:
+       [triggers]
+       crons = ["* * * * *"]
+     Minute granularity is the floor Cloudflare offers and it is the right unit here — a
+     reminder to train is not a rest timer, and a minute either way is invisible.
+
+     The scan is a KV list over one prefix, reading the due time out of each key's
+     metadata rather than fetching every record, so an idle minute costs one list and no
+     reads at all. */
+  async scheduled(event, env, ctx) {
+    if (!env || !env.E26_ACCOUNTS || !pushConfigured(env)) return;
+    const now = Date.now();
+    const due = [];
+    let cursor;
+    for (let page = 0; page < 20; page++) {
+      const res = await env.E26_ACCOUNTS.list({ prefix: "sched:", cursor, limit: 1000 });
+      for (const k of res.keys) {
+        const at = k.metadata && Number(k.metadata.at);
+        if (isFinite(at) && at <= now) due.push({ id: k.name.slice(6), at });
+      }
+      if (res.list_complete) break;
+      cursor = res.cursor;
+    }
+    /* Bounded concurrency: a hundred simultaneous fetches to a push service is how you
+       get rate-limited by it. */
+    for (let i = 0; i < due.length; i += 10) {
+      await Promise.all(due.slice(i, i + 10).map(d => fireDue(env, d.id, d.at).catch(() => {})));
+    }
   },
 };

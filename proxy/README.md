@@ -182,3 +182,56 @@ calls this.
 The account is gone, and that is the honest trade for having no email and no password.
 The app says so at sign-up and shows the ID once, big, behind a confirmation — and the
 recovery key is always visible again under **Settings → Account**.
+
+## Reminders (optional)
+
+One notification a day, at an hour the person picks, naming the session that is up. Off
+until you do all three of these; leave any of them undone and the app hides the whole
+card rather than offering a switch that does nothing.
+
+**1. Generate a VAPID keypair.** This is the identity the push services check when
+something claims to be sending on your behalf.
+
+```bash
+npx web-push generate-vapid-keys
+# Public Key:  BEl62iU…   (87 chars, base64url)
+# Private Key: 3KzvKas…   (43 chars, base64url)
+```
+
+**2. The private half goes to the Worker, never into the page.**
+
+```bash
+wrangler secret put VAPID_PRIVATE_KEY --config wrangler.accounts.toml
+wrangler secret put VAPID_PUBLIC_KEY  --config wrangler.accounts.toml
+wrangler secret put VAPID_SUBJECT     --config wrangler.accounts.toml   # mailto:you@example.com
+wrangler deploy proxy/accountworker.js --name element26-accounts --config wrangler.accounts.toml
+```
+
+`VAPID_SUBJECT` is a contact address the push services use if something goes wrong at
+their end; it is not shown to anyone using the app. It defaults to a placeholder, which
+works, but a real address is the polite thing.
+
+**3. The public half goes in `index.html`,** as `VAPID_PUBLIC`, near `E26_API`. It is a
+public key and belongs in a public file — that is the whole point of the pair.
+
+`wrangler.accounts.toml` already carries the `[triggers]` block that runs the sender.
+
+### On iPhone, it must be added to the Home Screen
+
+Safari implements Web Push only for an installed web app, on iOS 16.4 or later. In a
+Safari tab there is no subscription to be had, at all — not a degraded one. Share →
+**Add to Home Screen**, then open it from there and turn reminders on inside that copy.
+The app detects this and says so rather than presenting a switch that fails silently.
+
+### What actually gets sent
+
+Nothing, in the literal sense: the push carries no payload. It wakes the service worker,
+which fetches the one sentence waiting for it and shows that. An encrypted payload would
+mean this service holding key material for a device, and the text would sit in KV either
+way — so it stays out, and the token the service worker carries reads one message and
+cannot touch a training log.
+
+The app decides *what* the sentence says and *when* it is due, and posts a single
+one-shot; posting again replaces it. All of the rotation logic — which day is up, whether
+a rest is owed, whether you already trained — stays in the app, where it already lives.
+

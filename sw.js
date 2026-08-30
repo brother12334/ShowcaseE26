@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "7.1";
+const VERSION = "7.2";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -83,6 +83,88 @@ self.addEventListener("activate", event=>{
 
 self.addEventListener("message", event=>{
   if(event.data && event.data.type === "e26-skip-waiting") self.skipWaiting();
+});
+
+/* =====================================================================
+   PUSH
+
+   WHY THE PUSH CARRIES NO PAYLOAD. An encrypted Web Push payload is aes128gcm keyed off
+   the subscription's p256dh/auth pair, and getting that wrong fails silently at the
+   browser rather than at the sender. It is also the only part of this that would need
+   the account service to hold key material belonging to a device. A payload-less push is
+   a plain signed POST with no body: the push service wakes this worker, and the worker
+   asks the account service what the notification actually says. The text therefore lives
+   on the server for the few seconds between the two, and nowhere else.
+
+   THE TOKEN IS NOT THE ACCOUNT KEY. The page writes a random per-subscription token into
+   a Cache entry that only this worker's origin can read. It buys exactly one thing —
+   "read and clear the notification waiting for me" — and it is minted and thrown away
+   with the subscription. The recovery key never comes in here, so a worker that leaks
+   cannot read a training log.
+
+   A PUSH EVENT MUST END IN A NOTIFICATION. Every browser that implements this treats a
+   push handled without showing one as abuse, and Safari in particular will drop the
+   subscription for it. So every path below ends at showNotification(), including the
+   ones where the fetch failed and we genuinely do not know what to say. */
+const PUSH_API = "https://element26-accounts.ferbyablon.workers.dev";
+const PUSH_TOKEN_CACHE = "e26-push";
+const PUSH_TOKEN_URL = "./__e26_push_token";
+
+async function pushToken(){
+  try{
+    const cache = await caches.open(PUSH_TOKEN_CACHE);
+    const hit = await cache.match(PUSH_TOKEN_URL);
+    if(!hit) return "";
+    return (await hit.text()).trim();
+  }catch(e){ return ""; }
+}
+
+async function pendingNotification(){
+  const t = await pushToken();
+  if(!t) return null;
+  try{
+    const res = await fetch(PUSH_API + "/push/pending?t=" + encodeURIComponent(t), {cache:"no-store"});
+    if(!res.ok) return null;
+    const j = await res.json();
+    if(j && j.title) return j;
+  }catch(e){}
+  return null;
+}
+
+self.addEventListener("push", event=>{
+  event.waitUntil((async ()=>{
+    let n = null;
+    /* Nothing sends a payload today, but honouring one costs three lines and means a
+       future sender can skip the round trip without another worker release. */
+    try{ if(event.data) n = event.data.json(); }catch(e){ n = null; }
+    if(!n || !n.title) n = await pendingNotification();
+    if(!n || !n.title) n = {title:"Element 26", body:"Your next session is up."};
+    await self.registration.showNotification(String(n.title), {
+      body: String(n.body || ""),
+      /* One tag for the lot: a reminder that arrives while yesterday's is still on the
+         lock screen should replace it, not stack. */
+      tag: String(n.tag || "e26-reminder"),
+      icon: "./icon192v2.png",
+      badge: "./icon192v2.png",
+      data: {url: String(n.url || "./")}
+    });
+  })());
+});
+
+self.addEventListener("notificationclick", event=>{
+  event.notification.close();
+  const want = (event.notification.data && event.notification.data.url) || "./";
+  event.waitUntil((async ()=>{
+    const target = new URL(want, self.location.href).href;
+    const clients = await self.clients.matchAll({type:"window", includeUncontrolled:true});
+    /* Focus what is already open rather than opening a second copy. On iOS a Home Screen
+       app has exactly one window and reopening it would restart an in-progress workout's
+       view for no reason. */
+    for(const c of clients){
+      if(c.url.indexOf(self.registration.scope) === 0 && "focus" in c) return c.focus();
+    }
+    if(self.clients.openWindow) return self.clients.openWindow(target);
+  })());
 });
 
 /* Serve from cache, then refresh the cache in the background for next time.

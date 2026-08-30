@@ -3427,7 +3427,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "7.7";
+const APP_VERSION = "7.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8688,6 +8688,234 @@ function bindAccount(){
    thing people write on a bit of paper — cannot fetch a single byte. */
 function accountAuth(){
   return ACCT && ACCT.cloud && ACCT.id && ACCT.key ? ("Bearer " + ACCT.id + "." + ACCT.key) : "";
+}
+
+/* =====================================================================
+   REMINDERS
+
+   WHAT THIS IS FOR. The app cannot nag you, and mostly should not. The one thing worth
+   saying out loud is the thing you cannot see with the app closed: which session is up,
+   at the hour you would want to know. Everything else — rest timers, PRs, streaks — is
+   either already in front of you or is not worth a phone buzzing in a meeting.
+
+   THE iOS CONSTRAINT IS ABSOLUTE, AND IT IS WHY THIS LOOKS THE WAY IT DOES. Safari
+   implements Web Push only for a site that has been added to the Home Screen, on iOS
+   16.4 or later. In a tab, PushManager either is not there or throws on subscribe. There
+   is no workaround, no fallback, and no partial version, so the card below says so in
+   words rather than presenting a switch that quietly does nothing.
+
+   THE APP DOES THE THINKING. Which day is up, whether a rest is owed, whether you have
+   already trained today — that is rotation logic that lives here and nowhere else. So
+   this computes ONE sentence and ONE timestamp and posts them to the account service,
+   which stores exactly one per account and fires it when it comes due. Recomputing is
+   free and replaces what was there, so it happens after anything that could change the
+   answer rather than being carefully queued.
+
+   THE SERVICE WORKER, NOT THE PAGE, WRITES THE NOTIFICATION. It is handed a token here
+   that reads one pending message and nothing else; the recovery key never goes near it.
+   See the push handler in sw.js.
+
+   ►►► SET THIS to the VAPID public key you generated (`npx web-push generate-vapid-keys`).
+   It is a PUBLIC key and belongs in a public file — the private half goes to the Worker
+   with `wrangler secret put VAPID_PRIVATE_KEY` and never appears here. Leave it empty and
+   the whole feature hides itself. */
+const VAPID_PUBLIC = "";
+
+function pushSupported(){
+  return typeof navigator !== "undefined" && "serviceWorker" in navigator
+      && typeof window !== "undefined" && "PushManager" in window && "Notification" in window;
+}
+/* "Added to the Home Screen". navigator.standalone is the old iOS-only flag and is still
+   the only reliable one there; display-mode covers everything else. */
+function pushInstalled(){
+  try{
+    if(navigator.standalone === true) return true;
+    return !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  }catch(e){ return false; }
+}
+function isIOSDevice(){
+  const ua = navigator.userAgent || "";
+  return /iPad|iPhone|iPod/.test(ua) || (/Mac/.test(ua) && navigator.maxTouchPoints > 1);
+}
+/* Why each of these is a hard requirement, in the order a person hits them. */
+function pushBlocker(){
+  if(!VAPID_PUBLIC) return "unconfigured";
+  if(!accountCloudOn() || !accountAuth()) return "account";
+  if(!pushSupported()) return isIOSDevice() ? "install" : "browser";
+  if(isIOSDevice() && !pushInstalled()) return "install";
+  if(Notification.permission === "denied") return "denied";
+  return "";
+}
+function urlB64ToBytes(b64){
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(raw.length);
+  for(let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+/* The one sentence. Written to be true whenever it is read rather than whenever it was
+   composed — it is stored now and shown hours later, so it never says "tomorrow". */
+function reminderText(forTomorrow){
+  const rest = forTomorrow ? restDueNotToday() : isRestToday();
+  const wid = forTomorrow ? ROTATION[S.pointer] : todaysWorkoutId();
+  const meta = wid ? dayMeta(wid) : null;
+  const name = (meta && meta.name) || "Your next session";
+  if(rest) return {title:"Rest day", body:"Nothing to log today. " + name + " is next."};
+  /* No plan yet — this renders inside Setup, so a throw here would take the whole page
+     with it rather than costing a sentence. */
+  if(!wid) return {title:"Element 26", body:"Ready when you are."};
+  const ex = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher).map(x=> x.chosen);
+  const sets = ex.reduce((n, e)=> n + (e.sets || 0), 0);
+  return {
+    title: name,
+    body: ex.length ? (ex.length + " exercises, " + sets + " sets. Ready when you are.")
+                    : "Ready when you are."
+  };
+}
+/* The next moment worth a buzz, or null. A day you have already trained is skipped
+   outright: the reminder exists to tell you a session is waiting, and one that has been
+   done is not waiting. */
+function nextReminder(){
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(S.remindAt || ""));
+  if(!m) return null;
+  const hh = Math.min(23, +m[1]), mm = Math.min(59, +m[2]);
+  const now = new Date();
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+  const trainedToday = (S.sessions || []).some(x=> x && x.date === todayStr());
+  let tomorrow = false;
+  if(trainedToday || at.getTime() <= now.getTime() + 60000){
+    at.setDate(at.getDate() + 1);
+    tomorrow = true;
+  }
+  const t = reminderText(tomorrow);
+  return {at: at.getTime(), title: t.title, body: t.body};
+}
+
+let PUSH_SCHED_BUSY = false;
+/* Post the next reminder, replacing whatever was there. Safe to call from anywhere and
+   deliberately silent: this runs after finishing a workout and at launch, and a failed
+   reminder is not worth interrupting either. */
+async function pushSyncSchedule(){
+  if(!S.pushOn || !accountAuth() || PUSH_SCHED_BUSY) return;
+  PUSH_SCHED_BUSY = true;
+  try{
+    const r = nextReminder();
+    await apiFetch("/push/schedule", {
+      method:"POST",
+      headers:{"Content-Type":"application/json", "Authorization": accountAuth()},
+      body: JSON.stringify(r ? {at:r.at, title:r.title, body:r.body} : {at:null})
+    });
+  }catch(e){}
+  finally{ PUSH_SCHED_BUSY = false; }
+}
+
+/* Turning it on. requestPermission() is called FIRST and with nothing awaited before it,
+   because Safari only honours it inside the gesture that started the call. */
+async function pushEnable(){
+  const blocked = pushBlocker();
+  if(blocked) return blocked;
+  let perm;
+  try{ perm = await Notification.requestPermission(); }catch(e){ return "denied"; }
+  if(perm !== "granted") return "denied";
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    /* A subscription made against a different VAPID key is dead to us — the push service
+       will reject a signature from the new one — so it is torn down rather than reused. */
+    if(sub){
+      let same = false;
+      try{
+        const k = sub.options && sub.options.applicationServerKey;
+        same = !!k && btoa(String.fromCharCode.apply(null, new Uint8Array(k)))
+                        .replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"") === VAPID_PUBLIC;
+      }catch(e){}
+      if(!same){ try{ await sub.unsubscribe(); }catch(e){} sub = null; }
+    }
+    if(!sub) sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: urlB64ToBytes(VAPID_PUBLIC)
+    });
+    const res = await apiFetch("/push/subscribe", {
+      method:"POST",
+      headers:{"Content-Type":"application/json", "Authorization": accountAuth()},
+      body: JSON.stringify({endpoint: sub.endpoint})
+    });
+    if(!res.ok) return res.status === 501 ? "unconfigured" : "failed";
+    const j = await res.json();
+    if(!j || !j.token) return "failed";
+    /* The token goes into a Cache entry rather than localStorage because a service
+       worker cannot read localStorage at all. Same origin, same isolation. */
+    const cache = await caches.open("e26-push");
+    await cache.put("./__e26_push_token", new Response(j.token));
+    S.pushOn = true;
+    if(!S.remindAt) S.remindAt = "18:00";
+    save();
+    await pushSyncSchedule();
+    return "";
+  }catch(e){ return "failed"; }
+}
+
+async function pushDisable(){
+  S.pushOn = false; save();
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if(sub) await sub.unsubscribe();
+  }catch(e){}
+  try{ const c = await caches.open("e26-push"); await c.delete("./__e26_push_token"); }catch(e){}
+  try{
+    await apiFetch("/push/unsubscribe", {method:"POST", headers:{"Authorization": accountAuth()}});
+  }catch(e){}
+}
+
+const PUSH_WHY = {
+  unconfigured: "Reminders aren't set up on this copy of Element 26.",
+  account: "Reminders need your account registered with the cloud service — something has to be awake to send them while the app is closed. Connect it above.",
+  browser: "This browser doesn't support notifications.",
+  install: "<b>Add Element 26 to your Home Screen first.</b> On iOS, notifications only work for an app that's been installed — not for a site open in a Safari tab. Tap Share, then <b>Add to Home Screen</b>, and open it from there.",
+  denied: "Notifications are blocked for Element 26. Turn them back on in Settings › Notifications, then come back here.",
+  failed: "Couldn't set that up. Check your connection and try again."
+};
+let PUSH_BUSY = false, PUSH_ERR = "";
+function pushCardHTML(){
+  if(!VAPID_PUBLIC) return "";
+  const why = pushBlocker();
+  let h = `<div class="card">
+    <h3>Reminders</h3>
+    <div class="sub" style="margin:4px 0 10px">One notification, at an hour you pick, telling you
+      which session is up — or that today is a rest day. Nothing else is ever sent.</div>`;
+  if(PUSH_BUSY){
+    return h + `<div class="ai-busy"><span class="ai-spin"></span><span>Setting that up…</span></div></div>`;
+  }
+  if(why && !(why === "denied" && !S.pushOn)){
+    return h + `<div class="sync-warn">${PUSH_WHY[why] || PUSH_WHY.failed}</div></div>`;
+  }
+  if(!S.pushOn){
+    if(PUSH_ERR) h += `<div class="sync-warn">${PUSH_WHY[PUSH_ERR] || PUSH_WHY.failed}</div>`;
+    return h + `<div class="btn-row" style="margin-top:0">
+      <button class="btn small" id="pushOnBtn" style="flex:1">Turn on reminders</button>
+    </div></div>`;
+  }
+  const r = nextReminder();
+  h += `<div class="field"><label>Remind me at</label>
+      <input class="timein" type="time" id="remindAtIn" value="${esc(S.remindAt || "18:00")}"></div>
+    <div class="sub" style="margin:2px 0 10px;font-size:12.5px;color:var(--faint)">${
+      r ? `Next: <b>${esc(r.title)}</b> — ${esc(r.body)}<br>${esc(fmtWhen(r.at))}`
+        : "Nothing scheduled — pick a time."}</div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn ghost small" id="pushOffBtn" style="flex:1">Turn off reminders</button>
+    </div>`;
+  return h + `</div>`;
+}
+/* "Today at 18:00" / "Tomorrow at 18:00" / a date, for the one line that previews it. */
+function fmtWhen(ms){
+  const d = new Date(ms), now = new Date();
+  const time = d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate())
+                         - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / DAY_MS);
+  if(days === 0) return "Today at " + time;
+  if(days === 1) return "Tomorrow at " + time;
+  return d.toLocaleDateString(undefined, {weekday:"long"}) + " at " + time;
 }
 /* NO CREDENTIAL EVER LEAVES THIS DEVICE IN A SYNC BODY.
 
@@ -15178,6 +15406,7 @@ function viewSync(){
     </div>
   </div>
   ${syncCardHTML()}
+  ${pushCardHTML()}
   <div class="card">
     <h3>How the app behaves</h3>
     <div class="sub" style="margin:4px 0 10px">Side handling, warm-ups, RPE, progression, your bar and what
@@ -16006,6 +16235,32 @@ function bind(){
       toast("Training data erased");
     }
   };
+  const pon = $("#pushOnBtn");
+  if(pon) pon.onclick = async ()=>{
+    /* No await before requestPermission() inside pushEnable() — Safari drops the
+       permission prompt if the gesture has already been handed back. The busy repaint
+       therefore happens after the call returns, not before it. */
+    PUSH_ERR = ""; PUSH_BUSY = true;
+    const err = await pushEnable();
+    PUSH_BUSY = false; PUSH_ERR = err;
+    render();
+    toast(err ? "Reminders not turned on" : "Reminders on \u2014 " + (nextReminder() ? fmtWhen(nextReminder().at).toLowerCase() : "pick a time"));
+  };
+  const poff = $("#pushOffBtn");
+  if(poff) poff.onclick = async ()=>{
+    PUSH_BUSY = true; render();
+    await pushDisable();
+    PUSH_BUSY = false; render();
+    toast("Reminders off");
+  };
+  const rai = $("#remindAtIn");
+  if(rai) rai.onchange = ()=>{
+    S.remindAt = /^\d{1,2}:\d{2}$/.test(rai.value) ? rai.value : null;
+    save(); queueSync(); render();
+    pushSyncSchedule();
+    const r = nextReminder();
+    toast(r ? "Next reminder " + fmtWhen(r.at).toLowerCase() : "Reminder time cleared");
+  };
   const sti = $("#sleepTargetIn");
   if(sti) sti.onchange = ()=>{
     const v = parseFloat(sti.value);
@@ -16286,6 +16541,9 @@ function finishWorkout(){
   const cycleFinished = recomputeCycle(true);
   S.override = null;
   save(); render();
+  /* The rotation just moved, so the reminder that was queued is now about a session you
+     have already done. Recomputing replaces it, so this needs no cancel first. */
+  pushSyncSchedule();
   // celebration → quality score → cycle wrapped, each waiting for the last
   const afterScore = ()=>{
     if(cycleFinished && S.lastReview) setTimeout(()=>openCycleReview(S.lastReview), 250);
@@ -19790,7 +20048,7 @@ async function gistFetch(path, opts={}){
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
-  "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget",
+  "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
 ];
@@ -20807,7 +21065,7 @@ function mergeBackup(into, d){
       if(d[k] !== undefined) into[k] = d[k];
     });
   }
-  ["setup","lastReview","wakeTime","sleepTarget","asymRetest","volWindow","askWhy",
+  ["setup","lastReview","wakeTime","sleepTarget","remindAt","asymRetest","volWindow","askWhy",
    "experience","viewMode"].forEach(k=>{ if(d[k] !== undefined && d[k] !== null) into[k] = d[k]; });
   return stats;
 }
@@ -21026,6 +21284,10 @@ if(S.active && S.active.restTimer) showRestUI(S.active.restTimer.min);
 /* A signed-in account on a device that has been away: pull once, and only repaint if
    the server actually had something newer than what is on this device. */
 if(hasAccount() && accountAuth()) accountPull().then(ok=>{ if(ok) render(); });
+/* A reminder is a single stored one-shot, so it has to be renewed. Doing it on launch —
+   rather than trying to queue a week of them — means the text is always computed against
+   the plan as it stands today, and a plan edited yesterday cannot send a stale sentence. */
+if(S.pushOn) setTimeout(pushSyncSchedule, 1500);
 /* Coming back to the app after a while: pull the account's copy, in case the last
    session was logged on another device. */
 document.addEventListener("visibilitychange", ()=>{
