@@ -128,7 +128,12 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 
 /* header */
-.hdr{display:flex;align-items:baseline;justify-content:space-between;margin:6px 2px 16px}
+/* NO SIDE MARGIN. #app already pads 14px; another 2px on top of that made the header,
+   the plate strip and the cycle row sit 4px narrower than every card below them. On most
+   tabs there is nothing full-width to compare against, so it passed — on Today, where a
+   strip of plates sits directly above a stack of cards, the two edges visibly disagree
+   and the page reads as the wrong width. */
+.hdr{display:flex;align-items:baseline;justify-content:space-between;margin:6px 0 16px}
 .hdr h1{font-size:20px;font-weight:600;letter-spacing:.15em;display:flex;align-items:center;gap:9px}
 .hdr .date{color:var(--dim);font-family:var(--mono);font-size:13px}
 
@@ -138,7 +143,7 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   box-shadow:none;border:2px dashed var(--faint);
 }
 .plate.rest.cur{border-style:solid;border-color:var(--text)}
-.plates{display:flex;gap:5px;justify-content:space-between;margin:0 2px 18px}
+.plates{display:flex;gap:5px;justify-content:space-between;margin:0 0 18px}
 .plate{
   flex:1;aspect-ratio:1;max-width:44px;min-width:0;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
@@ -158,7 +163,13 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   background:var(--ok);color:#0d1a10;font-size:13px;font-weight:700;
   display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px var(--bg);
 }
-.cycle-row{display:flex;justify-content:space-between;align-items:center;margin:26px 2px 0;color:var(--faint);font-size:12px}
+/* Wraps rather than colliding: "3 rests a cycle, scheduled" and "reset cycle" were
+   fighting over one line on a narrow phone, and the count ran under the button. */
+.cycle-row{display:flex;flex-wrap:wrap;gap:4px 10px;justify-content:space-between;align-items:baseline;margin:26px 0 0;color:var(--faint);font-size:12px}
+.cycle-row > span:first-child{flex:1 1 auto;min-width:0}
+/* margin-left:auto, not justify-content. Once the row wraps, space-between aligns the
+   second line's only item to the START, so "reset cycle" jumped to the left margin. */
+.cycle-row > span:last-child{flex:0 0 auto;white-space:nowrap;margin-left:auto}
 .cycle-row button{background:none;border:none;color:var(--faint);font:11px var(--mono);text-decoration:underline dotted;text-underline-offset:3px;cursor:pointer;padding:6px 5px;min-height:24px}
 /* HOW IT FELT. The old rule dimmed an emoji with opacity and grayscale, neither of
    which does anything useful to a stroked drawing — a grayscale filter on currentColor
@@ -1230,6 +1241,23 @@ body.onboarding #app{padding:0}
 /* trained today, with a rest owed tomorrow */
 .rest-next-card{border-left:3px solid var(--acc);margin-bottom:12px}
 
+/* the moon in the Today header, and its date neighbour */
+.hdr-r{display:flex;align-items:center;gap:10px}
+.hdr-moon{
+  width:32px;height:32px;flex:0 0 auto;border-radius:50%;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;
+  background:var(--card2);border:1px solid var(--line);color:var(--dim);
+  transition:color .16s ease,border-color .16s ease,background .16s ease,transform .16s ease;
+}
+.hdr-moon .ico{width:16px;height:16px;vertical-align:middle}
+.hdr-moon:active{transform:scale(.92)}
+/* Clock running: filled, so at a glance it is a state and not an invitation. */
+.hdr-moon.on{
+  color:var(--acc);border-color:var(--acc);
+  background:color-mix(in srgb, var(--acc) 14%, var(--card2));
+}
+.hdr-moon.on .ico{fill:currentColor;fill-opacity:.18}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -1642,29 +1670,45 @@ nav button:active{transform:scale(.94)}
 .sl-sheet{text-align:center}
 .sl-sheet > *{animation:ciUp .34s var(--ease) both;animation-delay:var(--d,0ms)}
 .sl-art{display:flex;justify-content:center;margin:2px 0 14px}
-.sl-moon{width:min(56vw,190px);height:auto;overflow:visible}
+.sl-moon{width:min(46vw,168px);height:auto;overflow:visible;will-change:transform}
 /* A slow drift. One cycle is six seconds, three pixels of travel: at the edge of
-   noticing, which is the point — it should feel calm, not animated. */
+   noticing, which is the point — it should feel calm, not animated.
+
+   ON THE <svg> ELEMENT, NOT ON A GROUP INSIDE IT, and that is the whole fix. The moon
+   is a full-bleed <rect> cut to a crescent by a mask, and a mask resolves in the
+   REFERENCING element's user space, including that element's own transform. Translating
+   the group therefore slid the rect underneath a mask that stayed put: the crescent did
+   not drift, it CHANGED SHAPE, thinning and fattening once every six seconds. The same
+   trap is documented twice elsewhere in this file. Transforming the svg box moves the
+   whole coordinate system with its mask, so the shape is untouchable. */
 @keyframes slFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
-.sl-body{animation:slFloat 6s ease-in-out infinite;transform-origin:center}
-@keyframes slBreathe{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
-.sl-glow{animation:slBreathe 6s ease-in-out infinite;transform-origin:62px 52px}
+.sl-moon{animation:slFloat 6s ease-in-out infinite}
+@keyframes slBreathe{0%,100%{opacity:.7;transform:scale(1)}50%{opacity:1;transform:scale(1.06)}}
+/* fill-box, or a px transform-origin is measured from the bounding box corner and the
+   glow pulses off to one side of the moon it belongs to. */
+.sl-glow{animation:slBreathe 6s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
 /* Stars arrive one after another rather than together, which is what stops it reading as
-   a graphic that faded in and starts it reading as a sky. */
-@keyframes slTwinkle{from{opacity:0;transform:scale(.4)}to{opacity:.55;transform:none}}
-.sl-star{opacity:0;transform-origin:center;
-  animation:slTwinkle .5s var(--ease) forwards;animation-delay:calc(160ms + var(--i) * 90ms)}
+   a graphic that faded in and starts it reading as a sky. Then they keep breathing, each
+   on its own slightly different clock, so the sky is never quite still. */
+@keyframes slTwinkle{from{opacity:0;transform:scale(.4)}to{opacity:.5;transform:none}}
+@keyframes slShimmer{0%,100%{opacity:.28}50%{opacity:.62}}
+.sl-star{
+  opacity:0;transform-box:fill-box;transform-origin:center;
+  animation:slTwinkle .5s var(--ease) forwards,
+            slShimmer calc(3.4s + var(--i) * 420ms) ease-in-out infinite;
+  animation-delay:calc(160ms + var(--i) * 90ms), calc(700ms + var(--i) * 210ms);
+}
 /* The morning version of the same art: the glow warms and the stars stay out. */
-.sl-dawn .sl-star{animation-name:slTwinkle;animation-duration:.4s;opacity:0;
-  animation-fill-mode:forwards;animation-delay:calc(120ms + var(--i) * 60ms)}
+.sl-dawn .sl-star{animation-duration:.4s, 3.4s;
+  animation-delay:calc(120ms + var(--i) * 60ms), calc(600ms + var(--i) * 180ms)}
 .sl-dawn .sl-glow{animation-duration:4s}
 .sl-t{font-family:var(--disp);font-size:clamp(22px,6.4vw,27px);letter-spacing:.05em;line-height:1.15}
 .sl-p{margin:9px auto 0;max-width:40ch;color:var(--dim);font-size:13.5px;line-height:1.6}
 .sl-p b{color:var(--text)}
 .sl-go{margin-top:20px}
 @media (prefers-reduced-motion:reduce){
-  .sl-body,.sl-glow{animation:none}
-  .sl-star{animation:none;opacity:.55;transform:none}
+  .sl-moon,.sl-glow{animation:none}
+  .sl-star{animation:none;opacity:.5;transform:none}
 }
 /* ===================== the daily check-in sheet =====================
    Same tokens as everything else: copper accent, mono labels, the app's own card and
@@ -3238,7 +3282,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.8";
+const APP_VERSION = "6.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11671,6 +11715,14 @@ function profMini(){
 function hdrRight(extra){
   return `<span class="hdr-right">${extra||""}</span>`;
 }
+/* A small solid crescent for the header, drawn as a path rather than a masked rect: at
+   22px there is no room for a glow and nothing to gain from the mask, and a path can
+   never slide out from under one. */
+function moonGlyph(){
+  return '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+    + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'
+    + '<path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1Z"/></svg>';
+}
 function openProfilePicker(){
   const cur = PROF.activeId;
   const blocked = !!(S && S.active);
@@ -11968,6 +12020,36 @@ function moonSVG(){
 /* Asked when you open the app after your own sleep time. "Not yet" is a real answer and
    it stops the asking for the rest of the night — being asked twice in an hour is how a
    prompt becomes something you swipe away without reading. */
+/* The clock is already running. Tapping the moon then is not a question, it is a
+   status — with the one action that matters if it was started by accident. */
+function openSleepRunningSheet(){
+  const pend = S.sleepPend || {};
+  const since = pend.startedAt ? fmtClockShort(pend.startedAt) : "";
+  const hrs = pend.startedAt ? (Date.now() - pend.startedAt)/3600e3 : 0;
+  showModal(`<div class="sl-sheet">
+    <div class="sl-art" style="--d:0ms">${moonSVG()}</div>
+    <div class="sl-t" style="--d:80ms">Clock's running</div>
+    <div class="sl-p" style="--d:130ms">Started at <b>${esc(since)}</b>${
+      hrs >= 0.5 ? ", " + fmtHrs(hrs) + " ago" : ""}. Open Element 26 when you wake up and
+      it'll ask if you've just got up, then work out exactly how long you slept.</div>
+    <button class="btn sl-go" id="slClose" style="--d:190ms">Good night</button>
+    <div class="ci-alt" style="--d:230ms">
+      <button class="nb-link" id="slCancel">I'm not asleep, cancel it</button>
+    </div>
+  </div>`);
+  const m = $("#modal");
+  m.querySelector("#slClose").onclick = hideModal;
+  m.querySelector("#slCancel").onclick = ()=>{
+    delete S.sleepPend; save(); queueSync(); hideModal(); render();
+    toast("Sleep clock cancelled");
+  };
+  MODAL_REOPEN = openSleepRunningSheet;
+}
+function fmtHrs(h){
+  if(h < 1) return Math.round(h*60) + " min";
+  const w = Math.floor(h), mm = Math.round((h-w)*60);
+  return w + "h" + (mm ? " " + mm + "m" : "");
+}
 function openSleepSheet(){
   showModal(`<div class="sl-sheet">
     <div class="sl-art" style="--d:0ms">${moonSVG()}</div>
@@ -11986,8 +12068,12 @@ function openSleepSheet(){
   m.querySelector("#slGo").onclick = ()=>{
     S.sleepPend = {startedAt: Date.now(), date: todayStr()};
     save(); queueSync(); hideModal();
+    // so the header moon fills straight away rather than at the next render
+    render();
     toast("Good night \u2014 clock started " + fmtClockShort(S.sleepPend.startedAt));
   };
+  // "Not yet" still silences the automatic prompt for the night; the header moon is how
+  // you get back in, so nothing is lost by changing your mind.
   m.querySelector("#slNot").onclick = ()=>{ S.sleepAsked = todayStr(); saveQuiet(); hideModal(); };
   m.querySelector("#slOff").onclick = ()=>{
     trainPrefs().sleepPrompt = false; save(); queueSync(); hideModal();
@@ -12189,7 +12275,25 @@ function inlineTipHTML(a, seen){
 function viewToday(){
   const wid = todaysWorkoutId();
   const m = dayMeta(wid);
-  let h = `<div class="hdr"><h1>${brandMark()}</h1><span class="date num">${fmtDate(todayStr())}</span></div>`;
+  /* THE WAY BACK INTO "OFF TO BED?".
+
+     That prompt is deliberately once a night: being asked twice in an hour is how a
+     prompt becomes something you dismiss without reading, so "Not yet" stops it for the
+     rest of the night. Which was fine until somebody meant "not yet, ask me in an hour"
+     — and there was no way back in. The clock could only be started by a sheet that had
+     already decided not to appear again.
+
+     So a moon sits in the header for as long as the night window is open, whether or not
+     the sheet has been shown. It is the same sheet, opened on purpose. Once the clock IS
+     running it stays, filled, and reports rather than asks. */
+  const slNow = sleepWindowNow();
+  const slRunning = !!(S.sleepPend && S.sleepPend.startedAt);
+  const moonBtn = (slNow || slRunning)
+    ? `<button class="hdr-moon${slRunning ? " on" : ""}" id="todayMoon"
+         aria-label="${slRunning ? "Sleep clock running, tap to check" : "Going to sleep"}"
+         title="${slRunning ? "Sleep clock running" : "Going to sleep?"}">${moonGlyph()}</button>`
+    : "";
+  let h = `<div class="hdr"><h1>${brandMark()}</h1><span class="hdr-r">${moonBtn}<span class="date num">${fmtDate(todayStr())}</span></span></div>`;
 
   h += plateStrip();
 
@@ -15018,6 +15122,13 @@ function bind(){
   const rskK = $("#restSkipKeep");
   // Keeping it is the default, so this only has to get the offer off the screen.
   if(rskK) rskK.onclick = ()=>{ REST_SKIP_DISMISSED = todayStr(); render(); };
+  const tm = $("#todayMoon");
+  if(tm) tm.onclick = ()=>{
+    /* Opened on purpose, so it does NOT re-arm the once-a-night guard: somebody who
+       taps the moon and then changes their mind should be able to tap it again. */
+    if(S.sleepPend && S.sleepPend.startedAt) openSleepRunningSheet();
+    else openSleepSheet();
+  };
   const crb = $("#clearRestBtn");
   if(crb) crb.onclick = ()=>{
     // frees a credit but keeps the day in the permanent rest log: you did rest that
