@@ -3439,7 +3439,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "8.0";
+const APP_VERSION = "8.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9474,7 +9474,17 @@ let OB = null;     // the in-progress answers; null when the wizard is closed
 /* "where" sits between accepting the plan and starting: a plan somebody is already
    three weeks into is not a plan starting today, and assuming it is gets two things
    wrong that are hard to undo later. See viewOnboarding's "where" step. */
-const OB_STEPS = ["plan","where","done"];
+const OB_STEPS = ["plan","where","remind","done"];
+/* NOT EVERY STEP APPLIES TO EVERY PERSON. The reminders step is the first one that can
+   be genuinely impossible rather than merely skippable — on iOS, notifications need the
+   app installed to the Home Screen, so somebody meeting Element 26 in a Safari tab
+   cannot accept the offer no matter how it is worded. Offering it anyway would spend a
+   whole first-run screen explaining why the button does nothing. It is skipped instead,
+   and the same offer is waiting in Settings once they install. */
+function obStepLive(step){
+  if(step === "remind") return !!VAPID_PUBLIC && !S.pushOn && pushBlocker() === "";
+  return true;
+}
 
 function needsOnboarding(){ return !S.setup && !(S.sessions && S.sessions.length); }
 function startOnboarding(){
@@ -9489,7 +9499,10 @@ function startOnboarding(){
   openAIImport(true);
 }
 function obGo(n){
-  OB.step = Math.max(0, Math.min(OB_STEPS.length-1, n));
+  let i = Math.max(0, Math.min(OB_STEPS.length-1, n));
+  // walk past anything that does not apply, never off the end
+  while(i < OB_STEPS.length-1 && !obStepLive(OB_STEPS[i])) i++;
+  OB.step = i;
   render();
   window.scrollTo(0,0);
 }
@@ -9526,6 +9539,10 @@ function finishOnboarding(){
   S.planStart = (o.started && obAge && obAge.w) ? Date.now() - obAge.w * 7 * DAY_MS : Date.now();
   OB = null;
   save(); queueSync(); render();
+  /* Anything scheduled during the reminders step was computed against the starter
+     programme, because the import is only adopted above. Recompute now that there is a
+     real plan to name. */
+  pushSyncSchedule();
   /* The tour comes AFTER the plan is in, not before it. Explaining a rep range against
      an empty programme is explaining it in the abstract; explaining it one screen away
      from your own first session is explaining it about something. */
@@ -9612,10 +9629,12 @@ function obCard(kicker, title, sub){
 }
 function viewOnboarding(){
   const step = OB_STEPS[OB.step];
-  /* "plan" is a list of whatever was imported, so it is the one step that can outgrow the
-     window — and if it does, the button under it goes with it. It gets its own scroll
-     container; the fixed-copy steps stay clipped, as designed. */
-  const scrolls = step === "plan";
+  /* The steps that can outgrow the window, and if they do, the button under them goes
+     with it. "plan" is a list of whatever was imported, so its length is somebody else's
+     decision; "remind" is three explanations plus two buttons, which fits a phone
+     comfortably and does not fit a 320px one or a phone held sideways. Both get a real
+     scroll container. The fixed-copy steps stay clipped, as designed. */
+  const scrolls = step === "plan" || step === "remind";
   let h = `<div class="ob-wrap ob-first${scrolls ? " ob-scroll" : ""}">`;
 
   if(step === "plan"){
@@ -9684,6 +9703,19 @@ function viewOnboarding(){
     h += `<button class="btn" id="obWhereGo">${OB.started ? "That's where I am" : "Start from day one"}</button>`;
   }
 
+  if(step === "remind"){
+    h += obCard("Reminders", "Want a nudge?",
+      `<p>Three notifications, at most, and each one can be turned off on its own. You can
+       change all of this later in Settings.</p>`);
+    h += `<div class="ob-tips">
+      <div class="ob-tip"><b>Which session is up</b>, at an hour you pick. Skipped on a day you've already trained.</div>
+      <div class="ob-tip"><b>A nudge at bedtime</b> to start the sleep clock, so your sleep gets measured rather than remembered.</div>
+      <div class="ob-tip"><b>A prompt in the morning</b> to log the night. Element 26 works out roughly when you get up from the mornings you log — it won't guess before it has a few.</div>
+    </div>`;
+    h += `<button class="btn" id="obRemindYes">Turn on reminders</button>
+      <div class="ci-alt" style="margin-top:14px"><button class="nb-link" id="obRemindNo">Not now</button></div>`;
+  }
+
   if(step === "done"){
     h += obCard("", "You're set up",
       `<p>Your first session is waiting on the Today tab. Tap an exercise, log your sets, and the app takes it from there.</p>`);
@@ -9712,6 +9744,19 @@ function bindOnboarding(){
     OB.planAge = parseInt(b.dataset.obage, 10) || 0; render();
   });
   on("obWhereGo", ()=> obGo(OB.step+1));
+  /* pushEnable() asks for permission with nothing awaited in front of it, which is the
+     only way Safari honours the prompt — so it is called straight off the tap, and the
+     screen moves on whether it succeeded or not. A first run must not be able to dead-end
+     on a notification permission. */
+  on("obRemindYes", async ()=>{
+    const btn = $("#obRemindYes");
+    if(btn){ btn.disabled = true; btn.textContent = "Setting that up\u2026"; }
+    const err = await pushEnable();
+    if(err) toast("Reminders can be turned on later in Settings");
+    else toast("Reminders on");
+    obGo(OB.step+1);
+  });
+  on("obRemindNo", ()=> obGo(OB.step+1));
   /* Every "import" entry point lands in the same place. The importer decides for itself
      whether what you handed it is an Element 26 backup (adopted as-is) or a plan in some
      other form (read by the model), because that distinction is ours to make, not
