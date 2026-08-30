@@ -1354,6 +1354,10 @@ body.onboarding #app{padding:0}
 .coach-x .ico{width:13px;height:13px}
 .coach-x:hover{color:var(--dim);background:rgba(255,255,255,.05)}
 
+/* the tour sheet: a guide over the app, not a dialog covering it */
+.modal-bg.tour-open{background:rgba(0,0,0,.34);align-items:flex-end}
+.modal-bg.tour-open .modal{max-height:66vh}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -3370,7 +3374,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "7.5";
+const APP_VERSION = "7.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8804,75 +8808,92 @@ async function accountPull(){
    Each term it introduces is also in the glossary, so nothing here is the only place a
    word is explained.
    ===================================================================== */
+/* Each step names the TAB it belongs to, and the tour switches to it before drawing the
+   card. That is the difference between a tour and a slideshow: the sheet sits over the
+   real screen it is describing, so "the strip at the top is your rotation" is read with
+   that strip visible above it rather than from memory. */
 const TOUR_STEPS = [
   {
-    key: "welcome",
-    art: "plate",
-    h: "Here's how it works",
-    p: "Six short cards, about a minute. You can skip out of it at any point, and it's in Settings if you want it again.",
+    key: "welcome", tab: "today", art: "plate",
+    h: "Let's have a look round",
+    p: "Seven short cards. It'll take you through each tab as it goes, so you're always looking at the thing being described. Skip out any time — it's in Settings if you want it again.",
     bits: []
   },
   {
-    key: "cycle",
-    art: "strip",
-    h: "Your week is a cycle, not a calendar",
-    p: "The strip at the top of Today is your rotation. It moves forward when you train, not when the date changes — so missing a Tuesday doesn't cost you a workout, it just means the cycle takes longer to come round.",
+    key: "today", tab: "today", art: "strip",
+    h: "Today: what you're doing now",
+    p: "Above this card: the strip is your rotation and the card under it is the session that's up. Everything you log happens here.",
     bits: [
-      ["Cycle", "one full pass through your rotation, however many days that takes"],
-      ["Rest day", "a scheduled day off, marked R. A day you simply didn't train gets recorded as a skip instead, and doesn't count as one of them"]
+      ["The strip", "one plate per day of your cycle. It moves forward when you TRAIN, not when the date changes — missing a Tuesday costs you nothing, the cycle just takes longer to come round"],
+      ["R plates", "scheduled rest. A day you simply didn't train is recorded as a skip instead, and doesn't use one up"]
     ]
   },
   {
-    key: "set",
-    art: "setrow",
+    key: "set", tab: "today", art: "setrow",
     h: "A set is three numbers",
-    p: "Weight, reps, and how hard it felt. The first two you know. The third is the one worth learning, and it's the one this app is built around.",
+    p: "Weight, reps, and how hard it felt. Each exercise above shows its targets — sets × rep range, and an RPE.",
     bits: [
-      ["Rep range", "\"8–12\" means work up the range at the same load. When the last set reaches the top of it, the weight goes up and you rebuild from the bottom"],
-      ["Working set", "a real set, not a warm-up. Only these are graded"],
-      ["Warm-ups", "before you have logged anything they read \"light\", \"build up\", \"almost there\" \u2014 placeholders, not instructions. One full session and they become real weights off your own working load"]
-    ]
-  },
-  {
-    key: "rpe",
-    art: "rpe",
-    h: "RPE is reps in reserve",
-    p: "Rate of Perceived Exertion, 1–10. It sounds vague and isn't: what it actually measures is how many more reps you could have done. That makes it a number you can check yourself against, not a feeling.",
-    bits: [
-      ["RPE 10", "nothing left. You could not have done another rep"],
-      ["RPE 9", "one more rep in you"],
-      ["RPE 8", "two more"],
-      ["RPE 7", "three more — comfortably short of failure"]
+      ["Rep range", "\"8–12\" means work up the range at one load. When the last set reaches the top, the weight goes up and you rebuild from the bottom"],
+      ["RPE", "how close to failure, 1–10. 10 is nothing left, 9 is one rep in you, 8 is two. A target of 8 means finish with about two left"],
+      ["Warm-ups", "before you've logged anything they read \"light\", \"build up\" — placeholders, not instructions. One full session and they become real weights off your own load"]
     ],
-    foot: "A target of RPE 8 means finish with about two reps left. Logging it honestly is what lets the app tell a heavy day from a bad one."
+    foot: "Tap ✎ on any exercise while you train to say how it went. Those notes reach your grade and your Body tab."
   },
   {
-    key: "notes",
-    art: "note",
-    h: "Tell it what the numbers can't",
-    p: "Tap ✎ on any exercise to say how it actually went — form felt off, equipment was different, still learning the movement. Those notes turn up in your grade and your Body tab.",
+    key: "history", tab: "history", art: "grade",
+    h: "History: every session, graded",
+    p: "This is what's behind you. Each finished session is scored on what could actually be measured, with what to change next time.",
     bits: [
-      ["Read as context", "a note explains a number. It never moves your loads on its own"]
+      ["The grade", "eight sections — overload, effort, rest, rep ranges and more. Anything it couldn't measure is left out rather than marked down"],
+      ["Tap a session", "to see the sets as you logged them, edit anything, or read the grade again"]
     ]
   },
   {
-    key: "after",
-    art: "grade",
-    h: "Every session gets graded",
-    p: "When you finish, Element 26 scores the session on what it could actually measure, says what to change next time, and puts the loads that earned an increase in front of you.",
+    key: "body", tab: "body", art: "note",
+    h: "Body: how it's all going",
+    p: "The muscle map, what each one is getting, and everything the app has noticed about your training.",
     bits: [
-      ["Body tab", "what each muscle is getting, how recovered it is, and anything that needs attention"],
-      ["Deload", "a lighter week the app calls when fatigue has built up. Same loads, fewer sets"]
+      ["Worth a look", "anything under- or over-trained, with a button that actually changes your plan"],
+      ["From your workouts", "the flags your grades raised, kept here so they don't vanish with the card"],
+      ["What you've said", "your own notes, which future grades read as context"]
+    ]
+  },
+  {
+    key: "program", tab: "program", art: "doc",
+    h: "Program: your plan, as written",
+    p: "Every day, every exercise, sets, reps and targets. Element 26 doesn't write programmes — it runs the one you brought.",
+    bits: [
+      ["Editable", "change anything here and the app follows it from the next session"],
+      ["Re-read my plan", "rebuilds the programme from the document you imported, without re-uploading it"]
+    ]
+  },
+  {
+    key: "settings", tab: "sync", art: "gear",
+    h: "Settings: the things you'll want",
+    p: "Your account and recovery key, cloud sync, pounds or kilos, and how the app behaves.",
+    bits: [
+      ["Advanced settings", "side handling, warm-ups, progression, your bar weight — all set during the import, all changeable"],
+      ["How it works", "this tour, whenever you want it again"]
     ],
     foot: "Any underlined word anywhere in the app opens its own explanation. Nothing here is the only place it's written down."
   }
 ];
 let TOUR = null;   // {i} while it is open, null otherwise
 function tourSeen(){ return !!S.tourDone; }
-function startTour(){ TOUR = {i: 0}; drawTour(); }
+function startTour(){
+  // where they were, so a tour taken from Settings puts them back rather than adrift
+  TOUR = {i: 0, from: TAB, fromAdv: ADV_OPEN};
+  drawTour();
+}
 function endTour(done){
+  const t = TOUR;
   TOUR = null;
   if(done){ S.tourDone = true; save(); queueSync(); }
+  /* Back to Today, which is where somebody who has just been shown the app wants to be —
+     except when they started the tour from somewhere else on purpose, in which case they
+     get that place back. */
+  TAB = (t && t.from && t.from !== "today") ? t.from : "today";
+  ADV_OPEN = !!(t && t.fromAdv);
   hideModal();
   render();
 }
@@ -8892,7 +8913,9 @@ function tourArtHTML(kind){
       [7,8,9,10].map(n=>`<span class="tr-n${n===8?" on":""}">${n}</span>`).join("")
     }</div>`;
   }
-  if(kind === "note"){ return `<div class="tour-art tour-glyph">✎</div>`; }
+  if(kind === "note"){ return `<div class="tour-art tour-glyph">${ICON.note}</div>`; }
+  if(kind === "doc"){ return `<div class="tour-art tour-glyph">${ICON.doc}</div>`; }
+  if(kind === "gear"){ return `<div class="tour-art tour-glyph">${ICON.spark}</div>`; }
   if(kind === "grade"){ return `<div class="tour-art tour-glyph tour-grade">A−</div>`; }
   return `<div class="tour-art tour-plate"><span></span></div>`;
 }
@@ -8915,7 +8938,20 @@ function tourHTML(){
   </div>`;
 }
 function drawTour(){
+  const st = TOUR_STEPS[TOUR.i];
+  /* THE TAB MOVES FIRST. render() rewrites #app and leaves the modal alone, so the page
+     behind the sheet becomes the one this card is about before the card is drawn. */
+  if(st && st.tab && (TAB !== st.tab || ADV_OPEN)){
+    TAB = st.tab;
+    ADV_OPEN = false;
+    render();
+    window.scrollTo(0, 0);
+  }
   showModal(tourHTML());
+  /* A tour sheet is not a dialog: the page behind it is half the point, so the backdrop
+     lifts and the sheet gives up the bottom two thirds instead of taking 88% of the
+     screen. */
+  $("#modalBg").classList.add("tour-open");
   const card = $("#modal").querySelector(".tour");
   stageReveal(card, 0.045, 0.3);
   MODAL_REOPEN = drawTour;
@@ -19606,6 +19642,8 @@ function showModal(html){
   MODAL_REOPEN = null;
   $("#modal").innerHTML = html;
   $("#modal").scrollTop = 0;
+  // any previous sheet's mode is cleared; the tour re-adds its own after this returns
+  $("#modalBg").classList.remove("tour-open");
   $("#modalBg").classList.add("show");
   /* Scoped to the modal, deliberately. The full-screen importer has a #closeModal of its
      own and sits EARLIER in the document, so a document-wide lookup here rebound the
