@@ -121,7 +121,15 @@ body{
   -webkit-font-smoothing:antialiased;
   padding-bottom:calc(80px + env(safe-area-inset-bottom));
 }
-#app{max-width:600px;margin:0 auto;padding:16px 14px 20px}
+/* THE STATUS BAR SITS ON TOP OF THIS WITHOUT THE TOP INSET.
+
+   The viewport is viewport-fit=cover, which is what lets the app paint into the notch
+   area and behind the home indicator — and it means nothing is kept out of those areas
+   unless it asks. body already reserves the BOTTOM inset for the tab bar, and every
+   other full-screen surface here reserves the top one (onboarding, the importer, the
+   report, the cycle review). The main app never did, so on any phone with a notch the
+   header ran underneath the clock and the battery. */
+#app{max-width:600px;margin:0 auto;padding:calc(16px + env(safe-area-inset-top)) 14px 20px}
 /* Mono headings need less weight and more air than a condensed face did: bold mono at
    the old tracking reads as a shout. 600 with wide tracking reads as a label. */
 h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter-spacing:.11em;margin:0}
@@ -1258,6 +1266,28 @@ body.onboarding #app{padding:0}
 }
 .hdr-moon.on .ico{fill:currentColor;fill-opacity:.18}
 
+/* A REST DAY IS ONE CARD AND EIGHT HUNDRED PIXELS OF NOTHING, and the first attempt at
+   fixing that centred the card in a min-height box. That only moved the emptiness: a
+   guessed subtraction is wrong on every screen it was not guessed for, and centring
+   whitespace is still whitespace. The page is filled with something worth reading
+   instead — what the rest is FOR, which is tomorrow. */
+.today-rest{display:flex;flex-direction:column;gap:12px}
+.rest-tmr{padding:16px}
+.rest-tmr-k{font:10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.rest-tmr-h{display:flex;align-items:baseline;gap:9px;margin-top:5px}
+.rest-tmr-h b{font-size:19px;font-weight:600}
+.rest-tmr-h .dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+.rest-tmr-n{font:12px var(--mono);color:var(--dim);margin-left:auto;white-space:nowrap}
+.rest-tmr-list{margin-top:11px;display:flex;flex-direction:column}
+.rest-tmr-ex{
+  display:flex;justify-content:space-between;gap:12px;align-items:baseline;
+  padding:7px 0;border-top:1px solid var(--line);font-size:14px;
+}
+.rest-tmr-ex:first-child{border-top:0}
+.rest-tmr-ex span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rest-tmr-ex i{font-style:normal;font-family:var(--mono);font-size:12.5px;color:var(--dim);white-space:nowrap}
+.rest-tmr-more{font-size:12.5px;color:var(--faint);padding-top:8px}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -1816,9 +1846,15 @@ a{color:var(--text)}
 #app>.card:nth-of-type(7){animation-delay:.36s}
 #app>.card:nth-of-type(n+8){animation-delay:.42s}
 
-@keyframes ringPulse{0%{transform:scale(.8);opacity:.9}75%{transform:scale(1.3);opacity:0}100%{transform:scale(1.3);opacity:0}}
+/* THE PULSE HAS TO FIT IN THE GUTTER. The current plate is already scaled 1.12 and
+   carries a 4px outer ring; the pulse then sat 7px outside that again and grew to 1.3,
+   which put its widest moment about 16px beyond the plate. The row is aligned to the
+   card edge and the gutter is 14px, so on the LAST plate — which is where "today" lands
+   at the end of a cycle — the ring was drawn past the edge of the screen and clipped.
+   Tighter and calmer: it now peaks around 9px out, comfortably inside the gutter. */
+@keyframes ringPulse{0%{transform:scale(.85);opacity:.85}75%{transform:scale(1.15);opacity:0}100%{transform:scale(1.15);opacity:0}}
 .plate{overflow:visible}
-.plate.cur::after{content:"";position:absolute;inset:-7px;border-radius:50%;border:3px solid rgba(255,255,255,.55);animation:ringPulse 1.7s ease-out infinite;pointer-events:none}
+.plate.cur::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid rgba(255,255,255,.5);animation:ringPulse 1.7s ease-out infinite;pointer-events:none}
 
 @keyframes bounceIn{0%{transform:scale(0)}55%{transform:scale(1.45)}100%{transform:scale(1)}}
 .pcheck{animation:bounceIn .5s cubic-bezier(.34,1.56,.64,1) both}
@@ -3282,7 +3318,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.9";
+const APP_VERSION = "7.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -12305,6 +12341,11 @@ function viewToday(){
     /* A scheduled rest is the plan speaking, a taken one is you. Saying which stops the
        screen reading as the app having decided something on your behalf. */
     const sched = !isRestDay(todayStr()) && scheduledRestToday();
+    /* A rest day has one card on it, and left at the top of a phone screen that is one
+       card and eight hundred pixels of nothing — the page reads as though it failed to
+       load the rest of itself. The block below fills the space that is actually left and
+       centres what little there is in it. */
+    h += `<div class="today-rest">`;
     h += `<div class="card" style="text-align:center;padding:34px 20px">
       <h3 style="font-size:26px">Rest day</h3>
       <div class="sub" style="margin-top:8px">${sched
@@ -12332,6 +12373,35 @@ function viewToday(){
         <div class="btn-row"><button class="btn ghost small" id="restSkipKeep" style="flex:1">Keep the rest day</button></div>
       </div>`;
     }
+    /* WHAT THE REST IS FOR. A rest day has nothing to do on it, which is the point, but
+       a screen with nothing on it reads as a screen that failed to load. Tomorrow's
+       session is the one thing genuinely worth knowing today — it is what you are
+       resting for, and seeing it is how somebody decides whether to go to bed early. */
+    const tw = ROTATION[S.pointer];
+    /* resolvedProgram() returns {chosen, other, isFinisher} per slot, not the entries
+       themselves — the wrapper is what carries the ⇄ alternative. The exercise is
+       `chosen`, and the finisher belongs to whatever day it is run on rather than to
+       tomorrow specifically, so it is left out of a one-day preview. */
+    const tex = (resolvedProgram(tw) || []).filter(x=> x && x.chosen && !x.isFinisher)
+                                           .map(x=> x.chosen);
+    if(tex.length){
+      const meta = dayMeta(tw);
+      const shown = tex.slice(0, 6);
+      h += `<div class="card rest-tmr">
+        <div class="rest-tmr-k">Tomorrow</div>
+        <div class="rest-tmr-h">
+          <span class="dot" style="background:${meta.color}"></span>
+          <b>${esc(meta.name)}</b>
+          <span class="rest-tmr-n">${tex.length} exercises \u00b7 ${
+            tex.reduce((n,e)=> n + (e.sets||0), 0)} sets</span>
+        </div>
+        <div class="rest-tmr-list">${shown.map(e=>
+          `<div class="rest-tmr-ex"><span>${esc(e.name)}</span><i>${e.sets}\u00d7${esc(e.reps||"")}</i></div>`).join("")}</div>
+        ${tex.length > shown.length
+          ? `<div class="rest-tmr-more">and ${tex.length - shown.length} more</div>` : ""}
+      </div>`;
+    }
+    h += `</div>`;
     return h;
   }
 
