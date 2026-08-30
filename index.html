@@ -430,9 +430,44 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 }
 .set-tag b{color:var(--acc);font-weight:600}
 .set-tag-match{font-style:normal;color:var(--dim);overflow:hidden;text-overflow:ellipsis}
+
+/* ===== THE WEAKER-SIDE CAP, MADE UNMISSABLE =====
+
+   This is the one instruction in a session that CONTRADICTS the numbers printed beside
+   it: the plan says 8-12 at RPE 8, and the rule says stop at 8 whatever is left in the
+   tank. As a dim 11px line floating above the row it was both easy to miss and
+   ambiguous about which row it belonged to — the gap above it was smaller than the gap
+   below, so it read as a footnote on the PREVIOUS set.
+
+   So a capped set is welded to its banner: the banner squares off its bottom corners,
+   the row squares off its top ones, and they share an accent edge. There is no reading
+   of that which attaches the instruction to the wrong set. */
+.set-tag.is-cap{
+  margin:14px 0 0 0;padding:7px 11px;
+  border-radius:10px 10px 0 0;
+  background:var(--acc-soft);border:1px solid var(--acc-line);border-bottom:0;
+  font-size:12.5px;white-space:normal;flex-wrap:wrap;align-items:baseline;
+}
+.set-tag.is-cap::before{display:none}
+/* nowrap on the instruction itself: "STOP AT 8" breaking after "STOP" turns the one
+   line that has to be read at a glance into two half-phrases. */
+.set-tag.is-cap b{
+  font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--acc);
+  white-space:nowrap;flex:0 0 auto;
+}
+.set-tag.is-cap .set-tag-match{flex:1 1 190px;min-width:0}
+.set-tag.is-cap .set-tag-match{color:var(--text);white-space:normal}
 /* A matched set is the stronger limb doing the weaker limb's number, so the row is
    marked as taking its instruction from somewhere other than the plan. */
-.set.is-matched .idx{color:var(--acc)}
+.set.is-matched{
+  background:var(--acc-soft);border:1px solid var(--acc-line);border-top:0;
+  border-radius:0 0 10px 10px;padding:6px 9px;
+}
+.set.is-matched .idx{color:var(--acc);font-weight:700}
+/* The number you are stopping on, shown as a target rather than as a hint you can type
+   over without noticing. */
+.set.is-matched input[data-f="reps"]{border-color:var(--acc-line);color:var(--acc)}
+.set.is-matched input[data-f="reps"]::placeholder{color:var(--acc);opacity:.85}
 .rpe-target.is-cap{background:var(--acc-soft);color:var(--acc);border-color:var(--acc-line)}
 .rpe-target.is-tech{background:var(--acc-soft);color:var(--acc);border-color:var(--acc-line)}
 /* Sub-sets: the drops, mini-sets and bursts inside one set. Indented and set in the mono
@@ -3336,7 +3371,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "7.1";
+const APP_VERSION = "7.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -12839,7 +12874,7 @@ function rpeTargetChipHTML(entry, si, rx){
   /* A set that is deliberately cut short has no effort target to hit, so it shows the cap
      instead of a number it is not supposed to reach. Printing "8" there would be asking
      for the opposite of the rule in force. */
-  if(rx.match != null) return `<span class="rpe-target is-cap" title="Stop on the matched rep count, not on an effort target">cap</span>`;
+  if(rx.match != null) return `<span class="rpe-target is-cap" title="No effort target on a capped set: stop on the rep count, however easy it feels">\u2014</span>`;
   const t = rx.rpe != null ? rx.rpe : rpeTargetFor(entry, si);
   if(t == null) return "";
   return `<span class="rpe-target${rx.rpe != null ? " is-tech" : ""}" title="${rx.rpe != null
@@ -19071,12 +19106,18 @@ function setTagHTML(en, si, rx){
     if(rx.techDetail) bits.push(`<i class="set-tag-match">${esc(rx.techDetail)}</i>`);
     title = rx.techLabel + (rx.techDetail ? " — " + rx.techDetail : "");
   }
-  if(rx.match != null) bits.push(`<i class="set-tag-match">${esc(rx.why)} · ${rx.match} rep${rx.match===1?"":"s"}</i>`);
+  /* Said as an instruction, not as a label. "match your left leg · 8 reps" describes the
+     rule; "STOP AT 8" tells you what to do, and the reason follows it. */
+  if(rx.match != null){
+    bits.push(`<b>Stop at ${rx.match}</b>`);
+    bits.push(`<i class="set-tag-match">even if you have more in you \u2014 ${esc(rx.why)}, the side setting the number</i>`);
+  }
   else if(rx.why) bits.push(`<i class="set-tag-match">${esc(rx.why)}</i>`);
   if(!bits.length) return "";
   /* Titled as well as shown, because the line truncates rather than wrapping — a long
      instruction from a plan should shorten on screen, not push the set row down. */
-  return `<div class="set-tag"${title ? ` title="${attrSafe(title)}"` : ""}>${bits.join("")}</div>`;
+  return `<div class="set-tag${rx.match != null ? " is-cap" : ""}"${
+    title ? ` title="${attrSafe(title)}"` : ""}>${bits.join("")}</div>`;
 }
 /* What the technique adds to THIS row, which is now only the thing you cannot get from
    the label: somewhere to log the pieces. The prose cue that used to sit here is gone —
