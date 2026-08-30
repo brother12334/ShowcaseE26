@@ -1854,12 +1854,22 @@ nav button:active{transform:scale(.94)}
 .sl-glow{animation:slBreathe 6s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
 /* The morning version of the same art: the same moon, breathing a little faster. */
 .sl-dawn .sl-glow{animation-duration:4s}
+/* The bell is a 24px line icon, not the full-bleed moon artwork, so it needs its own
+   size here or it arrives as a speck in the middle of a sheet built for something 168px
+   wide. A ring rather than a drift: one tilt, once, on open — a bell that swings forever
+   is a bell you want to turn off. */
+.sl-bell svg{width:clamp(52px,15vw,68px);height:auto;color:var(--acc);stroke-width:1.3}
+@keyframes bellRing{
+  0%{transform:rotate(0)}   14%{transform:rotate(11deg)}  30%{transform:rotate(-8deg)}
+  46%{transform:rotate(5deg)} 60%{transform:rotate(-3deg)} 74%,100%{transform:rotate(0)}
+}
+.sl-bell svg{transform-origin:50% 18%;animation:bellRing 1.1s cubic-bezier(.36,.07,.19,.97) .25s both}
 .sl-t{font-family:var(--disp);font-size:clamp(22px,6.4vw,27px);letter-spacing:.05em;line-height:1.15}
 .sl-p{margin:9px auto 0;max-width:40ch;color:var(--dim);font-size:13.5px;line-height:1.6}
 .sl-p b{color:var(--text)}
 .sl-go{margin-top:20px}
 @media (prefers-reduced-motion:reduce){
-  .sl-moon,.sl-glow{animation:none}
+  .sl-moon,.sl-glow,.sl-bell svg{animation:none}
 }
 /* ===================== the daily check-in sheet =====================
    Same tokens as everything else: copper accent, mono labels, the app's own card and
@@ -3477,7 +3487,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "8.2";
+const APP_VERSION = "8.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4186,7 +4196,9 @@ const ICON = {
   spark:   svgIcon('<path d="M12 3v5M12 16v5M3 12h5M16 12h5"/><path d="m6.5 6.5 3 3M14.5 14.5l3 3M17.5 6.5l-3 3M9.5 14.5l-3 3"/>'),
   muscle:  svgIcon('<path d="M5 8c2-3 6-3 8-1l4 4c2 2 2 5 0 7s-5 2-7 0"/><path d="M5 8c-2 3-2 8 1 11"/>'),
   info:    svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="1" fill="currentColor" stroke="none"/>'),
-  warn:    svgIcon('<path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>')
+  warn:    svgIcon('<path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/>'),
+  // a bell, for a reminder. The clapper is a separate stroke so it reads at 22px.
+  bell:    svgIcon('<path d="M18 9a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16S18 14 18 9Z"/><path d="M10.3 19a2 2 0 0 0 3.4 0"/>')
 };
 /* HOW THE SESSION FELT.
 
@@ -9794,7 +9806,10 @@ function bindOnboarding(){
     else toast("Reminders on");
     obGo(OB.step+1);
   });
-  on("obRemindNo", ()=> obGo(OB.step+1));
+  /* "Not now" here starts the same week-long clock the sheet uses. Without it, declining
+     during setup and being asked again on the next launch is the whole nagging problem,
+     arriving faster than if we had never asked at all. */
+  on("obRemindNo", ()=>{ S.pushAsked = Date.now(); saveQuiet(); obGo(OB.step+1); });
   /* Every "import" entry point lands in the same place. The importer decides for itself
      whether what you handed it is an Element 26 backup (adopted as-is) or a plan in some
      other form (read by the model), because that distinction is ours to make, not
@@ -12676,6 +12691,13 @@ function openingPrompts(){
       openSleepSheet();
       return;
     }
+    /* Ahead of the check-in, and only ever briefly: this is due at most once a week and
+       the check-in it displaces is asked again the moment this one is answered. */
+    if(pushAskDue()){
+      S.pushAsked = Date.now(); saveQuiet();
+      openPushSheet(()=> maybeDailyCheckin());
+      return;
+    }
     maybeDailyCheckin();
   }catch(e){ /* a greeting must never be the thing that breaks the app */ }
 }
@@ -12783,6 +12805,74 @@ function openSleepSheet(){
     toast("Won't ask at night. Change it in Settings.");
   };
 }
+/* =====================================================================
+   ASKING AN EXISTING USER
+
+   Reminders arrived after people already had accounts, and those people never meet the
+   onboarding offer — for them the feature exists only behind Settings, on a screen most
+   people open once to read their ID and then never again. So they get asked once, in the
+   same shape as every other question this app asks: a sheet on opening, a real answer,
+   and a way to end the asking for good.
+
+   WHY IT IS NOT SIMPLY SHOWN ON THE NEXT LAUNCH. Three guards, and each one exists
+   because the alternative is nagging:
+
+     • pushBlocker() must be clear. On iOS in a Safari tab this is impossible, so asking
+       is not a prompt, it is an apology. They will meet it after they install.
+     • "Not now" is an answer with a lifetime, not a dismissal. It stands for a week.
+     • "Don't ask again" is permanent and honours itself. The card in Settings is still
+       there, and the sheet says so, so nothing is lost by taking it.
+
+   DEVICE-LOCAL, LIKE THE REST OF THE PUSH STATE. A subscription belongs to one installed
+   app, so "not on this device" is the coherent unit — and a person who says no on their
+   laptop should still be asked on the phone they actually train with. Neither flag goes
+   into a backup, for the same reason S.pushOn does not. */
+const PUSH_ASK_AGAIN_MS = 7 * DAY_MS;
+function pushAskDue(){
+  if(!VAPID_PUBLIC) return false;
+  if(!S.setup) return false;                 // still onboarding; it has its own offer
+  if(S.pushOn || S.pushNever) return false;
+  if(pushBlocker()) return false;            // cannot work here, so do not ask here
+  const last = Number(S.pushAsked) || 0;
+  return !last || (Date.now() - last) >= PUSH_ASK_AGAIN_MS;
+}
+/* `then` carries on to whatever would have been asked instead, so this never costs
+   somebody their daily check-in — it borrows the slot and hands it straight back. */
+function openPushSheet(then){
+  const go = ()=>{ hideModal(); if(then) then(); };
+  showModal(`<div class="sl-sheet">
+    <div class="sl-art sl-bell" style="--d:0ms">${ICON.bell}</div>
+    <div class="sl-t" style="--d:80ms">Want a nudge?</div>
+    <div class="sl-p" style="--d:130ms">Element 26 can tell you which session is up, remind you
+      to start the sleep clock at night, and ask how you slept in the morning. Three notifications
+      at most, each one switchable on its own, and nothing else is ever sent.</div>
+    <button class="btn sl-go" id="pshYes" style="--d:190ms">Turn on reminders</button>
+    <div class="ci-alt" style="--d:230ms">
+      <button class="nb-link" id="pshLater">Not now</button>
+      <span class="ci-alt-sep">·</span>
+      <button class="nb-link" id="pshNever">Don't ask again</button>
+    </div>
+  </div>`);
+  const m = $("#modal");
+  /* Nothing awaited before requestPermission(), inside pushEnable() — Safari only
+     honours the prompt while the tap that started it is still on the stack. */
+  m.querySelector("#pshYes").onclick = async ()=>{
+    const b = m.querySelector("#pshYes");
+    if(b){ b.disabled = true; b.textContent = "Setting that up…"; }
+    const err = await pushEnable();
+    toast(err ? "Couldn't turn those on — try Settings" : "Reminders on");
+    render();
+    go();
+  };
+  m.querySelector("#pshLater").onclick = go;
+  m.querySelector("#pshNever").onclick = ()=>{
+    S.pushNever = true; save();
+    toast("Won't ask again. They're in Settings if you change your mind.");
+    go();
+  };
+  MODAL_REOPEN = ()=> openPushSheet(then);
+}
+
 /* The other half. The figure is shown before it is written down, because a measured
    number somebody disagrees with is worse than an asked one: it is wrong AND it looks
    authoritative. `then` carries on to the daily check-in so the two never stack up. */
