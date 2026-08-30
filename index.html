@@ -1227,6 +1227,9 @@ body.onboarding #app{padding:0}
 }
 .ob-chip.on{border-color:var(--acc);color:var(--text)}
 
+/* trained today, with a rest owed tomorrow */
+.rest-next-card{border-left:3px solid var(--acc);margin-bottom:12px}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -3235,7 +3238,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "6.7";
+const APP_VERSION = "6.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -3640,6 +3643,24 @@ function scheduledRestToday(){
   return true;
 }
 function isRestToday(){ return isRestDay(todayStr()) || scheduledRestToday(); }
+/* A REST THAT IS DUE, ON A DAY YOU HAVE ALREADY TRAINED.
+
+   scheduledRestToday() correctly refuses to call today a rest day when a session is
+   already logged on it — you did not rest today, you trained. But "not today" was being
+   read as "not next", and the screen went straight on to offering the following workout.
+   Finish the last day of a cycle and the app congratulated you, wrapped the cycle, and
+   invited you into Push A, with the rest day between the two cycles never mentioned.
+
+   It has not been lost. It is due, it is simply due TOMORROW, and saying so is the whole
+   fix: the state was right and the sentence was wrong. */
+function restDueNotToday(){
+  if(restsFloat()) return false;
+  if(restDueIndex() < 0) return false;
+  if(isRestToday()) return false;
+  const today = todayStr();
+  if(restTombstones().indexOf(today) > -1) return false;   // they said they would train
+  return (S.sessions || []).some(x=> x && x.date === today);
+}
 function takeRestDay(date){
   const list = restDaysThisCycle();
   if(list.indexOf(date) > -1) return false;
@@ -12208,6 +12229,20 @@ function viewToday(){
       </div>`;
     }
     return h;
+  }
+
+  /* Trained today, with a rest owed. Said before the next workout is offered, because
+     the next workout is not what comes next. */
+  if(restDueNotToday()){
+    const justWrapped = S.lastCycle && (Date.now() - S.lastCycle.end) < DAY_MS;
+    h += `<div class="card rest-next-card">
+      <div class="rs-k">${justWrapped ? "Cycle complete" : "Rest day next"}</div>
+      <h3 style="font-size:20px;margin-top:4px">${justWrapped
+        ? "That's the cycle done. Take your rest day."
+        : "Take tomorrow off."}</h3>
+      <div class="sub" style="margin-top:8px">You've trained today, so today isn't it \u2014 your
+        rest lands tomorrow. After that the rotation picks up with <b>${esc(m.name)}</b>.</div>
+    </div>`;
   }
 
   // rest days already spent this cycle, noted so they never look "lost"
