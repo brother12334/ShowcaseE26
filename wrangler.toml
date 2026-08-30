@@ -20,3 +20,20 @@ compatibility_date = "2024-11-01"
 # a KV binding this one must not have: the plan reader should not be able to read a
 # single byte of anybody's training data. See proxy/README.md for the four lines of
 # wrangler.accounts.toml and the deploy command.
+
+# PER-ADDRESS RATE LIMIT for the plan reader. The origin check above it stops a copy of
+# the app hosted somewhere else; it does not stop a script, because Origin is a header
+# and a script sends whatever it likes. This is what stops the script.
+#
+# 20 reads a minute per address is invisible to a real import — a handful of calls on the
+# day somebody imports a plan, then nothing for weeks — and a loop hits it immediately.
+#
+# `namespace_id` is a label local to this Worker, not an id from the dashboard: pick any
+# number and keep it. `period` accepts 10 or 60 only. Remove this block and the Worker
+# still runs, unlimited — the code skips the check when the binding is absent rather than
+# failing closed, so a config mistake cannot take the importer down.
+[[unsafe.bindings]]
+name = "PLAN_LIMIT"
+type = "ratelimit"
+namespace_id = "2601"
+simple = { limit = 20, period = 60 }

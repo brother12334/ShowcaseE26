@@ -14,6 +14,8 @@
  * What it does, and deliberately nothing else:
  *   • answers the CORS preflight
  *   • refuses anything that is not a POST from an origin you listed
+ *   • caps how many requests one address may make, because the origin check alone is
+ *     not a wall — see below
  *   • caps the body so it cannot be used to relay something enormous
  *   • pins the model to a list, so it cannot be turned into a general-purpose Gemini
  *   • attaches the key and forwards to Google, returning the response verbatim
@@ -27,7 +29,15 @@
 
 /* Who may call this. An empty list would make the Worker a free Gemini endpoint for
    anyone who found the URL, so it is not allowed to be empty — see the guard in
-   fetch(). Use the exact scheme+host you serve the app from. */
+   fetch(). Use the exact scheme+host you serve the app from.
+
+   WHAT THE ORIGIN CHECK IS ACTUALLY WORTH. Against a browser it is a wall: a copy of
+   this app hosted anywhere else sends its own Origin, the request is refused, and the
+   copy cannot use this key. Against a script it is a speed bump, because Origin is just
+   a header and curl will send whatever you tell it to. That is not a flaw to be fixed —
+   there is no header a browser sends that a script cannot forge — it is the reason the
+   rate limit below exists. The origin check stops clones; the rate limit stops whoever
+   read the URL out of the page and started a loop. */
 const ALLOWED_ORIGINS = [
   "https://brother12334.github.io",
 ];
@@ -75,6 +85,28 @@ let RESOLVED = null;
 const RESOLVE_TTL_MS = 60 * 60 * 1000;
 
 const MAX_BODY_BYTES = 14 * 1024 * 1024;   // Gemini's own inline-data ceiling is ~15 MB
+
+/* PER-ADDRESS CAP. Reading a plan is a rare thing to do — a handful of calls on the day
+   somebody imports, and then nothing for weeks — so a ceiling generous enough to be
+   invisible to a real person is still low enough that a loop hits it in seconds.
+
+   Cloudflare's own rate-limit binding rather than KV, deliberately: KV is eventually
+   consistent, which makes it a damper rather than a limit, and it would mean giving the
+   plan reader a storage binding it otherwise has no business holding. Configured in
+   wrangler.toml; if the binding is absent the check is skipped rather than failing
+   closed, because an unconfigured limiter must not be able to take the importer down. */
+const RATE_KEY_HEADER = "CF-Connecting-IP";
+async function overLimit(request, env) {
+  const limiter = env && env.PLAN_LIMIT;
+  if (!limiter || typeof limiter.limit !== "function") return false;
+  const key = request.headers.get(RATE_KEY_HEADER) || "unknown";
+  try {
+    const { success } = await limiter.limit({ key });
+    return !success;
+  } catch (e) {
+    return false;
+  }
+}
 const API = "https://generativelanguage.googleapis.com/v1beta";
 const GOOGLE = API + "/models/";
 
@@ -153,6 +185,12 @@ export default {
     }
     if (!allowed) {
       return fail(403, "Origin not allowed.", "");
+    }
+    /* After the origin check so a refused clone never consumes anybody's allowance, and
+       before the key is touched so a flood costs nothing upstream. 429 is a status the
+       app already has a sentence for. */
+    if (await overLimit(request, env)) {
+      return fail(429, "Too many plan reads from this connection. Give it a minute.", origin);
     }
     if (!env.GEMINI_API_KEY) {
       return fail(500, "Proxy is missing its GEMINI_API_KEY secret.", origin);
