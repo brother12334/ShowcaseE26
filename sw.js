@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "7.0";
+const VERSION = "7.1";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 

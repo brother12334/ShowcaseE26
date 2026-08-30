@@ -1358,6 +1358,59 @@ body.onboarding #app{padding:0}
 .modal-bg.tour-open{background:rgba(0,0,0,.34);align-items:flex-end}
 .modal-bg.tour-open .modal{max-height:66vh}
 
+/* ===================== the tour =====================
+   A spotlight over the live app. Four shades make the hole, a ring sits on the target
+   and a tip points at it. Everything is positioned from measured rectangles in script,
+   so nothing here assumes where anything is. */
+#tourLayer{position:fixed;inset:0;z-index:170;pointer-events:none}
+body.tour-live{overflow:hidden}
+.tr-sh{
+  position:fixed;background:rgba(8,8,10,.76);pointer-events:auto;cursor:pointer;
+  transition:top .28s var(--ease),left .28s var(--ease),width .28s var(--ease),height .28s var(--ease);
+}
+.tr-ring{
+  position:fixed;border-radius:12px;pointer-events:none;
+  border:2px solid var(--acc);
+  box-shadow:0 0 0 3px rgba(201,138,75,.22), 0 0 26px rgba(201,138,75,.30);
+  transition:top .28s var(--ease),left .28s var(--ease),width .28s var(--ease),height .28s var(--ease);
+}
+.tr-tip{
+  position:fixed;width:min(324px,calc(100vw - 20px));pointer-events:auto;
+  transition:top .28s var(--ease),left .28s var(--ease);
+}
+.tr-body{
+  background:var(--card);border:1px solid var(--acc-line);border-radius:14px;padding:14px 15px 12px;
+  box-shadow:0 18px 44px rgba(0,0,0,.55);
+}
+/* the pointer, on whichever edge faces the target */
+.tr-arrow{
+  position:absolute;top:-7px;width:14px;height:14px;margin-left:-7px;
+  background:var(--card);border-left:1px solid var(--acc-line);border-top:1px solid var(--acc-line);
+  transform:rotate(45deg);border-radius:2px;
+}
+.tr-tip.above .tr-arrow{
+  top:auto;bottom:-7px;
+  border-left:0;border-top:0;
+  border-right:1px solid var(--acc-line);border-bottom:1px solid var(--acc-line);
+}
+.tr-dots{display:flex;gap:5px;margin-bottom:10px}
+.tr-dots i{width:5px;height:5px;border-radius:50%;background:var(--line);transition:all .2s ease}
+.tr-dots i.past{background:var(--dim)}
+.tr-dots i.on{width:15px;border-radius:3px;background:var(--acc)}
+.tr-title{font-family:var(--disp);font-size:15px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.tr-text{margin-top:6px;font-size:13.5px;color:var(--dim);line-height:1.5}
+.tr-row{display:flex;align-items:center;gap:8px;margin-top:13px}
+.tr-sp{flex:1 1 auto}
+.tr-row button{
+  border-radius:9px;padding:8px 14px;font-size:13px;cursor:pointer;min-height:36px;
+  border:1px solid var(--line);background:var(--card2);color:var(--dim);
+}
+.tr-next{border-color:var(--acc)!important;background:var(--acc)!important;color:var(--bg)!important;font-weight:600}
+.tr-skip{border:0!important;background:none!important;color:var(--faint)!important;padding-left:0!important}
+@media (prefers-reduced-motion:reduce){
+  .tr-sh,.tr-ring,.tr-tip{transition:none}
+}
+
 .acct-check{
   display:flex;gap:11px;align-items:center;text-align:left;padding:14px;margin:0;
   border:1px solid var(--line);border-radius:12px;background:var(--card2);cursor:pointer;font-size:14px;
@@ -3374,7 +3427,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "7.6";
+const APP_VERSION = "7.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8812,165 +8865,184 @@ async function accountPull(){
    card. That is the difference between a tour and a slideshow: the sheet sits over the
    real screen it is describing, so "the strip at the top is your rotation" is read with
    that strip visible above it rather than from memory. */
+/* =====================================================================
+   THE TOUR
+
+   Not a slideshow. A stack of cards describing the app is something you read and then
+   have to go and find; this points at the actual thing, on the actual screen, with the
+   rest of it dimmed — so "this strip is your rotation" is read with a ring around that
+   strip and everything else out of the way.
+
+   HOW THE SPOTLIGHT IS BUILT. Four shades rather than a clip-path or a mask: a
+   rectangular hole is four rectangles around it, they need no SVG, they cannot be
+   defeated by a stacking context, and they animate as plain top/left/width/height. The
+   ring is a fifth element sitting exactly on the target's box.
+
+   REACTIVE, because the page underneath is real and moves. Every step re-measures after
+   its tab has rendered and after the element has been scrolled into view, and the whole
+   thing re-measures again on scroll, on resize and on orientation change. A step whose
+   target does not exist on this person's screen — no sessions yet, so no session row to
+   point at — is skipped rather than pointing at nothing.
+   ===================================================================== */
 const TOUR_STEPS = [
-  {
-    key: "welcome", tab: "today", art: "plate",
-    h: "Let's have a look round",
-    p: "Seven short cards. It'll take you through each tab as it goes, so you're always looking at the thing being described. Skip out any time — it's in Settings if you want it again.",
-    bits: []
-  },
-  {
-    key: "today", tab: "today", art: "strip",
-    h: "Today: what you're doing now",
-    p: "Above this card: the strip is your rotation and the card under it is the session that's up. Everything you log happens here.",
-    bits: [
-      ["The strip", "one plate per day of your cycle. It moves forward when you TRAIN, not when the date changes — missing a Tuesday costs you nothing, the cycle just takes longer to come round"],
-      ["R plates", "scheduled rest. A day you simply didn't train is recorded as a skip instead, and doesn't use one up"]
-    ]
-  },
-  {
-    key: "set", tab: "today", art: "setrow",
-    h: "A set is three numbers",
-    p: "Weight, reps, and how hard it felt. Each exercise above shows its targets — sets × rep range, and an RPE.",
-    bits: [
-      ["Rep range", "\"8–12\" means work up the range at one load. When the last set reaches the top, the weight goes up and you rebuild from the bottom"],
-      ["RPE", "how close to failure, 1–10. 10 is nothing left, 9 is one rep in you, 8 is two. A target of 8 means finish with about two left"],
-      ["Warm-ups", "before you've logged anything they read \"light\", \"build up\" — placeholders, not instructions. One full session and they become real weights off your own load"]
-    ],
-    foot: "Tap ✎ on any exercise while you train to say how it went. Those notes reach your grade and your Body tab."
-  },
-  {
-    key: "history", tab: "history", art: "grade",
-    h: "History: every session, graded",
-    p: "This is what's behind you. Each finished session is scored on what could actually be measured, with what to change next time.",
-    bits: [
-      ["The grade", "eight sections — overload, effort, rest, rep ranges and more. Anything it couldn't measure is left out rather than marked down"],
-      ["Tap a session", "to see the sets as you logged them, edit anything, or read the grade again"]
-    ]
-  },
-  {
-    key: "body", tab: "body", art: "note",
-    h: "Body: how it's all going",
-    p: "The muscle map, what each one is getting, and everything the app has noticed about your training.",
-    bits: [
-      ["Worth a look", "anything under- or over-trained, with a button that actually changes your plan"],
-      ["From your workouts", "the flags your grades raised, kept here so they don't vanish with the card"],
-      ["What you've said", "your own notes, which future grades read as context"]
-    ]
-  },
-  {
-    key: "program", tab: "program", art: "doc",
-    h: "Program: your plan, as written",
-    p: "Every day, every exercise, sets, reps and targets. Element 26 doesn't write programmes — it runs the one you brought.",
-    bits: [
-      ["Editable", "change anything here and the app follows it from the next session"],
-      ["Re-read my plan", "rebuilds the programme from the document you imported, without re-uploading it"]
-    ]
-  },
-  {
-    key: "settings", tab: "sync", art: "gear",
-    h: "Settings: the things you'll want",
-    p: "Your account and recovery key, cloud sync, pounds or kilos, and how the app behaves.",
-    bits: [
-      ["Advanced settings", "side handling, warm-ups, progression, your bar weight — all set during the import, all changeable"],
-      ["How it works", "this tour, whenever you want it again"]
-    ],
-    foot: "Any underlined word anywhere in the app opens its own explanation. Nothing here is the only place it's written down."
-  }
+  {tab:"today", sel:".plates-wrap", title:"Your week is a cycle",
+   text:"One plate per day of your rotation. It moves forward when you TRAIN, not when the date changes — miss a Tuesday and nothing is lost, the cycle just takes longer to come round. R is a scheduled rest."},
+  {tab:"today", sel:".card", title:"What's up next",
+   text:"The session the rotation has reached. Everything you log happens on this screen."},
+  {tab:"today", sel:".ex-target, .ex-head b", title:"Sets, reps and effort",
+   text:"\"4×6-10 · RPE 7-9\" is four sets of six to ten reps at RPE seven to nine. RPE is how close to failure: 10 is nothing left, 9 is one rep in you, 8 is two.",
+   optional:true},
+  {tab:"today", sel:".warm", title:"Warm-ups",
+   text:"Before you've logged anything these read \"light\", \"build up\" — placeholders, not instructions. Log one full session and they become real weights off your own load.",
+   optional:true},
+  {tab:"history", sel:".card.sess, .card", title:"Everything you've done",
+   text:"Each finished session, scored on what could actually be measured. Tap one to see the sets as you logged them, or read its grade again."},
+  {tab:"body", sel:".nb-fix, .nb-hero", title:"What needs attention",
+   text:"Anything under- or over-trained, each with a button that actually changes your plan. Below it: the flags your grades raised, and your own notes."},
+  {tab:"program", sel:".btn-row", title:"Your plan, as written",
+   text:"Element 26 doesn't write programmes — it runs the one you brought. Everything here is editable, and \"Re-read my plan\" rebuilds it from the document you imported."},
+  {tab:"sync", sel:".card", title:"Account and settings",
+   text:"Your ID and recovery key, cloud sync, pounds or kilos. Advanced settings has how the app behaves — and this tour, whenever you want it again."},
+  {tab:"today", sel:".tabs, .tabbar, nav", title:"That's the tour",
+   text:"Five tabs, and you've seen all of them. Start your session on Today whenever you're ready.",
+   optional:true}
 ];
-let TOUR = null;   // {i} while it is open, null otherwise
+let TOUR = null;                     // {i, from, fromAdv} while it is open
 function tourSeen(){ return !!S.tourDone; }
 function startTour(){
-  // where they were, so a tour taken from Settings puts them back rather than adrift
   TOUR = {i: 0, from: TAB, fromAdv: ADV_OPEN};
-  drawTour();
+  tourGo(0);
 }
 function endTour(done){
   const t = TOUR;
   TOUR = null;
   if(done){ S.tourDone = true; save(); queueSync(); }
-  /* Back to Today, which is where somebody who has just been shown the app wants to be —
-     except when they started the tour from somewhere else on purpose, in which case they
-     get that place back. */
+  tourTeardown();
   TAB = (t && t.from && t.from !== "today") ? t.from : "today";
   ADV_OPEN = !!(t && t.fromAdv);
-  hideModal();
   render();
 }
-function tourArtHTML(kind){
-  if(kind === "strip"){
-    return `<div class="tour-art tour-strip">${
-      ["A","B","R","C"].map((t,i)=>`<span class="tp${i===1?" cur":""}${i===0?" done":""}${t==="R"?" r":""}">${t}</span>`).join("")
-    }</div>`;
+function tourLayer(){
+  let el = document.getElementById("tourLayer");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "tourLayer";
+    el.innerHTML =
+      '<div class="tr-sh tr-t"></div><div class="tr-sh tr-b"></div>' +
+      '<div class="tr-sh tr-l"></div><div class="tr-sh tr-r"></div>' +
+      '<div class="tr-ring"></div>' +
+      '<div class="tr-tip"><div class="tr-arrow"></div><div class="tr-body">' +
+        '<div class="tr-dots"></div>' +
+        '<div class="tr-title"></div><div class="tr-text"></div>' +
+        '<div class="tr-row">' +
+          '<button class="tr-skip" type="button">Skip</button>' +
+          '<span class="tr-sp"></span>' +
+          '<button class="tr-back" type="button">Back</button>' +
+          '<button class="tr-next" type="button">Next</button>' +
+        '</div></div></div>';
+    document.body.appendChild(el);
+    el.querySelector(".tr-next").onclick = ()=> tourGo(TOUR ? TOUR.i + 1 : 0);
+    el.querySelector(".tr-back").onclick = ()=> tourGo(TOUR ? TOUR.i - 1 : 0);
+    el.querySelector(".tr-skip").onclick = ()=> endTour(true);
+    // tapping the dimmed area moves on, which is what everyone tries first
+    el.querySelectorAll(".tr-sh").forEach(sh=> sh.onclick = ()=> tourGo(TOUR ? TOUR.i + 1 : 0));
+    window.addEventListener("resize", tourReposition, {passive:true});
+    window.addEventListener("orientationchange", tourReposition, {passive:true});
+    window.addEventListener("scroll", tourReposition, {passive:true});
   }
-  if(kind === "setrow"){
-    return `<div class="tour-art tour-row">
-      <span class="tr-i">2</span><span class="tr-f">135</span><span class="tr-f">9</span><span class="tr-f tr-hl">RPE 8</span><span class="tr-c">✓</span>
-    </div>`;
-  }
-  if(kind === "rpe"){
-    return `<div class="tour-art tour-rpe">${
-      [7,8,9,10].map(n=>`<span class="tr-n${n===8?" on":""}">${n}</span>`).join("")
-    }</div>`;
-  }
-  if(kind === "note"){ return `<div class="tour-art tour-glyph">${ICON.note}</div>`; }
-  if(kind === "doc"){ return `<div class="tour-art tour-glyph">${ICON.doc}</div>`; }
-  if(kind === "gear"){ return `<div class="tour-art tour-glyph">${ICON.spark}</div>`; }
-  if(kind === "grade"){ return `<div class="tour-art tour-glyph tour-grade">A−</div>`; }
-  return `<div class="tour-art tour-plate"><span></span></div>`;
+  return el;
 }
-function tourHTML(){
-  const n = TOUR_STEPS.length, i = TOUR.i, st = TOUR_STEPS[i];
-  return `<div class="tour">
-    <div class="tour-dots">${TOUR_STEPS.map((x,k)=>
-      `<span class="tour-dot${k===i?" on":k<i?" past":""}"></span>`).join("")}</div>
-    ${tourArtHTML(st.art)}
-    <h3 class="tour-h">${esc(st.h)}</h3>
-    <p class="tour-p">${esc(st.p)}</p>
-    ${st.bits && st.bits.length ? `<div class="tour-bits">${st.bits.map(b=>
-      `<div class="tour-bit"><b>${esc(b[0])}</b><span>${esc(b[1])}</span></div>`).join("")}</div>` : ""}
-    ${st.foot ? `<div class="tour-foot">${esc(st.foot)}</div>` : ""}
-    <div class="btn-row" style="margin-top:18px">
-      ${i > 0 ? `<button class="btn ghost small" id="tourBack" style="flex:0 0 auto">Back</button>` : ""}
-      <button class="btn small" id="tourNext" style="flex:1">${i === n-1 ? "Start training" : "Next"}</button>
-    </div>
-    ${i < n-1 ? `<button class="linklike tour-skip" id="tourSkip">Skip the tour</button>` : ""}
-  </div>`;
+function tourTeardown(){
+  const el = document.getElementById("tourLayer");
+  if(el) el.remove();
+  document.body.classList.remove("tour-live");
 }
-function drawTour(){
-  const st = TOUR_STEPS[TOUR.i];
-  /* THE TAB MOVES FIRST. render() rewrites #app and leaves the modal alone, so the page
-     behind the sheet becomes the one this card is about before the card is drawn. */
-  if(st && st.tab && (TAB !== st.tab || ADV_OPEN)){
-    TAB = st.tab;
-    ADV_OPEN = false;
+// The element this step points at, or null when it is not on this person's screen.
+function tourTarget(step){
+  if(!step || !step.sel) return null;
+  const list = step.sel.split(",").map(x=> x.trim()).filter(Boolean);
+  for(let i = 0; i < list.length; i++){
+    const el = document.querySelector(list[i]);
+    if(el && el.getBoundingClientRect().height > 4) return el;
+  }
+  return null;
+}
+/* Move to a step: switch tab, let it render, bring the target into view, then measure.
+   Skipping forwards over a step whose target is missing, and backwards the same way, so
+   Back never lands on an empty screen either. */
+function tourGo(i, dir){
+  if(!TOUR) return;
+  const step = TOUR_STEPS[i];
+  if(i < 0) return tourGo(0);
+  if(i >= TOUR_STEPS.length) return endTour(true);
+  TOUR.i = i;
+  if(TAB !== step.tab || ADV_OPEN){
+    TAB = step.tab; ADV_OPEN = false;
     render();
-    window.scrollTo(0, 0);
   }
-  showModal(tourHTML());
-  /* A tour sheet is not a dialog: the page behind it is half the point, so the backdrop
-     lifts and the sheet gives up the bottom two thirds instead of taking 88% of the
-     screen. */
-  $("#modalBg").classList.add("tour-open");
-  const card = $("#modal").querySelector(".tour");
-  stageReveal(card, 0.045, 0.3);
-  MODAL_REOPEN = drawTour;
-  /* Backdrop dismissal counts as finishing it. Somebody who taps away has made their
-     decision, and coming back tomorrow to a tour they closed is the app not listening. */
-  MODAL_DISMISS = ()=>{ if(TOUR){ TOUR = null; S.tourDone = true; save(); render(); } };
-  /* Guarded on TOUR still existing. hideModal() leaves the card's markup in #modal, so
-     a second tap on the last "Start training" — a double-tap delivered as two events is
-     enough — reaches a handler whose tour has already closed. */
-  const nx = $("#tourNext");
-  if(nx) nx.onclick = ()=>{
+  document.body.classList.add("tour-live");
+  const layer = tourLayer();
+  const target = tourTarget(step);
+  if(!target){
+    // nothing to point at here: step over it rather than ring an empty rectangle
+    const d = dir === -1 ? -1 : 1;
+    return tourGo(i + d, d);
+  }
+  /* Centre it, then measure on the frame AFTER the scroll has settled — measuring in the
+     same frame returns the pre-scroll box and the ring lands somewhere else entirely. */
+  target.scrollIntoView({block:"center", inline:"nearest", behavior:"auto"});
+  requestAnimationFrame(()=> requestAnimationFrame(()=>{
     if(!TOUR) return;
-    if(TOUR.i >= TOUR_STEPS.length - 1) return endTour(true);
-    TOUR.i++; drawTour();
-  };
-  const bk = $("#tourBack");
-  if(bk) bk.onclick = ()=>{ if(!TOUR) return; TOUR.i = Math.max(0, TOUR.i - 1); drawTour(); };
-  const sk = $("#tourSkip");
-  if(sk) sk.onclick = ()=> endTour(true);
+    TOUR.el = target;
+    tourPaint();
+  }));
+}
+function tourReposition(){
+  if(!TOUR || !TOUR.el || !TOUR.el.isConnected) return;
+  tourPaint(true);
+}
+function tourPaint(quiet){
+  const layer = document.getElementById("tourLayer");
+  if(!layer || !TOUR || !TOUR.el) return;
+  const step = TOUR_STEPS[TOUR.i];
+  const r = TOUR.el.getBoundingClientRect();
+  const W = window.innerWidth, H = window.innerHeight;
+  const pad = 6;
+  const x = Math.max(0, r.left - pad), y = Math.max(0, r.top - pad);
+  const w = Math.min(W - x, r.width + pad*2), h = Math.min(H - y, r.height + pad*2);
+
+  const set = (sel, css)=> Object.assign(layer.querySelector(sel).style, css);
+  set(".tr-t", {top:"0px", left:"0px", width:W+"px", height:y+"px"});
+  set(".tr-b", {top:(y+h)+"px", left:"0px", width:W+"px", height:Math.max(0,H-y-h)+"px"});
+  set(".tr-l", {top:y+"px", left:"0px", width:x+"px", height:h+"px"});
+  set(".tr-r", {top:y+"px", left:(x+w)+"px", width:Math.max(0,W-x-w)+"px", height:h+"px"});
+  set(".tr-ring", {top:y+"px", left:x+"px", width:w+"px", height:h+"px"});
+
+  const tip = layer.querySelector(".tr-tip");
+  if(!quiet){
+    layer.querySelector(".tr-title").textContent = step.title;
+    layer.querySelector(".tr-text").textContent = step.text;
+    layer.querySelector(".tr-dots").innerHTML = TOUR_STEPS
+      .map((_,k)=> `<i class="${k===TOUR.i?"on":k<TOUR.i?"past":""}"></i>`).join("");
+    layer.querySelector(".tr-back").style.visibility = TOUR.i ? "visible" : "hidden";
+    layer.querySelector(".tr-next").textContent =
+      TOUR.i === TOUR_STEPS.length - 1 ? "Done" : "Next";
+  }
+  /* Below the target if it fits, above if not. Measured, not guessed: the tip's height
+     depends on how long this step's sentence is. */
+  tip.style.visibility = "hidden";
+  tip.style.top = "0px"; tip.style.left = "0px";
+  const th = tip.offsetHeight, tw = tip.offsetWidth;
+  const gap = 14;
+  const below = y + h + gap + th <= H - 8;
+  const top = below ? (y + h + gap) : Math.max(8, y - gap - th);
+  const cx = x + w/2;
+  const left = Math.max(10, Math.min(W - tw - 10, cx - tw/2));
+  tip.classList.toggle("above", !below);
+  Object.assign(tip.style, {top: top+"px", left: left+"px", visibility:"visible"});
+  // the arrow points at the target's centre, wherever the tip had to be clamped to
+  const ax = Math.max(16, Math.min(tw - 16, cx - left));
+  layer.querySelector(".tr-arrow").style.left = ax+"px";
 }
 
 let OB = null;     // the in-progress answers; null when the wizard is closed
