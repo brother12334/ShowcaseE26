@@ -225,13 +225,31 @@ The app detects this and says so rather than presenting a switch that fails sile
 
 ### What actually gets sent
 
-Nothing, in the literal sense: the push carries no payload. It wakes the service worker,
-which fetches the one sentence waiting for it and shows that. An encrypted payload would
-mean this service holding key material for a device, and the text would sit in KV either
-way — so it stays out, and the token the service worker carries reads one message and
-cannot touch a training log.
+Three kinds, each switchable on its own, and nothing else:
 
-The app decides *what* the sentence says and *when* it is due, and posts a single
-one-shot; posting again replaces it. All of the rotation logic — which day is up, whether
-a rest is owed, whether you already trained — stays in the app, where it already lives.
+| kind | when | what it says |
+|---|---|---|
+| `train` | an hour you pick | which session is up, or that today is a rest day. Skipped on a day you have already trained. |
+| `bed` | your night-start time, the one the app already uses | a nudge to start the sleep clock. Not sent on a night you have already answered. |
+| `wake` | roughly when you get up | a prompt to log the night while you can still remember it. |
+
+The morning one is aimed by measurement, not assumption. The wake sheet already asks
+"just woken up?"; recording the clock time of that answer turns every logged night into a
+sample, and the reminder lands on the median of them — median so that one early flight or
+one lie-in moves it by nothing. Under three samples there is no prediction and no morning
+reminder, and the app says that rather than inventing a seven o'clock and being wrong at
+somebody every day for a week. A wake time set by hand under **Sleep** overrides all of
+it. If the sleep clock is running and a typical night from when the phone actually went
+down lands after the usual hour, the reminder moves later — never earlier.
+
+The push itself carries no payload. It wakes the service worker, which fetches the one
+sentence waiting for it and shows that. An encrypted payload would mean this service
+holding key material for a device, and the text would sit in KV either way — so it stays
+out, and the token the service worker carries reads one message and cannot touch a
+training log.
+
+The app decides *what* each sentence says and *when* it is due, and posts all of them
+together; a kind it leaves out is deleted. All of the rotation and sleep logic stays in
+the app, where it already lives. Two kinds coming due in the same minute are collected and
+queued in one write, so neither can overwrite the other.
 

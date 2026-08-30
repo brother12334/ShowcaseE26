@@ -110,10 +110,15 @@ function sameSecret(a, b) {
      push:<id>    the push service endpoint for that account's one installed app, plus a
                   random token. No p256dh, no auth secret — see below.
      ptok:<token> reverse lookup for that token. It authorises exactly one thing.
-     sched:<id>   the single next reminder: {at, title, body}. One per account, replaced
-                  every time the app recomputes it. There is no queue to drift.
-     pend:<id>    what the service worker is about to come and ask for, for the seconds
-                  between the push landing and the worker reading it. Self-expiring.
+     sched:<id>:<kind>
+                  the next reminder OF THAT KIND: {at, title, body}. One per kind, never
+                  more, and posting replaces it — so there is no queue to drift out of
+                  step with the plan it came from. The app posts the whole set at once and
+                  a kind it leaves out is deleted, which is how turning one off works.
+     pend:<id>    a short list of what the service worker is about to come and ask for,
+                  for the seconds between a push landing and the worker reading it. A list
+                  rather than a single value because two kinds can come due in the same
+                  minute, and the second must not overwrite the first. Self-expiring.
 
    THE PUSH ITSELF CARRIES NO BODY. That is a deliberate trade: an encrypted payload
    would mean holding each device's key material here, and the notification text would be
@@ -127,6 +132,11 @@ function sameSecret(a, b) {
    app computes one sentence and one timestamp and posts them; this stays dumb on
    purpose, and a change to how the plan works needs no deploy here. */
 const VAPID_TTL = "86400";
+/* The kinds of reminder that exist. Named here only so a client cannot invent an
+   unbounded set of them and fill the namespace one key at a time; what each one MEANS is
+   entirely the app's business and this service never looks. */
+const SCHED_KINDS = ["train", "bed", "wake"];
+const PEND_MAX = 4;
 const SCHED_MAX_AHEAD = 60 * 24 * 3600 * 1000;   // sanity bound, not a policy
 const TOKEN_RE = /^[a-f0-9]{32}$/;
 /* Push services are a small, known set. An endpoint is a URL this service will make an
@@ -220,23 +230,38 @@ async function forgetPush(env, id) {
     try { const p = JSON.parse(raw); if (p.token) await env.E26_ACCOUNTS.delete("ptok:" + p.token); } catch (e) {}
   }
   await env.E26_ACCOUNTS.delete("push:" + id);
-  await env.E26_ACCOUNTS.delete("sched:" + id);
+  for (const k of SCHED_KINDS) await env.E26_ACCOUNTS.delete("sched:" + id + ":" + k);
   await env.E26_ACCOUNTS.delete("pend:" + id);
 }
-/* One account's due reminder. Called from the cron, one per account, and written so that
-   a double delivery is the worst case rather than a lost one: the schedule is cleared
-   before the send, and a short-lived marker covers KV's eventual consistency across two
-   cron ticks a minute apart. */
-async function fireDue(env, id, at) {
-  const guard = "fired:" + id + ":" + at;
-  if (await env.E26_ACCOUNTS.get(guard)) return;
-  const rawS = await env.E26_ACCOUNTS.get("sched:" + id);
-  if (!rawS) return;
-  let sched;
-  try { sched = JSON.parse(rawS); } catch (e) { await env.E26_ACCOUNTS.delete("sched:" + id); return; }
-  if (!(Number(sched.at) <= Date.now())) return;
-  await env.E26_ACCOUNTS.put(guard, "1", { expirationTtl: 900 });
-  await env.E26_ACCOUNTS.delete("sched:" + id);
+/* ONE ACCOUNT'S DUE REMINDERS, ALL OF THEM, IN ONE PASS — and it has to be one pass.
+
+   Two kinds can come due in the same minute: a bedtime nudge at 22:30 and a training
+   reminder somebody set to 22:30. Handling them independently means each reads the
+   pending queue, appends itself and writes it back, and the two writes race — the second
+   one lands on a queue it read before the first existed, and a notification is silently
+   lost. KV has no atomic append to fix that with, so the fix is not to need one: every
+   message for an account is collected first and the queue is written exactly once.
+
+   Written so that a double delivery is the worst case rather than a lost one. Each
+   schedule is cleared before its send, and a short-lived marker covers KV's eventual
+   consistency across two cron ticks a minute apart. */
+async function fireDue(env, id, items) {
+  const now = Date.now();
+  const msgs = [];
+  for (const it of items) {
+    const key = "sched:" + id + ":" + it.kind;
+    const guard = "fired:" + id + ":" + it.kind + ":" + it.at;
+    if (await env.E26_ACCOUNTS.get(guard)) continue;
+    const raw = await env.E26_ACCOUNTS.get(key);
+    if (!raw) continue;
+    let sched;
+    try { sched = JSON.parse(raw); } catch (e) { await env.E26_ACCOUNTS.delete(key); continue; }
+    if (!(Number(sched.at) <= now)) continue;
+    await env.E26_ACCOUNTS.put(guard, "1", { expirationTtl: 900 });
+    await env.E26_ACCOUNTS.delete(key);
+    msgs.push({ title: sched.title, body: sched.body, tag: sched.tag || ("e26-" + it.kind) });
+  }
+  if (!msgs.length) return;
 
   const rawP = await env.E26_ACCOUNTS.get("push:" + id);
   if (!rawP) return;
@@ -244,17 +269,25 @@ async function fireDue(env, id, at) {
   try { sub = JSON.parse(rawP); } catch (e) { return; }
   if (!sub.endpoint) return;
 
-  await env.E26_ACCOUNTS.put("pend:" + id, JSON.stringify({
-    title: sched.title, body: sched.body, tag: sched.tag || "e26-reminder",
-  }), { expirationTtl: 3600 });
+  let queue = [];
+  try { queue = JSON.parse(await env.E26_ACCOUNTS.get("pend:" + id) || "[]"); } catch (e) {}
+  if (!Array.isArray(queue)) queue = [];
+  await env.E26_ACCOUNTS.put("pend:" + id, JSON.stringify(queue.concat(msgs).slice(-PEND_MAX)),
+    { expirationTtl: 3600 });
 
-  try {
-    if (await sendPush(env, sub.endpoint)) await forgetPush(env, id);
-  } catch (e) {
-    /* A send that throws leaves pend: in place; it expires on its own within the hour
-       and the app will have posted a fresh schedule long before that matters. */
+  /* One push per message, because one push event shows one notification. Sequential: a
+     dead endpoint should stop the rest rather than being retried three times. */
+  for (let i = 0; i < msgs.length; i++) {
+    try {
+      if (await sendPush(env, sub.endpoint)) { await forgetPush(env, id); return; }
+    } catch (e) {
+      /* A send that throws leaves the queue in place; it expires within the hour and the
+         app will have posted a fresh schedule long before that matters. */
+      return;
+    }
   }
 }
+
 
 /* THE ONLY WAY TO IDENTIFY A CALLER. Returns the account, or null. Note what it does
    not accept: an id in the path, an id in the body, an id in a query string. The caller
@@ -385,12 +418,14 @@ export default {
       if (!TOKEN_RE.test(t)) return json({ error: "unauthorized" }, 401, origin);
       const id = await env.E26_ACCOUNTS.get("ptok:" + t);
       if (!id) return json({ error: "unauthorized" }, 401, origin);
-      const raw = await env.E26_ACCOUNTS.get("pend:" + id);
-      if (!raw) return json({}, 200, origin);
-      await env.E26_ACCOUNTS.delete("pend:" + id);
-      return new Response(raw, {
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...cors(origin) },
-      });
+      let queue = [];
+      try { queue = JSON.parse(await env.E26_ACCOUNTS.get("pend:" + id) || "[]"); } catch (e) {}
+      if (!Array.isArray(queue) || !queue.length) return json({}, 200, origin);
+      const next = queue.shift();
+      /* One push event, one notification, one message off the front. */
+      if (queue.length) await env.E26_ACCOUNTS.put("pend:" + id, JSON.stringify(queue), { expirationTtl: 3600 });
+      else await env.E26_ACCOUNTS.delete("pend:" + id);
+      return json(next, 200, origin);
     }
 
     if (path === "/push/subscribe" && request.method === "POST") {
@@ -427,21 +462,32 @@ export default {
       if (!who) return json({ error: "unauthorized" }, 401, origin);
       let body = {};
       try { body = await request.json(); } catch (e) {}
-      if (body.at == null) {
-        await env.E26_ACCOUNTS.delete("sched:" + who.id);
-        return json({ ok: true, cleared: true }, 200, origin);
+      /* THE WHOLE SET, EVERY TIME. The app recomputes all of its reminders together from
+         one consistent view of the plan, so it posts all of them together and a kind it
+         leaves out is deleted. Anything else means reasoning here about which of two
+         partial updates is the newer, which is exactly the drift this avoids. */
+      const items = Array.isArray(body.items) ? body.items : [];
+      const kept = [];
+      for (const kind of SCHED_KINDS) {
+        const it = items.find(x => x && x.kind === kind);
+        const at = it ? Math.round(Number(it.at)) : NaN;
+        if (!it || !isFinite(at) || at > Date.now() + SCHED_MAX_AHEAD) {
+          await env.E26_ACCOUNTS.delete("sched:" + who.id + ":" + kind);
+          continue;
+        }
+        await env.E26_ACCOUNTS.put(
+          "sched:" + who.id + ":" + kind,
+          JSON.stringify({
+            at,
+            title: String(it.title || "Element 26").slice(0, 80),
+            body: String(it.body || "").slice(0, 200),
+            tag: "e26-" + kind,
+          }),
+          { metadata: { at }, expirationTtl: Math.max(120, Math.ceil((at - Date.now()) / 1000) + 7 * 86400) }
+        );
+        kept.push({ kind, at });
       }
-      const at = Math.round(Number(body.at));
-      if (!isFinite(at) || at > Date.now() + SCHED_MAX_AHEAD) return json({ error: "bad time" }, 400, origin);
-      const title = String(body.title || "Element 26").slice(0, 80);
-      const text = String(body.body || "").slice(0, 200);
-      const tag = String(body.tag || "e26-reminder").slice(0, 40);
-      await env.E26_ACCOUNTS.put(
-        "sched:" + who.id,
-        JSON.stringify({ at, title, body: text, tag }),
-        { metadata: { at }, expirationTtl: Math.max(120, Math.ceil((at - Date.now()) / 1000) + 7 * 86400) }
-      );
-      return json({ ok: true, at }, 200, origin);
+      return json({ ok: true, scheduled: kept }, 200, origin);
     }
 
     return json({ error: "not found" }, 404, origin);
@@ -459,21 +505,32 @@ export default {
   async scheduled(event, env, ctx) {
     if (!env || !env.E26_ACCOUNTS || !pushConfigured(env)) return;
     const now = Date.now();
-    const due = [];
+    const due = new Map();
     let cursor;
     for (let page = 0; page < 20; page++) {
       const res = await env.E26_ACCOUNTS.list({ prefix: "sched:", cursor, limit: 1000 });
       for (const k of res.keys) {
         const at = k.metadata && Number(k.metadata.at);
-        if (isFinite(at) && at <= now) due.push({ id: k.name.slice(6), at });
+        if (!isFinite(at) || at > now) continue;
+        const rest = k.name.slice(6);                 // "<id>:<kind>"
+        const cut = rest.lastIndexOf(":");
+        if (cut < 0) continue;
+        const id = rest.slice(0, cut);
+        /* Grouped by account, not left flat: everything due for one account has to be
+           handled together — see fireDue(). */
+        if (!due.has(id)) due.set(id, []);
+        due.get(id).push({ kind: rest.slice(cut + 1), at });
       }
       if (res.list_complete) break;
       cursor = res.cursor;
     }
-    /* Bounded concurrency: a hundred simultaneous fetches to a push service is how you
-       get rate-limited by it. */
-    for (let i = 0; i < due.length; i += 10) {
-      await Promise.all(due.slice(i, i + 10).map(d => fireDue(env, d.id, d.at).catch(() => {})));
+    /* Bounded concurrency ACROSS accounts, never within one: a hundred simultaneous
+       fetches to a push service is how you get rate-limited by it, and two workers on the
+       same account is the race fireDue() exists to avoid. */
+    const accounts = [...due.entries()];
+    for (let i = 0; i < accounts.length; i += 10) {
+      await Promise.all(accounts.slice(i, i + 10)
+        .map(([id, items]) => fireDue(env, id, items).catch(() => {})));
     }
   },
 };

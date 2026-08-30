@@ -1271,6 +1271,18 @@ body.onboarding #app{padding:0}
 .sync-ok{background:var(--ok);box-shadow:0 0 0 3px rgba(74,147,88,.16)}
 .sync-wait{background:var(--arms);box-shadow:0 0 0 3px rgba(201,154,52,.16)}
 .sync-bad{background:var(--bad);box-shadow:0 0 0 3px rgba(209,88,79,.16)}
+/* One reminder per row: a name, its switch, what it will say, and when. The preview is
+   the whole point of the layout — a reminder somebody cannot read before agreeing to it
+   is a reminder they find out about at 6am. */
+.rem-row{border-top:1px solid var(--line);padding:13px 0 0;margin:13px 0 0}
+.rem-row:first-of-type{border-top:0;padding-top:0;margin-top:0}
+.rem-head{display:flex;align-items:center;gap:12px;justify-content:space-between;margin:0 0 5px}
+.rem-head b{font-size:15px}
+.rem-head .seg{width:auto;flex:0 0 auto;margin:0}
+.rem-head .seg button{padding:7px 15px;font-size:12.5px}
+.rem-row .sub{margin:0 0 7px}
+.rem-when{font-size:12.5px;line-height:1.5;color:var(--faint)}
+.rem-when b{color:var(--ink)}
 .sync-warn{
   margin-top:12px;padding:11px 12px;border-radius:11px;background:var(--card2);
   border-left:3px solid var(--arms);font-size:13px;color:var(--dim);line-height:1.5;
@@ -3427,7 +3439,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "7.8";
+const APP_VERSION = "7.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8754,8 +8766,8 @@ function urlB64ToBytes(b64){
   return out;
 }
 
-/* The one sentence. Written to be true whenever it is read rather than whenever it was
-   composed — it is stored now and shown hours later, so it never says "tomorrow". */
+/* The training sentence. Written to be true whenever it is READ rather than whenever it
+   was composed — it is stored now and shown hours later, so it never says "tomorrow". */
 function reminderText(forTomorrow){
   const rest = forTomorrow ? restDueNotToday() : isRestToday();
   const wid = forTomorrow ? ROTATION[S.pointer] : todaysWorkoutId();
@@ -8773,23 +8785,151 @@ function reminderText(forTomorrow){
                     : "Ready when you are."
   };
 }
-/* The next moment worth a buzz, or null. A day you have already trained is skipped
-   outright: the reminder exists to tell you a session is waiting, and one that has been
-   done is not waiting. */
-function nextReminder(){
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(S.remindAt || ""));
-  if(!m) return null;
-  const hh = Math.min(23, +m[1]), mm = Math.min(59, +m[2]);
+
+/* =====================================================================
+   WHEN YOU WILL WAKE UP
+
+   The morning reminder has to land at a time nobody has told the app. Guessing it wrong
+   in either direction is worse than not sending it: early is an alarm clock somebody did
+   not ask for, late is a reminder about a night it can no longer measure.
+
+   So it is MEASURED, not assumed. The wake sheet already asks "just woken up?" and works
+   out the duration from it; recording the clock time of that answer costs nothing and
+   turns every logged night into a sample. The prediction is the median of them — median
+   rather than mean because one 5am flight or one Sunday lie-in should move it by nothing
+   at all, and a mean moves for both.
+
+   AND IT STAYS QUIET UNTIL IT KNOWS. Under three samples there is no prediction and no
+   morning reminder, and the card says that in words rather than defaulting to some
+   invented seven o'clock and being wrong at somebody every day for a week. */
+const WAKE_LOOKBACK = 21;      // samples considered, most recent first
+const WAKE_MIN_SAMPLES = 3;
+/* Waking is a morning event, and the arithmetic below cannot survive the wrap around
+   midnight — a median of 23:50 and 00:10 is midday. Samples outside this window are
+   dropped rather than mishandled; a genuinely nocturnal schedule gets no prediction,
+   which is the honest answer for it. */
+const WAKE_EARLIEST = 3*60, WAKE_LATEST = 13*60;
+function medianOf(a){
+  const v = a.slice().sort((x,y)=> x-y), n = v.length;
+  if(!n) return null;
+  return n % 2 ? v[(n-1)/2] : Math.round((v[n/2-1] + v[n/2]) / 2);
+}
+/* Every night that was actually measured: what time you got up, and how long you slept. */
+function wakeSamples(){
+  const ci = S.checkins || {};
+  const out = [];
+  Object.keys(ci).sort().slice(-WAKE_LOOKBACK).forEach(d=>{
+    const c = ci[d];
+    if(!c || !c.wokeAt) return;
+    const t = new Date(c.wokeAt);
+    if(!isFinite(t.getTime())) return;
+    const min = t.getHours()*60 + t.getMinutes();
+    if(min < WAKE_EARLIEST || min > WAKE_LATEST) return;
+    out.push({min, dur: parseFloat(c.sleep) || 0});
+  });
+  return out;
+}
+/* How long you actually sleep, as opposed to how long you meant to. */
+function typicalSleepH(){
+  const d = wakeSamples().map(x=> x.dur).filter(v=> v >= 3 && v <= 14);
+  if(d.length >= WAKE_MIN_SAMPLES) return medianOf(d.map(v=> Math.round(v*60))) / 60;
+  return sleepNeedH();
+}
+/* {min, why, n} or null. `min` is minutes past midnight. */
+function predictedWake(){
+  /* A wake time you set yourself beats anything inferred from data, always: it is not a
+     better estimate of the same thing, it is the answer. */
+  /* Parsed here rather than through parseHM(), which answers 08:00 for anything it does
+     not understand. A silent default is fine where it came from — it feeds a projection
+     somebody is looking at — and is exactly wrong here, where it would set an alarm. */
+  const wm = /^(\d{1,2}):(\d{2})$/.exec(String(S.wakeTime || ""));
+  if(wm && +wm[1] < 24 && +wm[2] < 60) return {min: +wm[1]*60 + +wm[2], why: "the wake time you set", n: 0};
+  const s = wakeSamples();
+  if(s.length < WAKE_MIN_SAMPLES) return null;
+  return {min: medianOf(s.map(x=> x.min)), why: "the last " + s.length + " mornings you logged", n: s.length};
+}
+function fmtMinOfDay(min){
+  const d = new Date(); d.setHours(Math.floor(min/60), min%60, 0, 0);
+  return d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+}
+/* The next time today or tomorrow that the clock reads `min`. */
+function nextAtMinute(min, notBefore){
   const now = new Date();
-  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
-  const trainedToday = (S.sessions || []).some(x=> x && x.date === todayStr());
-  let tomorrow = false;
-  if(trainedToday || at.getTime() <= now.getTime() + 60000){
-    at.setDate(at.getDate() + 1);
-    tomorrow = true;
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+                      Math.floor(min/60), min%60, 0, 0);
+  const floor = (notBefore || Date.now()) + 60000;
+  while(at.getTime() <= floor) at.setDate(at.getDate() + 1);
+  return at.getTime();
+}
+
+/* EVERY REMINDER, COMPUTED TOGETHER. They are posted as a set and a kind left out is
+   deleted, so this is the single place that decides what exists — there is no path where
+   one of them is stale because it was queued under different circumstances. */
+function plannedReminders(){
+  const out = [];
+
+  if(S.remindAt){
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(S.remindAt));
+    if(m){
+      const min = Math.min(23, +m[1])*60 + Math.min(59, +m[2]);
+      const at = nextAtMinute(min);
+      /* A day you have already trained is skipped: this exists to say a session is
+         waiting, and one that is done is not waiting. */
+      const trainedToday = (S.sessions || []).some(x=> x && x.date === todayStr());
+      const sameDay = new Date(at).toDateString() === new Date().toDateString();
+      const t = reminderText(!sameDay || trainedToday);
+      if(trainedToday && sameDay){
+        const d = new Date(at); d.setDate(d.getDate() + 1);
+        out.push({kind:"train", at: d.getTime(), title: t.title, body: t.body});
+      } else {
+        out.push({kind:"train", at, title: t.title, body: t.body});
+      }
+    }
   }
-  const t = reminderText(tomorrow);
-  return {at: at.getTime(), title: t.title, body: t.body};
+
+  const p = trainPrefs();
+  if(S.remindBed && p.sleepPrompt !== false){
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(p.sleepTime || "22:30"));
+    if(m){
+      const min = Math.min(23, +m[1])*60 + Math.min(59, +m[2]);
+      let at = nextAtMinute(min);
+      /* Already asked and answered for tonight — the clock is running, or you said not
+         yet. Either way tonight's question has had its answer, so this goes to tomorrow.
+         Both are cleared by the morning, which is what makes one extra day enough. */
+      const settled = !!(S.sleepPend && S.sleepPend.startedAt) || S.sleepAsked === todayStr();
+      if(settled && new Date(at).toDateString() === new Date().toDateString()){
+        const d = new Date(at); d.setDate(d.getDate() + 1); at = d.getTime();
+      }
+      out.push({kind:"bed", at, title:"Turning in?",
+        body:"Start the clock and Element 26 measures your sleep instead of asking you to remember it."});
+    }
+  }
+
+  if(S.remindWake && p.sleepPrompt !== false){
+    const w = predictedWake();
+    if(w){
+      let at = nextAtMinute(w.min);
+      const started = S.sleepPend && S.sleepPend.startedAt;
+      /* A LATE NIGHT MOVES THE MORNING. If the clock is running and a typical night from
+         when you actually put the phone down lands after the usual hour, that is the
+         better estimate — being woken at your normal time after going to bed at two is
+         the exact failure this is meant to avoid. It only ever moves the reminder later. */
+      if(started){
+        const fromBed = started + typicalSleepH()*3600e3;
+        if(fromBed > at && fromBed < at + 6*3600e3) at = fromBed;
+      }
+      out.push({kind:"wake", at, title:"Just woken up?",
+        body: started
+          ? "You put the phone down at " + fmtClockShort(started) + ". Open Element 26 and it'll work out the rest."
+          : "Log how you slept and today's check-in is most of the way done."});
+    }
+  }
+  return out;
+}
+/* Kept as the training reminder's own accessor: the Reminders card previews it, and it
+   is the only one with a time the person typed in themselves. */
+function nextReminder(){
+  return plannedReminders().find(x=> x.kind === "train") || null;
 }
 
 let PUSH_SCHED_BUSY = false;
@@ -8800,11 +8940,10 @@ async function pushSyncSchedule(){
   if(!S.pushOn || !accountAuth() || PUSH_SCHED_BUSY) return;
   PUSH_SCHED_BUSY = true;
   try{
-    const r = nextReminder();
     await apiFetch("/push/schedule", {
       method:"POST",
       headers:{"Content-Type":"application/json", "Authorization": accountAuth()},
-      body: JSON.stringify(r ? {at:r.at, title:r.title, body:r.body} : {at:null})
+      body: JSON.stringify({items: plannedReminders()})
     });
   }catch(e){}
   finally{ PUSH_SCHED_BUSY = false; }
@@ -8848,7 +8987,12 @@ async function pushEnable(){
     const cache = await caches.open("e26-push");
     await cache.put("./__e26_push_token", new Response(j.token));
     S.pushOn = true;
+    /* All three on to begin with, because the two sleep ones are the reason somebody
+       turned this on at all — they are the things you cannot see with the app closed.
+       The morning one still stays silent until it has mornings to go on. */
     if(!S.remindAt) S.remindAt = "18:00";
+    if(S.remindBed == null) S.remindBed = true;
+    if(S.remindWake == null) S.remindWake = true;
     save();
     await pushSyncSchedule();
     return "";
@@ -8882,8 +9026,8 @@ function pushCardHTML(){
   const why = pushBlocker();
   let h = `<div class="card">
     <h3>Reminders</h3>
-    <div class="sub" style="margin:4px 0 10px">One notification, at an hour you pick, telling you
-      which session is up — or that today is a rest day. Nothing else is ever sent.</div>`;
+    <div class="sub" style="margin:4px 0 10px">Three, at most, and each one switchable on its own.
+      Nothing is ever sent that isn't listed here.</div>`;
   if(PUSH_BUSY){
     return h + `<div class="ai-busy"><span class="ai-spin"></span><span>Setting that up…</span></div></div>`;
   }
@@ -8896,21 +9040,68 @@ function pushCardHTML(){
       <button class="btn small" id="pushOnBtn" style="flex:1">Turn on reminders</button>
     </div></div>`;
   }
-  const r = nextReminder();
-  h += `<div class="field"><label>Remind me at</label>
-      <input class="timein" type="time" id="remindAtIn" value="${esc(S.remindAt || "18:00")}"></div>
-    <div class="sub" style="margin:2px 0 10px;font-size:12.5px;color:var(--faint)">${
-      r ? `Next: <b>${esc(r.title)}</b> — ${esc(r.body)}<br>${esc(fmtWhen(r.at))}`
-        : "Nothing scheduled — pick a time."}</div>
-    <div class="btn-row" style="margin-top:0">
-      <button class="btn ghost small" id="pushOffBtn" style="flex:1">Turn off reminders</button>
-    </div>`;
-  return h + `</div>`;
+  const seg = (attr, on)=> `<div class="seg">
+    <button class="${on?"on":""}" ${attr}="on">On</button>
+    <button class="${on?"":"on"}" ${attr}="off">Off</button></div>`;
+  const plan = plannedReminders();
+  const at = k => plan.find(x=> x.kind === k);
+  const p = trainPrefs();
+  const sleepOff = p.sleepPrompt === false;
+  /* WHAT IT WILL SAY, AND WHEN, BEFORE YOU AGREE TO IT. A reminder somebody cannot read
+     in advance is one they find out about at six in the morning. */
+  const preview = (k, none, note)=>{
+    const r = at(k);
+    return `<div class="rem-when">${r
+      ? `${esc(fmtWhen(r.at))}${note ? ", " + note : ""} — “<b>${esc(r.title)}</b> ${esc(r.body)}”`
+      : none}</div>`;
+  };
+
+  h += `<div class="rem-row">
+    <div class="rem-head"><b>Training</b>${seg("data-remtrain", !!S.remindAt)}</div>
+    <div class="sub">Which session is up, at an hour you choose. Skipped on a day you've already trained.</div>`;
+  if(S.remindAt){
+    h += `<div class="field" style="margin:8px 0 0"><label>Time</label>
+      <input class="timein" type="time" id="remindAtIn" value="${esc(S.remindAt)}"></div>`;
+  }
+  h += preview("train", "Pick a time.") + `</div>`;
+
+  h += `<div class="rem-row">
+    <div class="rem-head"><b>Bedtime</b>${seg("data-rembed", !!S.remindBed && !sleepOff)}</div>
+    <div class="sub">A nudge to start the sleep clock at ${
+      sleepOff ? "your night-start time" : `<b>${esc(p.sleepTime || "22:30")}</b>`
+    }, the hour the app already treats as your night — change it under <b>Advanced settings</b>.
+      Not sent on a night you've already answered.</div>`;
+  h += sleepOff
+    ? `<div class="rem-when">Sleep tracking is off, so there's nothing to remind you about.</div>`
+    : preview("bed", "Off.");
+  h += `</div>`;
+
+  const w = predictedWake();
+  h += `<div class="rem-row">
+    <div class="rem-head"><b>Morning</b>${seg("data-remwake", !!S.remindWake && !sleepOff && !!w)}</div>
+    <div class="sub">To log the night while you can still remember it. Element 26 works out roughly
+      when you get up from the mornings you've already logged — nobody has to set an alarm.</div>`;
+  if(sleepOff){
+    h += `<div class="rem-when">Sleep tracking is off, so there's nothing to remind you about.</div>`;
+  } else if(!w){
+    /* Deliberately no fallback hour. Inventing 07:00 would be wrong at somebody every
+       morning until the data arrived, and a reminder that is reliably wrong gets
+       swiped away without being read — including on the days it was right. */
+    h += `<div class="rem-when">Not yet — it needs ${WAKE_MIN_SAMPLES} logged mornings before it'll
+      guess, and it won't guess before then. Set a fixed wake time under <b>Sleep</b> below to skip the wait.</div>`;
+  } else {
+    h += preview("wake", "Off.", "worked out from " + esc(w.why));
+  }
+  h += `</div>`;
+
+  return h + `<div class="btn-row" style="margin-top:12px">
+      <button class="btn ghost small" id="pushOffBtn" style="flex:1">Turn off all reminders</button>
+    </div></div>`;
 }
 /* "Today at 18:00" / "Tomorrow at 18:00" / a date, for the one line that previews it. */
 function fmtWhen(ms){
   const d = new Date(ms), now = new Date();
-  const time = d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  const time = d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
   const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate())
                          - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / DAY_MS);
   if(days === 0) return "Today at " + time;
@@ -12494,6 +12685,9 @@ function openSleepSheet(){
   m.querySelector("#slGo").onclick = ()=>{
     S.sleepPend = {startedAt: Date.now(), date: todayStr()};
     save(); queueSync(); hideModal();
+    /* The morning reminder was aimed at a typical night. Now there is a real bedtime to
+       aim it at, and tonight's bedtime reminder has plainly been answered. */
+    pushSyncSchedule();
     // so the header moon fills straight away rather than at the next render
     render();
     toast("Good night \u2014 clock started " + fmtClockShort(S.sleepPend.startedAt));
@@ -12513,7 +12707,7 @@ function openWakeSheet(then){
   const pend = S.sleepPend;
   if(!pend){ if(then) then(); return; }
   const hours = (Date.now() - pend.startedAt)/3600e3;
-  const done = ()=>{ delete S.sleepPend; save(); queueSync(); hideModal(); if(then) then(); };
+  const done = ()=>{ delete S.sleepPend; save(); queueSync(); hideModal(); pushSyncSchedule(); if(then) then(); };
   showModal(`<div class="sl-sheet">
     <div class="sl-art sl-dawn" style="--d:0ms">${moonSVG()}</div>
     <div class="sl-t" style="--d:80ms">Just woken up?</div>
@@ -12531,6 +12725,12 @@ function openWakeSheet(then){
     const d = todayStr();
     const rec = (S.checkins[d] = S.checkins[d] || {});
     rec.sleep = String(Math.round(hours*10)/10);
+    /* THE CLOCK TIMES, NOT JUST THE DURATION. Eight hours tells you nothing about when
+       you got up, and when you get up is the only thing a morning reminder can be aimed
+       at. Two numbers on a record that is already being written, and predictedWake()
+       downstream is reading measurements rather than guessing from a target. */
+    rec.bedAt = pend.startedAt;
+    rec.wokeAt = Date.now();
     toast("Logged " + fmtHours(hours) + " of sleep");
     done();
   };
@@ -15712,12 +15912,13 @@ function bind(){
   if(ciOpen) ciOpen.onclick = ()=> openCheckinSheet();
   document.querySelectorAll("[data-slprompt]").forEach(b=> b.onclick = ()=>{
     trainPrefs().sleepPrompt = b.dataset.slprompt === "on";
+    pushSyncSchedule();
     save(); queueSync(); render();
     toast(trainPrefs().sleepPrompt ? "Tracking your sleep" : "Won't ask at night");
   });
   const slT = $("#prefSleepT");
   if(slT) slT.onchange = ()=>{
-    if(/^\d{1,2}:\d{2}$/.test(slT.value)){ trainPrefs().sleepTime = slT.value; save(); queueSync();
+    if(/^\d{1,2}:\d{2}$/.test(slT.value)){ trainPrefs().sleepTime = slT.value; save(); queueSync(); pushSyncSchedule();
       toast("Night starts at " + slT.value); }
   };
   document.querySelectorAll("[data-ciprompt]").forEach(b=> b.onclick = ()=>{
@@ -16261,6 +16462,30 @@ function bind(){
     const r = nextReminder();
     toast(r ? "Next reminder " + fmtWhen(r.at).toLowerCase() : "Reminder time cleared");
   };
+  /* The three switches. Each one posts the whole set again rather than the one that
+     changed — see plannedReminders(): computing them together is what stops one going
+     stale, and it costs a single request either way. */
+  document.querySelectorAll("[data-remtrain]").forEach(b=> b.onclick = ()=>{
+    S.remindAt = b.dataset.remtrain === "on" ? (S.remindAt || "18:00") : null;
+    save(); queueSync(); render(); pushSyncSchedule();
+  });
+  document.querySelectorAll("[data-rembed]").forEach(b=> b.onclick = ()=>{
+    const on = b.dataset.rembed === "on";
+    if(on && trainPrefs().sleepPrompt === false){
+      toast("Sleep tracking is off \u2014 turn it on in Advanced settings"); return;
+    }
+    S.remindBed = on; save(); queueSync(); render(); pushSyncSchedule();
+  });
+  document.querySelectorAll("[data-remwake]").forEach(b=> b.onclick = ()=>{
+    const on = b.dataset.remwake === "on";
+    if(on && trainPrefs().sleepPrompt === false){
+      toast("Sleep tracking is off \u2014 turn it on in Advanced settings"); return;
+    }
+    if(on && !predictedWake()){
+      toast("Not enough logged mornings yet \u2014 it won't guess a time"); return;
+    }
+    S.remindWake = on; save(); queueSync(); render(); pushSyncSchedule();
+  });
   const sti = $("#sleepTargetIn");
   if(sti) sti.onchange = ()=>{
     const v = parseFloat(sti.value);
@@ -20048,7 +20273,7 @@ async function gistFetch(path, opts={}){
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
-  "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt",
+  "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","sessions","savedAt"
 ];
@@ -21065,7 +21290,7 @@ function mergeBackup(into, d){
       if(d[k] !== undefined) into[k] = d[k];
     });
   }
-  ["setup","lastReview","wakeTime","sleepTarget","remindAt","asymRetest","volWindow","askWhy",
+  ["setup","lastReview","wakeTime","sleepTarget","remindAt","remindBed","remindWake","asymRetest","volWindow","askWhy",
    "experience","viewMode"].forEach(k=>{ if(d[k] !== undefined && d[k] !== null) into[k] = d[k]; });
   return stats;
 }
