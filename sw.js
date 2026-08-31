@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "7.3";
+const VERSION = "7.4";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -138,7 +138,11 @@ self.addEventListener("push", event=>{
        future sender can skip the round trip without another worker release. */
     try{ if(event.data) n = event.data.json(); }catch(e){ n = null; }
     if(!n || !n.title) n = await pendingNotification();
-    if(!n || !n.title) n = {title:"Element 26", body:"Your next session is up."};
+    /* THE LAST-RESORT TEXT, and it says something rather than saying the app's name.
+       The device already tells you which app a notification came from — that line is the
+       operating system's and cannot be removed — so spending the title on the same word
+       is a notification whose entire content is "Element 26. Element 26." */
+    if(!n || !n.title) n = {title:"Your next session is up", body:""};
     await self.registration.showNotification(String(n.title), {
       body: String(n.body || ""),
       /* One tag for the lot: a reminder that arrives while yesterday's is still on the

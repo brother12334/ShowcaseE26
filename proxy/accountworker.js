@@ -514,7 +514,9 @@ export default {
           "sched:" + who.id + ":" + kind,
           JSON.stringify({
             at,
-            title: String(it.title || "Element 26").slice(0, 80),
+            /* The app always sends a title; this is only what a malformed post gets.
+               Not the app's name — the device already says which app raised it. */
+            title: String(it.title || "Reminder").slice(0, 80),
             body: String(it.body || "").slice(0, 200),
             tag: "e26-" + kind,
           }),
