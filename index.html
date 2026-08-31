@@ -3487,7 +3487,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "8.5";
+const APP_VERSION = "8.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9839,10 +9839,10 @@ function bindOnboarding(){
     else toast("Reminders on");
     obGo(OB.step+1);
   });
-  /* "Not now" here starts the same week-long clock the sheet uses. Without it, declining
-     during setup and being asked again on the next launch is the whole nagging problem,
-     arriving faster than if we had never asked at all. */
-  on("obRemindNo", ()=>{ S.pushAsked = Date.now(); saveQuiet(); obGo(OB.step+1); });
+  /* "Not now" here counts as today's ask, so setting the app up and being asked again
+     ten seconds later on the Today screen cannot happen. Tomorrow is fair game: the
+     question is still open until it is actually answered. */
+  on("obRemindNo", ()=>{ S.pushAsked = todayStr(); saveQuiet(); obGo(OB.step+1); });
   /* Every "import" entry point lands in the same place. The importer decides for itself
      whether what you handed it is an Element 26 backup (adopted as-is) or a plan in some
      other form (read by the model), because that distinction is ours to make, not
@@ -12727,7 +12727,7 @@ function openingPrompts(){
     /* Ahead of the check-in, and only ever briefly: this is due at most once a week and
        the check-in it displaces is asked again the moment this one is answered. */
     if(pushAskDue()){
-      S.pushAsked = Date.now(); saveQuiet();
+      S.pushAsked = todayStr(); saveQuiet();
       openPushSheet(()=> maybeDailyCheckin());
       return;
     }
@@ -12852,7 +12852,10 @@ function openSleepSheet(){
 
      • pushBlocker() must be clear. On iOS in a Safari tab this is impossible, so asking
        is not a prompt, it is an apology. They will meet it after they install.
-     • "Not now" is an answer with a lifetime, not a dismissal. It stands for a week.
+     • "Not now" means not today. THERE ARE ONLY TWO ANSWERS THAT END THE ASKING — turn
+       them on, or don't ask again — and a deferral is neither, so it lasts a day rather
+       than settling anything. Asking twice in one day is nagging; asking once more
+       tomorrow is the question still being open, which it is.
      • "Don't ask again" is permanent and honours itself. The card in Settings is still
        there, and the sheet says so, so nothing is lost by taking it.
 
@@ -12860,14 +12863,15 @@ function openSleepSheet(){
    app, so "not on this device" is the coherent unit — and a person who says no on their
    laptop should still be asked on the phone they actually train with. Neither flag goes
    into a backup, for the same reason S.pushOn does not. */
-const PUSH_ASK_AGAIN_MS = 7 * DAY_MS;
 function pushAskDue(){
   if(!VAPID_PUBLIC) return false;
   if(!S.setup) return false;                 // still onboarding; it has its own offer
   if(S.pushOn || S.pushNever) return false;
   if(pushBlocker()) return false;            // cannot work here, so do not ask here
-  const last = Number(S.pushAsked) || 0;
-  return !last || (Date.now() - last) >= PUSH_ASK_AGAIN_MS;
+  /* A date, like S.sleepAsked and S.ciAsked either side of it, rather than a timestamp
+     and a window. An earlier build stored a timestamp here; a leftover number is simply
+     not today's date, so it asks once and corrects itself. */
+  return S.pushAsked !== todayStr();
 }
 /* `then` carries on to whatever would have been asked instead, so this never costs
    somebody their daily check-in — it borrows the slot and hands it straight back. */
@@ -12881,7 +12885,7 @@ function openPushSheet(then){
       at most, each one switchable on its own, and nothing else is ever sent.</div>
     <button class="btn sl-go" id="pshYes" style="--d:190ms">Turn on reminders</button>
     <div class="ci-alt" style="--d:230ms">
-      <button class="nb-link" id="pshLater">Not now</button>
+      <button class="nb-link" id="pshLater">Not today</button>
       <span class="ci-alt-sep">·</span>
       <button class="nb-link" id="pshNever">Don't ask again</button>
     </div>
