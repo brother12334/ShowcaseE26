@@ -107,8 +107,9 @@ function sameSecret(a, b) {
    answers "not configured" and the app hides the whole feature. Nothing else changes.
 
    WHAT IS STORED, AND WHY IT IS SO LITTLE
-     push:<id>    the push service endpoint for that account's one installed app, plus a
-                  random token. No p256dh, no auth secret — see below.
+     push:<id>    that account's one installed app: the push service endpoint, the two
+                  RFC 8291 keys any sender needs to encrypt a message for it, a device
+                  label, and a random token for the payload-less path below.
      ptok:<token> reverse lookup for that token. It authorises exactly one thing.
      sched:<id>:<kind>
                   the next reminder OF THAT KIND: {at, title, body}. One per kind, never
@@ -120,11 +121,18 @@ function sameSecret(a, b) {
                   rather than a single value because two kinds can come due in the same
                   minute, and the second must not overwrite the first. Self-expiring.
 
-   THE PUSH ITSELF CARRIES NO BODY. That is a deliberate trade: an encrypted payload
-   would mean holding each device's key material here, and the notification text would be
-   sitting in KV either way. Payload-less means this service signs a VAPID JWT and POSTs
-   nothing at all; the text is fetched by the service worker over TLS a moment later,
-   against a token that reads one message and cannot touch the training log.
+   THIS SERVICE'S OWN PUSHES CARRY NO BODY, and that has not changed: a reminder is
+   signed, POSTed empty, and the text is fetched by the service worker a moment later
+   against a token that reads one message and cannot touch the training log. Implementing
+   aes128gcm here to say "Upper A" would be work in exchange for nothing.
+
+   THE SUBSCRIPTION KEYS ARE STORED ANYWAY. They belong to the subscription rather than
+   to this service's design, they exist only on the object the browser hands back at
+   subscribe time and cannot be recovered afterwards, and without them the ONLY thing
+   this record can ever deliver is a wake-up with no words in it — which forecloses every
+   other sender, the admin console included. What they are worth to an attacker is
+   bounded and worth stating: with the VAPID private key as well, they allow sending a
+   notification to that device. They read nothing.
 
    THE APP DECIDES WHAT IT SAYS. Which day is up, whether a rest is owed, whether you
    already trained — all of that is rotation logic that already exists in the app and
@@ -139,6 +147,9 @@ const SCHED_KINDS = ["train", "bed", "wake"];
 const PEND_MAX = 4;
 const SCHED_MAX_AHEAD = 60 * 24 * 3600 * 1000;   // sanity bound, not a policy
 const TOKEN_RE = /^[a-f0-9]{32}$/;
+/* Every device label the app can send; see deviceLabel() in index.html. */
+const UA_LABELS = ["iPhone", "iPad", "Android", "Mac", "Windows", "Linux", "Device"]
+  .flatMap((d) => [d, d + " (installed)"]);
 /* Push services are a small, known set. An endpoint is a URL this service will make an
    authenticated POST to on a schedule, so it is not somewhere a caller gets to point
    anywhere it likes — that would make this an open relay wearing a Worker. */
@@ -436,11 +447,35 @@ export default {
       try { body = await request.json(); } catch (e) {}
       const endpoint = String(body.endpoint || "");
       if (!endpointAllowed(endpoint)) return json({ error: "bad endpoint" }, 400, origin);
+      /* Bounded and shaped, because everything here is written by a client. p256dh is a
+         65-byte point and auth is 16 bytes, both base64url; anything else is dropped
+         rather than stored, and a record without them is still a working subscription
+         for the payload-less path. */
+      const b64u = (v, max) => {
+        const t = String(v || "");
+        return /^[A-Za-z0-9_-]+$/.test(t) && t.length <= max ? t : "";
+      };
+      const p256dh = b64u(body.keys && body.keys.p256dh, 120);
+      const authKey = b64u(body.keys && body.keys.auth, 48);
+      /* The label is a label, not free text. The app sends one of these and nothing
+         else, so it is checked against the list rather than sanitised — sanitising asks
+         "is this string safe to store", and the answer to "is it one of seven values" is
+         both easier and correct. Anything else is stored as nothing. */
+      const ua = UA_LABELS.indexOf(String(body.ua || "")) > -1 ? String(body.ua) : "";
       /* One installed app per account, by design: resubscribing replaces rather than
          adds, so an app deleted and reinstalled leaves nothing behind to send to. */
       await forgetPush(env, who.id);
       const token = randomFrom("abcdef0123456789", 32);
-      await env.E26_ACCOUNTS.put("push:" + who.id, JSON.stringify({ endpoint, token, at: Date.now() }));
+      /* `createdAt` rather than `at`: it is the name every other reader of this record
+         uses, and one record written under two spellings is a bug waiting for whoever
+         reads it next. */
+      await env.E26_ACCOUNTS.put("push:" + who.id, JSON.stringify({
+        endpoint,
+        keys: { p256dh, auth: authKey },
+        ua,
+        token,
+        createdAt: Date.now(),
+      }));
       await env.E26_ACCOUNTS.put("ptok:" + token, who.id);
       return json({ ok: true, token }, 200, origin);
     }

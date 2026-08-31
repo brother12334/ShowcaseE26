@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "7.2";
+const VERSION = "7.3";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -155,7 +155,16 @@ self.addEventListener("notificationclick", event=>{
   event.notification.close();
   const want = (event.notification.data && event.notification.data.url) || "./";
   event.waitUntil((async ()=>{
-    const target = new URL(want, self.location.href).href;
+    /* THE URL COMES FROM WHOEVER SENT THE PUSH, so it is resolved and then checked
+       against this worker's own scope rather than trusted. A notification that can
+       navigate somebody anywhere is a redirect with a badge on it; and the honest case
+       is duller than the malicious one — the app is served from a project subpath, so a
+       sender that innocently says "/" means the domain root, which is not the app. */
+    let target = self.registration.scope;
+    try{
+      const u = new URL(want, self.registration.scope);
+      if(u.href.indexOf(self.registration.scope) === 0) target = u.href;
+    }catch(e){}
     const clients = await self.clients.matchAll({type:"window", includeUncontrolled:true});
     /* Focus what is already open rather than opening a second copy. On iOS a Home Screen
        app has exactly one window and reopening it would restart an in-progress workout's
