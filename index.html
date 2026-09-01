@@ -252,6 +252,19 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
    the only thing marking it as live is the weight riding after it and a dotted rule
    under the name itself. A name that suddenly looked like a button would be louder than
    the exercise. */
+/* A slot the plan wrote as a choice. Reads as the exercise name with a quiet "or…"
+   after it — enough to say a decision is available without turning every card into a
+   control panel. */
+.ex-pick{
+  background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;text-align:left;
+  display:inline-flex;align-items:baseline;gap:7px;cursor:pointer;
+}
+.ex-pick-tag{
+  font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--acc);border:1px solid var(--line);border-radius:999px;padding:2px 7px;
+  font-weight:500;transform:translateY(-1px);
+}
+.ex-pick:active .ex-pick-tag{background:var(--card2)}
 .ex-bar-name{background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;
   text-transform:inherit;letter-spacing:inherit;cursor:pointer;text-align:left;
   display:inline-flex;align-items:baseline;gap:7px;flex-wrap:wrap;
@@ -3494,7 +3507,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "9.0";
+const APP_VERSION = "9.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6943,9 +6956,59 @@ function limbWord(name){
   if(/\bcrunch|\bab\b|\btwist\b|\bside bend\b/i.test(n)) return "side";
   return "arm";
 }
+/* =====================================================================
+   A SLOT THAT OFFERS A CHOICE
+
+   Two different things share e.alt, and telling them apart is the whole of this:
+
+     ALTERNATING   the plan says do A this week and B next. Nobody chooses; the rotation
+                   does, off the session count. This is what alt has always meant.
+     CHOOSING      the plan says "cable fly OR smith press" and means it — either is the
+                   prescription, and which one you do today is a decision you make in the
+                   gym, usually based on what is free. e.altPick marks this.
+
+   The distinction matters because auto-alternating a slot that was meant to be a choice
+   is the app overruling the plan, and it does it silently: you arrive, the machine you
+   wanted is taken, and the card insists on it anyway.
+
+   THE CHOICE IS REMEMBERED PER SLOT, so a rack you never use does not have to be
+   declined every session — but it is only ever a default, never a rule. */
+function pickKey(wid, e){ return String(wid) + "|" + nrm(e && e.name); }
+function altPicked(wid, e){
+  if(!S.picks || typeof S.picks !== "object") return false;
+  return !!S.picks[pickKey(wid, e)];
+}
+function setAltPick(wid, e, useAlt){
+  if(!S.picks || typeof S.picks !== "object") S.picks = {};
+  if(useAlt) S.picks[pickKey(wid, e)] = 1;
+  else delete S.picks[pickKey(wid, e)];
+}
 function activeVariant(wid, e){
   if(!e.alt) return e;
+  if(e.altPick) return altPicked(wid, e) ? e.alt : e;
   return altIndex(wid)===0 ? e : e.alt;
+}
+/* The two exercises a slot offers, primary first, or null when it offers no choice. */
+function pickOptions(wid, en){
+  if(!en) return null;
+  const src = findProgramSlot(en.name);
+  if(!src || !src.e || !src.e.alt || !src.e.altPick) return null;
+  return {wid: src.wid, base: src.e, opts: [src.e, src.e.alt],
+          at: nrm(en.name) === nrm(src.e.alt.name) ? 1 : 0};
+}
+/* Where an exercise lives in the programme, INCLUDING as the alternative half of a
+   choice — findProgramEntry() only ever looked at primaries, so a slot you had switched
+   to its second option could not find its own slot again. */
+function findProgramSlot(name){
+  const k = nrm(name);
+  for(const wid of DAYS){
+    const list = S.program[wid] || [];
+    for(const e of list){
+      if(nrm(e.name) === k) return {wid, e};
+      if(e.alt && nrm(e.alt.name) === k) return {wid, e};
+    }
+  }
+  return null;
 }
 function widName(wid){ return wid==="finisher" ? "Finisher" : dayName(wid); }
 /* =====================================================================
@@ -13606,7 +13669,7 @@ function viewActiveSession(){
     const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
     const ll = lastBox(a.workoutId, en.name, anyDay, occ);
     h += `<div class="card ex${supersetInfo(a.entries, ei)?' ss-card':''}">
-      <div class="ex-head"><b>${exNameHTML(en)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b></div>
+      <div class="ex-head"><b>${exNameHTML(en, ei)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b></div>
       <div class="ex-bar">
         <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}${easeTagHTML(en)}</span>
         <span class="icon-btns ex-ctl">
@@ -13956,7 +14019,16 @@ function barKindFor(name){
   return null;   // dumbbells, cables, machines and bodyweight have no bar to weigh
 }
 // The name, made tappable when there is a bar behind it. `ei` is only for the aria label.
-function exNameHTML(en){
+function exNameHTML(en, ei){
+  /* A slot with a choice in it says so on the card, because a choice nobody can see is
+     one nobody takes. It wins over the bar-weight control: which exercise you are doing
+     is a bigger question than what the bar weighs, and the bar is still reachable from
+     Settings and from the swap sheet. */
+  if(ei != null && S.active && pickOptions(S.active.workoutId, en)){
+    return `<button class="ex-pick" data-exchoose="${ei}"
+      aria-label="${esc(en.name)} \u2014 your plan offers a choice here, tap to change"
+      >${esc(en.name)}<span class="ex-pick-tag" aria-hidden="true">or\u2026</span></button>`;
+  }
   const kind = barKindFor(en && en.name);
   if(!kind) return `${esc(en.name)}`;
   const w = kind === "smith" ? smithWeight() + " " + unitWord()
@@ -14271,7 +14343,7 @@ function viewFocusSession(){
   const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
   const ll = lastBox(a.workoutId, en.name, anyDay, occ);
   h += `<div class="card ex focus">
-    <div class="ex-head"><b class="focus-name">${exNameHTML(en)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b></div>
+    <div class="ex-head"><b class="focus-name">${exNameHTML(en, ei)}${en.fin?' <span class="alt-badge">finisher</span>':''}</b></div>
     ${swapNoteHTML(en)}
     ${exNoteLineHTML(en)}
     <div class="ex-bar" style="margin:4px 0 10px">
@@ -14313,6 +14385,50 @@ function viewFocusSession(){
    Step one offers the shortlist first — same slot, same job, different equipment — then
    a search over every movement the app knows. Search rather than a long list: this gets
    used standing in a gym, and scrolling four hundred names one-handed is not a feature. */
+/* The chooser. Deliberately NOT the swap sheet: a swap is a deviation from the plan and
+   is recorded as one, with a reason, because knowing you benched dumbbells all month
+   because the rack was busy is the point of recording it. Picking the other half of a
+   slot your plan wrote as a choice is not a deviation — it is the plan being followed —
+   so it asks nothing and records nothing. */
+function openPickModal(ei){
+  const a = S.active;
+  if(!a || !a.entries[ei]) return;
+  const en = a.entries[ei];
+  const info = pickOptions(a.workoutId, en);
+  if(!info) return;
+  const logged = en.sets.filter(st=> st.done || st.weight !== "" || st.reps !== "").length;
+  showModal(`<h3>Which one today?</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">${
+      logged
+        ? "You've already logged " + logged + " set" + (logged===1?"":"s") + " here. Switching now would leave them on an exercise you didn't do, so finish or clear them first \u2014 or use Switch if the machine went busy mid-way."
+        : "Your plan asks for either of these, so take whichever is free. Element 26 remembers what you picked and offers it first next time."
+    }</div>
+    ${info.opts.map((o, i)=>`
+      <button class="btn ghost swap-opt" data-pickopt="${i}" ${logged?"disabled style=opacity:.4":""}
+        style="text-align:left;width:100%;margin-bottom:8px;padding:12px 14px">
+        <b style="display:block">${i === info.at ? "\u2713 " : ""}${esc(o.name)}</b>
+        <span class="sub" style="display:block;margin-top:3px;text-transform:none;letter-spacing:0">${
+          o.sets} \u00d7 ${esc(o.reps || "?")}${o.weight != null ? " \u00b7 " + fmtLoad(o.weight) + " " + esc(unitWord()) : ""}${
+          i === info.at ? " \u00b7 on the card now" : ""}</span>
+      </button>`).join("")}
+    <button class="btn ghost small" id="closeModal" style="margin-top:6px">Never mind</button>`);
+  $("#modal").querySelectorAll("[data-pickopt]").forEach(btn=> btn.onclick = ()=>{
+    if(logged) return;
+    const i = parseInt(btn.dataset.pickopt, 10);
+    if(i === info.at){ hideModal(); return; }
+    setAltPick(info.wid, info.base, i === 1);
+    /* Rebuilt through the same function that built it at session start, so the new row
+       carries the right reps, RPE ramp, warm-up kind, techniques and side handling
+       rather than the old exercise's wearing a new name. */
+    const rp = resolvedProgram(a.workoutId);
+    const chosen = rp.map(x=> x.chosen);
+    const slot = rp.findIndex(x=> x.chosen && nrm(x.chosen.name) === nrm(info.opts[i].name));
+    const side = a.entries[ei].startSide || startSideFor(a.workoutId);
+    a.entries[ei] = planEntry(info.opts[i], !!en.fin, slot < 0 ? ei : slot, chosen, side);
+    save(); queueSync(); hideModal(); render();
+    toast(info.opts[i].name + " it is");
+  });
+}
 function openSwapModal(ei){
   const a = S.active;
   if(!a) return;
@@ -15892,6 +16008,7 @@ function viewProgram(){
     // worse failure than an empty card.
     (S.program[wid] || []).forEach((e,i)=>{
       const nextUp = e.alt ? (activeVariant(wid,e)===e ? e.name : e.alt.name) : null;
+      const isPick = !!(e.alt && e.altPick);
       const asty = altStyle(e);
       let title = esc(e.name)
         + supersetBadge(supersetInfo(S.program[wid] || [], i))
@@ -15900,7 +16017,11 @@ function viewProgram(){
         + (asty === "cross" ? ' <span class="uni-badge">crossover</span>' : '')
         + (e.alt ? ' <span class="alt-badge">⇄ '+esc(e.alt.name)+'</span>' : '');
       let meta = `${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}`;
-      if(e.alt) meta += `<br>next ${m.name.toLowerCase()} day: ${esc(nextUp)}`;
+      /* "next Push day: X" is a promise, and for a slot you choose it is one the app
+         cannot keep. It says what it is instead: either, your call. */
+      if(e.alt) meta += isPick
+        ? `<br>either one \u2014 you pick on the day${nextUp ? ", currently " + esc(nextUp) : ""}`
+        : `<br>next ${m.name.toLowerCase()} day: ${esc(nextUp)}`;
       h += `<div class="prog-ex">
         <div><b>${title}</b><div class="meta">${meta}</div></div>
         <div class="icon-btns">
@@ -16592,6 +16713,8 @@ function bind(){
     [S.active.entries[i], S.active.entries[i+1]] = [S.active.entries[i+1], S.active.entries[i]];
     save(); render();
   });
+  document.querySelectorAll("[data-exchoose]").forEach(b=> b.onclick = ()=>
+    openPickModal(parseInt(b.dataset.exchoose, 10)));
   document.querySelectorAll("[data-barkind]").forEach(b=> b.onclick = ()=>{
     harvestActive();                      // bank whatever is typed before the re-render
     openBarModal(b.dataset.barkind);
@@ -17134,14 +17257,30 @@ function startWorkout(wid){
     workoutId: wid,
     date: todayStr(),
     startedAt: Date.now(),
-    entries: resolvedProgram(wid).map(({chosen:e, isFinisher}, _wi)=>({
+    /* Built once per slot by planEntry() below. resolvedProgram() is called once and
+       the chosen list passed down, rather than rebuilt inside the loop for every slot. */
+    entries: (()=>{
+      const rp = resolvedProgram(wid);
+      const chosen = rp.map(x=> x.chosen);
+      return rp.map(({chosen:e, isFinisher}, wi)=> planEntry(e, isFinisher, wi, chosen, side));
+    })()
+  };
+  save(); render();
+}
+/* ONE SLOT OF THE PLAN, TURNED INTO A ROW YOU CAN LOG INTO.
+
+   Lifted out of startWorkout() because it is no longer the only caller: picking the other
+   exercise in a slot that offers a choice rebuilds exactly one of these, and a second
+   hand-written copy of twenty fields is a second copy to forget to update. */
+function planEntry(e, isFinisher, wi, chosenList, side){
+  return {
       name: e.name, reps: e.reps, rpe: e.rpe, note: e.note, fin: isFinisher||undefined,
       // the per-set ramp, frozen at session start so editing the plan mid-workout
       // can't retarget sets you have already done
       rpes: Array.isArray(e.rpes) ? e.rpes.slice() : undefined,
       // which warm-up ramp this slot earns: what the plan prescribed if it prescribed
       // anything, otherwise whatever this person's warm-up preference generates
-      warm: warmupKindFor(resolvedProgram(wid).map(x=>x.chosen), _wi) || undefined,
+      warm: warmupKindFor(chosenList, wi) || undefined,
       warmups: Array.isArray(e.warmups) && e.warmups.length ? e.warmups.slice() : undefined,
       warmupNote: e.warmupNote || undefined,
       sideMode: e.sideMode || undefined,
@@ -17157,10 +17296,8 @@ function startWorkout(wid){
       // both frozen at session start so per-set L/R can never drift mid-workout
       altStyle: altStyle(e) || undefined,
       startSide: altStyle(e) ? side : undefined,
-      sets: Array.from({length:e.sets}, ()=>({weight:"",reps:"",rpe:"",done:false}))
-    }))
+    sets: Array.from({length:e.sets}, ()=>({weight:"",reps:"",rpe:"",done:false}))
   };
-  save(); render();
 }
 function resumeSession(id){
   const idx = S.sessions.findIndex(s=>s.id===id);
@@ -17468,7 +17605,17 @@ function openExEditor(wid, idx){
     </select>
   </div>
   <div class="sub" style="margin:-6px 0 12px">The last two tag every set with the side to use, alternating down the sets and flipping which side you open on next session. <b>Crossover</b> is for movements like the reverse delt fly where both arms work but one crosses over the other.</div>
-  <div class="togglerow"><input type="checkbox" id="f_hasAlt" ${e.alt?"checked":""}><label for="f_hasAlt" style="margin:0;font:inherit;color:var(--text);text-transform:none;letter-spacing:0">Alternates with a second exercise every other ${dayLabel}</label></div>
+  <div class="togglerow"><input type="checkbox" id="f_hasAlt" ${e.alt?"checked":""}><label for="f_hasAlt" style="margin:0;font:inherit;color:var(--text);text-transform:none;letter-spacing:0">This slot has a second exercise</label></div>
+  <div id="altModeWrap" style="display:${e.alt?"block":"none"};margin:10px 0 0">
+    <div class="seg">
+      <button class="${e.altPick?"":"on"}" data-altmode="rotate">It alternates</button>
+      <button class="${e.altPick?"on":""}" data-altmode="pick">I choose each time</button>
+    </div>
+    <div class="sub" style="margin:7px 0 0;text-transform:none;letter-spacing:0;color:var(--faint);font-size:12.5px">${
+      e.altPick
+        ? "Your plan offers both and either is fine. The workout card lets you pick, and remembers what you picked last."
+        : "One this " + dayLabel + ", the other the next. The app decides, off the session count."}</div>
+  </div>
   <div id="altFields" style="display:${e.alt?"block":"none"};border-top:1px solid var(--line);padding-top:12px">
     <div class="field"><label>Alternate name</label><input id="g_name" value="${esc(alt.name)}"></div>
     <div class="field"><label>Sets / rep range</label><div class="duo">
@@ -17487,7 +17634,21 @@ function openExEditor(wid, idx){
     <button class="btn ghost small" id="closeModal">Cancel</button>
   </div>`;
   showModal(h);
-  $("#f_hasAlt").onchange = ev=>{ $("#altFields").style.display = ev.target.checked ? "block" : "none"; };
+  let altPickMode = !!e.altPick;
+  $("#f_hasAlt").onchange = ev=>{
+    const on = ev.target.checked;
+    $("#altFields").style.display = on ? "block" : "none";
+    const w = $("#altModeWrap"); if(w) w.style.display = on ? "block" : "none";
+  };
+  document.querySelectorAll("[data-altmode]").forEach(b=> b.onclick = ()=>{
+    altPickMode = b.dataset.altmode === "pick";
+    document.querySelectorAll("[data-altmode]").forEach(x=>
+      x.classList.toggle("on", (x.dataset.altmode === "pick") === altPickMode));
+    const note = $("#altModeWrap").querySelector(".sub");
+    if(note) note.textContent = altPickMode
+      ? "Your plan offers both and either is fine. The workout card lets you pick, and remembers what you picked last."
+      : "One this " + dayLabel + ", the other the next. The app decides, off the session count.";
+  });
   $("#saveEx").onclick = ()=>{
     const ne = {
       name: $("#f_name").value.trim(),
@@ -17533,6 +17694,7 @@ function openExEditor(wid, idx){
       };
       if(!na.name){ toast("Name the alternate too"); return; }
       ne.alt = na;
+      if(altPickMode) ne.altPick = true; else delete ne.altPick;
     }
     /* A rename must not orphan the exercise's own history. Two things happen:
        the old name is registered as an alias, which is enough on its own because every
@@ -20943,7 +21105,7 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
-  "viewMode","cycleV2","sessions","savedAt"
+  "viewMode","cycleV2","picks","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
