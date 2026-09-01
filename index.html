@@ -3494,7 +3494,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "8.9";
+const APP_VERSION = "9.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4846,6 +4846,11 @@ const PREF_DEFAULTS = {
      counterbalanced carriage runs anywhere from 6 to 35 depending on the machine. Null
      means "the usual", which is smithBarDefault(). */
   smithWeight: null,
+  /* WHAT YOU CAN ACTUALLY LOAD. Null means nobody has said, and the app behaves exactly
+     as it always did. Told, it stops suggesting weights that do not exist: there is no
+     point telling somebody to add 2.5 lb a hand when the rack goes 10, 15, 20. */
+  dbStep: null,      // smallest gap between two of your dumbbells, per hand
+  plateStep: null,   // smallest plate you own — a bar changes by twice this
   /* POUNDS OR KILOS, AND NOTHING IS CONVERTED. This is a label, not a conversion.
      Every number in your log is the number you typed, which is the number written on
      the plate in front of you; the app only has to know what to CALL it, and what a
@@ -10860,6 +10865,10 @@ function aiPlanToProgram(doc, answers){
     if(ans.barMode === "total") prefs.barWeight = Math.max(5, Math.min(120, Math.round(aiQNum(ans.barWeight, 45))));
     else prefs.barWeight = 0;
   }
+  // unanswered stays null, and null means "nobody has said" rather than any default
+  const stepAns = v=>{ const n = parseFloat(v); return isFinite(n) && n > 0 && n <= 25 ? n : null; };
+  if(ans.plateStep) prefs.plateStep = stepAns(ans.plateStep);
+  if(ans.dbStep) prefs.dbStep = stepAns(ans.dbStep);
 
   /* What the plan's own effort targets look like, for the "found in your plan" screen —
      a sentence, not a boolean, because "RIR 3,2,2,1 on the compounds" is the evidence
@@ -11067,6 +11076,46 @@ function aiBuildQuestions(doc, result){
       when: a=> a.barMode === "total",
       def: barDefault(), unit: unitWord(), min: inKg() ? 2 : 5, max: inKg() ? 60 : 120,
       picks: inKg() ? [20, 15, 12, 10, 7] : [45, 35, 33, 25, 15]
+    });
+    /* WHAT YOU CAN PUT ON IT. A bar takes a plate at each end, so the smallest jump the
+       app should ever suggest is twice the smallest plate in the building. */
+    qs.push({
+      id:"plateStep", title:"What's the smallest pair of plates you have?",
+      sub:"A bar changes by twice this, so it sets the smallest increase the app will ever suggest. If you're not sure, pick the middle one.",
+      detected:"not in your plan",
+      def:null, rec: inKg() ? {v:"1.25", why:"the usual smallest in a kilo gym"}
+                            : {v:"2.5",  why:"the usual smallest in a pound gym"},
+      options: inKg()
+        ? [{v:"0.5",  t:"0.5 kg", s:"microplates. The bar moves in 1 kg."},
+           {v:"1.25", t:"1.25 kg", s:"the usual smallest. The bar moves in 2.5 kg."},
+           {v:"2.5",  t:"2.5 kg", s:"the bar moves in 5 kg."},
+           {v:"5",    t:"5 kg", s:"the bar moves in 10 kg."}]
+        : [{v:"1.25", t:"1.25 lb", s:"microplates. The bar moves in 2.5 lb."},
+           {v:"2.5",  t:"2.5 lb", s:"the usual smallest. The bar moves in 5 lb."},
+           {v:"5",    t:"5 lb", s:"the bar moves in 10 lb."},
+           {v:"10",   t:"10 lb", s:"big jumps only. The bar moves in 20 lb."}]
+    });
+  }
+
+  /* DUMBBELLS. Which pairs exist on the rack, which is the difference between a
+     suggestion somebody can act on and one they have to translate. */
+  const dbs = ex.filter(x=> /dumbbell|\bdb\b/i.test(String(x && x.name || "")));
+  if(dbs.length && doc.unit !== "percent"){
+    qs.push({
+      id:"dbStep", title:"How do your dumbbells go up?",
+      sub:"Which pairs the rack actually has decides what the app can suggest next \u2014 there's no point telling you to add "
+          + (inKg() ? "1 kg" : "2.5 lb") + " a hand if the smallest gap is " + (inKg() ? "2 kg" : "5 lb") + ".",
+      detected:"not in your plan",
+      def:null, rec: inKg() ? {v:"2", why:"the most common commercial rack"}
+                            : {v:"2.5", why:"most racks have the in-between sizes"},
+      options: inKg()
+        ? [{v:"1",   t:"Every 1 kg", s:"1, 2, 3, 4 \u2014 an adjustable set or a very full rack."},
+           {v:"2",   t:"Every 2 kg", s:"2, 4, 6, 8. The usual commercial rack."},
+           {v:"2.5", t:"Every 2.5 kg", s:"2.5, 5, 7.5, 10."},
+           {v:"5",   t:"Every 5 kg", s:"5, 10, 15, 20. Bigger jumps, common in home gyms."}]
+        : [{v:"2.5", t:"There are half sizes", s:"12.5, 17.5, 22.5 \u2014 so the smallest jump is 2.5 lb a hand."},
+           {v:"5",   t:"Whole numbers only", s:"10, 15, 20, 25 \u2014 the smallest jump is 5 lb a hand."},
+           {v:"10",  t:"Big jumps", s:"10, 20, 30. Common on older or home racks."}]
     });
   }
 
@@ -11596,6 +11645,8 @@ function aiReviewHTML(){
   if(p.sides) push("sides", "Side tracking", {separate:"Each side tracked separately", matchWeaker:"Held to the weaker side", both:"Both sides in one set"}[p.sides]);
   if(ans.startSide) push("startSide", "Starting side", p.startSideFlip ? "Alternates each cycle" : "Always the right");
   if(ans.barMode) push("barMode", "Barbell weight", p.barMode === "plates" ? "Plates only" : "Total, on a " + (p.barWeight||"?") + " " + unitWord() + " bar");
+  if(p.plateStep) push("plateStep", "Smallest plates", p.plateStep + " " + unitWord() + " a side, so the bar moves in " + fmtLoad(p.plateStep*2));
+  if(p.dbStep) push("dbStep", "Dumbbell steps", "every " + fmtLoad(p.dbStep) + " a hand");
   if(p.deloads && !(m.deloadWeeks||[]).length) push("deloads", "Deloads", p.deloads === "auto" ? "Element 26 tells you when one's due" : "Not prompted");
   if(ans.restDays) push("restDays", "Rest days", r.customSplit.layout.filter(x=>x==="rest").length + " a cycle");
   if(ans.units) push("units", "Units", ans.units === "convert" ? "Converted from kg to lb" : "Loads left out");
@@ -12303,6 +12354,15 @@ function trainPrefsCardHTML(){
     ${p.barMode === "total" ? `<div class="field" style="margin:10px 0 0"><label>Your bar weighs</label>
       <input id="prefBarW" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
         placeholder="e.g. 45 — leave blank if you'd rather not say"></div>` : ""}
+    <div class="sub" style="margin:14px 0 8px">What you can actually load. The app rounds every weight it
+      suggests to something that exists in your gym, so leave these right and it stops proposing jumps you
+      can't make. Blank means it won't assume.</div>
+    <div class="field" style="margin:0 0 10px"><label>Smallest plate, one side</label>
+      <input id="prefPlateStep" inputmode="decimal" value="${esc(p.plateStep == null ? "" : p.plateStep)}"
+        placeholder="${inKg() ? "e.g. 1.25 — the bar then moves in 2.5" : "e.g. 2.5 — the bar then moves in 5"}"></div>
+    <div class="field" style="margin:0 0 0"><label>Smallest gap between dumbbells</label>
+      <input id="prefDbStep" inputmode="decimal" value="${esc(p.dbStep == null ? "" : p.dbStep)}"
+        placeholder="${inKg() ? "e.g. 2" : "e.g. 2.5 if you have 12.5s and 17.5s, 5 if not"}"></div>
     <div class="field" style="margin:10px 0 0"><label>Smith machine carriage</label>
       <input id="prefSmithW" inputmode="decimal" value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
         placeholder="${smithBarDefault()} if you leave it blank — they vary from about 6 to 35"></div>
@@ -16648,6 +16708,21 @@ function bind(){
     save(); queueSync(); render();
     toast(trainPrefs().barWeight == null ? "Bar weight cleared" : "Bar set to " + trainPrefs().barWeight + " " + unitWord());
   };
+  const stepIn = (id, key, word)=>{
+    const el = $("#" + id);
+    if(!el) return;
+    el.onchange = ()=>{
+      const v = parseFloat(el.value);
+      trainPrefs()[key] = el.value.trim() === "" || !isFinite(v) || v <= 0
+        ? null : Math.min(25, Math.round(v * 100) / 100);
+      save(); queueSync(); render();
+      const now = trainPrefs()[key];
+      toast(now == null ? word + " cleared \u2014 the app won't assume"
+                        : word + ": " + fmtLoad(now) + " " + unitWord());
+    };
+  };
+  stepIn("prefPlateStep", "plateStep", "Smallest plate");
+  stepIn("prefDbStep", "dbStep", "Dumbbell gap");
   const smW = $("#prefSmithW");
   if(smW) smW.onchange = ()=>{
     const v = parseFloat(smW.value);
@@ -18617,6 +18692,23 @@ function openScoreCard(sess, onDone){
    documented as the cause of four stalled arm lifts in this log. Anything carrying an
    explicit `incr` (the three curls) overrides the class default. */
 function progressionStep(e){
+  const out = progressionStepRaw(e);
+  /* THE JUMP HAS TO EXIST. The class rules below are what the research says; what you
+     own is what you can put on the bar. Rounded UP rather than down, because the
+     alternative is suggesting a smaller increase than the smallest one available, which
+     is the same as suggesting nothing. */
+  const st = loadStepFor(e && e.name);
+  if(st > 0 && out.amount > 0){
+    const fitted = Math.max(st, Math.ceil((out.amount - 1e-9) / st) * st);
+    if(fitted !== out.amount){
+      out.amount = fitted;
+      out.why = (out.why || "") + ", rounded to what you can load";
+    }
+  }
+  if(st > 0 && out.alt > 0) out.alt = Math.max(st, Math.ceil((out.alt - 1e-9) / st) * st);
+  return out;
+}
+function progressionStepRaw(e){
   const n = nrm(e && e.name);
   const U = unitWord();
   /* Written in pounds because that is what the class rules were derived from, then
@@ -18641,6 +18733,12 @@ function progressionStep(e){
     return isCompound(e.name)
       ? st(5,   {unit: U + " a hand", why: "dumbbell compound"})
       : st(2.5, {unit: U + " a hand", why: "dumbbell isolation, microplates"});
+  }
+  /* A barbell was falling through to the stack rule and being told "one pin on the
+     stack", which is not a thing a barbell has. Same number, and now the reason given
+     is one that describes the equipment in front of you. */
+  if(equipmentOf(e.name) === "barbell"){
+    return st(5, {unit: U + " total", why: "barbell, a small plate each side"});
   }
   return st(5, {unit: U, why: "one pin on the stack"});
 }
@@ -18676,7 +18774,7 @@ function impossibleLoadCheck(e){
   }));
   if(!worst) return null;
   const step = progressionStep(e);
-  const suggest = Math.max(0, Math.round((e.weight - step.amount * 2) * 2) / 2);
+  const suggest = Math.max(0, roundLoadable(Math.round((e.weight - step.amount * 2) * 2) / 2, e.name));
   return {
     at: worst,
     to: suggest,                       // the load a flag built from this can actually apply
@@ -18718,7 +18816,8 @@ function progressionFor(sess, entry){
 
   if(clearedTop && atTarget){
     const from = isNaN(load) ? (target.weight == null ? null : target.weight) : load;
-    const to = step.bodyweight && from == null ? step.amount : (from == null ? null : from + step.amount);
+    const to = step.bodyweight && from == null ? step.amount
+             : (from == null ? null : roundLoadable(from + step.amount, entry.name));
     return {
       name: entry.name, kind: "up", from, to, step,
       msg: step.bodyweight && from == null
@@ -19727,6 +19826,38 @@ function entryBarAdd(entry){
   const v = Number(entry.barAdd);
   return isFinite(v) && v >= 0 ? v : barAddendFor(entry.name);
 }
+/* =====================================================================
+   THE SMALLEST CHANGE YOU CAN ACTUALLY MAKE
+
+   Every load the app suggests is a load somebody has to go and put on a bar, and half of
+   them were not loadable. "Add 2.5 lb a hand" is useless advice in a gym whose dumbbells
+   go 10, 15, 20; "202.5" is not a barbell weight anywhere that has no 1.25s.
+
+   Unknown stays unknown. Until somebody says what they own, this returns 0 and every
+   caller behaves exactly as it did before — a guess about a gym's plate collection is
+   worth less than no guess at all.
+
+   A machine's stack is deliberately absent. Its increments belong to the machine, they
+   vary from 5 to 20 within one gym, and there is no question that gets an honest answer. */
+function loadStepFor(name){
+  const p = trainPrefs();
+  const eq = equipmentOf(name);
+  if(eq === "dumbbell" || eq === "kettlebell") return p.dbStep > 0 ? p.dbStep : 0;
+  // a bar takes a plate on each end, so the smallest change is two of the smallest plate
+  if(eq === "barbell" || eq === "smith") return p.plateStep > 0 ? p.plateStep * 2 : 0;
+  return 0;
+}
+/* Rounded to something loadable. The BAR is held out of the arithmetic first: it is not
+   made of plates, and rounding 65 to the nearest 5 happens to work while rounding a
+   20 kg bar to the nearest 2.5 kg does not stay true for every bar that exists. */
+function roundLoadable(w, name){
+  const st = loadStepFor(name);
+  if(!(st > 0) || !(w > 0)) return w;
+  const bar = barWeightFor(name);
+  const plates = w - bar;
+  if(plates <= 0) return w;
+  return bar + Math.max(st, Math.round(plates / st) * st);
+}
 /* What a logged set actually weighed. Blank and bodyweight sets stay at zero rather than
    becoming an empty carriage: "0 reps at 25 lb" is not a thing that happened. */
 function setLoad(st, add){
@@ -19791,7 +19922,10 @@ function isBodyweightMovement(name){
 }
 // Round to something you can actually load: dumbbells move in 2.5s, plates in 5s.
 function warmRound(w, name){
-  const step = stepInUnits(/dumbbell|\bdb\b/.test(nrm(name)) ? 2.5 : 5);
+  /* Your own gear where you have said what it is, and the old assumption where you have
+     not — a warm-up rung nobody can load is a rung they round themselves, badly. */
+  const own = loadStepFor(name);
+  const step = own > 0 ? own : stepInUnits(/dumbbell|\bdb\b/.test(nrm(name)) ? 2.5 : 5);
   return Math.max(step, Math.round(w / step) * step);
 }
 /* Which ramp, if any, this exercise gets. Position in the session decides it: the
