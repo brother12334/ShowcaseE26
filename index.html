@@ -1271,6 +1271,13 @@ body.onboarding #app{padding:0}
 .sync-ok{background:var(--ok);box-shadow:0 0 0 3px rgba(74,147,88,.16)}
 .sync-wait{background:var(--arms);box-shadow:0 0 0 3px rgba(201,154,52,.16)}
 .sync-bad{background:var(--bad);box-shadow:0 0 0 3px rgba(209,88,79,.16)}
+/* What a bug report will carry, shown before it is sent. Quiet, but present: a list of
+   what is about to leave the device is the difference between a report somebody sends
+   and one they think twice about. */
+.rep-diag{margin:12px 0 0;padding:11px 13px;border-radius:10px;background:var(--card2);border:1px solid var(--line)}
+.rep-diag-h{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--faint);margin:0 0 5px}
+.rep-diag-b{font-size:12.5px;line-height:1.55;color:var(--dim)}
+.rep-diag-b + .rep-diag-b{margin-top:4px}
 /* One reminder per row: a name, its switch, what it will say, and when. The preview is
    the whole point of the layout — a reminder somebody cannot read before agreeing to it
    is a reminder they find out about at 6am. */
@@ -3487,7 +3494,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "8.8";
+const APP_VERSION = "8.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8769,6 +8776,53 @@ function bindAccount(){
    is one blob under the account id, and every call carries the id AND the key: the
    Worker matches the pair before it reads or writes anything, so an id on its own — the
    thing people write on a bit of paper — cannot fetch a single byte. */
+/* =====================================================================
+   REPORTING SOMETHING BROKEN
+
+   WHY THE ERRORS ARE CAPTURED RATHER THAN ASKED FOR. "It crashed" is not a bug report,
+   and nobody can be expected to open a console on a phone and copy a stack trace out of
+   it. So the last few uncaught errors are kept, and a report carries them.
+
+   PERSISTED, DELIBERATELY, AND IN THEIR OWN KEY. The errors worth having are exactly the
+   ones that killed the page, and an in-memory list dies with it. They go in a small
+   dedicated localStorage key rather than into S: S is synced to the account and merged
+   across devices, and a crash on one phone is not a fact about the training log.
+
+   WHAT A REPORT CONTAINS IS SHOWN BEFORE IT IS SENT. Every field is on screen in the
+   sheet. Nothing about the training itself goes — no sessions, no loads, no notes — only
+   counts, the settings that change how the app behaves, and the errors. */
+let SW_VERSION = "";
+const ERR_KEY = "e26.errs";
+const ERR_MAX = 5;
+function errLog(){
+  try{ const v = JSON.parse(localStorage.getItem(ERR_KEY) || "[]"); return Array.isArray(v) ? v : []; }
+  catch(e){ return []; }
+}
+function recordErr(rec){
+  try{
+    const list = errLog();
+    // the same error thrown on every render must not push the interesting one out
+    if(list.some(x=> x && x.msg === rec.msg && x.line === rec.line)) return;
+    list.push(rec);
+    localStorage.setItem(ERR_KEY, JSON.stringify(list.slice(-ERR_MAX)));
+  }catch(e){ /* a full or blocked localStorage must not itself throw here */ }
+}
+window.addEventListener("error", ev=>{
+  if(!ev) return;
+  recordErr({msg: String(ev.message || "error").slice(0, 300),
+             src: String(ev.filename || "").slice(0, 200),
+             line: ev.lineno || 0,
+             stack: String((ev.error && ev.error.stack) || "").slice(0, 1200),
+             at: Date.now()});
+});
+window.addEventListener("unhandledrejection", ev=>{
+  const r = ev && ev.reason;
+  recordErr({msg: "Unhandled rejection: " + String((r && r.message) || r || "").slice(0, 260),
+             src: "", line: 0,
+             stack: String((r && r.stack) || "").slice(0, 1200),
+             at: Date.now()});
+});
+
 function accountAuth(){
   return ACCT && ACCT.cloud && ACCT.id && ACCT.key ? ("Bearer " + ACCT.id + "." + ACCT.key) : "";
 }
@@ -9114,6 +9168,132 @@ async function pushDisable(){
   try{
     await apiFetch("/push/unsubscribe", {method:"POST", headers:{"Authorization": accountAuth()}});
   }catch(e){}
+}
+
+/* What the app can say about itself. Counts and settings, never content: knowing that
+   somebody has 214 sessions and logs in kilos is what makes a report reproducible;
+   knowing what they lifted is not, and is not ours to send. */
+function reportDiag(){
+  const p = trainPrefs();
+  return {
+    sessions: (S.sessions || []).length,
+    days: (ROTATION || []).length,
+    split: String(S.splitId || ""),
+    units: p.units === "kg" ? "kg" : "lb",
+    barMode: String(p.barMode || ""),
+    sides: String(p.sides || ""),
+    rpe: p.rpe !== false,
+    progression: String(p.progression || ""),
+    imported: !!(S.importMeta && S.importMeta.at),
+    remindersOn: !!S.pushOn,
+    cloud: !!(ACCT && ACCT.cloud),
+    active: !!S.active,
+    tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || "").slice(0, 40)
+  };
+}
+let REPORT_BUSY = false;
+const REPORT_KINDS = [
+  {k:"bug",   t:"Something's broken"},
+  {k:"idea",  t:"An idea"},
+  {k:"other", t:"Something else"}
+];
+function openReportSheet(){
+  let kind = "bug";
+  const errs = errLog();
+  const draw = ()=>{
+    const d = reportDiag();
+    showModal(`<h3>Report a problem</h3>
+      <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Goes straight to
+        whoever maintains Element 26. The more specific the better — what you tapped, what you expected,
+        what happened instead.</div>
+      <div class="seg" style="margin:0 0 12px">${REPORT_KINDS.map(o=>
+        `<button class="${kind===o.k?"on":""}" data-repkind="${esc(o.k)}">${esc(o.t)}</button>`).join("")}</div>
+      <div class="field"><label>What happened?</label>
+        <textarea id="repText" rows="5" placeholder="e.g. Tapped finish on Upper A and the grade screen came up blank"
+          style="width:100%;padding:13px;border-radius:11px;border:1px solid var(--line);background:var(--card2);color:var(--text);font:inherit;font-size:16px;resize:vertical"></textarea></div>
+      <div class="rep-diag">
+        <div class="rep-diag-h">Sent with it</div>
+        <div class="rep-diag-b">v${esc(APP_VERSION)} \u00b7 ${esc(d.units)} \u00b7 ${esc(String(d.sessions))} sessions
+          \u00b7 ${esc(d.split || "no split")} \u00b7 ${d.cloud ? "cloud account" : "device account"}
+          ${errs.length ? " \u00b7 " + errs.length + " recent error" + (errs.length>1?"s":"") : ""}</div>
+        <div class="rep-diag-b" style="color:var(--faint)">Your Element 26 ID, so a reply can reach you.
+          No workouts, loads or notes are sent.</div>
+      </div>
+      <button class="btn" id="repSend" style="margin-top:14px">Send report</button>
+      <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
+    const m = $("#modal");
+    const ta = m.querySelector("#repText");
+    if(ta) ta.value = REPORT_DRAFT || "";
+    m.querySelectorAll("[data-repkind]").forEach(b=> b.onclick = ()=>{
+      REPORT_DRAFT = (m.querySelector("#repText") || {}).value || "";
+      kind = b.dataset.repkind; draw();
+    });
+    m.querySelector("#repSend").onclick = async ()=>{
+      const text = (m.querySelector("#repText").value || "").trim();
+      if(text.length < 5){ toast("Tell us a bit more first"); return; }
+      const btn = m.querySelector("#repSend");
+      btn.disabled = true; btn.textContent = "Sending\u2026";
+      const ok = await sendReport({kind, text});
+      REPORT_DRAFT = ok ? "" : text;
+      hideModal();
+      toast(ok ? "Report sent \u2014 thank you" : "Couldn't send that. It's saved, we'll try again next time you open the app.");
+    };
+    MODAL_REOPEN = openReportSheet;
+  };
+  draw();
+}
+let REPORT_DRAFT = "";
+const REPORT_QUEUE_KEY = "e26.repq";
+/* A report that fails to send is KEPT. Somebody who has just hit a bug and taken the
+   trouble to describe it should not lose the description to the same bad connection
+   that may well be what they are reporting. */
+function reportQueue(){
+  try{ const v = JSON.parse(localStorage.getItem(REPORT_QUEUE_KEY) || "[]"); return Array.isArray(v) ? v : []; }
+  catch(e){ return []; }
+}
+function saveReportQueue(list){
+  try{ localStorage.setItem(REPORT_QUEUE_KEY, JSON.stringify(list.slice(-5))); }catch(e){}
+}
+function buildReport(o){
+  return Object.assign({
+    app: APP_VERSION,
+    sw: SW_VERSION || "",
+    ua: (navigator.userAgent || "").slice(0, 300),
+    installed: pushInstalled(),
+    tab: TAB,
+    diag: reportDiag(),
+    errors: errLog()
+  }, o || {});
+}
+async function sendReport(o){
+  const rec = o && o.app ? o : buildReport(o);
+  if(!accountAuth()){ const q = reportQueue(); q.push(rec); saveReportQueue(q); return false; }
+  try{
+    const res = await apiFetch("/report", {
+      method:"POST",
+      headers:{"Content-Type":"application/json", "Authorization": accountAuth()},
+      body: JSON.stringify(rec)
+    });
+    if(res.ok){
+      // the errors have been reported; keeping them would attach them to the next one too
+      try{ localStorage.removeItem(ERR_KEY); }catch(e){}
+      return true;
+    }
+    if(res.status === 429){ toast("That's a few reports in an hour \u2014 try again later"); return false; }
+  }catch(e){}
+  const q = reportQueue(); q.push(rec); saveReportQueue(q);
+  return false;
+}
+/* Flushed at launch, quietly. Nothing is said about it either way: a report that finally
+   went through does not need announcing, and one that still cannot go stays queued. */
+async function flushReports(){
+  if(!accountAuth()) return;
+  const q = reportQueue();
+  if(!q.length) return;
+  saveReportQueue([]);
+  const left = [];
+  for(const rec of q){ if(!(await sendReport(rec))) left.push(rec); }
+  if(left.length) saveReportQueue(left);
 }
 
 const PUSH_WHY = {
@@ -15839,6 +16019,15 @@ function viewSync(){
   ${syncCardHTML()}
   ${pushCardHTML()}
   <div class="card">
+    <h3>Something wrong?</h3>
+    <div class="sub" style="margin:4px 0 10px">If the app does something it shouldn't, say so. It goes
+      to whoever maintains Element 26, with the version you're on and any errors the app caught —
+      never your workouts.</div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn ghost small" id="repOpen">Report a problem</button>
+    </div>
+  </div>
+  <div class="card">
     <h3>How the app behaves</h3>
     <div class="sub" style="margin:4px 0 10px">Side handling, warm-ups, RPE, progression, your bar and what
       you're training for. All set during your import, all changeable — but they change how every session is
@@ -16667,6 +16856,8 @@ function bind(){
       toast("Training data erased");
     }
   };
+  const repBtn = $("#repOpen");
+  if(repBtn) repBtn.onclick = ()=> openReportSheet();
   const pon = $("#pushOnBtn");
   if(pon) pon.onclick = async ()=>{
     /* No await before requestPermission() inside pushEnable() — Safari drops the
@@ -21832,8 +22023,19 @@ function quoteOfTheDay(){
 if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
   window.addEventListener("load", ()=>{
     navigator.serviceWorker.register("sw.js").catch(()=>{});
+    // ask which build is serving, so a bug report can say whether it matches this page
+    navigator.serviceWorker.ready.then(reg=>{
+      const w = reg.active || navigator.serviceWorker.controller;
+      if(!w) return;
+      const ch = new MessageChannel();
+      ch.port1.onmessage = ev=>{
+        if(ev.data && ev.data.type === "e26-version") SW_VERSION = String(ev.data.version || "");
+      };
+      w.postMessage({type:"e26-version"}, [ch.port2]);
+    }).catch(()=>{});
   });
   navigator.serviceWorker.addEventListener("message", ev=>{
+    if(ev.data && ev.data.type === "e26-version"){ SW_VERSION = String(ev.data.version || ""); return; }
     if(ev.data && ev.data.type === "e26-updated"){
       /* Deliberately not auto-reloading. Doing that mid-session would tear down an
          in-progress workout to deliver a cosmetic change. */
@@ -21856,6 +22058,8 @@ if(hasAccount() && accountAuth()) accountPull().then(ok=>{ if(ok) render(); });
    rather than trying to queue a week of them — means the text is always computed against
    the plan as it stands today, and a plan edited yesterday cannot send a stale sentence. */
 if(S.pushOn) setTimeout(pushSyncSchedule, 1500);
+/* A report that could not be sent last time goes now, quietly. */
+setTimeout(flushReports, 2500);
 /* Coming back to the app after a while: pull the account's copy, in case the last
    session was logged on another device. */
 document.addEventListener("visibilitychange", ()=>{

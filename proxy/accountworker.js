@@ -139,6 +139,21 @@ function sameSecret(a, b) {
    would rot immediately if it were reimplemented here against a copy of the data. So the
    app computes one sentence and one timestamp and posts them; this stays dumb on
    purpose, and a change to how the plan works needs no deploy here. */
+/* BUG REPORTS. Written by the app, read by the admin console straight out of KV — the
+   same arrangement push: has, and for the same reason: the console holds the namespace
+   binding, so there is no route here that hands anybody else's report to a caller.
+
+   Authenticated, because an anonymous report endpoint is a spam target with a database
+   attached, and because a report worth reading is one you can reply to. Capped per
+   account per hour for the same reason account creation is.
+
+   `report:` sorts by time because the timestamp is zero-padded into the key, so the
+   console lists newest-first off the key names alone without reading a single record. */
+const REPORT_MAX_TEXT = 2000;
+const REPORT_MAX_ERRORS = 5;
+const REPORTS_PER_HOUR = 6;
+const REPORT_KINDS = ["bug", "idea", "other"];
+
 const VAPID_TTL = "86400";
 /* The kinds of reminder that exist. Named here only so a client cannot invent an
    unbounded set of them and fill the namespace one key at a time; what each one MEANS is
@@ -525,6 +540,64 @@ export default {
         kept.push({ kind, at });
       }
       return json({ ok: true, scheduled: kept }, 200, origin);
+    }
+
+    /* REPORT A PROBLEM. The diagnostics come from the client and are therefore capped
+       and shaped rather than trusted — a report is a text box on the internet, and the
+       one thing you can be sure of is that everything in it is somebody else's input. */
+    if (path === "/report" && request.method === "POST") {
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+
+      const bucket = "rate:rep:" + who.id + ":" + Math.floor(Date.now() / 3600000);
+      const seen = Number(await env.E26_ACCOUNTS.get(bucket)) || 0;
+      if (seen >= REPORTS_PER_HOUR) {
+        return json({ error: "too many reports, try again later" }, 429, origin);
+      }
+      await env.E26_ACCOUNTS.put(bucket, String(seen + 1), { expirationTtl: 7200 });
+
+      let body = {};
+      try { body = await request.json(); } catch (e) {}
+      const text = String(body.text || "").trim().slice(0, REPORT_MAX_TEXT);
+      if (!text) return json({ error: "say what happened" }, 400, origin);
+
+      const str = (v, n) => String(v == null ? "" : v).slice(0, n);
+      const at = Date.now();
+      /* Only the fields named here survive. A client that invents a field does not get
+         it stored, which keeps a report a known shape for whatever reads it next. */
+      const rec = {
+        at,
+        accountId: who.id,
+        name: str((who.rec && who.rec.name) || "", 32),
+        kind: REPORT_KINDS.indexOf(String(body.kind)) > -1 ? String(body.kind) : "bug",
+        text,
+        app: str(body.app, 16),
+        sw: str(body.sw, 16),
+        ua: str(body.ua, 300),
+        installed: !!body.installed,
+        tab: str(body.tab, 24),
+        diag: {},
+        errors: [],
+        status: "new",
+      };
+      const diag = body.diag && typeof body.diag === "object" ? body.diag : {};
+      Object.keys(diag).slice(0, 20).forEach((k) => {
+        const key = k.slice(0, 24);
+        const v = diag[k];
+        rec.diag[key] = typeof v === "number" || typeof v === "boolean" ? v : str(v, 60);
+      });
+      if (Array.isArray(body.errors)) {
+        rec.errors = body.errors.slice(0, REPORT_MAX_ERRORS).map((e) => ({
+          msg: str(e && e.msg, 300),
+          src: str(e && e.src, 200),
+          line: Number(e && e.line) || 0,
+          stack: str(e && e.stack, 1200),
+          at: Number(e && e.at) || 0,
+        }));
+      }
+      const key = "report:" + String(at).padStart(15, "0") + ":" + randomFrom("abcdef0123456789", 8);
+      await env.E26_ACCOUNTS.put(key, JSON.stringify(rec), { metadata: { at, kind: rec.kind } });
+      return json({ ok: true, id: key }, 201, origin);
     }
 
     return json({ error: "not found" }, 404, origin);

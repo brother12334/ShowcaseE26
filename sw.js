@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "7.4";
+const VERSION = "7.5";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -82,7 +82,22 @@ self.addEventListener("activate", event=>{
 });
 
 self.addEventListener("message", event=>{
-  if(event.data && event.data.type === "e26-skip-waiting") self.skipWaiting();
+  if(!event.data) return;
+  if(event.data.type === "e26-skip-waiting") self.skipWaiting();
+  /* WHICH BUILD IS ACTUALLY SERVING. Not always the one the page thinks: a cached shell
+     is one launch behind by design, so "the app says 8.9 and the worker says 7.2" is the
+     explanation for a whole class of "I updated and nothing changed". A bug report is
+     exactly where that belongs, so the page can ask. */
+  if(event.data.type === "e26-version"){
+    /* Down the supplied port first. On a FIRST load there is no controller yet — the
+       worker is active but has not taken over the page — so a reply addressed to
+       event.source arrives nowhere, and the one launch where a version mismatch is most
+       likely is the one launch that could not report it. A MessageChannel does not care
+       whether anybody is controlling anything. */
+    const reply = {type:"e26-version", version:VERSION};
+    if(event.ports && event.ports[0]) event.ports[0].postMessage(reply);
+    else if(event.source) event.source.postMessage(reply);
+  }
 });
 
 /* =====================================================================
