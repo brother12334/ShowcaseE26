@@ -3487,7 +3487,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "8.7";
+const APP_VERSION = "8.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6220,11 +6220,14 @@ function est1RM(w, reps){
   if(!(w>0) || !(reps>0)) return 0;
   return w * (1 + Math.min(reps, 12)/30);
 }
+/* RECORDS ARE TRUE LOADS. Every figure here is the logged number plus whatever implement
+   that session was performed with, so a record set on a heavier Smith is recognised as
+   the record it is — and one set on a lighter one cannot quietly out-rank it. */
 function bestEverFor(exName, upToEntry, upToSet){
   let maxW = 0, repsAtMaxW = 0, max1RM = 0, maxRepsBw = 0, seen = false;
   const key = nrm(exName);
-  const consider = st=>{
-    const w = parseFloat(st.weight)||0;
+  const consider = (st, add)=>{
+    const w = setLoad(st, add);
     const reps = parseFloat(st.reps)||0;
     if(!(reps>0) && !(w>0)) return;
     seen = true;
@@ -6236,24 +6239,31 @@ function bestEverFor(exName, upToEntry, upToSet){
   };
   // all finished history, name-normalised, so trailing spaces or a change of
   // capitalisation can't hide your own history from the comparison
-  S.sessions.forEach(s=> s.entries.forEach(en=>{ if(nrm(en.name)===key) en.sets.forEach(consider); }));
+  S.sessions.forEach(s=> s.entries.forEach(en=>{
+    if(nrm(en.name)!==key) return;
+    const add = entryBarAdd(en);
+    en.sets.forEach(st=> consider(st, add));
+  }));
   // plus sets already logged earlier in the live session, so a PR fires once (on the
   // set that breaks the record) rather than on every heavier set that follows
   if(S.active && upToEntry!=null){
+    // nothing is stamped yet mid-session, so the live figure is today's setting
+    const liveAdd = barAddendFor(exName);
     S.active.entries.forEach((en,i)=>{
       if(nrm(en.name) !== key) return;
       en.sets.forEach((st,j)=>{
         // only sets you've actually LOGGED count as a record to beat, a half-typed
         // row shouldn't quietly cancel the PR on the set that follows it
         const prior = i < upToEntry || (i === upToEntry && j < upToSet);
-        if(prior && st.done) consider(st);
+        if(prior && st.done) consider(st, liveAdd);
       });
     });
   }
   return {maxW, repsAtMaxW, max1RM, maxRepsBw, seen};
 }
 function detectPR(exName, st, ei, si){
-  const w = parseFloat(st.weight)||0;
+  // compared against records held as true loads, so this has to be one too
+  const w = setLoad(st, barAddendFor(exName));
   const reps = parseFloat(st.reps)||0;
   if(!(reps>0) && !(w>0)) return null;
   const b = bestEverFor(exName, ei, si);
@@ -6336,9 +6346,11 @@ function sweepSessionPRs(sess){
   const others = S.sessions.filter(s=>s.id !== sess.id);
   (sess.entries||[]).forEach(e=>{
     const key = nrm(e.name);
+    // this session's own implement, already stamped by the time finish calls this
+    const add = entryBarAdd(e);
     let maxW = 0, repsAtMaxW = 0, max1RM = 0, maxRepsBw = 0, seen = false;
-    const consider = st=>{
-      const w = parseFloat(st.weight)||0, reps = parseFloat(st.reps)||0;
+    const consider = (st, a)=>{
+      const w = setLoad(st, a), reps = parseFloat(st.reps)||0;
       if(!(reps>0) && !(w>0)) return;
       seen = true;
       if(w > maxW){ maxW = w; repsAtMaxW = reps; }
@@ -6346,9 +6358,13 @@ function sweepSessionPRs(sess){
       const e1 = est1RM(w, reps); if(e1 > max1RM) max1RM = e1;
       if(!(w>0) && reps > maxRepsBw) maxRepsBw = reps;
     };
-    others.forEach(s=> (s.entries||[]).forEach(en=>{ if(nrm(en.name)===key) en.sets.forEach(consider); }));
+    others.forEach(s=> (s.entries||[]).forEach(en=>{
+      if(nrm(en.name)!==key) return;
+      const oAdd = entryBarAdd(en);
+      en.sets.forEach(st=> consider(st, oAdd));
+    }));
     e.sets.forEach(st=>{
-      const w = parseFloat(st.weight)||0, reps = parseFloat(st.reps)||0;
+      const w = setLoad(st, add), reps = parseFloat(st.reps)||0;
       if(!(reps>0) && !(w>0)){ delete st.pr; return; }
       let pr = null;
       if(seen){
@@ -6359,7 +6375,7 @@ function sweepSessionPRs(sess){
         } else if(reps > maxRepsBw) pr = "REP PR";
       }
       if(pr) st.pr = pr; else delete st.pr;
-      consider(st);   // this set is now a record for the sets that follow it
+      consider(st, add);   // this set is now a record for the sets that follow it
     });
   });
 }
@@ -7537,10 +7553,15 @@ function windowStats(from, to){
     s.entries.forEach(e=>{
       const mm = musclesFor(e.name);
       if(!mm) return;
+      /* Tonnage and the strength trend are both loads moved, so both carry the
+         implement this session was performed with. Without it a plates-only log
+         undercounts every barbell and Smith set by the weight of the empty bar, and two
+         gyms whose carriages differ are compared as though they did not. */
+      const eAdd = entryBarAdd(e);
       e.sets.forEach(st=>{
         if(!isWorkingSet(st)) return;
         const reps = parseFloat(st.reps)||0;
-        const w = parseFloat(st.weight)||0;
+        const w = setLoad(st, eAdd);
         const rpe = effRpe(st);
         const e1 = w > 0 ? est1RM(w, reps) : reps;   // bodyweight → reps stand in for load
         const tgt = restTargetFor(e, st);
@@ -7551,7 +7572,7 @@ function windowStats(from, to){
            techniques and someone who does not. */
         let subVol = 0;
         if(Array.isArray(st.sub)) st.sub.forEach(r=>{
-          subVol += (parseFloat(r && r.weight)||0) * (parseFloat(r && r.reps)||0);
+          subVol += setLoad(r, eAdd) * (parseFloat(r && r.reps)||0);
         });
         Object.keys(mm).forEach(m=>{
           const o = out[m];
@@ -16950,6 +16971,15 @@ function finishWorkout(){
     addExNote({ex: null, code: null, text: sessObj.note,
       sessionId: sessObj.id, workoutId: sessObj.workoutId, date: sessObj.date});
   }
+  /* STAMP WHAT THE IMPLEMENT WEIGHED, before anything grades or compares this session.
+     After this line the session is self-describing: change the carriage setting
+     tomorrow and today keeps the figure it was actually done under. Only recorded when
+     it is non-zero, so a log full of dumbbells does not grow a field of zeroes. */
+  (sessObj.entries || []).forEach(en=>{
+    if(!en || !en.name) return;
+    const add = barAddendFor(en.name);
+    if(add > 0) en.barAdd = add; else delete en.barAdd;
+  });
   sweepSessionPRs(sessObj);
   // Progression is evaluated once, at finish, against the history as it stood then, and
   // stored on the session so the card says the same thing when you reopen it later.
@@ -17353,6 +17383,34 @@ function renderSessEditor(s){
       <p>This session was saved without any sets on it. You can delete it, or edit it to add what you did.</p>
     </div>`;
   }
+  /* CORRECTING WHAT THE BAR WEIGHED, AFTER THE FACT.
+
+     Only reachable when you log plates only, because that is the only convention where
+     the implement is missing from the number and has to be supplied. If you log totals,
+     what you moved is already written down and there is nothing here to fix.
+
+     This is the one thing about a session that is genuinely easy to get wrong and
+     impossible to notice: train somewhere with a heavier Smith, load the same plates,
+     and the log reads identically while the work was not. The carriage setting is
+     global and forward-looking, so it cannot answer for a day three weeks ago; this
+     can, and it changes nothing but this session. */
+  const barRows = trainPrefs().barMode === "total" ? []
+    : s.entries.map((e, i)=> ({e, i, add: entryBarAdd(e)}))
+               .filter(x=> x.add > 0 || implementWeight(x.e.name) > 0);
+  if(barRows.length){
+    h += `<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:14px">
+      <div class="sub" style="margin:0 0 4px">Bar and carriage</div>
+      <div class="sub" style="margin:0 0 10px;text-transform:none;letter-spacing:0;color:var(--faint);font-size:12.5px">
+        You log plates only, so this is what gets added to work out what you actually moved.
+        Trained somewhere with a different machine? Correct it here — it only changes this session.</div>
+      ${barRows.map(({e, i, add})=>`<div class="acct-row" style="gap:10px">
+        <span style="flex:1;min-width:0">${esc(e.name)}</span>
+        <input class="timein" inputmode="decimal" data-sessbar="${i}" value="${esc(String(add))}"
+          style="width:88px;flex:0 0 auto;text-align:right" aria-label="${esc(e.name)} bar or carriage weight">
+        <span class="sub" style="margin:0;flex:0 0 auto">${esc(unitWord())}</span>
+      </div>`).join("")}
+    </div>`;
+  }
   h += `<div style="border-top:1px solid var(--line);margin-top:14px;padding-top:14px">
     <div class="field"><label>Add an exercise</label>
       <select id="addExSel" style="width:100%;padding:13px;border-radius:11px;border:1px solid var(--line);background:var(--card2);color:var(--text);font-size:16px">
@@ -17399,6 +17457,26 @@ function renderSessEditor(s){
     document.querySelectorAll("#modal [data-feele]").forEach(x=>x.classList.toggle("on", parseInt(x.dataset.feele,10)===s.feel));
   });
 
+  document.querySelectorAll("[data-sessbar]").forEach(el=> el.onchange = ()=>{
+    const en = s.entries[parseInt(el.dataset.sessbar, 10)];
+    if(!en) return;
+    const v = parseFloat(el.value);
+    const val = el.value.trim() === "" || !isFinite(v) ? 0 : Math.max(0, Math.min(200, Math.round(v * 10) / 10));
+    if(val > 0) en.barAdd = val; else en.barAdd = 0;
+    s.edited = Date.now();
+    /* RE-GRADE, or this changes a number nobody sees. The grade is computed once and
+       stored, so a correction that does not re-run it leaves the card still saying the
+       thing that was wrong. Records are swept too, because a set that now weighs ten
+       pounds more may be one.
+
+       updateStalls() is deliberately NOT re-run: it walks history in order and mutates a
+       running counter, so replaying one old session through it would corrupt the count
+       for every session after it. */
+    sweepSessionPRs(s);
+    s.quality = scoreWorkout(s);
+    save(); queueSync();
+    toast(en.name + ": " + fmtLoad(val) + " " + unitWord() + " added, session re-graded");
+  });
   $("#addExSel").onchange = ev=>{ $("#customWrap").style.display = ev.target.value==="__custom__" ? "block" : "none"; };
   $("#plusSet").onclick = ()=>{ harvest(); newSets.push({weight:"",reps:"",rpe:""}); drawSets(); };
   document.querySelectorAll("[data-rmex]").forEach(b=> b.onclick=()=>{
@@ -17525,10 +17603,10 @@ function priorEntryFor(sess, exName, occ){
 }
 // Best estimated 1RM across a set list. Bodyweight movements fall back to rep count,
 // which is the only thing that can move on them.
-function topE1RM(sets){
+function topE1RM(sets, add){
   return (sets||[]).reduce((b,st)=>{
     if(!isWorkingSet(st)) return b;
-    const v = est1RM(parseFloat(st.weight)||0, parseFloat(st.reps)||0) || (parseFloat(st.reps)||0);
+    const v = est1RM(setLoad(st, add), parseFloat(st.reps)||0) || (parseFloat(st.reps)||0);
     return v > b ? v : b;
   }, 0);
 }
@@ -17718,11 +17796,14 @@ function scoreWorkout(sess){
     const prNames = new Set(prs.map(p=>nrm(p.name)));
     const rows = [];
     entries.forEach((e,i)=>{
-      const a = topE1RM(e.sets);
+      /* Each side carries its own implement weight, so a session done on a machine with
+         a heavier carriage is compared on what was actually moved rather than on the
+         plates that happened to be hanging off it. */
+      const a = topE1RM(e.sets, entryBarAdd(e));
       if(!a) return;
       const occ = occIndex(entries, i);
       const prior = priorEntryFor(sess, e.name, occ);
-      const b = prior ? topE1RM(prior.entry.sets) : 0;
+      const b = prior ? topE1RM(prior.entry.sets, entryBarAdd(prior.entry)) : 0;
       const isPR = prNames.has(nrm(e.name));
       if(!b){ rows.push({name:e.name, kind:isPR?"up":"new", a, pr:isPR}); return; }
       const d = (a - b)/b;
@@ -18487,11 +18568,14 @@ function findProgramEntry(name){
    reps or load. The protocol checks SLEEP FIRST and deliberately refuses to change the
    programme when sleep is the cause, because cutting volume to fix a recovery problem
    treats the symptom and removes the training at the same time. */
+/* The top working set, as a TRUE load. Callers compare one entry against another, and
+   two entries can come from gyms whose Smiths differ by ten pounds. */
 function bestOf(entry){
   let w = 0, reps = 0;
+  const add = entryBarAdd(entry);
   (entry.sets || []).forEach(st=>{
     if(!isWorkingSet(st)) return;
-    const sw = parseFloat(st.weight) || 0, sr = parseFloat(st.reps) || 0;
+    const sw = setLoad(st, add), sr = parseFloat(st.reps) || 0;
     if(sw > w || (sw === w && sr > reps)){ w = sw; reps = sr; }
   });
   return {w, reps};
@@ -19397,17 +19481,66 @@ function smithWeight(){
   const w = trainPrefs().smithWeight;
   return w == null ? smithBarDefault() : w;
 }
-function barWeightFor(name){
+/* =====================================================================
+   THE IMPLEMENT, AND WHERE IT LIVES IN THE NUMBER
+
+   Two different questions were being answered by one function, and they have different
+   answers whenever somebody logs plates only.
+
+     implementWeight()  what the empty thing weighs. A fact about the machine — the Smith
+                        carriage, the barbell — true regardless of how you write loads
+                        down.
+     barWeightFor()     how much of the number you WROTE is that implement. Zero in
+                        plates-only logging, because you did not put it there.
+     barAddendFor()     the mirror image: how much has to be ADDED to what you wrote to
+                        get the load you actually moved.
+
+   THE BUG THIS FIXES. The Smith branch used to return the carriage weight whatever the
+   logging convention, so a plates-only log had the carriage subtracted from a number
+   that never contained it — warm-ups came out a carriage-weight too light. And nothing
+   anywhere ADDED it back, so two sessions on machines with different carriages were
+   compared as though the carriages were the same. Train somewhere with a 10 lb heavier
+   carriage, put the same plates on, and the app read an identical number and called it
+   a stall — when you had in fact moved ten pounds more.
+
+   Only a barbell and a Smith have an implement in the first place. A dumbbell load is
+   per hand, a machine's is the stack, a cable's is the stack; none of them have an empty
+   weight to add. */
+function implementWeight(name){
   const p = trainPrefs();
+  const eq = equipmentOf(name);
   /* The Smith's own figure, never the barbell's. Reading barWeight here meant somebody
      who told the app their bar was 55 lb was also telling it their Smith carriage was,
      which is a different machine in a different rack. */
-  const eq = equipmentOf(name);
   if(eq === "smith") return smithWeight();
-  if(p.barMode !== "total" || p.barWeight == null) return 0;   // plates-only logging has no bar in the number
-  /* Only a barbell puts a bar in the number. A dumbbell load is per hand, a machine's is
-     the stack, a cable's is the stack — none of them have an empty-bar weight to add. */
-  return eq === "barbell" ? p.barWeight : 0;
+  if(eq === "barbell") return p.barWeight == null ? 0 : p.barWeight;
+  return 0;
+}
+function barWeightFor(name){
+  return trainPrefs().barMode === "total" ? implementWeight(name) : 0;
+}
+function barAddendFor(name){
+  return trainPrefs().barMode === "total" ? 0 : implementWeight(name);
+}
+/* THE ADDEND FOR A SESSION THAT IS ALREADY IN THE LOG, which is the whole reason this is
+   stamped rather than recomputed. The carriage is one global setting: change it after
+   training somewhere else and every past session is silently reinterpreted, and change
+   it back and the record that the day was different is gone. Stamped at finish, a
+   session keeps the figure it was actually performed under for ever.
+
+   Sessions logged before the stamp existed have nothing to read, so they fall back to
+   today's setting. That is a guess, and it is the only honest one available — but it is
+   also exactly right for everybody who has only ever trained in one gym. */
+function entryBarAdd(entry){
+  if(!entry) return 0;
+  const v = Number(entry.barAdd);
+  return isFinite(v) && v >= 0 ? v : barAddendFor(entry.name);
+}
+/* What a logged set actually weighed. Blank and bodyweight sets stay at zero rather than
+   becoming an empty carriage: "0 reps at 25 lb" is not a thing that happened. */
+function setLoad(st, add){
+  const w = parseFloat(st && st.weight) || 0;
+  return w > 0 ? w + (add || 0) : 0;
 }
 /* The load the ramp is a percentage OF, and where the number came from. `ctx` is how the
    caller says which exercise slot this is, and matches the arguments the "last time" box
