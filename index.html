@@ -258,6 +258,18 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 /* The editable target beside Apply. Sized so a three-digit load fits without the row
    reflowing, and styled as the number it is rather than as a form field — this sits on a
    results card, not a settings page. */
+/* Two ways out of a collapse, side by side, because the app genuinely does not know
+   which one it was. Stacked rather than in a row: each carries a number you might change
+   before committing to it, and three controls across a phone is none of them readable. */
+.flag-pick{margin:10px 0 0;display:flex;flex-direction:column;gap:8px}
+.flag-opt{
+  display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px;
+  background:var(--card2);border:1px solid var(--line);
+}
+.flag-opt-t{flex:1;min-width:0;font-size:13px;color:var(--text)}
+.flag-opt .pg-to{margin:0}
+.flag-opt .pg-to input{width:56px}
+.flag-opt .btn.small{width:auto;flex:0 0 auto;padding:8px 14px}
 .swap-mine{
   font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--acc);border:1px solid var(--line);border-radius:999px;padding:1px 6px;margin-left:8px;
@@ -1409,6 +1421,10 @@ body.onboarding #app{padding:0}
    and a tip points at it. Everything is positioned from measured rectangles in script,
    so nothing here assumes where anything is. */
 #tourLayer{position:fixed;inset:0;z-index:170;pointer-events:none}
+/* A sheet is up: the page behind it holds still. Without this the grade card and the
+   page under it both scrolled, which on a phone is two scrollbars and a card that slides
+   away when you meant to read it. */
+body.modal-live{overflow:hidden}
 body.tour-live{overflow:hidden}
 .tr-sh{
   position:fixed;background:rgba(8,8,10,.76);pointer-events:auto;cursor:pointer;
@@ -2046,7 +2062,15 @@ a{color:var(--text)}
    The impact shake now moves the overlay itself, which is what anybody watching thinks
    is shaking anyway. body.shake stays for the focus-view plate, where nothing is fixed
    above it. */
-body.shake,.cele-shake{animation:shakeX .55s both}
+/* AND NOT ON <body> FOR THE PLATE EITHER, which is the same bug caught a second time.
+   The note above concluded body.shake was safe for the focus-view plate "where nothing
+   is fixed above it". That was already untrue: the tick which completes a set STARTS THE
+   REST CLOCK, and the rest overlay is fixed — so is the tab bar. Shaking the body
+   reparented both to the body box, which after any scrolling is neither the size nor the
+   position of the viewport, and the whole screen appeared to shrink sideways for half a
+   second. #app holds no fixed descendants — every overlay is its sibling — so shaking
+   that shakes the page and nothing else. */
+#app.shake,.cele-shake{animation:shakeX .55s both}
 
 /* ================= FINISH SEQUENCE =================
    Staged rather than simultaneous. The old version faded a translucent wash in behind
@@ -3521,7 +3545,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "9.3";
+const APP_VERSION = "9.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6964,6 +6988,7 @@ function askSetReason(entry, st, miss){
       </div>`;
     $("#modal").scrollTop = 0;
     $("#modalBg").classList.add("show");
+    document.body.classList.add("modal-live");
     noteOriginAnim();
     document.querySelectorAll("#modal [data-reason]").forEach(b=> b.onclick = ()=>{
       const note = ($("#whyNote") && $("#whyNote").value.trim()) || "";
@@ -13859,8 +13884,19 @@ function viewActiveSession(){
       <div class="ex-bar">
         <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}${easeTagHTML(en)}</span>
         <span class="icon-btns ex-ctl">
-          <button data-exup="${ei}" aria-label="Move earlier">↑</button>
-          <button data-exdown="${ei}" aria-label="Move later">↓</button>
+          ${(()=>{
+            /* AN EXERCISE YOU HAVE FINISHED DOES NOT MOVE. Reordering is for saying what
+               you are about to do next; once every set is logged the order it ran in is
+               a fact, not a plan. Leaving the arrows live meant a stray tap on a finished
+               card swapped it with its neighbour — and the rest clock is held by INDEX,
+               so the swap handed a running timer to the exercise you had not started,
+               which is the phantom rest timer. Both halves are fixed: these are disabled,
+               and the handler moves the timer with the entry. */
+            const doneEx = en.sets.length && en.sets.every(x=>x.done);
+            const off = doneEx ? ` disabled aria-disabled="true" title="Already done — the order it ran in is fixed"` : "";
+            return `<button data-exup="${ei}" aria-label="Move earlier"${off}>↑</button>
+          <button data-exdown="${ei}" aria-label="Move later"${off}>↓</button>`;
+          })()}
           <button data-exnote="${ei}" aria-label="Add a note about ${esc(en.name)}">${exNoteMark(en)}</button>
           ${canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">⇄</button>`:""}
           <button data-exskip="${ei}" aria-label="Skip today">✕</button>
@@ -15750,6 +15786,25 @@ function viewBody(){
           ? `<span class="conf-tag conf-${esc(f.conf)}">${esc((CONF_BANDS.find(b=>b.k===f.conf)||{}).label||"")}</span>` : ""}</div>
         <div class="nb-flag-m">${esc(f.msg)}</div>
         ${f.fix?`<div class="nb-flag-f">${esc(f.fix)}</div>`:""}
+        ${f.kind === "fade" ? `
+        <div class="flag-pick">
+          <div class="flag-opt">
+            <span class="flag-opt-t">Rest longer</span>
+            <span class="pg-to"><input inputmode="numeric" data-faderest="${esc(f.id)}"
+              value="${f.restAdd == null ? 30 : f.restAdd}" aria-label="Extra seconds of rest"><i>s more</i></span>
+            <button class="btn small" data-flagdo="${esc(f.id)}" data-fadepick="rest">Apply</button>
+          </div>
+          <div class="flag-opt">
+            <span class="flag-opt-t">Start lighter</span>
+            <span class="pg-to"><input inputmode="decimal" data-fadeload="${esc(f.id)}"
+              value="${f.to == null ? "" : f.to}" aria-label="Opening weight"><i>${esc(unitWord())}</i></span>
+            <button class="btn small" data-flagdo="${esc(f.id)}" data-fadepick="load"
+              ${f.to == null ? "disabled style=opacity:.4" : ""}>Apply</button>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:9px">
+          <button class="btn ghost small" data-flagno="${esc(f.id)}" style="flex:1">Dismiss</button>
+        </div>` : `
         <div class="btn-row" style="margin-top:9px">
           ${actionable && f.kind !== "stall" ? `<span class="pg-to">
             <input inputmode="decimal" data-flagtoin="${esc(f.id)}" value="${f.to == null ? "" : f.to}"
@@ -15757,7 +15812,7 @@ function viewBody(){
           ${actionable?`<button class="btn small" data-flagdo="${esc(f.id)}" style="flex:1">${
             f.kind === "stall" ? "Cut a set for now" : "Set it"}</button>`:""}
           <button class="btn ghost small" data-flagno="${esc(f.id)}" style="flex:0 0 auto">Dismiss</button>
-        </div>
+        </div>`}
       </div>`;
     });
     if(flags.length > 4){
@@ -16827,8 +16882,11 @@ function bind(){
         const doShake = isComplete;
         render();
         if(doShake && !reducedMotion()){
-          document.body.classList.add("shake");
-          setTimeout(()=>document.body.classList.remove("shake"), 600);
+          const shakeEl = document.getElementById("app");
+          if(shakeEl){
+            shakeEl.classList.add("shake");
+            setTimeout(()=>shakeEl.classList.remove("shake"), 600);
+          }
         }
       }
       /* Last, and only after the rest clock is already running, so answering the
@@ -16901,19 +16959,34 @@ function bind(){
     const n = $("#sessNote");
     if(n) S.active.note = n.value;
   }
+  /* The rest clock stores which entry it belongs to as an index, so any swap has to move
+     it too or it silently starts pointing at somebody else's exercise. */
+  const swapEntries = (i, j)=>{
+    const list = S.active.entries;
+    if(i < 0 || j < 0 || i >= list.length || j >= list.length) return false;
+    const doneAt = k=> list[k].sets.length && list[k].sets.every(x=>x.done);
+    /* BOTH ENDS. Refusing only the one you tapped still let an unfinished exercise be
+       dragged up past a finished one, which moves the finished one just as surely. */
+    if(doneAt(i) || doneAt(j)){ toast("That one's done — its place in the session is set"); return false; }
+    harvestActive();
+    [list[i], list[j]] = [list[j], list[i]];
+    const rt = S.active.restTimer;
+    if(rt){
+      if(rt.e === i) rt.e = j;
+      else if(rt.e === j) rt.e = i;
+    }
+    save(); render();
+    return true;
+  };
   document.querySelectorAll("[data-exup]").forEach(b=> b.onclick=()=>{
     const i = parseInt(b.dataset.exup,10);
     if(i<=0) return;
-    harvestActive();
-    [S.active.entries[i-1], S.active.entries[i]] = [S.active.entries[i], S.active.entries[i-1]];
-    save(); render();
+    swapEntries(i, i-1);
   });
   document.querySelectorAll("[data-exdown]").forEach(b=> b.onclick=()=>{
     const i = parseInt(b.dataset.exdown,10);
     if(i>=S.active.entries.length-1) return;
-    harvestActive();
-    [S.active.entries[i], S.active.entries[i+1]] = [S.active.entries[i+1], S.active.entries[i]];
-    save(); render();
+    swapEntries(i, i+1);
   });
   document.querySelectorAll("[data-exchoose]").forEach(b=> b.onclick = ()=>
     openPickModal(parseInt(b.dataset.exchoose, 10)));
@@ -17185,8 +17258,26 @@ function bind(){
     el.value = f.to;
     save(); queueSync();
   });
+  document.querySelectorAll("#app [data-faderest]").forEach(el=> el.onchange = ()=>{
+    const f = flagLog().find(x=> x && x.id === el.dataset.faderest);
+    if(!f) return;
+    const v = parseInt(el.value, 10);
+    f.restAdd = isFinite(v) && v > 0 ? Math.max(5, Math.min(300, v)) : FADE_REST_ADD;
+    el.value = f.restAdd; save(); queueSync();
+  });
+  document.querySelectorAll("#app [data-fadeload]").forEach(el=> el.onchange = ()=>{
+    const f = flagLog().find(x=> x && x.id === el.dataset.fadeload);
+    if(!f) return;
+    const v = parseFloat(el.value);
+    if(!isFinite(v) || v < 0){ el.value = f.to == null ? "" : f.to; return; }
+    f.to = roundLoadable(v, f.ex); el.value = f.to; save(); queueSync();
+  });
   document.querySelectorAll("#app [data-flagdo]").forEach(b=> b.onclick=()=>{
-    if(applyFlag(b.dataset.flagdo)){ render(); toast("Applied to your programme"); }
+    if(applyFlag(b.dataset.flagdo, b.dataset.fadepick)){
+      render();
+      // addRestToExercise() says its own piece; a second toast would talk over it
+      if(b.dataset.fadepick !== "rest") toast("Applied to your programme");
+    }
   });
   document.querySelectorAll("#app [data-flagno]").forEach(b=> b.onclick=()=>{
     dismissFlag(b.dataset.flagno); render(); toast("Dismissed");
@@ -17615,7 +17706,7 @@ function finishWorkout(){
      earned it. */
   clearRebuiltEntries(sessObj);
   /* The grade's conclusions become a standing record here, not just a card. */
-  recordFlags(sessObj, sessObj.progression || []);
+  recordFlags(sessObj, (sessObj.progression || []).concat(fadeFindings(sessObj)));
   // graded once, at the moment it's finished, and stored on the session so History
   // shows the same number later even as the surrounding history grows
   sessObj.quality = scoreWorkout(sessObj);
@@ -18781,23 +18872,9 @@ function scoreWorkout(sess){
 
   /* 6, FATIGUE MANAGEMENT ----------------------------------------------------- */
   (()=>{
-    const drops = [];
-    entries.forEach(e=>{
-      const ws = e.sets.filter(isWorkingSet);
-      if(ws.length < 2) return;
-      /* Drop-off measures whether the later sets ran on empty. On an exercise whose
-         every set was governed — matched to the weaker side, run on a deload — the rep
-         count was set by the rule and not by how much was left in the tank, so there is
-         nothing here to read. Excluded rather than scored. */
-      if(ws.every(st=> st.gov)) return;
-      const first = parseFloat(ws[0].reps)||0;
-      const last = parseFloat(ws[ws.length-1].reps)||0;
-      if(!first) return;
-      // compare like for like, a rep drop only counts at the same or heavier load
-      const w0 = parseFloat(ws[0].weight)||0, wN = parseFloat(ws[ws.length-1].weight)||0;
-      if(wN < w0*0.95) return;
-      drops.push({name:e.name, drop:(first-last)/first, first, last});
-    });
+    /* Computed by repDropOffs(), which the Body tab's flag also reads — one finding,
+       one implementation, so the card and the flag can never disagree about it. */
+    const {drops, avgDrop, bad} = repDropOffs(sess);
     const why = [];
     if(!drops.length){
       add("fatigue","Fatigue management",10,0,
@@ -18805,8 +18882,6 @@ function scoreWorkout(sess){
         null, {na:true, unlock:"Run at least one exercise for 2+ sets at the same weight."});
       return;
     }
-    const avgDrop = drops.reduce((t,d)=>t+d.drop,0)/drops.length;
-    const bad = drops.filter(d=>d.drop > 0.35).sort((a,b)=>b.drop-a.drop);
     // Up to about 25% drop-off across sets is normal and expected; past about 35% the
     // later sets run on empty and contribute mostly fatigue rather than stimulus.
     const earned = 10 * Math.max(0, Math.min(1, 1 - Math.max(0, avgDrop - 0.25)/0.35));
@@ -19472,6 +19547,44 @@ const FLAG_MAX = 400;
 function flagLog(){ if(!Array.isArray(S.flags)) S.flags = []; return S.flags; }
 // One flag per movement per session: re-grading a session must not stack duplicates.
 function flagKey(f){ return (f.sessionId || "") + "|" + nrm(f.ex || "") + "|" + f.kind; }
+/* =====================================================================
+   REPS FALLING AWAY ACROSS SETS
+
+   Pulled out of the grade's fatigue section so the Body tab can act on the same finding
+   rather than a second implementation of it. A drop only counts at the same or heavier
+   load — three sets of ten, eight, four is a collapse; ten at 100 then four at 140 is
+   just a heavier set.
+
+   Up to about 25% off the first set is normal. Past 35% the later sets are running on
+   empty and are mostly buying fatigue. */
+const FADE_BAD = 0.35;
+function repDropOffs(sess){
+  const drops = [];
+  (sess.entries || []).forEach(e=>{
+    const ws = (e.sets || []).filter(isWorkingSet);
+    if(ws.length < 2) return;
+    const first = parseFloat(ws[0].reps) || 0;
+    const last  = parseFloat(ws[ws.length-1].reps) || 0;
+    if(!first) return;
+    const w0 = parseFloat(ws[0].weight)||0, wN = parseFloat(ws[ws.length-1].weight)||0;
+    if(wN < w0*0.95) return;                 // compare like for like
+    drops.push({name:e.name, drop:(first-last)/first, first, last, weight:w0});
+  });
+  const avgDrop = drops.length ? drops.reduce((t,d)=>t+d.drop,0)/drops.length : 0;
+  return {drops, avgDrop, bad: drops.filter(d=>d.drop > FADE_BAD).sort((a,b)=>b.drop-a.drop)};
+}
+/* How much longer to rest, and how much lighter to start, for a collapse. Both are
+   suggestions with a box next to them — see the flag row. */
+const FADE_REST_ADD = 30;                    // seconds
+function fadeFixFor(d){
+  const cur = findProgramEntry(d.name);
+  const w = cur && cur.weight != null ? cur.weight : d.weight;
+  const step = progressionStep(cur || {name:d.name, weight:w}).amount || stepInUnits(5);
+  return {
+    restAdd: FADE_REST_ADD,
+    to: w > 0 ? Math.max(0, roundLoadable(w - step, d.name)) : null
+  };
+}
 function recordFlags(sess, list){
   const log = flagLog();
   const seen = new Set(log.map(flagKey));
@@ -19488,6 +19601,9 @@ function recordFlags(sess, list){
       stallKind: p.stall.kind});
     if(p.kind === "up" && p.to != null) kinds.push({
       kind:"up", title:"Ready for more weight", msg:p.msg, fix:p.sub, to:p.to, sev:1});
+    if(p.kind === "fade") kinds.push({
+      kind:"fade", title:"Reps fell away across the sets", msg:p.msg, fix:p.sub,
+      to:p.to, restAdd:p.restAdd, sev:2});
     kinds.forEach(k=>{
       const f = Object.assign({
         id: uid(), at: sess.finishedAt || Date.now(), date: sess.date || todayStr(),
@@ -19502,16 +19618,48 @@ function recordFlags(sess, list){
   });
   if(log.length > FLAG_MAX) S.flags = log.slice(-FLAG_MAX);
 }
+/* The collapse findings, in the shape recordFlags() takes. Kept separate from the
+   progression list because a drop-off is not a progression verdict — it says nothing
+   about whether the load should go up, only that the way this exercise was run cost you
+   the last two sets of it. */
+function fadeFindings(sess){
+  return repDropOffs(sess).bad.slice(0, 3).map(d=>{
+    const fix = fadeFixFor(d);
+    return {
+      kind: "fade", name: d.name,
+      msg: "Reps went " + d.first + " \u2192 " + d.last + " at the same load, "
+         + Math.round(d.drop*100) + "% off the first set.",
+      sub: "A collapse like that is nearly always too little rest or too heavy an opening set. "
+         + "Rest longer, or start lighter and hold the reps.",
+      to: fix.to, restAdd: fix.restAdd
+    };
+  });
+}
 function openFlags(){
   return flagLog().filter(f=> f && !f.applied && !f.dismissed).sort((a,b)=> b.at - a.at);
 }
 /* Doing what the flag says. Each branch goes through the same code the grade card uses,
    so a flag applied from the Body tab and the same flag applied on the night are the
    same edit to the same plan. */
-function applyFlag(id){
+/* A COLLAPSE HAS TWO HONEST ANSWERS AND THE APP DOES NOT KNOW WHICH. Too little rest and
+   too heavy an opening set produce the same shape on the card, and only the person who
+   was standing there can say which it was — so this offers both rather than picking one,
+   with the amount editable on each. Every other flag has a single right action and keeps
+   its single button. */
+function applyFlag(id, choice){
   const f = flagLog().find(x=> x && x.id === id);
   if(!f || f.applied) return false;
   let ok = false;
+  if(f.kind === "fade"){
+    if(choice === "rest"){
+      ok = addRestToExercise(f.ex, f.restAdd == null ? FADE_REST_ADD : f.restAdd);
+    } else if(choice === "load" && f.to != null){
+      ok = applyProgression(f.ex, f.to,
+        "Applied from the Body tab: reps collapsed across the sets, so the opening load comes down.");
+    }
+    if(ok){ f.applied = true; f.appliedAs = choice; save(); queueSync(); }
+    return ok;
+  }
   if((f.kind === "up" || f.kind === "load") && f.to != null){
     ok = applyProgression(f.ex, f.to, f.kind === "load"
       ? "Applied from the Body tab: the prescribed range was not reachable at the old load."
@@ -19702,6 +19850,27 @@ function progressionHTML(list){
 }
 /* Writing a suggested load into the plan. Goes through the change log, because a load
    that moved on its own without a record is indistinguishable from one you mistyped. */
+/* Lengthening the rest this movement asks for. entry.rest is a [low, high] window and it
+   is what restTargetFor() reads first, so writing one here is the same instruction the
+   plan would have carried if it had said so. Where the plan never prescribed one, the
+   band the app was already judging against becomes the starting point — otherwise "rest
+   30 seconds longer" would have nothing to be longer THAN. */
+function addRestToExercise(name, seconds){
+  const add = Math.max(5, Math.min(300, Math.round(Number(seconds) || 0)));
+  const e = findProgramEntry(name);
+  if(!e){ toast("That exercise is not in the current programme"); return false; }
+  const cur = Array.isArray(e.rest) && e.rest.length === 2
+    ? e.rest.slice()
+    : (restTargetFor(e, null).ideal || [90, 150]).slice();
+  const next = [Math.round(cur[0]) + add, Math.round(cur[1]) + add];
+  e.rest = next;
+  logPlanChange("rest", null, e.name,
+    [fmtClock(cur[0]) + "\u2013" + fmtClock(cur[1]) + " \u2192 " + fmtClock(next[0]) + "\u2013" + fmtClock(next[1])],
+    {note:"Reps were collapsing across the sets, so the rest window was lengthened."});
+  save(); queueSync();
+  toast(e.name + ": rest now " + fmtClock(next[0]) + "\u2013" + fmtClock(next[1]));
+  return true;
+}
 function applyProgression(name, to, why){
   // Adding weight during the week you took off to shed fatigue defeats the deload.
   if(deloadActive()){ toast("Load increases are blocked during a deload"); return false; }
@@ -21348,6 +21517,10 @@ function showModal(html){
   // any previous sheet's mode is cleared; the tour re-adds its own after this returns
   $("#modalBg").classList.remove("tour-open");
   $("#modalBg").classList.add("show");
+  /* TWO SCROLLBARS. The sheet scrolls, and so did the page behind it, so the grade card
+     came up over a page that moved when you dragged the wrong half a centimetre. The
+     tour has locked the page this way since it was written; sheets never did. */
+  document.body.classList.add("modal-live");
   /* Scoped to the modal, deliberately. The full-screen importer has a #closeModal of its
      own and sits EARLIER in the document, so a document-wide lookup here rebound the
      importer's Cancel button to hideModal the first time somebody tapped a glossary term
@@ -21357,6 +21530,7 @@ function showModal(html){
 }
 function hideModal(){
   $("#modalBg").classList.remove("show");
+  document.body.classList.remove("modal-live");
   const d = MODAL_DISMISS;
   MODAL_DISMISS = null;
   if(d) d();                // a pending askConfirm resolves false
@@ -21385,6 +21559,7 @@ function askConfirm(opts){
       <div class="btn-row"><button class="btn ghost small" id="askNo" style="flex:1">${esc(opts.no||"Cancel")}</button></div>`;
     $("#modal").scrollTop = 0;
     $("#modalBg").classList.add("show");
+    document.body.classList.add("modal-live");
     $("#askYes").onclick = ()=>done(true);
     $("#askNo").onclick = ()=>done(false);
     MODAL_DISMISS = ()=>done(false);   // tapping the backdrop = "no"
