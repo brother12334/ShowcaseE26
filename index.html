@@ -3546,7 +3546,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "9.6";
+const APP_VERSION = "9.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9898,7 +9898,7 @@ const TOUR_STEPS = [
   {tab:"body", sel:".nb-fix, .nb-hero", title:"What needs attention",
    text:"Anything under- or over-trained, each with a button that actually changes your plan. Below it: the flags your grades raised, and your own notes."},
   {tab:"program", sel:".btn-row", title:"Your plan, as written",
-   text:"Element 26 doesn't write programmes — it runs the one you brought. Everything here is editable, and \"Re-read my plan\" rebuilds it from the document you imported."},
+   text:"Element 26 doesn't write programmes — it runs the one you brought. Everything here is editable."},
   {tab:"sync", sel:".card", title:"Account and settings",
    text:"Your ID and recovery key, cloud sync, pounds or kilos. Advanced settings has how the app behaves — and this tour, whenever you want it again."},
   {tab:"today", sel:".tabs, .tabbar, nav", title:"That's the tour",
@@ -12523,15 +12523,13 @@ async function aiUsePlan(){
   }
   S.importMeta = r.meta || null;
   /* THE DOCUMENT ITSELF, KEPT. Everything above is what the importer MADE of the plan;
-     this is the plan as it was read. Two things need it. The importer improves — the
-     rest-period pass that reads a blanket "rest 2-3 min" was added long after most plans
-     were imported, and without the source there is no way to apply it except by finding
-     the PDF again. And an answer given during the import ("convert kilos", "how do you
-     track sides") can be reconsidered later, which is only meaningful if the plan can be
-     rebuilt from it.
+     this is the plan as it was read. Nothing reads it back automatically — the programme
+     is yours to edit once it is in — but it is the only record of what the document
+     actually said, so a disagreement about a load or a rep range can be settled against
+     the source rather than against memory.
 
-     Stored with the answers, so a rebuild reproduces the same import exactly, and capped
-     — a very long document is not worth carrying in every backup. */
+     Stored with the answers given during the import, and capped — a very long document is
+     not worth carrying in every backup. */
   try{
     const src = JSON.stringify({doc: r.doc || null, answers: r.answers || null, at: Date.now()});
     S.importSrc = src.length <= 400000 ? JSON.parse(src) : null;
@@ -12555,49 +12553,6 @@ async function aiUsePlan(){
 /* What the document said about running the programme, kept where it can be read while
    training rather than thrown away at import. Element 26 does not run somebody else's
    periodisation for them — it holds on to it accurately and says so. */
-/* REBUILDING THE PROGRAMME FROM THE DOCUMENT ALREADY READ.
-
-   Distinct from importing again, and both are worth having. Importing again means "here
-   is a different plan". This means "read the same plan again" — which matters because
-   the importer is not fixed: the pass that reads a blanket "Rest 2-3 min between sets"
-   and puts it on every exercise did not exist when most plans were imported, and without
-   this the only way to pick it up is to go and find the PDF.
-
-   It touches the PROGRAMME and nothing else. Sessions, history, notes, flags and the
-   cycle are not derived from the document and are not in its gift. */
-function canRebuildPlan(){
-  return !!(S.importSrc && S.importSrc.doc && Array.isArray(S.importSrc.doc.days) && S.importSrc.doc.days.length);
-}
-function rebuildPlanFromSource(){
-  if(!canRebuildPlan()) return {ok:false, why:"There is no stored plan document to rebuild from."};
-  let r;
-  try{
-    r = aiPlanToProgram(S.importSrc.doc, S.importSrc.answers || {});
-  }catch(e){
-    return {ok:false, why: (e && e.message) || "That document could not be read again."};
-  }
-  if(!r || !r.program) return {ok:false, why:"That document could not be read again."};
-  const before = countPlanRests();
-  const oldFin = Array.isArray(S.program && S.program.finisher) ? S.program.finisher : [];
-  S.program = Object.assign({}, r.program, {finisher: oldFin});
-  if(r.customSplit){ S.customSplit = r.customSplit; S.splitId = null; }
-  S.importMeta = r.meta || null;
-  applySplit();
-  invalidateTableOrigin();
-  invalidateMultiDay();
-  logPlanChange("programme", null, "Whole programme",
-    ["Rebuilt from the imported document"],
-    {note:"Re-read the plan Element 26 already had on file. Your history was not touched."});
-  save(); queueSync();
-  return {ok:true, restsBefore: before, restsAfter: countPlanRests(),
-          exercises: DAYS.reduce((n,d)=> n + (S.program[d]||[]).length, 0)};
-}
-// How many movements currently carry a rest window, so a rebuild can say what it changed.
-function countPlanRests(){
-  let n = 0;
-  DAYS.forEach(d=> (S.program[d]||[]).forEach(e=>{ if(e && Array.isArray(e.rest)) n++; }));
-  return n;
-}
 /* The enums, in English. Kept beside importMetaCardHTML() rather than next to the schema
    because these are what a PERSON reads; the schema's job was to constrain the model. */
 const KIND_WORDS = {
@@ -16439,15 +16394,9 @@ function viewProgram(){
     <button class="btn ghost small" id="planBtn">${ICON.doc} Full plan</button>
     <button class="btn ghost small" id="splitBtn">${ICON.calendar} Schedule</button>
   </div>
-  <div class="btn-row" style="margin-bottom:${canRebuildPlan()?"8px":"16px"}">
+  <div class="btn-row" style="margin-bottom:16px">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
   </div>
-  ${canRebuildPlan() ? `<div class="btn-row" style="margin-bottom:16px">
-    <button class="btn ghost small" id="planRebuildBtn" style="flex:1">${ICON.refresh} Re-read my plan</button>
-  </div>
-  <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">Builds your programme again
-    from the document you imported, without re-uploading it. Useful after Element 26 gets better at reading
-    plans. Your history, notes and cycle are untouched.</div>` : ""}
   <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
@@ -17392,36 +17341,6 @@ function bind(){
   if(plan) plan.onclick = openPlan;
   const aiB = $("#aiImportBtn");
   if(aiB) aiB.onclick = ()=> openAIImport(false);
-  const reb = $("#planRebuildBtn");
-  if(reb) reb.onclick = async ()=>{
-    const yes = await askConfirm({
-      title:"Re-read your plan?",
-      body:"Element 26 will build your programme again from the document you imported. "
-         + "Anything you have EDITED in the Program tab since will be replaced by what the document says. "
-         + "<b>Your history, notes, flags and cycle are not touched.</b>",
-      meta: S.importSrc && S.importSrc.at ? "Imported " + fmtDate(dayKey(S.importSrc.at)) : "",
-      yes:"Re-read it", no:"Cancel"});
-    if(!yes) return;
-    const r = rebuildPlanFromSource();
-    render();
-    if(!r.ok){
-      showModal(`<h3>Couldn't re-read it</h3><p>${esc(r.why)}</p>
-        <button class="btn" id="closeModal" style="margin-top:16px">OK</button>`);
-      return;
-    }
-    const gained = r.restsAfter - r.restsBefore;
-    showModal(`<h3>Plan re-read</h3>
-      <p>${r.exercises} exercise${r.exercises===1?"":"s"} rebuilt from your document.</p>
-      <div class="sub" style="margin-top:10px">${
-        gained > 0
-          ? "Rest periods now read from the plan on " + r.restsAfter + " movement" + (r.restsAfter===1?"":"s") + ", up from " + r.restsBefore + "."
-          : r.restsAfter
-            ? "Rest periods on " + r.restsAfter + " movement" + (r.restsAfter===1?"":"s") + ", unchanged."
-            : "Your document doesn't state any rest periods, so the app judges each set on its own."
-      }</div>
-      <div class="sub" style="margin-top:8px">Your history, notes and cycle are exactly as they were.</div>
-      <button class="btn" id="closeModal" style="margin-top:16px">Done</button>`);
-  };
   const rep = $("#reportBtn");
   if(rep) rep.onclick = openReport;
   const docB = $("#docBtn");
