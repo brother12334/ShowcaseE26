@@ -3521,7 +3521,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "9.2";
+const APP_VERSION = "9.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -3780,8 +3780,31 @@ function dayName(id){ return dayMeta(id).name; }
 
    `S.restDays` holds the dates spent in the CURRENT cycle. `S.restLog` remains the
    permanent all-time record and is untouched by any of this.                        */
+/* DERIVED, NOT TRUSTED, and that distinction is the bug.
+
+   S.restDays is meant to hold only the days spent in the CURRENT cycle, and every path
+   that closes a cycle empties it. The trouble is that emptying it is not the only thing
+   that writes it, and the other writers have no idea which cycle they are in:
+
+     • the sync merge. pickRestDay() unions this device's rest days with the other one's,
+       sorts, and keeps the last few — with no reference to cycleStart anywhere in it. A
+       phone that has moved on to a new cycle pulls a laptop's copy of the old one and
+       gets last cycle's rest handed back. Filtering INSIDE that merge would not work
+       either: reconcileCycleAfterMerge() runs after it, so at that moment the app does
+       not yet know which cycle it is in.
+     • migrate(), which lifts the single legacy S.restDay into the array.
+     • restoring a backup, which brings whatever the file was holding.
+
+   So the array is no longer believed on sight. A rest dated before this cycle began
+   belongs to the cycle it was taken in, whatever is stored, and the stored list is
+   pruned to match so it heals itself and syncs clean rather than re-arriving for ever.
+
+   Dates are en-CA (YYYY-MM-DD), so a string compare is a date compare. */
 function restDaysThisCycle(){
   if(!Array.isArray(S.restDays)) S.restDays = [];
+  const from = dayKey(S.cycleStart || 0);
+  const kept = S.restDays.filter(d=> typeof d === "string" && d >= from);
+  if(kept.length !== S.restDays.length) S.restDays = kept;
   return S.restDays;
 }
 function restCreditsLeft(){ return Math.max(0, REST_CREDITS - restDaysThisCycle().length); }
