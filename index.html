@@ -3546,7 +3546,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "9.5";
+const APP_VERSION = "9.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6106,6 +6106,21 @@ function migrate(){
     if(filled) saveQuiet();
   }
   if(S.importMeta === undefined) S.importMeta = null;
+  /* EVERYBODY WHO ALREADY HAS A PLAN GETS ITS CLASSIFICATION, without re-reading a
+     document and without a Gemini request. Written down rather than only computed on
+     screen because the admin console reads the synced blob, not this function — an
+     answer that exists only at render time is an answer the console cannot see.
+
+     Only ever filled in when it is missing, and only ever with a derived reading: an
+     import that arrives later carries the document's own answer and replaces this,
+     because that one knows more. Nothing else about the plan is touched. */
+  if(!(S.importMeta && S.importMeta.kind && !S.importMeta.kind.derived)){
+    const dk = derivePlanKind();
+    if(dk){
+      if(!S.importMeta) S.importMeta = {at: null, derivedOnly: true};
+      S.importMeta.kind = dk;
+    }
+  }
   if(!S.viewMode) S.viewMode = "regular";
   if(!S.checkins) S.checkins = {};
   if(!Array.isArray(S.restLog)) S.restLog = [];
@@ -12611,8 +12626,94 @@ function planKindLine(k){
   if(pr) bits.push(pr);
   return bits.join(" \u00b7 ");
 }
+/* =====================================================================
+   WORKING IT OUT WITHOUT ASKING GEMINI AGAIN
+
+   planKind arrives with an import, which does nothing for the people who already
+   imported one — their document was read under the old schema and does not contain the
+   field. Re-running the model over every stored plan would cost a request each, would
+   need a stored document that only exists for imports since v6.5, and would tell the app
+   things it can already see.
+
+   Because it can see them. The programme is right there: how many sessions the rotation
+   has, what the days are called, what rep ranges they prescribe. That is enough for the
+   shape, the days a week, and a reasonable read of style and progression — and it works
+   for a hand-built plan and a starter split as well as an import, which the model's
+   answer never would.
+
+   WHAT IT WILL NOT DO IS NAME A PROGRAMME. "Six days, push/pull/legs, 8-12 reps" is not
+   evidence that somebody is running PHUL, and the difference between a shape the app
+   inferred and a name the document gave is the difference between a description and a
+   claim. `named` stays empty here, always, and `derived` marks the whole thing so
+   nothing downstream mistakes it for the document talking. */
+function derivePlanKind(){
+  /* INSIDE THE FUNCTION, and that is not a style choice. migrate() calls this during
+     module init, and a `const` declared further down the file is in its temporal dead
+     zone at that moment — reading it throws, and a throw there takes the whole app down
+     before it paints. The same trap is documented three other places in this file. */
+  const KIND_DAY_PATTERNS = [
+    [/\bpush\b/, "push"], [/\bpull\b/, "pull"], [/\bleg|\blower\b/, "legs"],
+    [/\bupper\b/, "upper"], [/\bfull[ -]?body\b|\bwhole[ -]?body\b/, "full"],
+    [/\bchest\b/, "chest"], [/\bback\b/, "back"], [/\bshoulder|\bdelt/, "shoulders"],
+    [/\barm|\bbicep|\btricep/, "arms"]
+  ];
+  const days = (ROTATION && ROTATION.length ? ROTATION : DAYS) || [];
+  if(!days.length) return null;
+  const names = days.map(d=> String(dayMeta(d).name || d).toLowerCase());
+  const tags = names.map(n=>{
+    for(const [re, tag] of KIND_DAY_PATTERNS) if(re.test(n)) return tag;
+    return "";
+  });
+  const has = t=> tags.indexOf(t) > -1;
+  const setOf = new Set(tags.filter(Boolean));
+  let family = "unclear";
+  if(has("push") && has("pull") && has("legs")) family = "ppl";
+  else if(has("push") && has("pull")) family = "push_pull";
+  else if(has("upper") && has("legs")) family = "upper_lower";
+  else if(has("full")) family = "full_body";
+  else if(setOf.size >= 3 && ["chest","back","shoulders","arms","legs"].filter(t=>has(t)).length >= 3)
+    family = "bro_split";
+  else if(days.length === 1) family = "full_body";
+  else if(setOf.size) family = "other";
+
+  /* Style from what the plan actually asks for, not from the person's goal — the goal is
+     a fact about them and this is meant to be a fact about the programme. */
+  const ranges = [];
+  days.forEach(d=> (S.program[d] || []).forEach(e=>{
+    const r = repRange(e && e.reps);
+    if(r) ranges.push((r[0] + r[1]) / 2);
+  }));
+  const avg = ranges.length ? ranges.reduce((a,b)=>a+b,0)/ranges.length : 0;
+  const style = !ranges.length ? "unclear"
+    : avg <= 6 ? "strength" : avg <= 13 ? "hypertrophy" : "endurance";
+
+  /* A plan written in ranges is asking you to earn the top of the range before the load
+     moves, which is double progression whether or not it uses the words. A plan of single
+     numbers is not saying how load moves at all. */
+  const ranged = ranges.length
+    ? days.reduce((n,d)=> n + (S.program[d]||[]).filter(e=>{
+        const r = repRange(e && e.reps); return r && r[1] > r[0]; }).length, 0)
+    : 0;
+  const progression = !ranges.length ? "unclear"
+    : ranged >= ranges.length * 0.5 ? "double" : "unclear";
+
+  if(family === "unclear" && style === "unclear") return null;
+  return {
+    family, named: "", style, progression, level: "unclear",
+    daysPerWeek: days.length, stated: false, derived: true,
+    evidence: days.length + " session" + (days.length===1?"":"s") + " in your rotation"
+      + (ranges.length ? ", rep ranges around " + Math.round(avg) : "")
+  };
+}
+/* The kind to show: what the document said, else what the app can see. Never overwritten
+   — an import that arrives later replaces this because it knows more, not less. */
+function planKindNow(){
+  const fromDoc = S.importMeta && S.importMeta.kind;
+  if(fromDoc && !fromDoc.derived) return fromDoc;
+  return derivePlanKind() || fromDoc || null;
+}
 function planKindCardHTML(){
-  const m = S.importMeta, k = m && m.kind;
+  const k = planKindNow();
   const line = planKindLine(k);
   if(!line && !(k && k.named)) return "";
   return `<div class="card">
@@ -12624,8 +12725,9 @@ function planKindCardHTML(){
     ${(KIND_WORDS.level[k.level] || "") ? `<div class="sub" style="margin:3px 0 0">Written for ${
       /^[aeiou]/i.test(KIND_WORDS.level[k.level]) ? "an" : "a"} ${esc(KIND_WORDS.level[k.level])} lifter.</div>` : ""}
     <div class="sub" style="margin:8px 0 0;color:var(--faint);font-size:12.5px">${
-      k.stated
-        ? "Your document says so."
+      k.stated ? "Your document says so."
+      : k.derived
+        ? "Worked out from your own programme" + (k.evidence ? " \u2014 " + esc(k.evidence) : "") + ". Nothing was re-read; this is just what's in front of it."
         : "Read from the plan itself" + (k.evidence ? " \u2014 " + esc(k.evidence) : "") + ", not stated outright."
     }</div>
   </div>`;
@@ -16482,6 +16584,52 @@ function viewAdvanced(){
    button, on their own page, with a way back. */
 let ADV_OPEN = false;
 let SYNC_BUSY = false;
+/* THE TWO QUESTIONS AN EXISTING PLAN NEVER GOT ASKED.
+
+   plateStep and dbStep are asked during an import, which is no use to anybody who
+   imported before they existed — and they change every load the app suggests, so leaving
+   them unset quietly keeps proposing jumps that gym does not stock. They are not
+   something to re-import for: they are two facts about a building, and the person is
+   standing in it.
+
+   Shown until answered or waved off, and only where the plan actually contains something
+   they would change. A card rather than another sheet on opening: this is worth knowing,
+   it is not worth interrupting a workout for. */
+function gearAskDue(){
+  const p = trainPrefs();
+  if(p.plateStep != null || p.dbStep != null) return false;   // one answer is enough to stop asking
+  if(S.gearAsked) return false;
+  if(!S.setup) return false;
+  const names = [];
+  (DAYS || []).forEach(d=> (S.program[d] || []).forEach(e=>{ if(e && e.name) names.push(e.name); }));
+  return names.some(n=>{
+    const eq = equipmentOf(n);
+    return eq === "barbell" || eq === "smith" || eq === "dumbbell";
+  });
+}
+function gearAskCardHTML(){
+  if(!gearAskDue()) return "";
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>What can you actually load?</h3>
+    </div>
+    <div class="sub" style="margin:4px 0 10px">Element 26 can now round every weight it suggests to
+      something that exists in your gym — no more "add 2.5 lb a hand" when the rack goes up in 5s.
+      It just needs to know what you've got. Your plan and your history are untouched either way.</div>
+    <div class="field" style="margin:0 0 10px"><label>Smallest plate, one side</label>
+      <input class="timein" inputmode="decimal" id="gearPlate"
+        placeholder="${inKg() ? "e.g. 1.25 — the bar then moves in 2.5" : "e.g. 2.5 — the bar then moves in 5"}"></div>
+    <div class="field" style="margin:0 0 12px"><label>Smallest gap between dumbbells</label>
+      <input class="timein" inputmode="decimal" id="gearDb"
+        placeholder="${inKg() ? "e.g. 2" : "e.g. 2.5 if you have 12.5s and 17.5s, 5 if not"}"></div>
+    <div class="btn-row" style="margin-top:0">
+      <button class="btn small" id="gearSave" style="flex:1">Save</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn ghost small" id="gearSkip" style="flex:1">Not now</button>
+    </div>
+  </div>`;
+}
 function syncCardHTML(){
   const st = syncStatus();
   if(st.k === "off") return "";
@@ -16553,6 +16701,7 @@ function viewSync(){
     </div>
   </div>
   ${syncCardHTML()}
+  ${gearAskCardHTML()}
   ${pushCardHTML()}
   <div class="card">
     <h3>Something wrong?</h3>
@@ -17455,6 +17604,26 @@ function bind(){
       S = load(); applySplit(); migrate(); saveQuiet(); render();
       toast("Training data erased");
     }
+  };
+  const gs = $("#gearSave");
+  if(gs) gs.onclick = ()=>{
+    const num = id=>{
+      const el = $("#" + id);
+      const v = el ? parseFloat(el.value) : NaN;
+      return isFinite(v) && v > 0 ? Math.min(25, Math.round(v*100)/100) : null;
+    };
+    const pl = num("gearPlate"), db = num("gearDb");
+    if(pl == null && db == null){ toast("Fill in at least one, or tap Not now"); return; }
+    if(pl != null) trainPrefs().plateStep = pl;
+    if(db != null) trainPrefs().dbStep = db;
+    S.gearAsked = true;
+    save(); queueSync(); render();
+    toast("Weights the app can suggest are now yours");
+  };
+  const gk = $("#gearSkip");
+  if(gk) gk.onclick = ()=>{
+    S.gearAsked = true; save(); queueSync(); render();
+    toast("Fine \u2014 they're under Advanced settings whenever you want them");
   };
   const repBtn = $("#repOpen");
   if(repBtn) repBtn.onclick = ()=> openReportSheet();
@@ -21696,7 +21865,7 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
-  "viewMode","cycleV2","picks","sessions","savedAt"
+  "viewMode","cycleV2","picks","gearAsked","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
