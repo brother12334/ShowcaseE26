@@ -228,8 +228,15 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 /* Five choices where the segmented control was built for two: the numbers are short,
    so they get less air and no letter-spacing rather than a scrollbar. */
 .step-seg button{padding:13px 4px;font-size:12px;letter-spacing:.02em}
-.gear-says{margin:7px 2px 0;font-size:12.5px;color:var(--faint)}
-.gear-head h3{font-family:var(--disp);text-transform:uppercase;letter-spacing:.04em}
+/* ONE SHAPE FOR EVERY SETTING: what it is, one line on what it does, the control. Read
+   top to bottom it is a list of sentences rather than a wall of switches. */
+.set-block{padding:15px 0;border-top:1px solid var(--line)}
+.set-block:first-child{padding-top:0;border-top:0}
+.set-block:last-child{padding-bottom:0}
+.set-name{font-size:14.5px;font-weight:600;color:var(--text);margin-bottom:3px}
+.set-help{font-size:12.5px;color:var(--dim);line-height:1.5;margin-bottom:10px}
+.set-says{margin:8px 2px 0;font-size:12.5px;color:var(--faint);line-height:1.5}
+.set-danger .set-name{color:var(--bad)}
 .focus-name{font-size:27px!important;line-height:1.1}
 .bar-wrap{display:flex;align-items:center;justify-content:center;margin:16px 0 6px;min-height:70px}
 .bar-end{height:8px;width:22px;background:#6d6d75;border-radius:4px;flex-shrink:0}
@@ -3562,7 +3569,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "9.9";
+const APP_VERSION = "10.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9624,21 +9631,19 @@ let PUSH_BUSY = false, PUSH_ERR = "";
 function pushCardHTML(){
   if(!VAPID_PUBLIC) return "";
   const why = pushBlocker();
-  let h = `<div class="card">
-    <h3>Reminders</h3>
-    <div class="sub" style="margin:4px 0 10px">Three, at most, and each one switchable on its own.
-      Nothing is ever sent that isn't listed here.</div>`;
+  let h = `<div class="sub" style="margin:0 0 12px">Three at most, each one switchable on its own.
+      Nothing is sent that isn't listed here.</div>`;
   if(PUSH_BUSY){
-    return h + `<div class="ai-busy"><span class="ai-spin"></span><span>Setting that up…</span></div></div>`;
+    return h + `<div class="ai-busy"><span class="ai-spin"></span><span>Setting that up…</span></div>`;
   }
   if(why && !(why === "denied" && !S.pushOn)){
-    return h + `<div class="sync-warn">${PUSH_WHY[why] || PUSH_WHY.failed}</div></div>`;
+    return h + `<div class="sync-warn">${PUSH_WHY[why] || PUSH_WHY.failed}</div>`;
   }
   if(!S.pushOn){
     if(PUSH_ERR) h += `<div class="sync-warn">${PUSH_WHY[PUSH_ERR] || PUSH_WHY.failed}</div>`;
     return h + `<div class="btn-row" style="margin-top:0">
       <button class="btn small" id="pushOnBtn" style="flex:1">Turn on reminders</button>
-    </div></div>`;
+    </div>`;
   }
   const seg = (attr, on)=> `<div class="seg">
     <button class="${on?"on":""}" ${attr}="on">On</button>
@@ -9669,7 +9674,7 @@ function pushCardHTML(){
     <div class="rem-head"><b>Bedtime</b>${seg("data-rembed", !!S.remindBed && !sleepOff)}</div>
     <div class="sub">A nudge to start the sleep clock at ${
       sleepOff ? "your night-start time" : `<b>${esc(p.sleepTime || "22:30")}</b>`
-    }, the hour the app already treats as your night — change it under <b>Advanced settings</b>.
+    }, the hour the app already treats as your night — change it under <b>Sleep &amp; check-in</b>.
       Not sent on a night you've already answered.</div>`;
   h += sleepOff
     ? `<div class="rem-when">Sleep tracking is off, so there's nothing to remind you about.</div>`
@@ -9688,7 +9693,7 @@ function pushCardHTML(){
        morning until the data arrived, and a reminder that is reliably wrong gets
        swiped away without being read — including on the days it was right. */
     h += `<div class="rem-when">Not yet — it needs ${WAKE_MIN_SAMPLES} logged mornings before it'll
-      guess, and it won't guess before then. Set a fixed wake time under <b>Sleep</b> below to skip the wait.</div>`;
+      guess, and it won't guess before then. Set a fixed wake time under <b>Sleep &amp; check-in</b> to skip the wait.</div>`;
   } else {
     h += preview("wake", "Off.", "worked out from " + esc(w.why));
   }
@@ -9696,7 +9701,7 @@ function pushCardHTML(){
 
   return h + `<div class="btn-row" style="margin-top:12px">
       <button class="btn ghost small" id="pushOffBtn" style="flex:1">Turn off all reminders</button>
-    </div></div>`;
+    </div>`;
 }
 /* "Today at 18:00" / "Tomorrow at 18:00" / a date, for the one line that previews it. */
 function fmtWhen(ms){
@@ -12866,69 +12871,88 @@ function importMetaCardHTML(){
    An exercise whose document spelled out how its sides are run keeps doing that
    whatever this says — a fact from a programme is not overridden by a general
    preference, which is the whole distinction this file is built on. */
-function trainPrefsCardHTML(){
+/* =====================================================================
+   THE SETTINGS, AS THREE SUBJECTS RATHER THAN ONE WALL
+
+   Everything below used to be a single "How you train" card: fourteen controls, each
+   under a paragraph, on a page reached through a button called Advanced. Two things were
+   wrong with it. Finding anything meant reading all of it, because the only ordering was
+   the order the features were written in. And the writing assumed you already knew what
+   was being asked \u2014 "one-limb movements", "double progression" \u2014 so the explanation was
+   long and still did not tell a beginner what to pick.
+
+   Now every setting is one block: a short bold name for the thing, ONE line saying what
+   it does in the words somebody would use out loud, and the control. They are grouped by
+   what you would be trying to do \u2014 the gym, the session, the day \u2014 and each group opens
+   from a list, so the screen you land on is eight lines instead of a thousand words. */
+function prefSeg(attr, val, opts){
+  return `<div class="seg">` + opts.map(o=>
+    `<button class="${val === o.v ? "on" : ""}" ${attr}="${esc(o.v)}">${esc(o.t)}</button>`).join("") + `</div>`;
+}
+// name, one line, control. The one shape every setting on this screen takes.
+function setBlock(title, help, control){
+  return `<div class="set-block">
+    <div class="set-name">${title}</div>
+    ${help ? `<div class="set-help">${help}</div>` : ""}
+    ${control}</div>`;
+}
+// EQUIPMENT: everything that is a fact about the building you lift in.
+function prefsGymHTML(){
+  const p = trainPrefs();
+  let h = setBlock("Pounds or kilos", "What your gym labels its plates in. Nothing you have already logged is converted \u2014 the numbers stay as you typed them.",
+    prefSeg("data-prefunits", p.units === "kg" ? "kg" : "lb", [{v:"lb", t:"Pounds"}, {v:"kg", t:"Kilos"}]));
+  h += setBlock("The number you write down for a barbell",
+    "Do you log the bar plus the plates, or just the plates? Warm-ups are worked out from this.",
+    prefSeg("data-prefbar", p.barMode, [{v:"total", t:"Bar + plates"}, {v:"plates", t:"Plates only"}]) +
+    (p.barMode === "total" ? `<div class="field" style="margin:10px 0 0"><label>Your bar weighs</label>
+      <input id="prefBarW" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
+        placeholder="e.g. ${barDefault()} \u2014 blank if you'd rather not say"></div>` : ""));
+  return h + gymGearHTML();
+}
+// THE SESSION: how a workout is shown to you and how it is judged.
+function prefsSessionHTML(){
   const p = trainPrefs();
   const anyUni = DAYS.some(d=> (S.program[d]||[]).some(e=> isSingleArm(e) || isCrossover(e) || e.sideMode));
-  const seg = (attr, val, opts)=> `<div class="seg">` + opts.map(o=>
-    `<button class="${val === o.v ? "on" : ""}" ${attr}="${esc(o.v)}">${esc(o.t)}</button>`).join("") + `</div>`;
-  let h = `<div class="card">
-    <h3>How you train</h3>
-    <div class="sub" style="margin:4px 0 8px">The unit your gym labels its plates in. Nothing already logged
-      is converted or rewritten \u2014 the numbers stay exactly as you typed them, this only changes what they
-      are called and how big a sensible jump is.</div>
-    ${seg("data-prefunits", p.units === "kg" ? "kg" : "lb", [
-      {v:"lb", t:"Pounds"}, {v:"kg", t:"Kilos"}])}`;
+  let h = setBlock("The workout screen",
+    "<b>Regular</b> shows the whole session. <b>Focus</b> shows one exercise at a time with bigger buttons, for the gym floor.",
+    `<div class="seg">
+      <button class="${S.viewMode!=="focus"?"on":""}" data-vmode="regular">Regular</button>
+      <button class="${S.viewMode==="focus"?"on":""}" data-vmode="focus">Focus</button>
+    </div>`);
+  h += setBlock("Warm-up sets",
+    "A ramp before the first big lift of the day. Warm-ups never count as working sets either way.",
+    prefSeg("data-prefwarm", p.warmups, [{v:"auto", t:"Add them"}, {v:"planOnly", t:"Plan only"}, {v:"manual", t:"Off"}]));
+  h += setBlock("Rating your sets",
+    term("rpe","RPE") + " is how close to failure a set was \u2014 10 is nothing left, 8 is two reps in you. Turning it off drops the column; sessions are still graded, with less to go on.",
+    prefSeg("data-prefrpe", p.rpe === false ? "off" : "on", [{v:"on", t:"Track RPE"}, {v:"off", t:"Weight and reps only"}]));
+  h += setBlock("When a weight is ready to go up",
+    "<b>Automatic</b> writes the increase into your plan the moment a session earns it. <b>Ask</b> offers it with a one-tap Apply.",
+    prefSeg("data-prefprog", p.progression, [{v:"auto", t:"Automatic"}, {v:"ask", t:"Ask me"}, {v:"hold", t:"I'll manage"}]));
   if(anyUni){
-    h += `<div class="sub" style="margin:4px 0 8px">One-limb movements. <b>Separately</b> marks each set L or R;
-      <b>match weaker</b> also holds both sides to whatever the weaker one manages; <b>together</b> counts a set
-      as covering both limbs. Exercises whose own plan states how sides are run keep doing that.</div>
-      ${seg("data-prefsides", p.sides, [
-        {v:"separate", t:"Separately"}, {v:"matchWeaker", t:"Match weaker"}, {v:"both", t:"Together"}])}`;
+    h += setBlock("One-arm and one-leg exercises",
+      "<b>Separately</b> marks each set L or R. <b>Match weaker</b> also holds both sides to what the weaker one manages. <b>Together</b> counts one set as covering both.",
+      prefSeg("data-prefsides", p.sides, [{v:"separate", t:"Separately"}, {v:"matchWeaker", t:"Match weaker"}, {v:"both", t:"Together"}]));
     if(p.sides !== "both"){
-      h += `<div class="sub" style="margin:14px 0 8px">Which side opens the session. Swapping it each time keeps
-        the fresh set from always going to the same limb.</div>
-        ${seg("data-prefstart", p.startSideFlip ? "flip" : "fixed", [
-          {v:"fixed", t:"Always right"}, {v:"flip", t:"Swap each cycle"}])}`;
+      h += setBlock("Which side goes first",
+        "Swapping each cycle keeps the fresh set from always going to the same limb.",
+        prefSeg("data-prefstart", p.startSideFlip ? "flip" : "fixed", [{v:"fixed", t:"Always right"}, {v:"flip", t:"Swap each cycle"}]));
     }
   }
-  h += `<div class="sub" style="margin:14px 0 8px">Warm-up sets. <b>Add them</b> builds a ramp before the first
-    compound of a session; <b>plan only</b> shows warm-ups exactly where a plan prescribes them; <b>off</b> leaves
-    them to you. Warm-ups are never counted as working volume either way.</div>
-    ${seg("data-prefwarm", p.warmups, [
-      {v:"auto", t:"Add them"}, {v:"planOnly", t:"Plan only"}, {v:"manual", t:"Off"}])}
-    <div class="sub" style="margin:14px 0 8px">Rating each set for ${term("rpe","RPE")}. Turning it off drops
-    the column from every set row; the session grade still runs, with a little less to go on.</div>
-    ${seg("data-prefrpe", p.rpe === false ? "off" : "on", [
-      {v:"on", t:"Track RPE"}, {v:"off", t:"Weight and reps only"}])}
-    <div class="sub" style="margin:14px 0 8px">When a load is ready to go up. <b>Automatic</b> writes the
-    increase into your plan the moment a session earns it; <b>ask</b> offers it with a one-tap Apply.</div>
-    ${seg("data-prefprog", p.progression, [
-      {v:"auto", t:"Automatic"}, {v:"ask", t:"Ask me"}, {v:"hold", t:"I'll manage"}])}
-    <div class="sub" style="margin:14px 0 8px">Deload weeks. Element 26 can watch for one being due after
-    ${DELOAD_EVERY_WEEKS} weeks and offer it, or stay quiet if your programme schedules its own.</div>
-    ${seg("data-prefdeload", p.deloads, [
-      {v:"auto", t:"Suggest one"}, {v:"planOnly", t:"Leave it to me"}])}
-    <div class="sub" style="margin:14px 0 8px">The daily check-in \u2014 sleep, energy and bodyweight. It's what your
-    recovery number is adjusted by, and it takes about five seconds.</div>
-    ${seg("data-ciprompt", p.checkinPrompt === false ? "off" : "on", [
-      {v:"on", t:"Ask me each day"}, {v:"off", t:"Don't ask"}])}
-    <div class="btn-row" style="margin:10px 0 0"><button class="btn ghost small" id="ciOpen">Open today's check-in</button></div>
-    <div class="sub" style="margin:14px 0 8px">Sleep time. Open the app after this and it offers to start the
-    clock; open it in the morning and it asks if you've just woken up, so your sleep is measured rather
-    than remembered.</div>
-    ${seg("data-slprompt", p.sleepPrompt === false ? "off" : "on", [
-      {v:"on", t:"Track my sleep"}, {v:"off", t:"Don't"}])}
-    ${p.sleepPrompt === false ? "" : `<div class="field" style="margin:10px 0 0"><label>My night starts at</label>
-      <input type="time" id="prefSleepT" class="timein" value="${esc(p.sleepTime || "22:30")}" aria-label="Sleep time"></div>`}
-    <div class="sub" style="margin:14px 0 8px">Barbell loads. Whether the number you log includes the bar, and
-    what your bar weighs — Element 26 takes its warm-up percentages off that, and it doesn't assume ${barDefault()} ${unitWord()}.</div>
-    ${seg("data-prefbar", p.barMode, [
-      {v:"total", t:"Bar + plates"}, {v:"plates", t:"Plates only"}])}
-    ${p.barMode === "total" ? `<div class="field" style="margin:10px 0 0"><label>Your bar weighs</label>
-      <input id="prefBarW" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
-        placeholder="e.g. 45 — leave blank if you'd rather not say"></div>` : ""}
-    ${gymGearHTML()}
-  </div>`;
+  h += setBlock("Deload weeks",
+    "A lighter week every " + DELOAD_EVERY_WEEKS + " weeks. Element 26 can watch for one being due, or stay quiet if your programme schedules its own.",
+    prefSeg("data-prefdeload", p.deloads, [{v:"auto", t:"Suggest one"}, {v:"planOnly", t:"Leave it to me"}]));
+  h += setBlock("Coaching tips",
+    "The short notes explaining how a movement is run. They stop on their own once you've logged a session.",
+    `<div class="seg">
+      <button class="${S.coachOff?"":"on"}" data-coach="on">Show them</button>
+      <button class="${S.coachOff?"on":""}" data-coach="off">Off</button>
+    </div>`);
+  h += setBlock("When a set falls well short",
+    "One tap to say what happened \u2014 and the answer changes the advice you get rather than just marking you down.",
+    `<div class="seg">
+      <button class="${S.askWhy!==false?"on":""}" data-askwhy="on">Ask me</button>
+      <button class="${S.askWhy===false?"on":""}" data-askwhy="off">Don't ask</button>
+    </div>`);
   return h;
 }
 /* WHAT YOUR GYM ACTUALLY STOCKS.
@@ -12961,45 +12985,26 @@ function gymGearHTML(){
   const kg = inKg();
   const pl = p.plateStep, db = p.dbStep;
   const base = kg ? 10 : 30;
-  return `<div class="gear-head" style="margin:18px 0 8px">
-      <h3 style="font-size:15px">What your gym has</h3></div>
-    <div class="sub" style="margin:0 0 12px">When Element 26 says to add weight, it should say a number you
-      can actually load. That depends on the smallest plates and dumbbells where you train \u2014 nothing else
-      here changes, and your plan and history are untouched either way.</div>
-    <div class="sub" style="margin:0 0 6px"><b>Barbell plates.</b> The smallest plate you can put on
-      <b>each side</b> of a bar.</div>
-    ${stepChoiceHTML("plateStep", "data-plstep", PLATE_STEPS[kg ? "kg" : "lb"], pl)}
-    <div class="sub gear-says">${
-      pl > 0 ? "One on each side, so the bar goes up <b>" + fmtLoad(pl * 2) + "</b> at a time. Element 26 will never suggest half of that."
-             : "Not set \u2014 so the app suggests exact numbers, which can mean a jump your gym can\u2019t make."}</div>
-    <div class="sub" style="margin:14px 0 6px"><b>Dumbbells.</b> The gap from one dumbbell to the next
-      one up on the rack.</div>
-    ${stepChoiceHTML("dbStep", "data-dbstep", DB_STEPS[kg ? "kg" : "lb"], db)}
-    <div class="sub gear-says">${
-      db > 0 ? "So " + stepNum(base) + ", " + stepNum(base + db) + ", " + fmtLoad(base + db*2) + " \u2014 and nothing in between."
-             : "Not set \u2014 so the app can suggest a dumbbell that isn\u2019t on your rack."}</div>
-    <div class="sub" style="margin:16px 0 6px"><b>Smith machine.</b> What the empty carriage weighs. They
-      run from about ${kg ? "3" : "6"} to ${smithBarDefault()}+ ${unitWord()} depending on the machine, and every warm-up
-      and every comparison comes off it.</div>
-    <div class="field" style="margin:0"><label>Empty carriage</label>
-      <input id="prefSmithW" inputmode="decimal" value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
+  return setBlock("The smallest plate you can put on each side of a bar",
+      "So Element 26 only ever suggests a weight you can actually load.",
+      stepChoiceHTML("plateStep", "data-plstep", PLATE_STEPS[kg ? "kg" : "lb"], pl) +
+      `<div class="set-says">${pl > 0
+        ? "One on each side, so the bar goes up <b>" + fmtLoad(pl * 2) + "</b> at a time. It will never suggest half of that."
+        : "Not set, so it suggests exact numbers \u2014 which can mean a jump your gym can\u2019t make."}</div>`)
+    + setBlock("The gap from one dumbbell to the next on the rack", "",
+      stepChoiceHTML("dbStep", "data-dbstep", DB_STEPS[kg ? "kg" : "lb"], db) +
+      `<div class="set-says">${db > 0
+        ? "So " + stepNum(base) + ", " + stepNum(base + db) + ", " + fmtLoad(base + db*2) + " \u2014 and nothing in between."
+        : "Not set, so it can suggest a dumbbell that isn\u2019t on your rack."}</div>`)
+    + setBlock("What the empty Smith machine carriage weighs",
+      "They run from about " + (kg ? "3" : "6") + " to " + smithBarDefault() + "+ " + unitWord() +
+      " depending on the machine, and every warm-up and comparison comes off it.",
+      `<div class="field" style="margin:0"><input id="prefSmithW" inputmode="decimal"
+        value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
         placeholder="${smithBarDefault()} if you leave it blank"></div>
-    <div class="sub" style="margin:10px 0 0;color:var(--faint);font-size:12.5px">The bar and the carriage are
-      also editable mid-session \u2014 tap the name of the lift you\u2019re on \u2014 for the day you train somewhere
-      the equipment is a different weight.</div>`;
+      <div class="set-says">The bar and the carriage are also editable mid-session \u2014 tap the name of the
+        lift you\u2019re on \u2014 for the day you train somewhere the kit is a different weight.</div>`);
 }
-
-/* =====================================================================
-   CHANGING YOUR SCHEDULE AFTER SETUP
-
-   Switching split is a bigger action than it looks: the rotation pointer, the cycle's
-   checkmarks and the programme's day keys are all indexed by the split you were on.
-   Doing it in one place, with one confirmation, is what keeps those three in step.
-
-   YOUR HISTORY IS NEVER TOUCHED. Sessions keep the day key they were logged under, and
-   applySplit() gives any key that is no longer in your split a name and a colour so
-   History and the reports keep reading correctly. Changing how you train from here on
-   is not a statement about what you did last month.                                  */
 function openSplitEditor(){
   const cur = S.customSplit ? "custom" : (S.splitId || DEFAULT_SPLIT);
   let h = `<h3>Your training schedule</h3>
@@ -16663,60 +16668,6 @@ function viewProgram(){
 
 /* ---------- SYNC / SETTINGS ---------- */
 let SHOW_KEY = false;      // the recovery key is hidden until asked for, every time
-function viewAdvanced(){
-  let h = `<div class="hdr"><h1>Advanced</h1>${hdrRight()}</div>
-  <button class="btn ghost small" id="advBack" style="margin-bottom:14px">‹ Back to Setup</button>
-  <div class="sub" style="margin:0 2px 14px;font-size:12.5px;color:var(--faint)">
-    These were set when you imported your plan. They change how every session is shown and graded — never what
-    your plan says. If something is not behaving how you expect, it is in here.</div>
-  <div class="card">
-    <h3>What you're training for</h3>
-    <div class="sub" style="margin:4px 0 10px">Currently on <b>${esc(splitName())}</b>. Your goal decides what the
-      Body tab measures you against — the volume landmarks per muscle, and how a session is graded. It never
-      rewrites your plan: the sets and reps in the Program tab are whatever your imported programme says.</div>
-    <div class="ob-opts" style="gap:7px;margin-bottom:12px">${Object.keys(GOALS).map(k=>
-      `<button class="ob-opt${(S.setup&&S.setup.goal)===k?" on":""}" data-setgoal="${k}" style="padding:11px 13px">
-        <span class="ob-opt-t">${esc(GOALS[k].name)}</span>
-        <span class="ob-opt-s">${esc(GOALS[k].sub)}</span>
-        <span class="ob-tick">✓</span>
-      </button>`).join("")}</div>
-    <div class="btn-row" style="margin-top:0">
-      <button class="btn ghost small" id="setupSplit">Schedule</button>
-    </div>
-  </div>
-  <div class="card">
-    <h3>How it works</h3>
-    <div class="sub" style="margin:4px 0 10px">Six cards on the vocabulary this app uses — cycles, rep
-      ranges, RPE, notes, grades. About a minute, and it changes nothing.</div>
-    <div class="btn-row" style="margin-top:0">
-      <button class="btn ghost small" id="replayTour">${S.tourDone ? "Show the tour again" : "Take the tour"}</button>
-    </div>
-  </div>
-  <div class="card">
-    <h3>Preferences</h3>
-    <div class="sub" style="margin:4px 0 10px">Workout view, <b>Regular</b> shows the whole session at once; <b>Focus</b> shows one exercise at a time with bigger controls, built for the gym floor.</div>
-    <div class="seg">
-      <button class="${S.viewMode!=="focus"?"on":""}" data-vmode="regular">Regular</button>
-      <button class="${S.viewMode==="focus"?"on":""}" data-vmode="focus">Focus</button>
-    </div>
-    <div class="sub" style="margin:14px 0 8px">Coaching tips — the ones that explain how a
-      movement is run, like which side to open a one-limb exercise with. They stop on their own
-      once you've logged a session, and the L/R marks on each set stay either way.</div>
-    <div class="seg">
-      <button class="${S.coachOff?"":"on"}" data-coach="on">Show them</button>
-      <button class="${S.coachOff?"on":""}" data-coach="off">Off</button>
-    </div>
-    <div class="sub" style="margin:14px 0 8px">When a set lands far under its target, ask what went wrong. One tap, at most once per exercise, and the answer changes the advice you get rather than just marking you down.</div>
-    <div class="seg">
-      <button class="${S.askWhy!==false?"on":""}" data-askwhy="on">Ask me</button>
-      <button class="${S.askWhy===false?"on":""}" data-askwhy="off">Don't ask</button>
-    </div>
-  </div>
-
-  ${gymsCardHTML()}
-  ${trainPrefsCardHTML()}`;
-  return h;
-}
 /* THE SWITCH, THE LIST, AND THE WAY OUT. A feature that reads your location has to be
    turnable off and its data deletable from somewhere obvious, in the same screen that
    says what it is doing — anything less is a setting you have to trust rather than one
@@ -16725,9 +16676,7 @@ function gymsCardHTML(){
   const gs = gymList();
   if(!geoReady() && !gs.length) return "";
   const on = S.geo === "on";
-  let h = `<div class="card">
-    <h3>Where you train</h3>
-    <div class="sub" style="margin:4px 0 10px">Element 26 takes one location reading when you tap Start, and
+  let h = `<div class="sub" style="margin:0 0 10px">Element 26 takes one location reading when you tap Start, and
       compares it only with the gyms below. Same place as usual and nothing happens \u2014 it just puts back the
       bar and carriage weights you set there. Somewhere else and it asks, so that session is filed under the
       right gym instead of being compared to a bar that weighs something different.
@@ -16765,14 +16714,15 @@ function gymsCardHTML(){
       S.geo === "off" ? "Off. No location is read, and sessions are filed with no gym on them."
                       : "Not set up yet \u2014 it will offer when you start your next workout."}</div>`;
   }
-  return h + `</div>`;
+  return h;
 }
-/* Setup has two screens. The first is the handful of things a person legitimately comes
-   here for; the second is everything that decides how the app BEHAVES — side handling,
-   warm-ups, RPE, progression, the bar convention, the goal. Those were all settled during
-   the import, they are easy to knock out of shape by accident, and the cost of doing so
-   is a plan that quietly stops matching the document it came from. They live behind a
-   button, on their own page, with a way back. */
+/* Setup used to be two screens: a front page, and an "Advanced settings" page behind a
+   button holding everything that decided how the app BEHAVES. The split was a mistake.
+   Nobody could predict which of the two a given setting was on, "advanced" is a word that
+   tells you to stay out rather than what is inside, and the front page had turned into an
+   overflow shelf anyway — sleep targets, deloads, volume windows. One screen, eight named
+   groups, nothing hidden behind a warning. ADV_OPEN survives only because the tour
+   remembers whether it had to close a screen to run; nothing sets it any more. */
 let ADV_OPEN = false;
 let SYNC_BUSY = false;
 /* The two questions about the building rather than about you \u2014 what plates and what
@@ -16785,16 +16735,13 @@ function syncCardHTML(){
   const st = syncStatus();
   if(st.k === "off") return "";
   const dot = st.k === "cloud" ? (st.at ? "ok" : "wait") : "bad";
-  let h = `<div class="card">
-    <h3>Cloud sync</h3>
-    <div class="sync-state">
+  let h = `<div class="sync-state">
       <span class="sync-dot sync-${dot}"></span>
       <span><b>${st.k === "cloud" ? "Backed up to your account" : "This device only"}</b>
         <span class="sub" style="display:block;margin:2px 0 0">${esc(st.msg)}</span></span>
     </div>`;
   if(SYNC_BUSY){
-    h += `<div class="ai-busy" style="margin-top:12px"><span class="ai-spin"></span><span>Talking to the account service\u2026</span></div>`;
-    return h + `</div>`;
+    return h + `<div class="ai-busy" style="margin-top:12px"><span class="ai-spin"></span><span>Talking to the account service\u2026</span></div>`;
   }
   if(st.k === "cloud"){
     h += `<div class="btn-row" style="margin-top:12px">
@@ -16818,18 +16765,50 @@ function syncCardHTML(){
       <button class="btn ghost small" id="syncSignInBtn" style="flex:1">I already have a cloud ID</button>
     </div>`;
   }
-  return h + `</div>`;
+  return h;
+}
+/* =====================================================================
+   SETTINGS
+
+   ONE PAGE, EIGHT NAMED GROUPS, ALL SHUT. What was here before was every setting in the
+   app laid end to end down a page you scrolled through hoping to recognise something,
+   split across two screens on a rule nobody could infer, with the most alarming card
+   (Danger zone) permanently visible at the bottom.
+
+   The list is the whole design. Each row says what it is in the words somebody would use
+   out loud — "In the gym", "Reminders", "Your data" — and one grey line underneath says
+   what is inside, so the right group can be picked without opening any of them. Open one
+   and you get its settings and nothing else. That turns a screen you had to read into a
+   screen you can look at.
+
+   The groups are not categories of feature, they are categories of INTENT: what were you
+   trying to change when you came here. "How sessions work" holds RPE and warm-ups and
+   progression not because they are related in the code but because they are the answer
+   to "the workout screen isn't behaving how I want".
+
+   State lives in BODY_OPEN, the same store the Body tab's sections use, so the toggle,
+   the +/− and the styling are the ones the app already has. */
+function setSec(key, title, sub, body){
+  const open = !!BODY_OPEN[key];
+  return `<div class="card sec">
+    <button class="sec-h" data-sec="${key}">
+      <span class="sec-t">${title}</span>
+      <span class="sec-x">${open ? "−" : "+"}</span>
+    </button>
+    <div class="sec-sub">${sub}</div>
+    ${open ? `<div class="sec-b">${body()}</div>` : ""}
+  </div>`;
 }
 function viewSync(){
-  if(ADV_OPEN) return viewAdvanced();
-  const c = S.sync;
-  let h = `<div class="hdr"><h1>Setup</h1>${hdrRight(`<span class="date num">v${APP_VERSION}</span>`)}</div>
-  <div class="card">
-    <h3>Account</h3>
-    <div class="sub" style="margin:4px 0 4px">Signed in as <b>${esc(accountName())}</b>. ${
+  let h = `<div class="hdr"><h1>Settings</h1>${hdrRight(`<span class="date num">v${APP_VERSION}</span>`)}</div>
+  <div class="sub" style="margin:-8px 2px 14px;font-size:12.5px;color:var(--faint)">Tap a heading to open it.
+    Nothing in here changes your plan or your history — it changes what Element 26 does with them.</div>`;
+
+  h += setSec("setAcct", "Your account", "Your ID and recovery key, cloud backup, signing out.", ()=>{
+    let a = `<div class="sub" style="margin:0 0 4px">Signed in as <b>${esc(accountName())}</b>. ${
       ACCT && ACCT.cloud
-        ? "Your plans, workouts and settings are stored against this account."
-        : "Your plans, workouts and settings are stored on this device under this account."}</div>
+        ? "Your plan, workouts and settings are stored against this account."
+        : "Your plan, workouts and settings are stored on this device under this account."}</div>
     <div class="acct-row">
       <span><span class="sub" style="display:block;margin:0 0 2px">Your Element 26 User ID</span>
         <span class="acct-val">${esc(ACCT ? ACCT.id : "")}</span></span>
@@ -16839,137 +16818,156 @@ function viewSync(){
       <span style="flex:1;min-width:0"><span class="sub" style="display:block;margin:0 0 2px">Recovery key</span>
         ${SHOW_KEY
           ? `<span class="acct-secret">${esc(ACCT ? ACCT.key : "")}</span>`
-          : `<span class="sub" style="margin:0">Hidden. This is the half that proves the account is yours — it is not your ID, and it is not for sharing.</span>`}</span>
+          : `<span class="sub" style="margin:0">Hidden. This is the half that proves the account is yours — not your ID, and not for sharing.</span>`}</span>
       <button class="btn ghost small" id="acctShowKey" style="width:auto;padding:9px 16px">${SHOW_KEY?"Hide":"Show"}</button>
       ${SHOW_KEY ? `<button class="btn ghost small" id="acctCopyKey" style="width:auto;padding:9px 16px">Copy key</button>` : ""}
     </div>
-    <div class="sub" style="margin:10px 0 10px;font-size:12.5px;color:var(--faint)">
+    <div class="sub" style="margin:10px 0 12px;font-size:12.5px;color:var(--faint)">
       Keep both private. You need the ID <b>and</b> the key to sign in somewhere else — the ID on its own
-      identifies the account and never opens it.</div>
-    <div class="btn-row" style="margin-top:0">
+      identifies the account and never opens it.</div>`;
+    const sync = syncCardHTML();
+    if(sync) a += `<div class="set-name" style="margin-top:4px">Cloud backup</div>${sync}`;
+    a += `<div class="btn-row" style="margin-top:14px">
       <button class="btn ghost small" id="acctSignOut">Sign out</button>
       <button class="btn ghost small danger" id="acctDelete">Delete account</button>
-    </div>
-  </div>
-  ${syncCardHTML()}
-  ${pushCardHTML()}
-  <div class="card">
-    <h3>Something wrong?</h3>
-    <div class="sub" style="margin:4px 0 10px">If the app does something it shouldn't, say so. It goes
-      to whoever maintains Element 26, with the version you're on and any errors the app caught —
-      never your workouts.</div>
-    <div class="btn-row" style="margin-top:0">
-      <button class="btn ghost small" id="repOpen">Report a problem</button>
-    </div>
-  </div>
-  <div class="card">
-    <h3>How the app behaves</h3>
-    <div class="sub" style="margin:4px 0 10px">Side handling, warm-ups, RPE, progression, your bar and what
-      you're training for. All set during your import, all changeable — but they change how every session is
-      shown and graded, so they live on their own page rather than under your thumb.</div>
-    <div class="btn-row" style="margin-top:0">
-      <button class="btn ghost small" id="advOpen">Advanced settings</button>
-    </div>
-  </div>
-  <div class="card">
-    <h3>Sleep</h3>
-    <div class="sub" style="margin:4px 0 10px">Late sessions cost sleep, and sleep is what recovery is made of.
-      This is entirely optional and off until you fill something in.</div>
+    </div>`;
+    return a;
+  });
 
-    <div class="field"><label>Hours of sleep you want</label>
-      <input class="timein" inputmode="decimal" id="sleepTargetIn" value="${esc(S.sleepTarget||"")}"
-        placeholder="e.g. 8 &mdash; leave blank to turn this off"></div>
+  h += setSec("setRemind", "Reminders", "Notifications for training, bedtime and the morning.",
+    ()=> pushCardHTML() || `<div class="sub">Reminders aren't available in this build.</div>`);
 
-    <div class="field" style="margin-bottom:6px"><label>Wake time, only if you have a fixed one</label>
-      <div style="display:flex;gap:8px;align-items:stretch">
-        <input type="time" class="timein" id="wakeIn" aria-label="Wake time" value="${esc(S.wakeTime||"")}" style="flex:1">
-        ${S.wakeTime ? `<button class="btn ghost small" id="wakeClear" style="flex-shrink:0;width:auto;padding:0 14px">Clear</button>` : ""}
-      </div></div>
-    <div class="sub" style="margin:0 0 10px;font-size:12.5px;color:var(--faint)">
-      ${hasWakeTime()
-        ? `Set to <b>${esc(S.wakeTime)}</b>. The app works backwards from it: wake &minus; ${r1(sleepNeedH())} h is
-           bedtime, bedtime &minus; ${WIND_DOWN_H} h is the latest you should still be training. If a session will not
-           fit, it says so before your first set and names what to cut, from the end.`
-        : `No fixed wake time, which is fine &mdash; most people don't have one. With just the hours above,
-           Today shows what time you'd actually be getting up if you train now, and leaves the decision to you.
-           Add a wake time only if you want the app to start cutting exercises to protect it.`}
+  h += setSec("setGym", "In the gym", "Pounds or kilos, your bar, and the plates and dumbbells you have.",
+    ()=> prefsGymHTML());
+
+  h += setSec("setWhere", "Where you train", "The gyms Element 26 knows about, and whether it checks.",
+    ()=> gymsCardHTML() || `<div class="sub">This device can't read a location, so there's nothing to set here.</div>`);
+
+  h += setSec("setSess", "How sessions work", "Warm-ups, RPE, one-limb work, and when weights go up.",
+    ()=> prefsSessionHTML());
+
+  h += setSec("setDay", "Sleep and check-ins", "The daily check-in, sleep tracking, and how much sleep you want.",
+    ()=> settingsDayHTML());
+
+  h += setSec("setPlan", "Your plan", "What you're training for, your schedule, deloads, volume targets.",
+    ()=> settingsPlanHTML());
+
+  h += setSec("setData", "Your data", "Export a backup, bring one in, or erase what's on this device.",
+    ()=> settingsDataHTML());
+
+  h += setSec("setHelp", "Help", "The tour, and telling somebody when the app misbehaves.", ()=>
+    `<div class="set-block">
+      <div class="set-name">The tour</div>
+      <div class="set-help">Twelve steps on how the app works — cycles, rep ranges, RPE, logging a set,
+        grades. About a minute, and it changes nothing.</div>
+      <div class="btn-row" style="margin-top:0"><button class="btn ghost small" id="replayTour" style="flex:1">${
+        S.tourDone ? "Show the tour again" : "Take the tour"}</button></div>
     </div>
+    <div class="set-block">
+      <div class="set-name">Something's wrong</div>
+      <div class="set-help">If the app does something it shouldn't, say so. It goes to whoever maintains
+        Element 26 with the version you're on and any errors the app caught — never your workouts.</div>
+      <div class="btn-row" style="margin-top:0"><button class="btn ghost small" id="repOpen" style="flex:1">Report a problem</button></div>
+    </div>
+    <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">Element 26 v${APP_VERSION}</div>`);
 
-    ${S.sleepTarget ? `<div class="sub num" style="font-size:12.5px">${
+  return h;
+}
+/* The day-shaped settings: the two things the app asks you about outside a workout, and
+   the sleep numbers those questions feed. */
+function settingsDayHTML(){
+  const p = trainPrefs();
+  let h = setBlock("The daily check-in",
+    "Sleep, energy and bodyweight. Five seconds, and it's what your recovery number is adjusted by.",
+    prefSeg("data-ciprompt", p.checkinPrompt === false ? "off" : "on",
+      [{v:"on", t:"Ask me each day"}, {v:"off", t:"Don't ask"}]) +
+    `<div class="btn-row" style="margin:10px 0 0"><button class="btn ghost small" id="ciOpen" style="flex:1">Open today's check-in</button></div>`);
+  h += setBlock("Sleep tracking",
+    "Open the app after your night starts and it offers to start the clock; open it in the morning and it asks if you've just woken up. So your sleep is measured rather than remembered.",
+    prefSeg("data-slprompt", p.sleepPrompt === false ? "off" : "on",
+      [{v:"on", t:"Track my sleep"}, {v:"off", t:"Don't"}]) +
+    (p.sleepPrompt === false ? "" : `<div class="field" style="margin:10px 0 0"><label>My night starts at</label>
+      <input type="time" id="prefSleepT" class="timein" value="${esc(p.sleepTime || "22:30")}" aria-label="Sleep time"></div>`));
+  h += setBlock("Hours of sleep you want",
+    "Optional, and off until you fill it in. Late sessions cost sleep, and sleep is what recovery is made of.",
+    `<div class="field" style="margin:0"><input class="timein" inputmode="decimal" id="sleepTargetIn"
+      value="${esc(S.sleepTarget||"")}" placeholder="e.g. 8 &mdash; blank turns this off"></div>`);
+  h += setBlock("Wake time, only if you have a fixed one",
+    hasWakeTime()
+      ? `Set to <b>${esc(S.wakeTime)}</b>. The app works backwards from it: wake &minus; ${r1(sleepNeedH())} h is
+         bedtime, and bedtime &minus; ${WIND_DOWN_H} h is the latest you should still be training. If a session
+         won't fit it says so before your first set, and names what to cut.`
+      : `Most people don't have one, and that's fine. With just the hours above, Today shows what time you'd
+         be getting up if you train now and leaves the decision to you. Add a wake time only if you want the
+         app to start cutting exercises to protect it.`,
+    `<div style="display:flex;gap:8px;align-items:stretch">
+      <input type="time" class="timein" id="wakeIn" aria-label="Wake time" value="${esc(S.wakeTime||"")}" style="flex:1">
+      ${S.wakeTime ? `<button class="btn ghost small" id="wakeClear" style="flex-shrink:0;width:auto;padding:0 14px">Clear</button>` : ""}
+    </div>` +
+    (S.sleepTarget ? `<div class="set-says num">${
       hasWakeTime()
         ? "Asleep by "+esc(fmtTimeOfDay(sleepWindow(todaysWorkoutId()).bedtime))+
           " &middot; out of the gym by "+esc(fmtTimeOfDay(sleepWindow(todaysWorkoutId()).latestEnd))
         : "Train now and you'd be up around "+esc(fmtTimeOfDay(sleepProjection(todaysWorkoutId()).wake))
-      }</div>` : ""}
-  </div>
-
-  <div class="card">
-    <h3>Deload</h3>
-    <div class="sub" style="margin:4px 0 10px">Same loads, every exercise cut to ${DELOAD_SETS} sets, everything
-      stopped 3-4 reps short of failure. Due every ${DELOAD_EVERY_WEEKS} weeks, or earlier if two or more warning
-      signs show up in your check-ins and RPE data.</div>
-    ${deloadActive()
-      ? `<button class="btn ghost small" id="endDeloadBtn2">End the deload</button>`
-      : `<button class="btn ghost small" id="startDeloadBtn2">Start a deload week</button>`}
-    <div class="sub num" style="margin-top:8px;font-size:12px;color:var(--faint)">
-      ${Math.floor(weeksSince(blockStartAt()))} weeks into this block${
-        deloadSignals().length ? " \u00b7 signs showing: " + esc(deloadSignals().join("; ")) : ""}</div>
-  </div>`;
-
-  /* Moved here from the Body tab. It is configuration and reference material, not
-     something you read while looking at the map, and it was the last long block
-     standing between the map and the answers underneath it. */
-  h += `<div class="card sec">
-    <button class="sec-h" data-sec="targets">
-      <span class="sec-t">How your targets are set</span>
-      <span class="sec-x">${BODY_OPEN.targets?"−":"+"}</span>
-    </button>
-    <div class="sec-sub">Where your volume numbers come from, what moves them, and which window they're counted over.</div>
-    ${BODY_OPEN.targets?`<div class="sec-b">
-      <div class="rev-head" style="margin-top:0">What a "week" means here</div>
-      <div class="bm-explain" style="margin-bottom:9px">Volume research is published per week, but a rotation is a number of workouts plus its rest days, and getting through it rarely takes exactly seven. Counted on a rolling week, a muscle lands inside the window twice in some weeks and once in others, so its numbers move for reasons that have nothing to do with your training.</div>
-      <div class="seg" style="margin-bottom:6px">
-        <button class="${(S.volWindow||"cycle")==="cycle"?"on":""}" data-volwin="cycle">This cycle</button>
-        <button class="${(S.volWindow||"cycle")==="week"?"on":""}" data-volwin="week">Rolling 7 days</button>
-      </div>
-      <div class="sub" style="margin-bottom:10px">${(S.volWindow||"cycle")==="cycle"
-        ? "Counting everything since this cycle began, with your MEV / MAV / MRV thresholds scaled to the cycle's real length. Recommended: it matches how you actually train."
-        : "Counting the last 7 calendar days against unscaled weekly thresholds. Simpler, but noisier on a rotation that doesn't line up with the calendar week."}</div>
-      ${S.sessions.length ? landmarkExplainerHTML(bodyAnalysis()) : `<div class="sub">Log a few sessions and this fills in with your own numbers.</div>`}
-    </div>`:""}
-  </div>`;
-
-  /* NEITHER REST DAYS NOR WORKOUT ORDER APPEAR HERE ANY MORE, deliberately. Both cards
-     asked the same kind of question — where the rests fall, and whether the days have to
-     be done in the order they are written. The plan already answers both, and the
-     importer reads both out of the document. A switch whose only job is to restate what
-     the app has already worked out is a way for the two to end up disagreeing, and the
-     person who has to reconcile them is the one who came here to lift.
-
-     `restMode` and `dayOrder` both still exist and are both still honoured. An import
-     sets restMode to "floating" when a document says the rest days are the lifter's to
-     place, and dayOrder to "any" when it says the days may be done in any order. They
-     are simply no longer switches on this screen. */
-  h += `  <div class="card">
-    <h3>Backup &amp; transfer</h3>
-    <div class="sub" style="margin:4px 0 10px">One file with your whole log in it: every workout,
-      your plan, your split and your settings. It's also how you move an older copy of Element 26
-      into this one — export there, import here, and it merges into what's already on this account.
-      No credentials are ever written into the file.</div>
-    <div class="btn-row">
+      }</div>` : ""));
+  return h;
+}
+/* The plan-shaped settings: what the programme is being run FOR, and the numbers the
+   Body tab judges it against. The plan itself is edited on the Program tab — this is
+   only the frame around it. */
+function settingsPlanHTML(){
+  let h = setBlock("What you're training for",
+    "This decides what the Body tab measures you against and how a session is graded. It never rewrites your plan: the sets and reps stay whatever your programme says.",
+    `<div class="ob-opts" style="gap:7px">${Object.keys(GOALS).map(k=>
+      `<button class="ob-opt${(S.setup&&S.setup.goal)===k?" on":""}" data-setgoal="${k}" style="padding:11px 13px">
+        <span class="ob-opt-t">${esc(GOALS[k].name)}</span>
+        <span class="ob-opt-s">${esc(GOALS[k].sub)}</span>
+        <span class="ob-tick">✓</span>
+      </button>`).join("")}</div>`);
+  h += setBlock("Your schedule",
+    "Currently on <b>" + esc(splitName()) + "</b> — " + esc(ROTATION.map(w=>dayName(w)).join(" → ")) + ".",
+    `<div class="btn-row" style="margin-top:0"><button class="btn ghost small" id="setupSplit" style="flex:1">Change the schedule</button></div>`);
+  h += setBlock("Deload",
+    "Same loads, every exercise cut to " + DELOAD_SETS + " sets, everything stopped 3-4 reps short of failure. Due every " +
+    DELOAD_EVERY_WEEKS + " weeks, or earlier if your check-ins and RPE start showing warning signs.",
+    `<div class="btn-row" style="margin-top:0">${deloadActive()
+      ? `<button class="btn ghost small" id="endDeloadBtn2" style="flex:1">End the deload</button>`
+      : `<button class="btn ghost small" id="startDeloadBtn2" style="flex:1">Start a deload week</button>`}</div>
+    <div class="set-says num">${Math.floor(weeksSince(blockStartAt()))} weeks into this block${
+      deloadSignals().length ? " · signs showing: " + esc(deloadSignals().join("; ")) : ""}</div>`);
+  /* Moved here from the Body tab, and then off the old Setup page. It is reference
+     material about how the numbers on another screen are produced, which is exactly what
+     a settings page is for and exactly what a map is not. */
+  h += setBlock("What a “week” means in your volume targets",
+    "Volume research is published per week, but a rotation is a number of workouts plus its rest days, and getting through it rarely takes exactly seven days.",
+    `<div class="seg">
+      <button class="${(S.volWindow||"cycle")==="cycle"?"on":""}" data-volwin="cycle">This cycle</button>
+      <button class="${(S.volWindow||"cycle")==="week"?"on":""}" data-volwin="week">Rolling 7 days</button>
+    </div>
+    <div class="set-says">${(S.volWindow||"cycle")==="cycle"
+      ? "Counting everything since this cycle began, with your MEV / MAV / MRV thresholds scaled to the cycle's real length. Recommended: it matches how you actually train."
+      : "Counting the last 7 calendar days against unscaled weekly thresholds. Simpler, but noisier on a rotation that doesn't line up with the calendar week."}</div>
+    ${S.sessions.length ? `<div style="margin-top:10px">${landmarkExplainerHTML(bodyAnalysis())}</div>`
+                        : `<div class="set-says">Log a few sessions and this fills in with your own numbers.</div>`}`);
+  return h;
+}
+/* Everything that moves your log around or destroys it, in one place, so the two
+   destructive buttons in the app are never a scroll away from something routine. */
+function settingsDataHTML(){
+  return setBlock("Backup and transfer",
+    "One file with your whole log in it: every workout, your plan, your split and your settings. It's also how you move an older copy of Element 26 into this one — export there, import here, and it merges into what's already on this account. No passwords or keys are ever written into the file.",
+    `<div class="btn-row" style="margin-top:0">
       <button class="btn ghost small" id="exportBtn">Export my data</button>
       <button class="btn ghost small" id="importBtn">Import a file</button>
     </div>
-    <input type="file" id="importFile" accept=".json,application/json" style="display:none">
-  </div>
-  <div class="card">
-    <h3 class="danger">Danger zone</h3>
-    <div class="sub" style="margin:4px 0 0">This erases your plan and your logged workouts on this device.
-      Your account itself stays — sign in again and you start empty. To remove the account as well, use
-      <b>Delete account</b> above.</div>
-    <button class="btn ghost small danger" id="resetBtn" style="margin-top:10px">Erase my training data</button>
-  </div>`;
-  return h;
+    <input type="file" id="importFile" accept=".json,application/json" style="display:none">`)
+  + `<div class="set-block set-danger">
+      <div class="set-name danger">Erase my training data</div>
+      <div class="set-help">This deletes your plan and every workout you have logged on this device. Your
+        account itself stays — sign in again and you start empty. To remove the account as well, use
+        <b>Delete account</b> under Your account.</div>
+      <div class="btn-row" style="margin-top:0"><button class="btn ghost small danger" id="resetBtn" style="flex:1">Erase my training data</button></div>
+    </div>`;
 }
 
 /* ================= EVENTS ================= */
@@ -17888,10 +17886,6 @@ function bind(){
   });
   const sus = $("#setupSplit");
   if(sus) sus.onclick = openSplitEditor;
-  const advO = $("#advOpen");
-  if(advO) advO.onclick = ()=>{ ADV_OPEN = true; render(); window.scrollTo(0,0); };
-  const advB = $("#advBack");
-  if(advB) advB.onclick = ()=>{ ADV_OPEN = false; render(); window.scrollTo(0,0); };
   /* The account card. The ID is copyable in one tap because the whole point of it is
      that people keep it somewhere; the key needs a deliberate reveal, because it is the
      credential and a screenshot of this screen should not hand it over. */
