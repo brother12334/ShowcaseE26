@@ -261,6 +261,7 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 /* Two ways out of a collapse, side by side, because the app genuinely does not know
    which one it was. Stacked rather than in a row: each carries a number you might change
    before committing to it, and three controls across a phone is none of them readable. */
+.pk-named{font-family:var(--disp);font-size:19px;letter-spacing:.02em;color:var(--text);margin:6px 0 0}
 .flag-pick{margin:10px 0 0;display:flex;flex-direction:column;gap:8px}
 .flag-opt{
   display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px;
@@ -3545,7 +3546,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "9.4";
+const APP_VERSION = "9.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10509,6 +10510,7 @@ function aiSystemPrompt(){
 "3. 'restDaysPerCycle' only when the document actually says how the week is laid out. Otherwise leave it null and set stated.schedule false.",
 "3b. 'restDaysFlexible' true ONLY where the document says in as many words that the rest days are the lifter's to place \u2014 'take rest days as needed', 'train 4 days a week, any days you like', 'schedule the off days to suit you'. A plan that simply never mentions rest days is NOT saying this: leave it false. Naming fixed days (\u2018Mon/Wed/Fri\u2019) or writing rest into the rotation is the opposite of flexible.",
 "3c. 'daysAnyOrder' true ONLY where the document says the SESSIONS themselves may be performed in any order \u2014 'do these in whatever order suits your week', 'the three workouts can be done on any days'. Listing sessions as Day 1, Day 2, Day 3, or as Push then Pull then Legs, is prescribing an order, not permitting any: leave it false. Silence is false.",
+"4b. 'planKind' IS THE ONE PLACE YOU MAY READ BETWEEN THE LINES, and it is fenced. Everything else in this schema is transcription; this is a classification, and the app needs it to know what somebody is actually running. Fill it in from the sessions themselves: a Push / Pull / Legs rotation is family 'ppl' whether or not those words appear, four sessions alternating upper and lower body is 'upper_lower', one session per muscle group is 'bro_split'. 'named' is different and much stricter: put a published programme's name there ONLY if the document names it — 5/3/1, StrongLifts 5x5, PHUL, PHAT, GZCLP, nSuns, Starting Strength, Candito, Sheiko — and leave it empty if the plan merely resembles one, because 'this looks like 5/3/1' is a guess and the app will show it to the person as a fact. Set 'stated' true only when the document says in words what kind of plan it is, false when you worked it out from the structure, and put what you worked it out FROM in 'evidence' — a heading, a sentence, or 'sessions named Push, Pull, Legs'. Where the shape genuinely does not resolve, 'unclear' is a real answer and a better one than a confident wrong label.",
 "4. 'weeks' is how many weeks the programme runs, if it says. 'goal' ONLY if the document says what it is for — a title like \"12-Week Hypertrophy Block\" or a line saying it is a strength or fat-loss programme counts; a plan that merely looks like one does not. Otherwise 'unstated'.",
 "",
 "EXERCISES",
@@ -10555,6 +10557,32 @@ const AI_PLAN_SCHEMA = {
     understood:      {type:"BOOLEAN", description:"false if the input is not a readable training plan"},
     problem:         {type:"STRING",  description:"why it could not be read, if understood is false"},
     planName:        {type:"STRING",  description:"a short name for the whole programme, eg. Push Pull Legs"},
+    /* WHAT KIND OF PLAN THIS IS. The one place in this schema where reading between the
+       lines is allowed, and it is fenced: `stated` says whether the document told you or
+       you worked it out, and `evidence` has to quote what you worked it out from. */
+    planKind:{
+      type:"OBJECT",
+      properties:{
+        family:      {type:"STRING", enum:["ppl","upper_lower","full_body","bro_split","arnold",
+                                           "push_pull","hybrid","specialisation","conditioning",
+                                           "other","unclear"],
+                      description:"the shape of the split, from the sessions themselves"},
+        named:       {type:"STRING",
+                      description:"a published programme this IS — 5/3/1, StrongLifts 5x5, PHUL, GZCLP, nSuns, Starting Strength — ONLY if the document names it. Empty otherwise."},
+        style:       {type:"STRING", enum:["hypertrophy","strength","powerbuilding","endurance",
+                                           "general","unclear"]},
+        progression: {type:"STRING", enum:["linear","double","percentage","rpe","block",
+                                           "undulating","none","unclear"],
+                      description:"how load is meant to move over time"},
+        level:       {type:"STRING", enum:["beginner","intermediate","advanced","unclear"]},
+        daysPerWeek: {type:"INTEGER", nullable:true},
+        stated:      {type:"BOOLEAN",
+                      description:"true only if the document says what kind of plan it is in words"},
+        evidence:    {type:"STRING",
+                      description:"the words, headings or structure this reading came from, one short phrase"}
+      },
+      propertyOrdering:["family","named","style","progression","level","daysPerWeek","stated","evidence"]
+    },
     goal:            {type:"STRING",  enum:["muscle","strength","lean","health","unstated"],
                       description:"only if the document states what the programme is for; 'unstated' otherwise"},
     weeks:           {type:"INTEGER", nullable:true},
@@ -11093,8 +11121,30 @@ function aiPlanToProgram(doc, answers){
     .map(w=> aiTrim(w, 160)).filter(Boolean).slice(0, 8);
 
   const arr = (v, fn)=> (Array.isArray(v) ? v : []).map(fn).filter(Boolean).slice(0, 12);
+  /* WHAT KIND OF PLAN THIS IS, shaped rather than trusted. Everything the model can put
+     here is an enum or a short string, so anything outside the list becomes "unclear"
+     rather than reaching the screen — a label the app made up is worse than no label. */
+  const KIND_FAMILY = ["ppl","upper_lower","full_body","bro_split","arnold","push_pull",
+                       "hybrid","specialisation","conditioning","other","unclear"];
+  const KIND_STYLE  = ["hypertrophy","strength","powerbuilding","endurance","general","unclear"];
+  const KIND_PROG   = ["linear","double","percentage","rpe","block","undulating","none","unclear"];
+  const KIND_LEVEL  = ["beginner","intermediate","advanced","unclear"];
+  const oneOf = (v, list)=> list.indexOf(String(v||"")) > -1 ? String(v) : "unclear";
+  const pk = doc.planKind && typeof doc.planKind === "object" ? doc.planKind : {};
+  const dpw = Math.round(Number(pk.daysPerWeek));
+  const kind = {
+    family:      oneOf(pk.family, KIND_FAMILY),
+    named:       aiTrim(pk.named, 40) || "",
+    style:       oneOf(pk.style, KIND_STYLE),
+    progression: oneOf(pk.progression, KIND_PROG),
+    level:       oneOf(pk.level, KIND_LEVEL),
+    daysPerWeek: isFinite(dpw) && dpw > 0 && dpw <= 14 ? dpw : ((doc.days||[]).length || null),
+    stated:      !!pk.stated,
+    evidence:    aiTrim(pk.evidence, 120) || ""
+  };
   const meta = {
     name: split.name,
+    kind,
     at: Date.now(),
     weeks: (isFinite(Number(doc.weeks)) && Number(doc.weeks) > 0) ? Math.min(104, Math.round(Number(doc.weeks))) : null,
     unit,
@@ -12532,6 +12582,53 @@ function countPlanRests(){
   let n = 0;
   DAYS.forEach(d=> (S.program[d]||[]).forEach(e=>{ if(e && Array.isArray(e.rest)) n++; }));
   return n;
+}
+/* The enums, in English. Kept beside importMetaCardHTML() rather than next to the schema
+   because these are what a PERSON reads; the schema's job was to constrain the model. */
+const KIND_WORDS = {
+  family: {ppl:"Push / Pull / Legs", upper_lower:"Upper / Lower", full_body:"Full body",
+           bro_split:"One muscle group a day", arnold:"Arnold split", push_pull:"Push / Pull",
+           hybrid:"Hybrid split", specialisation:"Specialisation block",
+           conditioning:"Conditioning", other:"Custom split", unclear:""},
+  style:  {hypertrophy:"built for size", strength:"built for strength",
+           powerbuilding:"powerbuilding", endurance:"endurance", general:"general fitness", unclear:""},
+  progression:{linear:"linear progression", double:"double progression",
+               percentage:"percentage based", rpe:"RPE based", block:"block periodised",
+               undulating:"undulating", none:"no progression rule", unclear:""},
+  level:  {beginner:"beginner", intermediate:"intermediate", advanced:"advanced", unclear:""}
+};
+/* One sentence describing the programme, or "" when the document did not give enough to
+   say anything true. Never guesses: every part of it is a field that came back set. */
+function planKindLine(k){
+  if(!k) return "";
+  const bits = [];
+  const fam = KIND_WORDS.family[k.family] || "";
+  if(fam) bits.push(fam);
+  if(k.daysPerWeek) bits.push(k.daysPerWeek + " days a week");
+  const st = KIND_WORDS.style[k.style] || "";
+  if(st) bits.push(st);
+  const pr = KIND_WORDS.progression[k.progression] || "";
+  if(pr) bits.push(pr);
+  return bits.join(" \u00b7 ");
+}
+function planKindCardHTML(){
+  const m = S.importMeta, k = m && m.kind;
+  const line = planKindLine(k);
+  if(!line && !(k && k.named)) return "";
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>What you're running</h3>
+    </div>
+    ${k.named ? `<div class="pk-named">${esc(k.named)}</div>` : ""}
+    ${line ? `<div class="sub" style="margin:5px 0 0">${esc(line)}</div>` : ""}
+    ${(KIND_WORDS.level[k.level] || "") ? `<div class="sub" style="margin:3px 0 0">Written for ${
+      /^[aeiou]/i.test(KIND_WORDS.level[k.level]) ? "an" : "a"} ${esc(KIND_WORDS.level[k.level])} lifter.</div>` : ""}
+    <div class="sub" style="margin:8px 0 0;color:var(--faint);font-size:12.5px">${
+      k.stated
+        ? "Your document says so."
+        : "Read from the plan itself" + (k.evidence ? " \u2014 " + esc(k.evidence) : "") + ", not stated outright."
+    }</div>
+  </div>`;
 }
 function importMetaCardHTML(){
   const m = S.importMeta;
@@ -16252,6 +16349,7 @@ function viewProgram(){
   <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
+  h += planKindCardHTML();
   h += importMetaCardHTML();
   DAYS.forEach(wid=>{
     const m = dayMeta(wid);
