@@ -1443,15 +1443,27 @@ body.onboarding #app{padding:0}
    away when you meant to read it. */
 body.modal-live{overflow:hidden}
 body.tour-live{overflow:hidden}
-.tr-sh{
-  position:fixed;background:rgba(8,8,10,.76);pointer-events:auto;cursor:pointer;
-  transition:top .28s var(--ease),left .28s var(--ease),width .28s var(--ease),height .28s var(--ease);
-}
-.tr-ring{
-  position:fixed;border-radius:12px;pointer-events:none;
-  border:2px solid var(--acc);
-  box-shadow:0 0 0 3px rgba(201,138,75,.22), 0 0 26px rgba(201,138,75,.30);
-  transition:top .28s var(--ease),left .28s var(--ease),width .28s var(--ease),height .28s var(--ease);
+/* THE SPOTLIGHT IS ONE ELEMENT NOW, NOT FIVE.
+
+   It used to be four opaque rectangles arranged around the target plus a ring drawn on
+   top. That works, and it looks like what it is: a hole cut with scissors. Four hard
+   straight edges, square corners on a screen where nothing else is square, and five
+   boxes sliding independently between steps.
+
+   This is the same hole made by a single box-shadow with a spread big enough to cover
+   any screen and a BLUR, so the darkness fades in over twenty-odd pixels instead of
+   starting. The element's own corner radius is copied onto it, so the light hugs the
+   shape of the thing it is pointing at — round on a card, round on a button, a pill on
+   the rest timer — and one element moving is one movement to follow rather than five. */
+.tr-catch{position:fixed;inset:0;pointer-events:auto;cursor:pointer}
+.tr-hole{
+  position:fixed;border-radius:14px;pointer-events:none;
+  box-shadow:
+    0 0 26px 100vmax rgba(8,8,10,.80),
+    0 0 0 1.5px rgba(201,138,75,.50),
+    0 0 30px 6px rgba(201,138,75,.18);
+  transition:top .34s var(--ease),left .34s var(--ease),width .34s var(--ease),
+             height .34s var(--ease),border-radius .34s var(--ease);
 }
 .tr-tip{
   position:fixed;width:min(324px,calc(100vw - 20px));pointer-events:auto;
@@ -1487,7 +1499,7 @@ body.tour-live{overflow:hidden}
 .tr-next{border-color:var(--acc)!important;background:var(--acc)!important;color:var(--bg)!important;font-weight:600}
 .tr-skip{border:0!important;background:none!important;color:var(--faint)!important;padding-left:0!important}
 @media (prefers-reduced-motion:reduce){
-  .tr-sh,.tr-ring,.tr-tip{transition:none}
+  .tr-hole,.tr-tip{transition:none}
 }
 
 .acct-check{
@@ -3569,7 +3581,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "10.0";
+const APP_VERSION = "10.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9958,9 +9970,8 @@ function tourLayer(){
     el = document.createElement("div");
     el.id = "tourLayer";
     el.innerHTML =
-      '<div class="tr-sh tr-t"></div><div class="tr-sh tr-b"></div>' +
-      '<div class="tr-sh tr-l"></div><div class="tr-sh tr-r"></div>' +
-      '<div class="tr-ring"></div>' +
+      '<div class="tr-catch"></div>' +
+      '<div class="tr-hole"></div>' +
       '<div class="tr-tip"><div class="tr-arrow"></div><div class="tr-body">' +
         '<div class="tr-dots"></div>' +
         '<div class="tr-title"></div><div class="tr-text"></div>' +
@@ -9974,8 +9985,8 @@ function tourLayer(){
     el.querySelector(".tr-next").onclick = ()=> tourGo(TOUR ? TOUR.i + 1 : 0);
     el.querySelector(".tr-back").onclick = ()=> tourGo(TOUR ? TOUR.i - 1 : 0);
     el.querySelector(".tr-skip").onclick = ()=> endTour(true);
-    // tapping the dimmed area moves on, which is what everyone tries first
-    el.querySelectorAll(".tr-sh").forEach(sh=> sh.onclick = ()=> tourGo(TOUR ? TOUR.i + 1 : 0));
+    // tapping anywhere off the card moves on, which is what everyone tries first
+    el.querySelector(".tr-catch").onclick = ()=> tourGo(TOUR ? TOUR.i + 1 : 0);
     window.addEventListener("resize", tourReposition, {passive:true});
     window.addEventListener("orientationchange", tourReposition, {passive:true});
     window.addEventListener("scroll", tourReposition, {passive:true});
@@ -9983,6 +9994,7 @@ function tourLayer(){
   return el;
 }
 function tourTeardown(){
+  tourFollowStop();
   tourDemoClear();
   const el = document.getElementById("tourLayer");
   if(el) el.remove();
@@ -10142,12 +10154,47 @@ function tourGo(i, dir){
   requestAnimationFrame(()=> requestAnimationFrame(()=>{
     if(!TOUR) return;
     TOUR.el = target;
+    TOUR.box = null;
     tourPaint();
+    tourFollowStop();
+    tourFollow();
   }));
 }
 function tourReposition(){
   if(!TOUR || !TOUR.el || !TOUR.el.isConnected) return;
   tourPaint(true);
+}
+/* THE HIGHLIGHT FOLLOWS THE THING, EVERY FRAME.
+
+   Measuring once after two animation frames was not enough, and the way it failed was
+   the whole complaint: the ring sat eight or twenty pixels below what it was pointing
+   at, cutting the top off a card. The cause is that the page is still MOVING when the
+   measurement is taken — the rest pill slides up over half a second on its way in, cards
+   settle, a font swaps and a line rewraps — so a rectangle read on frame two is a
+   rectangle from the past.
+
+   No amount of waiting fixes that in general, because there is no frame after which a
+   live page is guaranteed to be still. So this reads the target every frame while the
+   tour is open and repaints only when the numbers actually changed: one
+   getBoundingClientRect per frame against one comparison, and the light stays welded to
+   the thing it is describing no matter what moves it. */
+let TOUR_RAF = null;
+function tourFollow(){
+  TOUR_RAF = null;
+  if(!TOUR) return;
+  if(TOUR.el && TOUR.el.isConnected){
+    const r = TOUR.el.getBoundingClientRect();
+    const b = TOUR.box;
+    if(!b || Math.abs(b[0]-r.top) > .5 || Math.abs(b[1]-r.left) > .5
+          || Math.abs(b[2]-r.width) > .5 || Math.abs(b[3]-r.height) > .5){
+      tourPaint(true);
+    }
+  }
+  TOUR_RAF = requestAnimationFrame(tourFollow);
+}
+function tourFollowStop(){
+  if(TOUR_RAF) cancelAnimationFrame(TOUR_RAF);
+  TOUR_RAF = null;
 }
 function tourPaint(quiet){
   const layer = document.getElementById("tourLayer");
@@ -10155,16 +10202,24 @@ function tourPaint(quiet){
   const step = TOUR_STEPS[TOUR.i];
   const r = TOUR.el.getBoundingClientRect();
   const W = window.innerWidth, H = window.innerHeight;
-  const pad = 6;
+  const pad = 9;
   const x = Math.max(0, r.left - pad), y = Math.max(0, r.top - pad);
   const w = Math.min(W - x, r.width + pad*2), h = Math.min(H - y, r.height + pad*2);
 
-  const set = (sel, css)=> Object.assign(layer.querySelector(sel).style, css);
-  set(".tr-t", {top:"0px", left:"0px", width:W+"px", height:y+"px"});
-  set(".tr-b", {top:(y+h)+"px", left:"0px", width:W+"px", height:Math.max(0,H-y-h)+"px"});
-  set(".tr-l", {top:y+"px", left:"0px", width:x+"px", height:h+"px"});
-  set(".tr-r", {top:y+"px", left:(x+w)+"px", width:Math.max(0,W-x-w)+"px", height:h+"px"});
-  set(".tr-ring", {top:y+"px", left:x+"px", width:w+"px", height:h+"px"});
+  /* The hole takes the target's OWN corner radius plus the padding, so the light is the
+     shape of the thing rather than a rectangle laid over it. A square-cornered target
+     still gets a little rounding — nothing else on this screen has a sharp corner. */
+  let rad = 12;
+  try{
+    const cs = getComputedStyle(TOUR.el);
+    const got = parseFloat(cs.borderTopLeftRadius);
+    if(isFinite(got)) rad = got;
+  }catch(e){}
+  rad = Math.max(10, Math.min(999, rad + pad));
+  if(r.height <= 56 && r.width <= 72) rad = Math.min(rad, Math.round(h / 2));   // a chip or a button
+  Object.assign(layer.querySelector(".tr-hole").style,
+    {top:y+"px", left:x+"px", width:w+"px", height:h+"px", borderRadius:rad+"px"});
+  TOUR.box = [r.top, r.left, r.width, r.height];
 
   const tip = layer.querySelector(".tr-tip");
   if(!quiet){
