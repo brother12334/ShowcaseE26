@@ -225,6 +225,11 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   font-family:var(--disp);font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
 }
 .seg button.on{background:var(--text);color:var(--bg)}
+/* Five choices where the segmented control was built for two: the numbers are short,
+   so they get less air and no letter-spacing rather than a scrollbar. */
+.step-seg button{padding:13px 4px;font-size:12px;letter-spacing:.02em}
+.gear-says{margin:7px 2px 0;font-size:12.5px;color:var(--faint)}
+.gear-head h3{font-family:var(--disp);text-transform:uppercase;letter-spacing:.04em}
 .focus-name{font-size:27px!important;line-height:1.1}
 .bar-wrap{display:flex;align-items:center;justify-content:center;margin:16px 0 6px;min-height:70px}
 .bar-end{height:8px;width:22px;background:#6d6d75;border-radius:4px;flex-shrink:0}
@@ -1492,6 +1497,13 @@ body.tour-live{overflow:hidden}
   display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;
   border-top:1px solid var(--line);padding:10px 0;
 }
+/* One line per place you train. Same shape as the account rows above it. */
+.gym-row{
+  display:flex;gap:10px;align-items:center;justify-content:space-between;
+  border-top:1px solid var(--line);padding:10px 0;
+}
+.gym-row:last-child{border-bottom:1px solid var(--line)}
+.gym-row b{font-size:14.5px}
 .acct-val{font:15px var(--mono);letter-spacing:.05em;color:var(--text);user-select:all;word-break:break-all}
 .acct-secret{font:12px var(--mono);color:var(--dim);word-break:break-all;user-select:all}
 
@@ -3550,7 +3562,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "9.8";
+const APP_VERSION = "9.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6011,6 +6023,11 @@ function migrate(){
   // Renames you've made yourself have to be live before ANY name comparison happens.
   if(!S.exAliases || typeof S.exAliases !== "object") S.exAliases = {};
   USER_ALIASES = S.exAliases;
+  /* Where you train. Both are absent for everybody who installed before this existed,
+     and absent means "never asked" — see checkGymAtStart(). */
+  if(!Array.isArray(S.gyms)) S.gyms = [];
+  S.gyms = S.gyms.filter(g=> g && g.id && Array.isArray(g.spots));
+  if(S.geo !== "on" && S.geo !== "off") S.geo = null;
   invalidateTableOrigin();
   // migrate() also runs after a sync pull, which can replace the whole program
   invalidateMultiDay();
@@ -12910,22 +12927,66 @@ function trainPrefsCardHTML(){
     ${p.barMode === "total" ? `<div class="field" style="margin:10px 0 0"><label>Your bar weighs</label>
       <input id="prefBarW" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
         placeholder="e.g. 45 — leave blank if you'd rather not say"></div>` : ""}
-    <div class="sub" style="margin:14px 0 8px">What you can actually load. The app rounds every weight it
-      suggests to something that exists in your gym, so leave these right and it stops proposing jumps you
-      can't make. Blank means it won't assume.</div>
-    <div class="field" style="margin:0 0 10px"><label>Smallest plate, one side</label>
-      <input id="prefPlateStep" inputmode="decimal" value="${esc(p.plateStep == null ? "" : p.plateStep)}"
-        placeholder="${inKg() ? "e.g. 1.25 — the bar then moves in 2.5" : "e.g. 2.5 — the bar then moves in 5"}"></div>
-    <div class="field" style="margin:0 0 0"><label>Smallest gap between dumbbells</label>
-      <input id="prefDbStep" inputmode="decimal" value="${esc(p.dbStep == null ? "" : p.dbStep)}"
-        placeholder="${inKg() ? "e.g. 2" : "e.g. 2.5 if you have 12.5s and 17.5s, 5 if not"}"></div>
-    <div class="field" style="margin:10px 0 0"><label>Smith machine carriage</label>
-      <input id="prefSmithW" inputmode="decimal" value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
-        placeholder="${smithBarDefault()} if you leave it blank — they vary from about 6 to 35"></div>
-    <div class="sub" style="margin:8px 0 0">Both are also reachable from the workout screen itself, for the day
-      you train somewhere the bar is a different weight.</div>
+    ${gymGearHTML()}
   </div>`;
   return h;
+}
+/* WHAT YOUR GYM ACTUALLY STOCKS.
+
+   This used to be two boxes labelled "Smallest plate, one side" and "Smallest gap
+   between dumbbells". Both are precise, and both are gibberish to anybody who has never
+   had to think about it — you end up guessing at what the app wants rather than saying
+   what your gym has. So: the question is asked in the terms you would use standing in
+   front of the rack, the answers are buttons with the numbers that actually exist, and
+   under each one a plain sentence says what that answer means for the weights you will
+   be told to lift. The typed box is still there for a gym that stocks something odd, it
+   is just no longer the only way in. */
+const PLATE_STEPS = {lb: [1.25, 2.5, 5, 10], kg: [0.5, 1.25, 2.5, 5]};
+const DB_STEPS    = {lb: [2.5, 5, 10],       kg: [1, 2, 2.5, 5]};
+let STEP_OTHER = {plateStep: false, dbStep: false};
+const stepNum = v=> String(Math.round(v * 100) / 100);
+function stepChoiceHTML(key, attr, opts, cur){
+  const inList = opts.some(v=> v === cur);
+  const other = STEP_OTHER[key] || (cur != null && !inList);
+  return `<div class="seg step-seg">${opts.map(v=>
+      `<button class="${cur === v ? "on" : ""}" ${attr}="${v}">${stepNum(v)}</button>`).join("")
+    }<button class="${other ? "on" : ""}" ${attr}="other">Other</button></div>` +
+    (other ? `<div class="field" style="margin:8px 0 0"><label>${
+      key === "plateStep" ? "Smallest plate, one side" : "Gap between dumbbells"}</label>
+      <input id="pref${key === "plateStep" ? "PlateStep" : "DbStep"}" inputmode="decimal"
+        value="${esc(cur == null ? "" : cur)}" placeholder="in ${unitWord()}"></div>` : "");
+}
+function gymGearHTML(){
+  const p = trainPrefs();
+  const kg = inKg();
+  const pl = p.plateStep, db = p.dbStep;
+  const base = kg ? 10 : 30;
+  return `<div class="gear-head" style="margin:18px 0 8px">
+      <h3 style="font-size:15px">What your gym has</h3></div>
+    <div class="sub" style="margin:0 0 12px">When Element 26 says to add weight, it should say a number you
+      can actually load. That depends on the smallest plates and dumbbells where you train \u2014 nothing else
+      here changes, and your plan and history are untouched either way.</div>
+    <div class="sub" style="margin:0 0 6px"><b>Barbell plates.</b> The smallest plate you can put on
+      <b>each side</b> of a bar.</div>
+    ${stepChoiceHTML("plateStep", "data-plstep", PLATE_STEPS[kg ? "kg" : "lb"], pl)}
+    <div class="sub gear-says">${
+      pl > 0 ? "One on each side, so the bar goes up <b>" + fmtLoad(pl * 2) + "</b> at a time. Element 26 will never suggest half of that."
+             : "Not set \u2014 so the app suggests exact numbers, which can mean a jump your gym can\u2019t make."}</div>
+    <div class="sub" style="margin:14px 0 6px"><b>Dumbbells.</b> The gap from one dumbbell to the next
+      one up on the rack.</div>
+    ${stepChoiceHTML("dbStep", "data-dbstep", DB_STEPS[kg ? "kg" : "lb"], db)}
+    <div class="sub gear-says">${
+      db > 0 ? "So " + stepNum(base) + ", " + stepNum(base + db) + ", " + fmtLoad(base + db*2) + " \u2014 and nothing in between."
+             : "Not set \u2014 so the app can suggest a dumbbell that isn\u2019t on your rack."}</div>
+    <div class="sub" style="margin:16px 0 6px"><b>Smith machine.</b> What the empty carriage weighs. They
+      run from about ${kg ? "3" : "6"} to ${smithBarDefault()}+ ${unitWord()} depending on the machine, and every warm-up
+      and every comparison comes off it.</div>
+    <div class="field" style="margin:0"><label>Empty carriage</label>
+      <input id="prefSmithW" inputmode="decimal" value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
+        placeholder="${smithBarDefault()} if you leave it blank"></div>
+    <div class="sub" style="margin:10px 0 0;color:var(--faint);font-size:12.5px">The bar and the carriage are
+      also editable mid-session \u2014 tap the name of the lift you\u2019re on \u2014 for the day you train somewhere
+      the equipment is a different weight.</div>`;
 }
 
 /* =====================================================================
@@ -14568,6 +14629,7 @@ function openBarModal(kind){
     const val = (raw === "" || !isFinite(v)) ? null
       : Math.max(smith ? 0 : 5, Math.min(120, Math.round(v * 10) / 10));
     if(smith) trainPrefs().smithWeight = val; else trainPrefs().barWeight = val;
+    rememberGymGear();
     hideModal(); save(); queueSync(); render();
     toast(smith ? "Smith carriage " + smithWeight() + " " + unitWord()
                 : (val == null ? "Bar weight cleared" : "Bar " + val + " " + unitWord()));
@@ -16481,6 +16543,7 @@ function viewHistory(){
         </span>
       </div>
       <div class="sub num" style="margin-top:2px">${s.entries.length} exercises · ${Math.round(vol).toLocaleString()} ${unitWord()} total${s.feel?' · '+feelIcon(s.feel)+' '+esc(FEEL_WORDS[s.feel-1]):''}${nPr?' · '+ICON.pr+' '+nPr+' PR'+(nPr>1?"s":""):''}</div>
+      ${s.gymName && gymList().length > 1 ? `<div class="sub" style="margin-top:3px;color:var(--faint)">at ${esc(s.gymName)}</div>` : ""}
       ${s.note?`<div class="sub" style="margin-top:4px;font-style:italic">"${esc(s.note)}"</div>`:""}
       <div class="detail">${((ssm)=> s.entries.map((e,i)=>
         `<div class="exline"><b>${ssm[i]?`<span class="ss-tag">${ssm[i].letter}${ssm[i].pos}</span> `:""}${esc(e.name)}</b>${
@@ -16650,8 +16713,59 @@ function viewAdvanced(){
     </div>
   </div>
 
+  ${gymsCardHTML()}
   ${trainPrefsCardHTML()}`;
   return h;
+}
+/* THE SWITCH, THE LIST, AND THE WAY OUT. A feature that reads your location has to be
+   turnable off and its data deletable from somewhere obvious, in the same screen that
+   says what it is doing — anything less is a setting you have to trust rather than one
+   you can check. */
+function gymsCardHTML(){
+  const gs = gymList();
+  if(!geoReady() && !gs.length) return "";
+  const on = S.geo === "on";
+  let h = `<div class="card">
+    <h3>Where you train</h3>
+    <div class="sub" style="margin:4px 0 10px">Element 26 takes one location reading when you tap Start, and
+      compares it only with the gyms below. Same place as usual and nothing happens \u2014 it just puts back the
+      bar and carriage weights you set there. Somewhere else and it asks, so that session is filed under the
+      right gym instead of being compared to a bar that weighs something different.
+      ${on ? "Nothing is sent anywhere; it lives in your log like everything else." : ""}</div>`;
+  if(gs.length){
+    h += `<div class="gym-list">` + gs.map(g=>{
+      const bits = [];
+      if(g.n) bits.push(g.n + " session" + (g.n === 1 ? "" : "s"));
+      if(g.bar != null) bits.push("bar " + fmtLoad(g.bar));
+      if(g.smith != null) bits.push("carriage " + fmtLoad(g.smith));
+      return `<div class="gym-row">
+        <div style="min-width:0">
+          <b>${esc(g.name)}</b>
+          <span class="sub" style="display:block;margin-top:2px">${bits.length ? esc(bits.join(" \u00b7 ")) : "not trained at yet"}</span>
+        </div>
+        <span class="icon-btns">
+          <button data-gymren="${esc(g.id)}" aria-label="Rename ${esc(g.name)}">\u270e</button>
+          <button data-gymdel="${esc(g.id)}" aria-label="Forget ${esc(g.name)}">\u2715</button>
+        </span>
+      </div>`;
+    }).join("") + `</div>`;
+  }
+  h += `<div class="btn-row" style="margin-top:12px">`;
+  if(on){
+    h += `<button class="btn ghost small" id="gymAddHere" style="flex:1">Add where I am now</button>`;
+  } else {
+    h += `<button class="btn ghost small" id="gymGeoOn" style="flex:1">${
+      S.geo === "off" ? "Turn it back on" : "Set this up"}</button>`;
+  }
+  h += `</div>`;
+  if(on){
+    h += `<div class="btn-row"><button class="btn ghost small" id="gymGeoOff" style="flex:1">Stop using my location</button></div>`;
+  } else {
+    h += `<div class="sub" style="margin:8px 0 0;color:var(--faint);font-size:12.5px">${
+      S.geo === "off" ? "Off. No location is read, and sessions are filed with no gym on them."
+                      : "Not set up yet \u2014 it will offer when you start your next workout."}</div>`;
+  }
+  return h + `</div>`;
 }
 /* Setup has two screens. The first is the handful of things a person legitimately comes
    here for; the second is everything that decides how the app BEHAVES — side handling,
@@ -16661,52 +16775,12 @@ function viewAdvanced(){
    button, on their own page, with a way back. */
 let ADV_OPEN = false;
 let SYNC_BUSY = false;
-/* THE TWO QUESTIONS AN EXISTING PLAN NEVER GOT ASKED.
-
-   plateStep and dbStep are asked during an import, which is no use to anybody who
-   imported before they existed — and they change every load the app suggests, so leaving
-   them unset quietly keeps proposing jumps that gym does not stock. They are not
-   something to re-import for: they are two facts about a building, and the person is
-   standing in it.
-
-   Shown until answered or waved off, and only where the plan actually contains something
-   they would change. A card rather than another sheet on opening: this is worth knowing,
-   it is not worth interrupting a workout for. */
-function gearAskDue(){
-  const p = trainPrefs();
-  if(p.plateStep != null || p.dbStep != null) return false;   // one answer is enough to stop asking
-  if(S.gearAsked) return false;
-  if(!S.setup) return false;
-  const names = [];
-  (DAYS || []).forEach(d=> (S.program[d] || []).forEach(e=>{ if(e && e.name) names.push(e.name); }));
-  return names.some(n=>{
-    const eq = equipmentOf(n);
-    return eq === "barbell" || eq === "smith" || eq === "dumbbell";
-  });
-}
-function gearAskCardHTML(){
-  if(!gearAskDue()) return "";
-  return `<div class="card">
-    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
-      <span class="dot" style="background:var(--acc)"></span><h3>What can you actually load?</h3>
-    </div>
-    <div class="sub" style="margin:4px 0 10px">Element 26 can now round every weight it suggests to
-      something that exists in your gym — no more "add 2.5 lb a hand" when the rack goes up in 5s.
-      It just needs to know what you've got. Your plan and your history are untouched either way.</div>
-    <div class="field" style="margin:0 0 10px"><label>Smallest plate, one side</label>
-      <input class="timein" inputmode="decimal" id="gearPlate"
-        placeholder="${inKg() ? "e.g. 1.25 — the bar then moves in 2.5" : "e.g. 2.5 — the bar then moves in 5"}"></div>
-    <div class="field" style="margin:0 0 12px"><label>Smallest gap between dumbbells</label>
-      <input class="timein" inputmode="decimal" id="gearDb"
-        placeholder="${inKg() ? "e.g. 2" : "e.g. 2.5 if you have 12.5s and 17.5s, 5 if not"}"></div>
-    <div class="btn-row" style="margin-top:0">
-      <button class="btn small" id="gearSave" style="flex:1">Save</button>
-    </div>
-    <div class="btn-row">
-      <button class="btn ghost small" id="gearSkip" style="flex:1">Not now</button>
-    </div>
-  </div>`;
-}
+/* The two questions about the building rather than about you \u2014 what plates and what
+   dumbbells it stocks \u2014 used to be a prompt card sitting on the front of Setup. It was
+   the first thing anybody saw there and the least urgent thing on the screen, written in
+   language ("smallest plate, one side") that made people guess at what was being asked.
+   It now lives once, in Advanced, next to every other fact about how you train, asked in
+   buttons instead of vocabulary. See gymGearHTML(). */
 function syncCardHTML(){
   const st = syncStatus();
   if(st.k === "off") return "";
@@ -16778,7 +16852,6 @@ function viewSync(){
     </div>
   </div>
   ${syncCardHTML()}
-  ${gearAskCardHTML()}
   ${pushCardHTML()}
   <div class="card">
     <h3>Something wrong?</h3>
@@ -17443,8 +17516,80 @@ function bind(){
                         : word + ": " + fmtLoad(now) + " " + unitWord());
     };
   };
+  document.querySelectorAll("#app [data-gymren]").forEach(b=> b.onclick = ()=>{
+    const g = gymById(b.dataset.gymren);
+    if(!g) return;
+    showModal(`<h3>Rename this gym</h3>
+      <div class="field" style="margin:10px 0 12px"><label>Called</label>
+        <input id="gymRenName" maxlength="40" value="${esc(g.name)}"></div>
+      <button class="btn" id="gymRenSave">Save</button>
+      <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
+    const inp = $("#modal").querySelector("#gymRenName");
+    inp.focus();
+    $("#modal").querySelector("#gymRenSave").onclick = ()=>{
+      const v = (inp.value || "").trim();
+      if(!v){ toast("Give it a name"); return; }
+      g.name = v;
+      /* Sessions carry the NAME as well as the id, so they read correctly in an export
+         and in a backup opened somewhere the gym list did not travel. Renaming has to
+         reach them or History keeps showing the old one. */
+      S.sessions.forEach(x=>{ if(x.gymId === g.id) x.gymName = v; });
+      if(S.active && S.active.gymId === g.id) S.active.gymName = v;
+      hideModal(); save(); queueSync(); render();
+      toast("Renamed");
+    };
+  });
+  document.querySelectorAll("#app [data-gymdel]").forEach(b=> b.onclick = async ()=>{
+    const g = gymById(b.dataset.gymdel);
+    if(!g) return;
+    const yes = await askConfirm({
+      title:"Forget " + g.name + "?",
+      body:"The place and the bar weights you set there are deleted. <b>Sessions already logged there keep the "
+         + "name on them</b> \u2014 nothing in your history is changed or removed.",
+      yes:"Forget it", no:"Keep it", danger:true});
+    if(!yes) return;
+    S.gyms = gymList().filter(x=> x.id !== g.id);
+    save(); queueSync(); render();
+    toast(g.name + " forgotten");
+  });
+  const gOff = $("#gymGeoOff");
+  if(gOff) gOff.onclick = ()=>{
+    S.geo = "off"; save(); queueSync(); render();
+    toast("Location off \u2014 your gyms are kept");
+  };
+  const gOn = $("#gymGeoOn");
+  if(gOn) gOn.onclick = async ()=>{
+    const pos = await gymPos();
+    if(!pos.ok){
+      toast(pos.denied ? "Your browser has location blocked for this app" : "Couldn't get a location just now");
+      return;
+    }
+    S.geo = "on";
+    const near = nearestGym(pos);
+    if(near && near.d <= GYM_SAME_M){ gymRemember(near.gym, pos); save(); queueSync(); render(); toast("On \u2014 you're at " + near.gym.name); return; }
+    save(); queueSync(); render();
+    gymNameSheet(pos);
+  };
+  const gAdd = $("#gymAddHere");
+  if(gAdd) gAdd.onclick = async ()=>{
+    const pos = await gymPos();
+    if(!pos.ok){ toast(pos.denied ? "Your browser has location blocked for this app" : "Couldn't get a location just now"); return; }
+    const near = nearestGym(pos);
+    if(near && near.d <= GYM_SAME_M){ toast("Already on the list as " + near.gym.name); return; }
+    gymNameSheet(pos);
+  };
   stepIn("prefPlateStep", "plateStep", "Smallest plate");
   stepIn("prefDbStep", "dbStep", "Dumbbell gap");
+  const stepChip = (attr, key, word)=> document.querySelectorAll("#app [" + attr + "]").forEach(b=> b.onclick = ()=>{
+    const raw = b.getAttribute(attr);
+    if(raw === "other"){ STEP_OTHER[key] = !STEP_OTHER[key]; render(); return; }
+    STEP_OTHER[key] = false;
+    trainPrefs()[key] = parseFloat(raw);
+    save(); queueSync(); render();
+    toast(word + ": " + fmtLoad(trainPrefs()[key]) + " " + unitWord());
+  });
+  stepChip("data-plstep", "plateStep", "Smallest plate");
+  stepChip("data-dbstep", "dbStep", "Dumbbell gap");
   const smW = $("#prefSmithW");
   if(smW) smW.onchange = ()=>{
     const v = parseFloat(smW.value);
@@ -17652,26 +17797,6 @@ function bind(){
       toast("Training data erased");
     }
   };
-  const gs = $("#gearSave");
-  if(gs) gs.onclick = ()=>{
-    const num = id=>{
-      const el = $("#" + id);
-      const v = el ? parseFloat(el.value) : NaN;
-      return isFinite(v) && v > 0 ? Math.min(25, Math.round(v*100)/100) : null;
-    };
-    const pl = num("gearPlate"), db = num("gearDb");
-    if(pl == null && db == null){ toast("Fill in at least one, or tap Not now"); return; }
-    if(pl != null) trainPrefs().plateStep = pl;
-    if(db != null) trainPrefs().dbStep = db;
-    S.gearAsked = true;
-    save(); queueSync(); render();
-    toast("Weights the app can suggest are now yours");
-  };
-  const gk = $("#gearSkip");
-  if(gk) gk.onclick = ()=>{
-    S.gearAsked = true; save(); queueSync(); render();
-    toast("Fine \u2014 they're under Advanced settings whenever you want them");
-  };
   const repBtn = $("#repOpen");
   if(repBtn) repBtn.onclick = ()=> openReportSheet();
   const pon = $("#pushOnBtn");
@@ -17858,6 +17983,299 @@ function bind(){
 }
 
 /* ---------- workout flow ---------- */
+/* =====================================================================
+   WHERE YOU TRAINED
+
+   The app already knows a session can be done under different equipment — the bar
+   weight and the Smith carriage are editable mid-session for exactly that reason. What
+   it could not do was NOTICE. You train somewhere else for a week, the carriage is ten
+   pounds heavier, and the log quietly records a regression that never happened; the only
+   defence was remembering to change two settings on the way in and change them back on
+   the way out.
+
+   So: the first session you log, the app offers to remember where you are. After that
+   every session start compares one reading against the gyms you already have. Same
+   place, nothing happens — no prompt, no card, and the bar and carriage you set for that
+   gym come back automatically. Somewhere else, it asks once, and the session is filed
+   under the answer.
+
+   WHAT IS STORED AND WHAT IS NOT. A coordinate per gym, rounded to four decimals
+   (about ten metres — enough to tell two gyms apart, not enough to point at a door),
+   plus whatever you named it. It is compared only against your own gyms, on your own
+   device. Nothing is sent anywhere: it lives in your account's data like the rest of
+   your log. There is no map, no tracking between sessions, and one reading is taken at
+   the moment you tap Start rather than any watching in the background.
+
+   IT IS OFF UNTIL YOU SAY YES, and one "No thanks" is permanent — see S.geo. A refused
+   browser permission counts as a no, because asking again every session for something
+   the operating system has already refused is nagging, not a feature. */
+const GYM_SAME_M = 400;        // same building, with room for the drift you get indoors
+function geoReady(){
+  return typeof navigator !== "undefined" && !!navigator.geolocation
+      && (location.protocol === "https:" || location.hostname === "localhost"
+          || location.hostname === "127.0.0.1");
+}
+function gymList(){
+  if(!Array.isArray(S.gyms)) S.gyms = [];
+  return S.gyms;
+}
+function gymById(id){ return gymList().find(g=> g && g.id === id) || null; }
+/* One reading, with a hard ceiling on how long it may take. getCurrentPosition can hang
+   indefinitely on a device that has been refused location at the OS level without ever
+   calling either callback, and a promise that never settles here would leave the start
+   of a workout waiting on a satellite. */
+function gymPos(ms){
+  const limit = ms || 9000;
+  return new Promise(resolve=>{
+    if(!geoReady()) return resolve({ok:false});
+    let done = false;
+    const fin = v=>{ if(!done){ done = true; resolve(v); } };
+    try{
+      navigator.geolocation.getCurrentPosition(
+        pos=> fin({ok:true, lat: pos.coords.latitude, lon: pos.coords.longitude,
+                   acc: pos.coords.accuracy || null}),
+        err=> fin({ok:false, denied: !!err && err.code === 1}),
+        /* NO CACHED FIX. A two-minute-old position is a perfectly good answer to "where
+           am I" and the wrong answer to "which gym is this" — the drive from one to the
+           other is exactly the window a cache would paper over, and mislabelling the
+           session is worse than one extra fix. Low accuracy: a building, not a door. */
+        {timeout: limit, maximumAge: 0, enableHighAccuracy: false});
+    }catch(e){ fin({ok:false}); }
+    setTimeout(()=> fin({ok:false}), limit + 1500);
+  });
+}
+function metresApart(a, b){
+  const R = 6371000, rad = d=> d * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat/2)*Math.sin(dLat/2)
+          + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon/2)*Math.sin(dLon/2);
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+/* A gym is a NAME and a set of points, not a single dot. "No, same gym as usual" adds
+   the reading that raised the question, so the same false alarm cannot happen twice —
+   which is what makes a big car park, or a phone that fixes off a different mast each
+   week, stop being a recurring prompt. */
+function gymDistance(g, pos){
+  const spots = Array.isArray(g && g.spots) ? g.spots : [];
+  let best = null;
+  spots.forEach(sp=>{
+    if(!sp || typeof sp.lat !== "number") return;
+    const d = metresApart(pos, sp);
+    if(best == null || d < best) best = d;
+  });
+  return best;
+}
+function nearestGym(pos){
+  let best = null;
+  gymList().forEach(g=>{
+    const d = gymDistance(g, pos);
+    if(d == null) return;
+    if(!best || d < best.d) best = {gym: g, d};
+  });
+  return best;
+}
+const gymSpot = pos=> ({lat: Math.round(pos.lat*1e4)/1e4, lon: Math.round(pos.lon*1e4)/1e4});
+function addGym(name, pos){
+  /* THE EQUIPMENT GOES ON THE GYM THE MOMENT THE GYM EXISTS. Recording it only when
+     somebody edits it left the first gym with nothing on file, so coming home from a
+     week away restored nothing and the away gym's carriage stayed set — the original
+     complaint, in reverse. Whatever is configured as you name a place is what that place
+     has until you say otherwise, null (\u201cnot set\u201d) included. */
+  const p = trainPrefs();
+  const g = {id: uid(), name: (name || "").trim() || "My gym",
+             spots: [gymSpot(pos)], at: Date.now(), n: 0,
+             bar: p.barWeight == null ? null : p.barWeight,
+             smith: p.smithWeight == null ? null : p.smithWeight};
+  gymList().push(g);
+  return g;
+}
+function gymRemember(g, pos){
+  if(!g || !pos) return;
+  if(!Array.isArray(g.spots)) g.spots = [];
+  if(gymDistance(g, pos) == null || gymDistance(g, pos) > 60) g.spots.push(gymSpot(pos));
+  if(g.spots.length > 8) g.spots = g.spots.slice(-8);
+}
+function setSessionGym(g){
+  if(!S.active || !g) return;
+  S.active.gymId = g.id;
+  S.active.gymName = g.name;
+  g.n = (g.n || 0) + 1;
+  g.lastAt = Date.now();
+  save();
+}
+/* The bar and the carriage, as they were the last time you were in THIS building. Set
+   from the workout screen while a gym session is open, applied on the way back in. This
+   is the whole point of knowing where you are: the number that was wrong is the number
+   every warm-up and every comparison is computed from. */
+function rememberGymGear(){
+  const g = S.active && S.active.gymId ? gymById(S.active.gymId) : null;
+  if(!g) return;
+  const p = trainPrefs();
+  g.bar = p.barWeight == null ? null : p.barWeight;
+  g.smith = p.smithWeight == null ? null : p.smithWeight;
+}
+function applyGymGear(g){
+  if(!g) return "";
+  const p = trainPrefs(), said = [];
+  /* `undefined` is "never recorded" and null is "deliberately not set" \u2014 the second one
+     has to be applied too, or coming home from a gym with a heavier carriage leaves the
+     heavier carriage in place. */
+  if(g.bar !== undefined && g.bar !== p.barWeight){
+    p.barWeight = g.bar;
+    said.push(g.bar == null ? "no bar weight set" : "bar " + fmtLoad(g.bar));
+  }
+  if(g.smith !== undefined && g.smith !== p.smithWeight){
+    p.smithWeight = g.smith;
+    said.push(g.smith == null ? "carriage back to standard" : "carriage " + fmtLoad(g.smith));
+  }
+  if(said.length){ save(); queueSync(); render(); }
+  return said.join(" \u00b7 ");
+}
+function fmtDist(m){
+  if(!isFinite(m)) return "";
+  if(m < 950) return Math.round(m / 50) * 50 + " m";
+  return (Math.round(m / 100) / 10) + " km";
+}
+// Does this session have anything in it whose weight depends on the building?
+function sessionHasBar(){
+  return !!(S.active && (S.active.entries || []).some(en=> en && barKindFor(en.name)));
+}
+// Naming a place you are standing in, from Settings rather than from a workout.
+function gymNameSheet(pos){
+  showModal(`<h3>What's this gym called?</h3>
+    <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Just a label, so sessions
+      logged here say where they were.</div>
+    <div class="field" style="margin:0 0 12px"><label>Called</label>
+      <input id="gymNewName" placeholder="e.g. home gym" maxlength="40"></div>
+    <button class="btn" id="gymNewSave">Save it</button>
+    <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
+  const inp = $("#modal").querySelector("#gymNewName");
+  inp.focus();
+  $("#modal").querySelector("#gymNewSave").onclick = ()=>{
+    const g = addGym(inp.value, pos);
+    if(S.active && !S.active.gymId) setSessionGym(g);
+    hideModal(); save(); queueSync(); render();
+    toast(g.name + " added");
+  };
+}
+/* Asked once, on the first workout, and only ever from the tap that started it. */
+function askGymOptIn(){
+  showModal(`<h3>Remember which gym this is?</h3>
+    <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Element 26 can note where
+      you are when you start a session. Then when you train somewhere else \u2014 travelling, a second gym,
+      a hotel rack \u2014 it notices, asks, and files that session under the right place instead of comparing
+      it to your usual bar.</div>
+    <div class="sub" style="margin:0 0 12px;text-transform:none;letter-spacing:0;color:var(--faint)">
+      One reading when you tap Start, nothing in between. It is kept in your own log, compared only against
+      your own gyms, and never sent anywhere. You can turn it off and delete your gyms in Advanced settings.</div>
+    <div class="field" style="margin:0 0 12px"><label>Call this gym</label>
+      <input id="gymName" placeholder="e.g. home gym, Planet Fitness" maxlength="40"></div>
+    <button class="btn" id="gymYes">Remember this gym</button>
+    <button class="btn ghost small" id="gymNo" style="margin-top:8px">No thanks</button>`);
+  const m = $("#modal");
+  m.querySelector("#gymNo").onclick = ()=>{
+    S.geo = "off"; save(); queueSync(); hideModal();
+    toast("Fine \u2014 it won't ask again");
+  };
+  m.querySelector("#gymYes").onclick = async ()=>{
+    const name = (m.querySelector("#gymName").value || "").trim();
+    hideModal();
+    const pos = await gymPos();
+    if(!pos.ok){
+      S.geo = pos.denied ? "off" : null;
+      save(); queueSync();
+      toast(pos.denied ? "Location is off for this app \u2014 nothing recorded"
+                       : "Couldn't get a location just now");
+      return;
+    }
+    S.geo = "on";
+    const g = addGym(name, pos);
+    setSessionGym(g);
+    save(); queueSync(); render();
+    toast("This session is at " + g.name);
+  };
+}
+/* The reading disagrees with every gym on file. Asked, never assumed: a phone that fixes
+   badly indoors is a bad reason to relabel a session, so the person decides and the app
+   remembers the answer either way. */
+function askDifferentGym(pos, near){
+  const home = near && near.gym;
+  const away = home ? fmtDist(near.d) : "";
+  showModal(`<h3>Different gym today?</h3>
+    <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">${
+      home ? "You're about <b>" + esc(away) + "</b> from " + esc(home.name) + ", so this looks like somewhere else."
+           : "This doesn't match any gym you've logged."} Worth saying, because the bar and the Smith carriage
+      are rarely the same weight in two buildings \u2014 and a heavier carriage reads as a bad session when it
+      was only a different machine.</div>
+    <div class="field" style="margin:0 0 12px"><label>Call this gym</label>
+      <input id="gymName" placeholder="e.g. the hotel gym" maxlength="40"></div>
+    <button class="btn" id="gymNew">Yes, somewhere else</button>
+    ${home ? `<button class="btn ghost small" id="gymSame" style="margin-top:8px">No, this is ${esc(home.name)}</button>` : ""}
+    <button class="btn ghost small" id="closeModal" style="margin-top:8px">Not now</button>`);
+  const m = $("#modal");
+  const same = m.querySelector("#gymSame");
+  if(same) same.onclick = ()=>{
+    gymRemember(home, pos);
+    setSessionGym(home);
+    hideModal();
+    const said = applyGymGear(home);
+    toast(said ? home.name + " \u2014 " + said : "Filed under " + home.name);
+  };
+  m.querySelector("#gymNew").onclick = ()=>{
+    const name = (m.querySelector("#gymName").value || "").trim();
+    const g = addGym(name, pos);
+    setSessionGym(g);
+    hideModal(); save(); queueSync(); render();
+    if(sessionHasBar()) askGymGear(g);
+    else toast("This session is at " + g.name);
+  };
+}
+/* Somewhere new, with a barbell or a Smith machine in it: the one moment where asking
+   what the equipment weighs is neither nagging nor buried in Settings. */
+function askGymGear(g){
+  const smith = (S.active.entries || []).some(en=> barKindFor(en.name) === "smith");
+  const bar = (S.active.entries || []).some(en=> barKindFor(en.name) === "barbell");
+  showModal(`<h3>What's the kit like at ${esc(g.name)}?</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Optional, and you can do it
+      mid-session by tapping the name of the lift you're on. Whatever you set here is remembered for
+      ${esc(g.name)} and put back automatically next time you train here.</div>
+    ${bar ? `<button class="btn ghost" id="gymBarBtn" style="margin-bottom:8px">Set the barbell weight</button>` : ""}
+    ${smith ? `<button class="btn ghost" id="gymSmithBtn" style="margin-bottom:8px">Set the Smith carriage</button>` : ""}
+    <button class="btn" id="closeModal">It's the same as usual</button>`);
+  const m = $("#modal");
+  const bb = m.querySelector("#gymBarBtn");
+  if(bb) bb.onclick = ()=>{ hideModal(); openBarModal("barbell"); };
+  const sb = m.querySelector("#gymSmithBtn");
+  if(sb) sb.onclick = ()=>{ hideModal(); openBarModal("smith"); };
+}
+/* Called from startWorkout(). Deliberately not awaited: a workout screen that waits on a
+   GPS fix before it will draw is a worse app than one that labels the session a moment
+   later. Everything it does is additive, so arriving late costs nothing. */
+async function checkGymAtStart(){
+  if(!S.active || !geoReady()) return;
+  if(S.geo === "off") return;
+  if(MODAL_LIVE()) return;                     // never on top of another sheet
+  if(S.geo !== "on"){
+    if(!gymList().length) askGymOptIn();
+    return;
+  }
+  const pos = await gymPos();
+  if(!pos.ok){
+    if(pos.denied){ S.geo = "off"; save(); queueSync(); }
+    return;
+  }
+  if(!S.active) return;                        // finished or discarded while we waited
+  const near = nearestGym(pos);
+  if(near && near.d <= GYM_SAME_M){
+    gymRemember(near.gym, pos);
+    setSessionGym(near.gym);
+    const said = applyGymGear(near.gym);
+    if(said) toast(near.gym.name + " \u2014 " + said);
+    return;
+  }
+  if(MODAL_LIVE()) return;
+  askDifferentGym(pos, near);
+}
 function startWorkout(wid){
   /* The same shape of problem from the other end: tapping "start" repeatedly built a
      fresh session object each time, discarding the sets already logged into the previous
@@ -17884,6 +18302,7 @@ function startWorkout(wid){
     })()
   };
   save(); render();
+  checkGymAtStart();
 }
 /* ONE SLOT OF THE PLAN, TURNED INTO A ROW YOU CAN LOG INTO.
 
@@ -17977,6 +18396,8 @@ function finishWorkout(){
   if(noteEl) a.note = noteEl.value.trim();
   const vol = a.entries.reduce((t,e)=>t+e.sets.reduce((u,st)=>u+((parseFloat(st.weight)||0)*(parseFloat(st.reps)||0)),0),0);
   const sessObj = {id:a.id, workoutId:a.workoutId, date:a.date, startedAt:a.startedAt, finishedAt:a.finishedAt, entries:a.entries, note:a.note||"", feel:a.feel||null};
+  // where it was done, when that is known — see checkGymAtStart()
+  if(a.gymId){ sessObj.gymId = a.gymId; sessObj.gymName = a.gymName || ""; }
   const existing = S.sessions.findIndex(x=>x.id===a.id);
   if(existing>=0) S.sessions.splice(existing,1);
   S.sessions.push(sessObj);
@@ -21820,6 +22241,11 @@ function openCycleWrapped(r){
 
 /* ---------- modal ---------- */
 let MODAL_DISMISS = null;
+// Is a sheet up right now? Anything that offers to open one of its own asks first.
+function MODAL_LIVE(){
+  const bg = document.getElementById("modalBg");
+  return !!(bg && bg.classList.contains("show"));
+}
 // How to rebuild the modal that's currently showing, so a glossary term opened from
 // inside it can offer a working "Back". Set by the modals that contain terms.
 let MODAL_REOPEN = null;
@@ -21912,7 +22338,7 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
-  "viewMode","cycleV2","picks","gearAsked","sessions","savedAt"
+  "viewMode","cycleV2","picks","gearAsked","gyms","geo","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
