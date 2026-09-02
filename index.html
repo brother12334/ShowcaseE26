@@ -1422,6 +1422,10 @@ body.onboarding #app{padding:0}
    and a tip points at it. Everything is positioned from measured rectangles in script,
    so nothing here assumes where anything is. */
 #tourLayer{position:fixed;inset:0;z-index:170;pointer-events:none}
+/* The tour's demonstration set row and rest pill: real markup, inert. Nothing in
+   here is typed into, tapped, or saved — see tourDemoBuild(). */
+#tourDemo,#tourRest{pointer-events:none;user-select:none}
+#tourDemo .sub{font-size:11.5px;color:var(--faint);margin:-2px 0 8px}
 /* A sheet is up: the page behind it holds still. Without this the grade card and the
    page under it both scrolled, which on a phone is two scrollbars and a card that slides
    away when you meant to read it. */
@@ -9893,6 +9897,12 @@ const TOUR_STEPS = [
   {tab:"today", sel:".warm", title:"Warm-ups",
    text:"Before you've logged anything these read \"light\", \"build up\" — placeholders, not instructions. Log one full session and they become real weights off your own load.",
    optional:true},
+  {tab:"today", demo:"row", sel:"#tourDemo .demo-live", title:"This is how you log",
+   text:"During a session every set is a row like this one. Weight, reps, and how hard it felt \u2014 typed in as you finish the set, not remembered afterwards."},
+  {tab:"today", demo:"tick", sel:"#tourDemo .demo-live .chk", title:"The tick banks it",
+   text:"Ticking is what saves the set and what tells Element 26 where you are. The reps you actually got are what next week's target is built from."},
+  {tab:"today", demo:"rest", sel:"#tourRest", title:"Then it rests you",
+   text:"Finishing a round starts your rest clock, at the rest your plan asks for. It runs on the clock, so it stays right with your phone in your pocket."},
   {tab:"history", sel:".card.sess, .card", title:"Everything you've done",
    text:"Each finished session, scored on what could actually be measured. Tap one to see the sets as you logged them, or read its grade again."},
   {tab:"body", sel:".nb-fix, .nb-hero", title:"What needs attention",
@@ -9951,6 +9961,7 @@ function tourLayer(){
   return el;
 }
 function tourTeardown(){
+  tourDemoClear();
   const el = document.getElementById("tourLayer");
   if(el) el.remove();
   document.body.classList.remove("tour-live");
@@ -9964,6 +9975,121 @@ function tourTarget(step){
     if(el && el.getBoundingClientRect().height > 4) return el;
   }
   return null;
+}
+/* THE ONE THING THE TOUR CANNOT POINT AT.
+
+   Everything else here rings something real on a real screen. The set row cannot be:
+   it only exists while a workout is running, and nobody has started one on the morning
+   they install this. Describing it in prose instead was the weakest part of the tour —
+   the single screen you spend all your time on, explained from memory.
+
+   So the tour brings one with it. Same markup, same CSS, same set row you will be
+   typing into, injected at the top of Today for three steps and taken away again. It
+   fills itself in while you watch, because "what logging looks like" is a thing that
+   happens rather than a thing that sits there.
+
+   It is INERT. No data-e attributes, so none of the delegated handlers in bind() see
+   it; pointer-events off, so it cannot be typed into; built after render() and removed
+   on teardown, so it is never part of a view and never reaches save(). It says so on
+   the card too, because a fake set row that looks exactly like a real one had better
+   admit which it is. */
+let TOUR_DEMO = null;                // {kind, timers:[]}
+function tourDemoStop(){
+  if(TOUR_DEMO) TOUR_DEMO.timers.forEach(id=>{ clearTimeout(id); clearInterval(id); });
+  TOUR_DEMO = null;
+}
+function tourDemoClear(){
+  tourDemoStop();
+  const d = document.getElementById("tourDemo"); if(d) d.remove();
+  const r = document.getElementById("tourRest"); if(r) r.remove();
+}
+function tourDemoBuild(){
+  const app = document.getElementById("app");
+  if(!app) return null;
+  const rpeOn = rpeTracked();
+  const u = unitWord();
+  const w = u === "kg" ? "60" : "135";
+  const row = (n, wt, reps, rpe, done, live)=> `<div class="set${rpeOn?"":" no-rpe"}${live?" demo-live":""}">
+    <span class="idx">${n}</span>
+    <input inputmode="decimal" tabindex="-1" value="${esc(wt)}" placeholder="${esc(u)}">
+    <input inputmode="numeric" tabindex="-1" value="${esc(reps)}" placeholder="reps">
+    ${rpeOn?`<span class="rpe-cell"><select tabindex="-1">${rpeOptions(rpe)}</select></span>`:""}
+    <button class="chk${done?" on":""}" tabindex="-1">\u2713</button>
+  </div>`;
+  const el = document.createElement("div");
+  el.id = "tourDemo";
+  el.className = "card ex";
+  el.setAttribute("aria-hidden", "true");
+  el.innerHTML =
+    `<div class="ex-head"><b>Bench Press</b></div>
+     <div class="ex-bar"><span class="ex-target">4\u00d76-10${rpeOn?" \u00b7 RPE 7-9":""}</span></div>
+     <div class="sub">An example \u2014 nothing on this card is saved.</div>
+     ${setLabelsHTML()}
+     ${row(1, w, "9", "8", true, false)}
+     ${row(2, "", "", "", false, true)}`;
+  app.insertBefore(el, app.firstChild);
+  return el;
+}
+function tourDemoRest(on){
+  let el = document.getElementById("tourRest");
+  if(!on){ if(el) el.remove(); return; }
+  if(el) return el;
+  el = document.createElement("div");
+  el.id = "tourRest";
+  el.className = "rest-mini";
+  el.setAttribute("aria-hidden", "true");
+  const wid = ROTATION[S.pointer];
+  el.innerHTML = `<button class="rest-expand" tabindex="-1"><span class="rest-dot" style="background:${
+    DAY_HEX[wid] || "#e8e6e1"}"></span><span class="rest-time num">0:03</span></button>` +
+    `<button class="rest-stop-mini" tabindex="-1" aria-label="Stop rest">\u25a0</button>`;
+  document.body.appendChild(el);
+  /* A clock that does not move is a picture of a clock. This one counts, off its own
+     interval, cleared with everything else in tourDemoStop(). */
+  let sec = 3;
+  const t = setInterval(()=>{
+    if(!el.isConnected){ clearInterval(t); return; }
+    sec++;
+    const n = el.querySelector(".rest-time");
+    if(n) n.textContent = fmtClock(sec);
+  }, 1000);
+  if(TOUR_DEMO) TOUR_DEMO.timers.push(t);
+  return el;
+}
+/* Each kind states the WHOLE demo, then animates only what it just changed — so
+   stepping backwards lands on the same picture as stepping forwards did. */
+function tourDemoSet(kind){
+  if(!kind){ tourDemoClear(); return; }
+  const el = document.getElementById("tourDemo") || tourDemoBuild();
+  if(!el) return;
+  tourDemoStop();
+  TOUR_DEMO = {kind, timers:[]};
+  const after = (ms, fn)=> TOUR_DEMO.timers.push(setTimeout(()=>{
+    if(TOUR_DEMO && TOUR_DEMO.kind === kind && el.isConnected) fn();
+  }, ms));
+  const r = el.querySelector(".demo-live");
+  if(!r) return;
+  const wIn = r.children[1], rIn = r.children[2];
+  const sel = r.querySelector("select"), chk = r.querySelector(".chk");
+  const u = unitWord(), w = u === "kg" ? "62.5" : "140";
+
+  if(kind === "row"){
+    tourDemoRest(false);
+    chk.classList.remove("on");
+    wIn.value = ""; rIn.value = ""; if(sel) sel.value = "";
+    // typed, digit by digit, because that is what it looks like from the bench
+    w.split("").forEach((c, i)=> after(320 + i*180, ()=> wIn.value = w.slice(0, i+1)));
+    after(320 + w.length*180 + 260, ()=> rIn.value = "8");
+    if(sel) after(320 + w.length*180 + 620, ()=> sel.value = "8");
+  } else if(kind === "tick"){
+    tourDemoRest(false);
+    wIn.value = w; rIn.value = "8"; if(sel) sel.value = "8";
+    chk.classList.remove("on");
+    after(520, ()=> chk.classList.add("on"));
+  } else if(kind === "rest"){
+    wIn.value = w; rIn.value = "8"; if(sel) sel.value = "8";
+    chk.classList.add("on");
+    tourDemoRest(true);
+  }
 }
 /* Move to a step: switch tab, let it render, bring the target into view, then measure.
    Skipping forwards over a step whose target is missing, and backwards the same way, so
@@ -9980,6 +10106,8 @@ function tourGo(i, dir){
   }
   document.body.classList.add("tour-live");
   const layer = tourLayer();
+  /* After the render, because render() rewrites #app and would take the demo with it. */
+  tourDemoSet(step.demo || null);
   const target = tourTarget(step);
   if(!target){
     // nothing to point at here: step over it rather than ring an empty rectangle
