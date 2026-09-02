@@ -1954,10 +1954,19 @@ nav button:active{transform:scale(.94)}
 .sl-p{margin:9px auto 0;max-width:40ch;color:var(--dim);font-size:13.5px;line-height:1.6}
 .sl-p b{color:var(--text)}
 .sl-go{margin-top:20px}
+/* The two answerable lines on the morning sheet. Left-aligned inside a centred sheet
+   deliberately: a label and its box are a form, and a centred form is a form you have to
+   hunt across. */
+.mn-row{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  text-align:left;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.mn-row label{font-size:13.5px;color:var(--dim)}
+.mn-row .timein{width:auto;min-width:118px}
+.mn-row .ci-wrow{flex:0 0 auto}
+.mn-row .ci-w{width:104px;min-height:44px;font-size:17px}
 @media (prefers-reduced-motion:reduce){
   .sl-moon,.sl-glow,.sl-bell svg{animation:none}
 }
-/* ===================== the daily check-in sheet =====================
+/* ===================== the morning sheet, and the energy tap =====================
    Same tokens as everything else: copper accent, mono labels, the app's own card and
    line colours. It reads as a page of Element 26 that happens to open by itself, not as
    a dialog bolted on from somewhere else.
@@ -3581,7 +3590,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "10.1";
+const APP_VERSION = "10.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -4436,7 +4445,7 @@ const GLOSSARY = {
     <div class="gl-def"><b>How far through its own recovery window a muscle is since the last time you trained it.</b></div>
     <p>Each muscle has a typical turnaround time, 36 hours for side delts, 60 for quads, and a heavier-than-usual session stretches that window proportionally.</p>
     <p><b>Why this isn't just the inverse of ${term("fatigue","fatigue")}:</b> they answer different questions. A muscle you hammered six days ago is <em>fully recovered</em> and ready to train, but a week of hard work can still leave fatigue residue on the books. One tells you if you can train it today; the other tells you whether the week is catching up with you.</p>
-    <p>Your daily check-in feeds into this. Averaging under 6 hours of sleep drops every muscle's recovery, because sleep debt measurably slows tissue repair, that's not a per-muscle effect, so it shifts them all together.</p>`},
+    <p>Your sleep and energy logs feed into this. Averaging under 6 hours of sleep drops every muscle's recovery, because sleep debt measurably slows tissue repair, that's not a per-muscle effect, so it shifts them all together.</p>`},
 
   growth:{title:"Growth (how it's calculated)", html:`
     <div class="gl-def"><b>Is this muscle actually progressing? Last 3 weeks against the 3 weeks before.</b></div>
@@ -4940,9 +4949,6 @@ const PREF_DEFAULTS = {
      from whatever the cycle has left, and is only set when a document says the sessions
      can be done in any order. */
   dayOrder: "fixed",      // fixed | any
-  /* Whether to ask for the daily check-in on the first open of each day. A prompt
-     nobody can turn off is a prompt people learn to dismiss without reading. */
-  checkinPrompt: true,
   /* WHEN YOUR NIGHT STARTS. Not a fixed hour, because "late" is 22:00 for one person and
      01:00 for another, and being asked "off to bed?" at half past nine is the fastest way
      to teach somebody to dismiss the app's prompts without reading them. */
@@ -8145,7 +8151,7 @@ function experienceIsAuto(){ return !S.experience || S.experience === "auto"; }
      4. EXERCISE     Compound work costs systemic fatigue that isolation work does not,
         SELECTION    so a compound-heavy week lowers MRV.
      5. RECOVERY     Short sleep and low energy lower what you can recover from. Read
-                     straight from your daily check-ins.
+                     from the morning sheet and the energy tap before a session.
    ===================================================================== */
 const EXP_SCALE = {
   beginner:     {mev:0.70, mav:0.75, mrv:0.80},
@@ -8182,7 +8188,7 @@ function adjustedLandmarks(A, g){
     else why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"a balanced mix, no adjustment"});
   }
 
-  // 5 - recovery: sleep and energy from your check-ins
+  // 5 - recovery: sleep from the morning sheet, energy from the start of a session
   const mod = A.modInfo.mod;
   if(mod !== 0){
     mrv *= (1 + mod/100 * 0.7);
@@ -9391,7 +9397,7 @@ function plannedReminders(){
       out.push({kind:"wake", at, title:"Just woken up?",
         body: started
           ? "You put the phone down at " + fmtClockShort(started) + ". Open Element 26 and it'll work out the rest."
-          : "Log how you slept and today's check-in is most of the way done."});
+          : "Open Element 26 and it'll take now as the time you got up."});
     }
   }
   return out;
@@ -9686,7 +9692,7 @@ function pushCardHTML(){
     <div class="rem-head"><b>Bedtime</b>${seg("data-rembed", !!S.remindBed && !sleepOff)}</div>
     <div class="sub">A nudge to start the sleep clock at ${
       sleepOff ? "your night-start time" : `<b>${esc(p.sleepTime || "22:30")}</b>`
-    }, the hour the app already treats as your night — change it under <b>Sleep &amp; check-in</b>.
+    }, the hour the app already treats as your night — change it under <b>Sleep and mornings</b>.
       Not sent on a night you've already answered.</div>`;
   h += sleepOff
     ? `<div class="rem-when">Sleep tracking is off, so there's nothing to remind you about.</div>`
@@ -9705,7 +9711,7 @@ function pushCardHTML(){
        morning until the data arrived, and a reminder that is reliably wrong gets
        swiped away without being read — including on the days it was right. */
     h += `<div class="rem-when">Not yet — it needs ${WAKE_MIN_SAMPLES} logged mornings before it'll
-      guess, and it won't guess before then. Set a fixed wake time under <b>Sleep &amp; check-in</b> to skip the wait.</div>`;
+      guess, and it won't guess before then. Set a fixed wake time under <b>Sleep and mornings</b> to skip the wait.</div>`;
   } else {
     h += preview("wake", "Off.", "worked out from " + esc(w.why));
   }
@@ -13627,13 +13633,24 @@ function greetingWord(){
    checked here rather than inside the sheet, so the sheet itself is only ever opened
    when it should be. */
 /* ONE DECISION ABOUT WHAT TO SHOW ON OPEN, so two prompts can never appear at once and
-   the order is never accidental. Waking is asked first because it FILLS IN the sleep
-   figure the check-in would otherwise ask for; asking them the other way round means
-   answering the same question twice in ten seconds. */
+   the order is never accidental.
+
+   THERE IS NO DAILY CHECK-IN ANY MORE. It asked three questions — sleep, energy,
+   bodyweight — in one sheet on the first open of the day, and two of the three were
+   asked in the wrong place. Sleep it asked you to ESTIMATE at breakfast, in a sheet that
+   opened immediately after the wake sheet had just MEASURED it. Energy it asked hours
+   before the only moment the answer matters, which is the moment you are about to lift.
+
+   What is left is the one thing a first open of the day genuinely knows: you are awake,
+   and it is now. So the morning sheet says what time you woke, lets you correct it, and
+   takes your bodyweight while you are standing there. Energy moved to the start of a
+   workout. Nothing about the RECORD changed — sleep, energy, weight and the clock times
+   are still written to S.checkins and still feed the recovery number. */
 function openingPrompts(){
   try{
     if(typeof S === "undefined" || !S || !S.setup) return;
     if(S.active) return;                                       // mid-workout, not now
+    if(trainPrefs().sleepPrompt === false) return;              // sleep tracking is off
     const pend = S.sleepPend;
     if(pend && pend.startedAt){
       const hrs = (Date.now() - pend.startedAt)/3600e3;
@@ -13641,49 +13658,53 @@ function openingPrompts(){
         // Not evidence of anything. Dropped rather than believed.
         delete S.sleepPend; saveQuiet();
       } else if(hrs >= SLEEP_MIN_HOURS){
-        /* Straight into the check-in rather than through maybeDailyCheckin(), which
-           would refuse: it skips a day that already has an answer on it, and the wake
-           sheet has just written one. Sleep being measured is exactly why the other two
-           questions still need asking. */
-        openWakeSheet(()=>{
-          const ci = (S.checkins||{})[todayStr()] || {};
-          if(trainPrefs().checkinPrompt === false) return;
-          if(ci.energy || ci.weight) return;         // those two are the ones it asks for
-          S.ciAsked = todayStr(); saveQuiet();
-          openCheckinSheet();
-        });
+        S.ciAsked = todayStr(); saveQuiet();
+        openMorningSheet(pend);
+        return;
+      } else {
+        // still inside the night: nothing to ask yet, and definitely not "off to bed?"
         return;
       }
-      // still inside the night: nothing to ask yet, and definitely not "off to bed?"
-      return;
     }
     if(sleepWindowNow() && S.sleepAsked !== todayStr()){
       S.sleepAsked = todayStr(); saveQuiet();
       openSleepSheet();
       return;
     }
-    /* Ahead of the check-in, and only ever briefly: this is due at most once a week and
-       the check-in it displaces is asked again the moment this one is answered. */
+    /* Ahead of the morning sheet, and only ever briefly: this is due at most once a week
+       and the morning sheet it displaces is asked the moment this one is answered. */
     if(pushAskDue()){
       S.pushAsked = todayStr(); saveQuiet();
-      openPushSheet(()=> maybeDailyCheckin());
+      openPushSheet(()=> maybeMorning());
       return;
     }
-    maybeDailyCheckin();
+    maybeMorning();
   }catch(e){ /* a greeting must never be the thing that breaks the app */ }
 }
-function maybeDailyCheckin(){
+/* THE FIRST OPEN OF A NEW DAY IS THE WAKE TIME, even on a night the clock was never
+   started. That is the whole idea: the app is in your hand within a minute or two of
+   your eyes opening, every day, and no question you could ask would beat that.
+
+   Bounded by MORNING_LATEST, because it is only true in the morning. Opening the app for
+   the first time at four in the afternoon says you were busy, not that you have just got
+   up, and "you woke up at 16:02" written into your record would be a lie the app told
+   itself. After that hour it asks nothing and the day simply has no wake time. */
+const MORNING_LATEST = 12 * 60;     // no claim about waking after noon
+function maybeMorning(){
   try{
-    if(typeof S === "undefined" || !S || !S.setup) return;    // still in onboarding
-    if(S.active) return;                                       // mid-workout, not now
-    if(trainPrefs().checkinPrompt === false) return;
+    if(typeof S === "undefined" || !S || !S.setup) return;
+    if(S.active) return;
+    if(trainPrefs().sleepPrompt === false) return;
     const d = todayStr();
     if(S.ciAsked === d) return;                                // already asked today
+    const now = new Date();
+    const min = now.getHours()*60 + now.getMinutes();
+    if(min > MORNING_LATEST) return;
     const ci = (S.checkins||{})[d];
-    if(ci && (ci.weight || ci.sleep || ci.energy)) return;     // already filled in
+    if(ci && ci.wokeAt) return;                                // already recorded
     S.ciAsked = d; saveQuiet();
-    openCheckinSheet();
-  }catch(e){ /* a greeting must never be the thing that breaks the app */ }
+    openMorningSheet(null);
+  }catch(e){}
 }
 /* The moon. Two circles and a mask rather than a drawn crescent, so the shadow can be
    nudged without redrawing a path, and a soft radial glow behind it. It drifts a few
@@ -13848,129 +13869,147 @@ function openPushSheet(then){
   MODAL_REOPEN = ()=> openPushSheet(then);
 }
 
-/* The other half. The figure is shown before it is written down, because a measured
-   number somebody disagrees with is worse than an asked one: it is wrong AND it looks
-   authoritative. `then` carries on to the daily check-in so the two never stack up. */
-function openWakeSheet(then){
-  const pend = S.sleepPend;
-  if(!pend){ if(then) then(); return; }
-  const hours = (Date.now() - pend.startedAt)/3600e3;
-  const done = ()=>{ delete S.sleepPend; save(); queueSync(); hideModal(); pushSyncSchedule(); if(then) then(); };
+/* THE MORNING SHEET.
+
+   One screen, at most two questions, and the first of them is already answered. It says
+   what time you woke because it knows — you just opened the app — and the number is
+   editable because a measured figure somebody disagrees with is worse than an asked one:
+   it is wrong AND it looks authoritative. Correcting the time re-derives the night's
+   length in front of you rather than after you press Save.
+
+   Bodyweight rides along because this is the only moment in the day when the answer is
+   comparable to yesterday's: same hour, same state, before anything has been eaten. */
+let MORN = null;              // {wokeAt, weight} while the sheet is open
+function openMorningSheet(pend){
+  const rec = (S.checkins||{})[todayStr()] || {};
+  MORN = {wokeAt: Date.now(), weight: rec.weight == null ? "" : String(rec.weight)};
+  drawMorningSheet(pend || null);
+}
+function hhmm(ms){
+  const t = new Date(ms);
+  return String(t.getHours()).padStart(2,"0") + ":" + String(t.getMinutes()).padStart(2,"0");
+}
+function drawMorningSheet(pend){
+  if(!MORN) return;
+  const woke = MORN.wokeAt;
+  const hrs = pend ? (woke - pend.startedAt)/3600e3 : null;
+  const bad = hrs != null && hrs <= 0;
   showModal(`<div class="sl-sheet">
     <div class="sl-art sl-dawn" style="--d:0ms">${moonSVG()}</div>
-    <div class="sl-t" style="--d:80ms">Just woken up?</div>
-    <div class="sl-p" style="--d:130ms">You put the phone down at <b>${esc(fmtClockShort(pend.startedAt))}</b>.
-      If you're up now, that's <b>${esc(fmtHours(hours))}</b> of sleep.</div>
-    <button class="btn sl-go" id="slYes" style="--d:190ms">Yes \u2014 log ${esc(fmtHours(hours))}</button>
-    <div class="ci-alt" style="--d:230ms">
-      <button class="nb-link" id="slEarlier">I woke earlier</button>
-      <span class="ci-alt-sep">\u00b7</span>
-      <button class="nb-link" id="slDrop">Skip</button>
+    <div class="sl-t" style="--d:80ms">You woke up at ${esc(fmtClockShort(woke))}</div>
+    <div class="sl-p" style="--d:130ms">${
+      pend
+        ? (bad
+            ? `That's before you put the phone down at <b>${esc(fmtClockShort(pend.startedAt))}</b> — set a later time.`
+            : `You put the phone down at <b>${esc(fmtClockShort(pend.startedAt))}</b>, so that's
+               <b>${esc(fmtHours(hrs))}</b> of sleep.`)
+        : `Element 26 takes the first time you open the app as the time you got up. Change it if that's not right.`
+    }</div>
+    <div class="mn-row" style="--d:180ms">
+      <label for="mnWoke">Woke up at</label>
+      <input type="time" class="timein" id="mnWoke" value="${esc(hhmm(woke))}">
     </div>
-  </div>`);
-  const m = $("#modal");
-  m.querySelector("#slYes").onclick = ()=>{
-    const d = todayStr();
-    const rec = (S.checkins[d] = S.checkins[d] || {});
-    rec.sleep = String(Math.round(hours*10)/10);
-    /* THE CLOCK TIMES, NOT JUST THE DURATION. Eight hours tells you nothing about when
-       you got up, and when you get up is the only thing a morning reminder can be aimed
-       at. Two numbers on a record that is already being written, and predictedWake()
-       downstream is reading measurements rather than guessing from a target. */
-    rec.bedAt = pend.startedAt;
-    rec.wokeAt = Date.now();
-    toast("Logged " + fmtHours(hours) + " of sleep");
-    done();
-  };
-  /* Woke up an hour ago and only opened the app now: the measured figure is an
-     over-estimate, so it hands over to the chips rather than shaving a guess off it. */
-  m.querySelector("#slEarlier").onclick = ()=>{
-    delete S.sleepPend; save();
-    hideModal();
-    CI_DRAFT = Object.assign({}, (S.checkins||{})[todayStr()] || {});
-    drawCheckinSheet();
-  };
-  m.querySelector("#slDrop").onclick = done;
-}
-let CI_DRAFT = null;
-function openCheckinSheet(){
-  const d = todayStr();
-  CI_DRAFT = Object.assign({}, (S.checkins||{})[d] || {});
-  drawCheckinSheet();
-}
-function drawCheckinSheet(){
-  /* Resolved here, not captured from openCheckinSheet(). The handlers below are created
-     on every redraw and closed over THIS scope; reading `d` from the opener's scope threw
-     "d is not defined" the moment Save was pressed, which failed silently as far as the
-     screen was concerned — the sheet simply did nothing. */
-  const d = todayStr();
-  const v = CI_DRAFT || {};
-  const anyAnswer = !!(v.sleep || v.energy || v.weight);
-  showModal(`<div class="ci-sheet">
-    <div class="ci-h" style="--d:0ms">
-      <div class="ci-hi">${esc(greetingWord())}</div>
-      <div class="ci-sub">Three quick things. They're what your recovery number is worked out from.</div>
-    </div>
-
-    <div class="ci-q" style="--d:70ms">
-      <div class="ci-k">How did you sleep?</div>
-      <div class="ci-chips">${CI_SLEEP.map(n=>`
-        <button class="ci-chip${String(v.sleep)===String(n)?" on":""}" data-cisleep="${n}">${
-          n===4?"4-":n===10?"10+":n}</button>`).join("")}</div>
-      <div class="ci-foot">hours</div>
-    </div>
-
-    <div class="ci-q" style="--d:140ms">
-      <div class="ci-k">How's your energy?</div>
-      <div class="ci-dots">${CI_ENERGY.map(e=>`
-        <button class="ci-dot${parseFloat(v.energy)>=e.v?" lit":""}${String(v.energy)===String(e.v)?" on":""}"
-          data-cienergy="${e.v}" aria-label="${esc(e.label)}"><i></i><span>${esc(e.label)}</span></button>`).join("")}</div>
-    </div>
-
-    <div class="ci-q" style="--d:210ms">
-      <div class="ci-k">Bodyweight <span class="ci-opt">optional</span></div>
-      <div class="ci-wrow">
-        <input id="ciSheetW" class="ci-w" inputmode="decimal" value="${esc(v.weight??"")}" placeholder="\u2014" aria-label="Bodyweight in pounds">
+    <div class="mn-row" style="--d:215ms">
+      <label for="mnW">Bodyweight <span class="ci-opt">optional</span></label>
+      <div class="ci-wrow" style="margin:0">
+        <input id="mnW" class="ci-w" inputmode="decimal" value="${esc(MORN.weight)}" placeholder="—"
+          aria-label="Bodyweight in ${esc(unitWord())}">
         <span class="ci-unit">${unitWord()}</span>
       </div>
     </div>
-
-    <button class="btn ci-save" id="ciSave" style="--d:280ms">${anyAnswer?"Save":"Save and carry on"}</button>
-    <div class="ci-alt" style="--d:320ms">
-      <button class="nb-link" id="ciSkip">Skip today</button>
-      <span class="ci-alt-sep">\u00b7</span>
-      <button class="nb-link" id="ciNever">Don't ask again</button>
+    <button class="btn sl-go" id="mnSave" style="--d:260ms">${bad ? "Fix the time first" : "Save"}</button>
+    <div class="ci-alt" style="--d:300ms">
+      <button class="nb-link" id="mnSkip">Skip</button>
     </div>
   </div>`);
-
   const m = $("#modal");
-  m.querySelectorAll("[data-cisleep]").forEach(b=> b.onclick = ()=>{
-    // tapping the chip you already chose clears it, so a mis-tap is one tap to undo
-    CI_DRAFT.sleep = (String(CI_DRAFT.sleep) === b.dataset.cisleep) ? "" : b.dataset.cisleep;
-    drawCheckinSheet();
-  });
-  m.querySelectorAll("[data-cienergy]").forEach(b=> b.onclick = ()=>{
-    CI_DRAFT.energy = (String(CI_DRAFT.energy) === b.dataset.cienergy) ? "" : b.dataset.cienergy;
-    drawCheckinSheet();
-  });
-  const w = m.querySelector("#ciSheetW");
-  if(w) w.oninput = ()=>{ CI_DRAFT.weight = w.value.trim(); };
-  m.querySelector("#ciSave").onclick = ()=>{
-    if(w) CI_DRAFT.weight = w.value.trim();
+  const wIn = m.querySelector("#mnW");
+  const tIn = m.querySelector("#mnWoke");
+  const readWeight = ()=>{ if(wIn) MORN.weight = wIn.value.trim(); };
+  if(wIn) wIn.oninput = readWeight;
+  tIn.onchange = ()=>{
+    readWeight();
+    const mt = /^(\d{1,2}):(\d{2})$/.exec(tIn.value || "");
+    if(!mt) return;
+    /* Anchored to TODAY, and never allowed into the future: a mistyped 19:00 at eight in
+       the morning would otherwise record a wake eleven hours from now and take the
+       night's length with it. */
+    const d = new Date();
+    d.setHours(parseInt(mt[1],10), parseInt(mt[2],10), 0, 0);
+    MORN.wokeAt = Math.min(d.getTime(), Date.now());
+    drawMorningSheet(pend);
+  };
+  m.querySelector("#mnSave").onclick = ()=>{
+    readWeight();
+    const hours = pend ? (MORN.wokeAt - pend.startedAt)/3600e3 : null;
+    if(hours != null && hours <= 0){ toast("That's before you went to bed"); return; }
+    const d = todayStr();
     const rec = (S.checkins[d] = S.checkins[d] || {});
-    if(CI_DRAFT.sleep !== undefined)  rec.sleep  = CI_DRAFT.sleep;
-    if(CI_DRAFT.energy !== undefined) rec.energy = CI_DRAFT.energy;
-    if(CI_DRAFT.weight !== undefined) rec.weight = CI_DRAFT.weight;
-    if(!rec.sleep && !rec.energy && !rec.weight) delete S.checkins[d];
-    save(); queueSync(); hideModal(); render();
-    toast(rec.sleep || rec.energy || rec.weight ? "Logged \u2014 thanks" : "Nothing saved");
+    /* THE CLOCK TIMES, NOT JUST THE DURATION. Eight hours tells you nothing about when
+       you got up, and when you get up is the only thing a morning reminder can be aimed
+       at — predictedWake() reads these measurements rather than guessing from a target. */
+    rec.wokeAt = MORN.wokeAt;
+    if(hours != null){
+      rec.bedAt = pend.startedAt;
+      rec.sleep = String(Math.round(hours*10)/10);
+    }
+    if(MORN.weight) rec.weight = MORN.weight; else delete rec.weight;
+    if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt) delete S.checkins[d];
+    delete S.sleepPend;
+    MORN = null;
+    save(); queueSync(); hideModal(); render(); pushSyncSchedule();
+    toast(hours != null ? "Logged " + fmtHours(hours) + " of sleep" : "Morning logged");
   };
-  m.querySelector("#ciSkip").onclick = ()=>{ hideModal(); };
-  m.querySelector("#ciNever").onclick = ()=>{
-    trainPrefs().checkinPrompt = false;
-    save(); queueSync(); hideModal();
-    toast("Won't ask again. Open it any time in Settings.");
+  m.querySelector("#mnSkip").onclick = ()=>{
+    delete S.sleepPend; MORN = null;
+    save(); queueSync(); hideModal(); pushSyncSchedule();
   };
+}
+/* ENERGY, ASKED WHERE THE ANSWER IS WORTH SOMETHING.
+
+   It used to be one third of a sheet that opened when you first picked up your phone,
+   which is a guess about a session that might be nine hours away. Asked as the session
+   opens it is a reading rather than a forecast, it is one tap, and the number lands on
+   the same record it always did — so the recovery modifier and every grade that reads it
+   carry on unchanged.
+
+   Once a day, never twice, and never on top of another sheet. `then` carries on to
+   whatever the start of a workout was going to do next. */
+function energyDue(){
+  const ci = (S.checkins||{})[todayStr()] || {};
+  return !ci.energy;
+}
+function askEnergyAtStart(then){
+  const go = ()=>{ if(then) then(); };
+  try{
+    if(!S.active || !energyDue() || MODAL_LIVE()) return go();
+    showModal(`<div class="ci-sheet">
+      <div class="ci-h" style="--d:0ms">
+        <div class="ci-hi">Before you start</div>
+        <div class="ci-sub">How you feel right now, in one tap. It's what your recovery number is
+          adjusted by, and it's why a flat session gets read as a flat day rather than a bad lift.</div>
+      </div>
+      <div class="ci-q" style="--d:70ms">
+        <div class="ci-k">How's your energy?</div>
+        <div class="ci-dots">${CI_ENERGY.map(e=>`
+          <button class="ci-dot" data-cienergy="${e.v}" aria-label="${esc(e.label)}"><i></i><span>${esc(e.label)}</span></button>`).join("")}</div>
+      </div>
+      <div class="ci-alt" style="--d:150ms">
+        <button class="nb-link" id="enSkip">Skip</button>
+      </div>
+    </div>`);
+    const m = $("#modal");
+    m.querySelectorAll("[data-cienergy]").forEach(b=> b.onclick = ()=>{
+      const d = todayStr();
+      const rec = (S.checkins[d] = S.checkins[d] || {});
+      rec.energy = b.dataset.cienergy;
+      save(); queueSync(); hideModal();
+      toast(energyWord(rec.energy) + " — logged");
+      go();
+    });
+    m.querySelector("#enSkip").onclick = ()=>{ hideModal(); go(); };
+    MODAL_DISMISS = go;                       // tapping the backdrop still carries on
+  }catch(e){ go(); }
 }
 /* checkinCard() is gone. It sat two thirds of the way down the Today tab and asked for
    the same three numbers the daily sheet now asks for on the first open of the day, so
@@ -15802,7 +15841,7 @@ function bodyTiles(A){
   out.push({key:"sleep", label:"Sleep", val: sleep==null ? "Not logged" : fmtHours(sleep),
     pct: sleep==null ? 0 : Math.min(100, Math.round(sleep/9*100)),
     color: sleep==null ? C_FLAT : sleep>=7.5 ? C_OK : sleep>=6.5 ? C_WARN : C_BAD,
-    note: sleep==null ? "Add it in your daily check-in and this starts adjusting your recovery."
+    note: sleep==null ? "Start the sleep clock at night and this starts adjusting your recovery."
         : sleep>=7.5 ? "A good amount of sleep." : sleep>=6.5 ? "A little short of ideal."
         : "Short sleep is holding your recovery back."});
   return out;
@@ -16035,7 +16074,7 @@ function viewBody(){
       <div><b>${t.setsWk} working sets</b> ${esc(win.short)}${t.setsPrev>0?`, ${t.setsWk>=t.setsPrev?"up":"down"} from ${t.setsPrev} ${esc(win.prevLabel)}`:""}.</div>
       ${t.acwr!=null?`<div><b>Load change ${t.acwr.toFixed(2)}\u00d7</b> compares this week against your last four. Over 1.5\u00d7 is a jump big enough to be worth noticing.</div>`:""}
       ${A.modInfo.why.length
-        ? `<div>Your recovery number is adjusted for your check-ins: ${esc(A.modInfo.why.join("; "))}.</div>`
+        ? `<div>Your recovery number is adjusted for what you've logged: ${esc(A.modInfo.why.join("; "))}.</div>`
         : (recentSleep() != null || Object.keys(S.checkins||{}).length
             /* Having check-ins and no adjustment is a RESULT, not a gap. Printing the
                "please log it" prompt at somebody who has been logging it every day is
@@ -16901,7 +16940,7 @@ function viewSync(){
   h += setSec("setSess", "How sessions work", "Warm-ups, RPE, one-limb work, and when weights go up.",
     ()=> prefsSessionHTML());
 
-  h += setSec("setDay", "Sleep and check-ins", "The daily check-in, sleep tracking, and how much sleep you want.",
+  h += setSec("setDay", "Sleep and mornings", "The morning check, sleep tracking, and how much sleep you want.",
     ()=> settingsDayHTML());
 
   h += setSec("setPlan", "Your plan", "What you're training for, your schedule, deloads, volume targets.",
@@ -16932,13 +16971,8 @@ function viewSync(){
    the sleep numbers those questions feed. */
 function settingsDayHTML(){
   const p = trainPrefs();
-  let h = setBlock("The daily check-in",
-    "Sleep, energy and bodyweight. Five seconds, and it's what your recovery number is adjusted by.",
-    prefSeg("data-ciprompt", p.checkinPrompt === false ? "off" : "on",
-      [{v:"on", t:"Ask me each day"}, {v:"off", t:"Don't ask"}]) +
-    `<div class="btn-row" style="margin:10px 0 0"><button class="btn ghost small" id="ciOpen" style="flex:1">Open today's check-in</button></div>`);
-  h += setBlock("Sleep tracking",
-    "Open the app after your night starts and it offers to start the clock; open it in the morning and it asks if you've just woken up. So your sleep is measured rather than remembered.",
+  let h = setBlock("Sleep and mornings",
+    "Open the app after your night starts and it offers to start the clock. The first time you open it the next morning is taken as the time you got up — it says so, you can correct it, and it takes your bodyweight while you're there. So sleep is measured rather than remembered. Turning this off stops both, and nothing is asked outside a workout.",
     prefSeg("data-slprompt", p.sleepPrompt === false ? "off" : "on",
       [{v:"on", t:"Track my sleep"}, {v:"off", t:"Don't"}]) +
     (p.sleepPrompt === false ? "" : `<div class="field" style="margin:10px 0 0"><label>My night starts at</label>
@@ -17216,24 +17250,17 @@ function bind(){
     setTimeout(()=>{ const t=$("#tokenIn"); if(t) t.focus(); }, 60);
   };
 
-  const ciOpen = $("#ciOpen");
-  if(ciOpen) ciOpen.onclick = ()=> openCheckinSheet();
   document.querySelectorAll("[data-slprompt]").forEach(b=> b.onclick = ()=>{
     trainPrefs().sleepPrompt = b.dataset.slprompt === "on";
     pushSyncSchedule();
     save(); queueSync(); render();
-    toast(trainPrefs().sleepPrompt ? "Tracking your sleep" : "Won't ask at night");
+    toast(trainPrefs().sleepPrompt ? "Tracking your sleep" : "Won't ask about sleep or mornings");
   });
   const slT = $("#prefSleepT");
   if(slT) slT.onchange = ()=>{
     if(/^\d{1,2}:\d{2}$/.test(slT.value)){ trainPrefs().sleepTime = slT.value; save(); queueSync(); pushSyncSchedule();
       toast("Night starts at " + slT.value); }
   };
-  document.querySelectorAll("[data-ciprompt]").forEach(b=> b.onclick = ()=>{
-    trainPrefs().checkinPrompt = b.dataset.ciprompt === "on";
-    save(); queueSync(); render();
-    toast(trainPrefs().checkinPrompt ? "Will ask once a day" : "Won't ask \u2014 open it here any time");
-  });
 
   document.querySelectorAll(".set input, .set select").forEach(el=>{
     if(el.dataset.e==null) return;      // skip the session-editor's own rows
@@ -18351,7 +18378,9 @@ function startWorkout(wid){
     })()
   };
   save(); render();
-  checkGymAtStart();
+  /* Energy first — it is one tap and it is about right now — then the location check,
+     which may want a sheet of its own and would otherwise refuse to open on top of it. */
+  askEnergyAtStart(()=> checkGymAtStart());
 }
 /* ONE SLOT OF THE PLAN, TURNED INTO A ROW YOU CAN LOG INTO.
 
