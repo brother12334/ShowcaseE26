@@ -3710,7 +3710,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "10.4";
+const APP_VERSION = "10.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9766,10 +9766,13 @@ function openReportSheet(){
   const errs = errLog();
   const draw = ()=>{
     const d = reportDiag();
+    const blocked = reportBlocker();
     showModal(`<h3>Report a problem</h3>
       <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Goes straight to
         whoever maintains Element 26. The more specific the better — what you tapped, what you expected,
         what happened instead.</div>
+      ${blocked ? `<div class="sync-warn" style="margin:0 0 12px">${REPORT_WHY[blocked] || REPORT_WHY.server}</div>
+      ${blocked === "account" ? `<button class="btn small" id="repConnect" style="margin:0 0 12px">Take me to my account</button>` : ""}` : ""}
       <div class="seg" style="margin:0 0 12px">${REPORT_KINDS.map(o=>
         `<button class="${kind===o.k?"on":""}" data-repkind="${esc(o.k)}">${esc(o.t)}</button>`).join("")}</div>
       <div class="field"><label>What happened?</label>
@@ -9797,10 +9800,31 @@ function openReportSheet(){
       if(text.length < 5){ toast("Tell us a bit more first"); return; }
       const btn = m.querySelector("#repSend");
       btn.disabled = true; btn.textContent = "Sending\u2026";
-      const ok = await sendReport({kind, text});
-      REPORT_DRAFT = ok ? "" : text;
-      hideModal();
-      toast(ok ? "Report sent \u2014 thank you" : "Couldn't send that. It's saved, we'll try again next time you open the app.");
+      const r = await sendReport({kind, text});
+      REPORT_DRAFT = r.ok ? "" : text;
+      if(r.ok){
+        hideModal();
+        toast("Report sent \u2014 thank you");
+        return;
+      }
+      /* NOT A TOAST. A report that did not go is the one moment where the reason matters
+         more than the fact, and a two-second line at the bottom of the screen is where a
+         reason goes to be missed. */
+      btn.disabled = false; btn.textContent = "Send report";
+      showModal(`<h3>Couldn't send that</h3>
+        <div class="sync-warn" style="margin:8px 0 14px">${REPORT_WHY[r.why] || REPORT_WHY.server}</div>
+        <div class="sub" style="margin:0 0 14px;text-transform:none;letter-spacing:0">Nothing is lost \u2014 what
+          you wrote is saved on this device and goes out on its own as soon as it can.</div>
+        ${r.why === "account" ? `<button class="btn small" id="repConnect2" style="margin-bottom:8px">Take me to my account</button>` : ""}
+        <button class="btn ghost small" id="closeModal">OK</button>`);
+      const m2 = $("#modal");
+      const c2 = m2.querySelector("#repConnect2");
+      if(c2) c2.onclick = ()=>{ hideModal(); TAB = "sync"; BODY_OPEN.setAcct = true; render(); window.scrollTo(0,0); };
+    };
+    const conn = m.querySelector("#repConnect");
+    if(conn) conn.onclick = ()=>{
+      REPORT_DRAFT = (m.querySelector("#repText") || {}).value || "";
+      hideModal(); TAB = "sync"; BODY_OPEN.setAcct = true; render(); window.scrollTo(0,0);
     };
     MODAL_REOPEN = openReportSheet;
   };
@@ -9829,35 +9853,69 @@ function buildReport(o){
     errors: errLog()
   }, o || {});
 }
+/* WHY A REPORT CANNOT GO, ANSWERED BEFORE IT IS TYPED.
+
+   "Couldn't send that" was the only thing this ever said, for four completely different
+   situations: an account that was never connected to the cloud and so has nothing to
+   report AS, a service that is not deployed, a service that is deployed and broke, and a
+   phone with no signal. Only the last of those is worth retrying, and only the first is
+   something the person can fix — and it was the one most likely to be true, because a
+   device-only account works perfectly well for everything else in the app.
+
+   So: the sheet says up front when it cannot send and offers the fix, and the failures
+   that do happen come back named rather than as false. */
+function reportBlocker(){
+  if(!E26_API) return "unconfigured";
+  if(!accountAuth()) return "account";
+  return "";
+}
+const REPORT_WHY = {
+  unconfigured: "This copy of Element 26 has no report service configured, so there is nowhere to send it.",
+  account: "A report is filed against your account \u2014 that is how a reply reaches you, and it is what stops the inbox being an open text box on the internet. <b>Connect this account to the cloud</b> under Your account and it will send.",
+  missing: "The report service didn't recognise that address. It may need redeploying \u2014 your report is saved and will go the moment it does.",
+  server: "The report service is having trouble. Your report is saved and it'll try again next time you open the app.",
+  offline: "No connection. Your report is saved and it'll go next time you open the app.",
+  rate: "That's a few reports in an hour. Your report is saved \u2014 it'll go through a bit later.",
+  auth: "Your account wasn't accepted by the service. Check you're signed in under Your account."
+};
 async function sendReport(o){
   const rec = o && o.app ? o : buildReport(o);
-  if(!accountAuth()){ const q = reportQueue(); q.push(rec); saveReportQueue(q); return false; }
+  const queue = why=>{ const q = reportQueue(); q.push(rec); saveReportQueue(q); return {ok:false, why}; };
+  const blocked = reportBlocker();
+  if(blocked) return queue(blocked);
+  let res;
   try{
-    const res = await apiFetch("/report", {
+    res = await apiFetch("/report", {
       method:"POST",
       headers:{"Content-Type":"application/json", "Authorization": accountAuth()},
       body: JSON.stringify(rec)
     });
-    if(res.ok){
-      // the errors have been reported; keeping them would attach them to the next one too
-      try{ localStorage.removeItem(ERR_KEY); }catch(e){}
-      return true;
-    }
-    if(res.status === 429){ toast("That's a few reports in an hour \u2014 try again later"); return false; }
-  }catch(e){}
-  const q = reportQueue(); q.push(rec); saveReportQueue(q);
-  return false;
+  }catch(e){ return queue("offline"); }
+  if(res.ok){
+    // the errors have been reported; keeping them would attach them to the next one too
+    try{ localStorage.removeItem(ERR_KEY); }catch(e){}
+    return {ok:true};
+  }
+  if(res.status === 404) return queue("missing");
+  if(res.status === 401 || res.status === 403) return queue("auth");
+  if(res.status === 429) return queue("rate");
+  return queue("server");
 }
 /* Flushed at launch, quietly. Nothing is said about it either way: a report that finally
    went through does not need announcing, and one that still cannot go stays queued. */
 async function flushReports(){
-  if(!accountAuth()) return;
+  if(reportBlocker()) return;
   const q = reportQueue();
   if(!q.length) return;
   saveReportQueue([]);
   const left = [];
-  for(const rec of q){ if(!(await sendReport(rec))) left.push(rec); }
-  if(left.length) saveReportQueue(left);
+  for(const rec of q){
+    const r = await sendReport(rec);
+    if(!r || !r.ok) left.push(rec);
+  }
+  /* sendReport() re-queues what it could not send, so the retries are already back on
+     the list; writing `left` on top of that would store each one twice. */
+  saveReportQueue(left);
 }
 
 const PUSH_WHY = {
