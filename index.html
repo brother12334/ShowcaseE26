@@ -3739,7 +3739,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "10.6";
+const APP_VERSION = "10.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -24335,6 +24335,10 @@ function quoteOfTheDay(){
    launch late by design, so without a word to that effect the honest behaviour — serve
    instantly from cache, refresh in the background — is indistinguishable from the app
    being broken and stuck on an old version. */
+/* Said once a launch, and read from an async message handler — declared here rather
+   than in the script's tail, where a `let` is a temporal dead zone until the last line
+   runs. That trap has taken this file down four times. */
+let UPDATE_SEEN = false;
 if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
   window.addEventListener("load", ()=>{
     navigator.serviceWorker.register("sw.js").catch(()=>{});
@@ -24355,6 +24359,17 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
       /* Deliberately not auto-reloading. Doing that mid-session would tear down an
          in-progress workout to deliver a cosmetic change. */
       try{ toast("Updated to v" + ev.data.version + " \u2014 reopen when you're done"); }catch(e){}
+    }
+    /* THE NEW PAGE IS DOWNLOADED AND WAITING. The service worker serves the copy from
+       last launch and fetches the new one behind it, so an update is always one open
+       late — and silently, which is indistinguishable from an update that never
+       shipped. This is the only moment the app knows, so it says so. Once per launch:
+       a banner that reappears every time the worker re-checks is worse than no banner. */
+    if(ev.data && ev.data.type === "e26-shell-updated" && !UPDATE_SEEN){
+      UPDATE_SEEN = true;
+      if(!S.active){
+        try{ toast("A new version is ready \u2014 close and reopen Element 26"); }catch(e){}
+      }
     }
   });
 }

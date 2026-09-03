@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "7.5";
+const VERSION = "7.6";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -232,8 +232,30 @@ self.addEventListener("fetch", event=>{
       const cache = await caches.open(SHELL);
       const cached = await cache.match("./index.html") || await cache.match("./");
       if(cached){
-        event.waitUntil(fetch(req).then(res=>{
-          if(res && res.ok) return cache.put("./index.html", res.clone());
+        /* TELL THE PAGE WHEN A NEW ONE ARRIVES.
+
+           Cache-first means the version you are looking at is always the one from last
+           launch, and the fresh copy this fetch stores only becomes visible the NEXT
+           time the app is opened. That is the right trade for an app you use in a gym
+           with no signal — but done silently it looks exactly like a change that never
+           shipped, which is how "it didn't push" gets said about a push that worked.
+
+           So the shell is compared with the one already cached, and when it differs the
+           open page is told. It is not reloaded from under you: doing that mid-session
+           would tear down an in-progress workout to deliver a cosmetic change. The page
+           says a new version is ready and leaves the moment to you. */
+        event.waitUntil(fetch(req).then(async res=>{
+          if(!res || !res.ok) return;
+          let changed = true;
+          try{
+            const [was, now] = await Promise.all([cached.clone().text(), res.clone().text()]);
+            changed = was !== now;
+          }catch(e){}
+          await cache.put("./index.html", res.clone());
+          if(changed){
+            const clients = await self.clients.matchAll({type:"window"});
+            clients.forEach(c=> c.postMessage({type:"e26-shell-updated"}));
+          }
         }).catch(()=>{}));
         return cached;
       }
