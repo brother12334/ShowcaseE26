@@ -3898,7 +3898,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.9";
+const APP_VERSION = "12.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -18979,13 +18979,27 @@ function bind(){
       const entry = S.active.entries[ei];
       const wasComplete = entryDone(entry);
       const st = entry.sets[si];
+      const nudge = (msg)=>{
+        el.classList.remove("chk-nudge"); void el.offsetWidth; el.classList.add("chk-nudge");
+        toast(msg);
+      };
       /* A FINISHED EXERCISE STAYS FINISHED. See entryDone(): unticking one threw away
          its rest and its PR, and moved a running clock onto an exercise nobody had
          started. Numbers are still editable in the boxes; the fact is not. */
       if(wasComplete && st.done){
-        el.classList.remove("chk-nudge"); void el.offsetWidth; el.classList.add("chk-nudge");
-        toast("Already logged \u2014 edit the numbers if they're wrong");
+        nudge("Already logged \u2014 edit the numbers if they're wrong");
         return;
+      }
+      /* AND SO DOES EVERY SET BEHIND THE ONE YOU ARE ON. Only the set you just finished
+         can be taken back; the ones before it are done, and un-ticking one of those
+         deleted the rest it had recorded and killed the clock that was running for the
+         set you are actually resting from. An undo is for the tap you just made. */
+      if(st.done){
+        const last = lastDoneInOrder(S.active.entries);
+        if(!last || last.ei !== ei || last.si !== si){
+          nudge("Already logged \u2014 only the set you just finished can be undone");
+          return;
+        }
       }
       // About to log a set while a rest timer for a DIFFERENT set is barely started?
       // That means the last rest was ~nothing, ask before it gets recorded, using the
@@ -19030,7 +19044,12 @@ function bind(){
            that set was not the end of the session, so the stopwatch started on the walk
            to the car, and the label above it had already been fixed to say otherwise.
            The question is asked directly instead: does any set remain after this one. */
-        if(endsRound(S.active.entries, ei, si) && setsRemainAfter(S.active.entries, ei, si)){
+        /* AND NOT FOR A SET THAT IS ALREADY BEHIND YOU. Ticking a set you skipped
+           earlier is catching the log up, not finishing a set — starting its rest
+           would throw away the clock running for the set you really are resting from,
+           which is the whole reason the timer exists. */
+        if(endsRound(S.active.entries, ei, si) && setsRemainAfter(S.active.entries, ei, si)
+           && !doneAfter(S.active.entries, ei, si)){
           startRest(ei, si);
         }
       } else {
@@ -24160,6 +24179,29 @@ function setsRemainAfter(list, ei, si){
   const at = order.findIndex(x=> x.ei === ei && x.si === si);
   if(at < 0) return false;                  // not in the running order at all
   return at < order.length - 1;
+}
+/* WHICH SET WAS THE LAST ONE ACTUALLY FINISHED, in the order the session runs — so a
+   superset pair is read round by round rather than exercise by exercise. */
+function lastDoneInOrder(list){
+  const order = sessionOrder(list);
+  for(let i = order.length - 1; i >= 0; i--){
+    const o = order[i];
+    const st = ((list[o.ei] || {}).sets || [])[o.si];
+    if(st && st.done) return o;
+  }
+  return null;
+}
+// Has anything AFTER this set already been logged? If so this one is history, not the front.
+function doneAfter(list, ei, si){
+  const order = sessionOrder(list);
+  const at = order.findIndex(x=> x.ei === ei && x.si === si);
+  if(at < 0) return false;
+  for(let i = at + 1; i < order.length; i++){
+    const o = order[i];
+    const st = ((list[o.ei] || {}).sets || [])[o.si];
+    if(st && st.done) return true;
+  }
+  return false;
 }
 function supersetInfo(list, i){
   const cur = list && list[i];
