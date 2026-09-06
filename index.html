@@ -228,6 +228,44 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 /* Five choices where the segmented control was built for two: the numbers are short,
    so they get less air and no letter-spacing rather than a scrollbar. */
 .step-seg button{padding:13px 4px;font-size:12px;letter-spacing:.02em}
+/* THE DAY EDITOR. One day, one card per movement, every control on the card. */
+.de-ex{padding:14px 15px}
+.de-ss{border-left:3px solid var(--acc-line)}
+.de-head{display:flex;gap:11px;align-items:flex-start}
+.de-n{flex:0 0 auto;width:22px;height:22px;border-radius:6px;background:var(--card2);
+  color:var(--faint);font-size:12px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.de-ex .meta{font-family:var(--mono);font-size:12.5px;color:var(--dim);margin-top:3px}
+.de-note{font-size:12.5px;color:var(--faint);margin:7px 0 0;padding-left:33px}
+.de-mus{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;margin:9px 0 0;padding-left:33px;font-size:12px}
+.de-mus-p{color:var(--text)}
+.de-mus-s{color:var(--dim)}
+.de-mus-t{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.de-ask{color:var(--faint)}
+.de-ask .linklike{font-size:12px}
+.de-btns{display:flex;gap:6px;margin:11px 0 0;padding-left:33px}
+.de-btns button{
+  flex:1 1 0;min-height:38px;border-radius:9px;border:1px solid var(--line);
+  background:var(--card2);color:var(--dim);cursor:pointer;font-size:13px;
+  display:flex;align-items:center;justify-content:center;
+}
+.de-btns button .ico{width:15px;height:15px}
+.de-btns button:disabled{opacity:.35}
+.de-btns button.danger{color:var(--bad)}
+/* The suggestion, shown before it is taken. It is a proposal on the screen, not a value
+   already written into the plan — hence its own panel rather than pre-filled boxes. */
+.sug-card{border:1px solid var(--acc-line);background:var(--acc-soft);border-radius:11px;
+  padding:12px 13px;margin:0 0 14px}
+.sug-k{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--acc)}
+.sug-v{font-family:var(--mono);font-size:19px;color:var(--text);margin-top:5px}
+.sug-w{font-size:12px;color:var(--dim);line-height:1.45;margin-top:5px}
+/* Saying what a movement trains, in the same weights the tables use. */
+.mus-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow-y:auto}
+.mus-row{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+  padding:11px 13px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
+  color:var(--dim);cursor:pointer;font:inherit;font-size:13.5px}
+.mus-row.on{border-color:var(--acc-line);color:var(--text)}
+.mus-v{font:11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.mus-row.on .mus-v{color:var(--acc)}
 /* THE SETTINGS GRID. Two across, each tile carrying its own value and a drawing of it.
    A button, not a div: it is the only thing on the screen you can press, and it should
    answer to a keyboard and a screen reader as one. */
@@ -3739,7 +3777,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "10.7";
+const APP_VERSION = "11.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6228,6 +6266,7 @@ function migrate(){
   USER_ALIASES = S.exAliases;
   /* Where you train. Both are absent for everybody who installed before this existed,
      and absent means "never asked" — see checkGymAtStart(). */
+  if(!S.exMuscles || typeof S.exMuscles !== "object") S.exMuscles = {};
   if(!Array.isArray(S.gyms)) S.gyms = [];
   S.gyms = S.gyms.filter(g=> g && g.id && Array.isArray(g.spots));
   if(S.geo !== "on" && S.geo !== "off") S.geo = null;
@@ -8137,13 +8176,299 @@ const MUSCLE_KEYWORDS = [
   [/oblique|russian twist|side bend|woodchop/,                             {obliques:1, abs:.4}]
 ];
 const EX_MUSCLES_C = canonIndex(EX_MUSCLES);
+/* WHAT THIS MOVEMENT TRAINS, IN ORDER OF WHO IS MOST LIKELY TO BE RIGHT.
+
+   You first: a mapping somebody confirmed by hand outranks everything, because they are
+   the one who did the exercise. Then the app's own tables and keyword patterns, which are
+   curated and cover the movements a plan usually contains. Then a stored classification
+   for a movement the tables have never heard of — see classifyExercise(). Still nothing
+   means nothing: an exercise the app cannot place contributes no volume rather than
+   contributing a guess, and shows up as something to confirm. */
 function musclesFor(name){
+  const rec = exMuscleRec(name);
+  if(rec && rec.map && rec.src === "you") return rec.map;
   const k = nrm(name);
   const t = tableKey(name);                       // survives a rename
   if(EX_MUSCLES_C[t]) return EX_MUSCLES_C[t];
   if(EX_MUSCLES_C[k]) return EX_MUSCLES_C[k];
+  /* A CLASSIFICATION BEATS A KEYWORD, and this order is the whole reason to have one.
+     The keyword list is deliberately loose so that most of a plan lands somewhere — but
+     loose means /curl/ files a Jefferson curl under biceps, and a spinal flexion movement
+     counted as arm work is worse than one counted nowhere. A stored classification was
+     made about THIS name, in full, and only stored when the model was sure; the exact
+     table above still wins, because those entries were written by hand. */
+  if(rec && rec.map) return rec.map;
   for(const [re, m] of MUSCLE_KEYWORDS){ if(re.test(k) || re.test(t)) return m; }
   return null;
+}
+/* =====================================================================
+   PROGRAMMING A NEW EXERCISE FROM THE DAY AROUND IT
+
+   Adding an exercise used to open a form pre-filled with 3 x 8-10 and nothing else,
+   which is a guess dressed as a default. Meanwhile the answer is sitting on the same
+   screen: the day you are adding to already says what kind of training this is. A day
+   of 3 x 8-12 at RPE 7-9 is a hypertrophy day, and a lateral raise dropped into it
+   should arrive as 3 x 10-15 at RPE 8 rather than as whatever the form was last left at.
+
+   WHAT IT READS. The sets, rep ranges and RPE targets of the exercises already in the
+   day; whether the new movement is a compound or an isolation, since the same day
+   programmes those differently; where in the day it lands, because an accessory at the
+   end is not prescribed like the opener; and, if the same movement is already programmed
+   somewhere else in the plan, that copy wins outright — the plan has already answered
+   the question and disagreeing with itself is worse than any heuristic.
+
+   IT SUGGESTS. Every number it produces is editable before it is saved, and once the
+   person changes one the suggestion has done its job and gets out of the way: nothing
+   here re-derives or overwrites a value that was typed. */
+function medianOf(list){
+  const v = list.filter(x=> isFinite(x)).sort((a,b)=> a-b);
+  if(!v.length) return null;
+  const n = v.length;
+  return n % 2 ? v[(n-1)/2] : (v[n/2-1] + v[n/2]) / 2;
+}
+// The same movement, already programmed. The plan's own answer beats any inference.
+function planTwinOf(name, skipWid, skipIdx){
+  const k = nrm(name);
+  if(!k) return null;
+  const days = DAYS.concat(["finisher"]);
+  for(const d of days){
+    const list = S.program[d] || [];
+    for(let i = 0; i < list.length; i++){
+      if(d === skipWid && i === skipIdx) continue;
+      const e = list[i];
+      if(!e) continue;
+      if(nrm(e.name) === k) return {e, wid: d};
+      if(e.alt && nrm(e.alt.name) === k) return {e: e.alt, wid: d};
+    }
+  }
+  return null;
+}
+function suggestProgramming(wid, name, atIdx){
+  const list = (S.program[wid] || []).filter(e=> e && e.name);
+  const twin = planTwinOf(name, wid, atIdx);
+  if(twin){
+    return {sets: twin.e.sets, reps: twin.e.reps, rpe: twin.e.rpe,
+            rest: Array.isArray(twin.e.rest) ? twin.e.rest.slice() : null,
+            why: "Copied from the same movement on " + widName(twin.wid) + "."};
+  }
+  if(!list.length){
+    const comp = isCompound(name);
+    return {sets: comp ? 4 : 3, reps: comp ? "6-10" : "10-15", rpe: comp ? "7-9" : "8-9", rest: null,
+            why: "Nothing else on this day yet — a standard "
+               + (comp ? "compound" : "isolation") + " prescription."};
+  }
+  /* Compounds and isolations in the same day are not programmed alike, so the day is
+     read through the lens of what is being added: the movements of the same KIND are
+     the evidence, and the whole day is only the fallback when there are none. */
+  const comp = isCompound(name);
+  const kin = list.filter(e=> isCompound(e.name) === comp);
+  const src = kin.length ? kin : list;
+
+  const sets = Math.max(1, Math.round(medianOf(src.map(e=> parseInt(e.sets, 10))) || 3));
+  // rep ranges: the median bottom and the median top across the day, kept as a range
+  const ranges = src.map(e=> repRange(e.reps)).filter(Boolean);
+  let reps;
+  if(ranges.length){
+    const lo = Math.round(medianOf(ranges.map(r=> r[0])));
+    const hi = Math.round(medianOf(ranges.map(r=> r[1])));
+    /* An isolation added to a day of heavy compounds takes the day's STYLE without
+       taking its rep range literally: a lateral raise at 5-8 is not what a day of 5-8
+       squats implies. Shifted up a band, and only in that direction. */
+    const shift = (!comp && lo <= 8) ? 4 : 0;
+    reps = (lo + shift) + "-" + (hi + shift + (shift ? 2 : 0));
+  } else {
+    reps = comp ? "6-10" : "10-15";
+  }
+  // RPE: the most common target in the day, so a ramp does not average into nonsense
+  const rpes = src.map(e=> String(e.rpe || "").trim()).filter(Boolean);
+  const tally = {};
+  rpes.forEach(r=> tally[r] = (tally[r] || 0) + 1);
+  let rpe = Object.keys(tally).sort((a,b)=> tally[b] - tally[a])[0] || (comp ? "7-9" : "8-9");
+  /* Last in the day is where the accessories go, and an accessory is taken closer to
+     failure than the opener because there is nothing after it to protect. */
+  const last = atIdx == null || atIdx >= list.length;
+  if(last && !comp){
+    const rr = repRange(rpe);
+    if(rr && rr[1] < 9) rpe = rr[0] + 1 + "-" + (rr[1] + 1);
+  }
+  const rests = src.map(e=> Array.isArray(e.rest) ? e.rest : null).filter(Boolean);
+  const rest = rests.length
+    ? [Math.round(medianOf(rests.map(r=> r[0]))), Math.round(medianOf(rests.map(r=> r[1])))]
+    : null;
+  const nKin = kin.length;
+  return {sets, reps, rpe, rest,
+    why: nKin
+      ? "Matches the " + (comp ? "compound" : "isolation") + " work already on this day — "
+        + nKin + (nKin === 1 ? " exercise" : " exercises") + " at " + sets + "×" + reps
+        + (rpe ? " @ RPE " + rpe : "") + "."
+      : "Built from the rest of this day."};
+}
+
+/* =====================================================================
+   WHAT AN EXERCISE TRAINS, WHEN THE APP HAS NEVER HEARD OF IT
+
+   The Body tab is built on EX_MUSCLES: a movement maps to muscles with a WEIGHT for how
+   much of it each one takes — 1 for what it is for, .5 for what it helps with, .2 for
+   what merely stabilises. That weighting is the whole reason a compound and an isolation
+   are not counted the same, and it is why the tab can say a muscle is trained directly
+   rather than only along for the ride.
+
+   The table covers what the app knows and a list of keyword patterns covers most of the
+   rest. What neither covers returns null — and a null contributes NOTHING. Add a
+   movement the table has never seen, log ten sets of it, and the Body tab shows those
+   sets nowhere. That is the gap this closes.
+
+   THE MODEL CLASSIFIES; IT DOES NOT COUNT. Gemini is asked one question, once per
+   exercise name — which of THESE muscle keys does this movement train, and how much —
+   and the answer is stored. Every number the Body tab shows is then computed locally
+   from stored weights, exactly as it always was. No screen waits on a network call, the
+   same exercise is never asked about twice, and the tab works offline forever after.
+
+   UNCERTAIN IS NOT STORED AS FACT. A low-confidence answer, or one that maps to nothing
+   the app tracks, is kept as a QUESTION: it shows up as something to confirm and
+   contributes no volume until it is. Guessing quietly is how a Body tab ends up
+   confidently wrong, and a confidently wrong recovery reading is worse than a blank. */
+const EXM_MIN_CONF = 0.6;
+function exMuscleStore(){
+  if(!S.exMuscles || typeof S.exMuscles !== "object") S.exMuscles = {};
+  return S.exMuscles;
+}
+// Keyed the same way every other exercise lookup is, so a rename carries the mapping.
+function exmKey(name){ return tableKey(name) || nrm(name); }
+function exMuscleRec(name){
+  const store = exMuscleStore();
+  return store[exmKey(name)] || store[nrm(name)] || null;
+}
+/* Only weights on muscles the app actually tracks, clamped to the range the tables use,
+   and never more than a handful — a model that lists nine muscles for a curl has not
+   understood the question and its answer should not become the app's data. */
+function cleanMuscleMap(raw){
+  const out = {};
+  if(!raw || typeof raw !== "object") return null;
+  Object.keys(raw).forEach(k=>{
+    if(MKEYS.indexOf(k) < 0) return;
+    const v = Number(raw[k]);
+    if(!isFinite(v) || v <= 0) return;
+    out[k] = Math.max(.1, Math.min(1, Math.round(v * 10) / 10));
+  });
+  const keys = Object.keys(out);
+  if(!keys.length) return null;
+  if(!keys.some(k=> out[k] >= .9)) return null;      // nothing is the point of the movement
+  if(keys.length > 6){
+    keys.sort((a,b)=> out[b] - out[a]).slice(6).forEach(k=> delete out[k]);
+  }
+  return out;
+}
+const EXM_SCHEMA = {
+  type:"object",
+  properties:{
+    known:{type:"boolean"},
+    confidence:{type:"number"},
+    muscles:{type:"array", items:{type:"object", properties:{
+      key:{type:"string", enum: MKEYS},
+      share:{type:"number"}
+    }, required:["key","share"]}}
+  },
+  required:["known","confidence","muscles"]
+};
+function exmSystemPrompt(){
+  return "You classify resistance-training exercises by the muscles they train.\n"
+    + "You are given one exercise name. Return the muscles it trains, using ONLY these keys:\n"
+    + MKEYS.map(k=> "  " + k + " — " + (GROUPS[k] ? GROUPS[k].name : k)).join("\n") + "\n\n"
+    + "share is how much of the movement that muscle takes:\n"
+    + "  1.0  the muscle the exercise is FOR (there must be at least one)\n"
+    + "  0.4-0.6  a real assisting muscle that is worked hard\n"
+    + "  0.1-0.3  a stabiliser or minor contributor\n"
+    + "List at most 5. Do not list a muscle that is merely present.\n"
+    + "Recognise common spellings, abbreviations and gym slang, and treat a machine, "
+    + "cable, dumbbell or barbell version of the same movement as that movement.\n"
+    + "known=false and confidence=0 if the name is not a resistance exercise you can "
+    + "identify — a made-up name, a typo you cannot resolve, or something too vague to "
+    + "place. Never guess to fill the answer: a wrong classification is worse than none.";
+}
+/* One name, one call, one stored answer. Returns the record it stored, or a record
+   marked `ask` when the model was not sure enough to be believed. */
+async function classifyExercise(name){
+  const clean = String(name || "").trim();
+  if(!clean) return null;
+  const key = exmKey(clean);
+  const store = exMuscleStore();
+  const have = store[key];
+  if(have && (have.map || have.ask)) return have;          // asked once, ever
+  if(!aiReady()) return null;
+  let out;
+  try{
+    out = await aiCall([{text: clean}], {
+      system: exmSystemPrompt(),
+      schema: EXM_SCHEMA,
+      temperature: 0
+    });
+  }catch(e){ return null; }                                 // offline: ask again later
+  const raw = {};
+  (out && Array.isArray(out.muscles) ? out.muscles : []).forEach(m=>{
+    if(m && m.key) raw[m.key] = m.share;
+  });
+  const map = cleanMuscleMap(raw);
+  const conf = Number(out && out.confidence) || 0;
+  const rec = {at: Date.now(), src: "ai", conf: Math.round(conf * 100) / 100, name: clean};
+  if(!map || out.known === false || conf < EXM_MIN_CONF){
+    rec.ask = true;                                         // a question, not an answer
+    if(map) rec.guess = map;
+  } else {
+    rec.map = map;
+  }
+  store[key] = rec;
+  save(); queueSync();
+  return rec;
+}
+/* Every name in the plan the app cannot place yet. Names, not exercises: two slots of
+   the same movement are one question. */
+function unclassifiedNames(){
+  const seen = {}, out = [];
+  const consider = e=>{
+    if(!e || !e.name) return;
+    const k = exmKey(e.name);
+    if(seen[k]) return;
+    seen[k] = 1;
+    /* The exact tables, not musclesFor(): a name that only matches a loose keyword
+       pattern is exactly the kind the model should be asked about. */
+    const t = tableKey(e.name);
+    if(EX_MUSCLES_C[t] || EX_MUSCLES_C[nrm(e.name)]) return;
+    const rec = exMuscleRec(e.name);
+    if(rec && (rec.map || rec.ask)) return;                 // already asked
+    out.push(e.name);
+  };
+  DAYS.concat(["finisher"]).forEach(d=> (S.program[d] || []).forEach(e=>{
+    consider(e); if(e && e.alt) consider(e.alt);
+  }));
+  return out;
+}
+/* Run in the background after a plan changes, one at a time, and never more than a few
+   in a sitting — a plan pasted in with forty unknown names should not become forty
+   requests the moment it lands. */
+let EXM_BUSY = false;
+async function classifyPlanExercises(limit){
+  if(EXM_BUSY || !aiReady()) return 0;
+  const names = unclassifiedNames().slice(0, limit || 6);
+  if(!names.length) return 0;
+  EXM_BUSY = true;
+  let n = 0;
+  try{
+    for(const nm of names){
+      const rec = await classifyExercise(nm);
+      if(rec && rec.map) n++;
+    }
+  } finally { EXM_BUSY = false; }
+  if(n) render();
+  return n;
+}
+// What the app believes this exercise trains, in the order the Body tab reads it.
+function muscleSourceOf(name){
+  const rec = exMuscleRec(name);
+  if(rec && rec.map) return {map: rec.map, src: rec.src === "you" ? "you" : "ai", rec};
+  const built = musclesFor(name);
+  if(built) return {map: built, src: "table", rec: null};
+  return {map: null, src: rec && rec.ask ? "ask" : "none", rec: rec || null};
 }
 // No RPE logged? Assume a normal hard working set rather than throwing the set away.
 function effRpe(st){ const r = parseFloat(st && st.rpe); return r > 0 ? r : 8; }
@@ -13492,6 +13817,7 @@ function render(){
   }
   document.body.classList.remove("onboarding");
   if(TAB !== "sync"){ ADV_OPEN = false; SET_PAGE = null; }
+  if(TAB !== "program") DAY_EDIT = null;
   if(TAB==="today") app.innerHTML = viewToday();
   else if(TAB==="history") app.innerHTML = viewHistory();
   else if(TAB==="body") app.innerHTML = viewBody();
@@ -17080,6 +17406,7 @@ function hasAltExercises(){
   return DAYS.some(d=>(S.program[d]||[]).some(e=>e && e.alt));
 }
 function viewProgram(){
+  if(DAY_EDIT && (S.program[DAY_EDIT] || DAY_EDIT === "finisher")) return viewDayEdit(DAY_EDIT);
   let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>
   <div class="sub" style="margin:-8px 2px 14px">Your rotation: ${esc(ROTATION.map(w=>dayName(w)).join(" → "))}.${
     hasAltExercises() ? " Exercises marked ⇄ alternate automatically every other session of that day." : ""
@@ -17102,6 +17429,7 @@ function viewProgram(){
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px">
         <span class="dot" style="background:${m.color}"></span><h3>${esc(m.name)}</h3>
         <button class="linklike" data-renameday="${wid}" style="margin-left:auto;font-size:12.5px">rename</button>
+        <button class="linklike" data-dayedit="${wid}" style="font-size:12.5px">edit day</button>
       </div>`;
     // `|| []` rather than a bare index: a day key can legitimately be missing for a
     // moment after a sync restores an older plan, and a thrown Program tab is a much
@@ -18401,6 +18729,76 @@ function bind(){
 
   document.querySelectorAll("[data-edit]").forEach(b=> b.onclick=()=> openExEditor(...b.dataset.edit.split(":")));
   document.querySelectorAll("[data-addex]").forEach(b=> b.onclick=()=> openExEditor(b.dataset.addex, -1));
+  /* ---- the day editor ---- */
+  document.querySelectorAll("[data-dayedit]").forEach(b=> b.onclick = ()=> dayEditOpen(b.dataset.dayedit));
+  const deB = $("#deBack");
+  if(deB) deB.onclick = dayEditClose;
+  document.querySelectorAll("[data-deadd]").forEach(b=> b.onclick = ()=> openAddExercise(b.dataset.deadd));
+  document.querySelectorAll("[data-deedit]").forEach(b=> b.onclick = ()=>{
+    const [wid, i] = b.dataset.deedit.split(":");
+    openExEditor(wid, parseInt(i, 10));
+  });
+  const deMove = (attr, d)=> document.querySelectorAll("[" + attr + "]").forEach(b=> b.onclick = ()=>{
+    const [wid, i0] = b.getAttribute(attr).split(":");
+    const list = S.program[wid] || [];
+    const i = parseInt(i0, 10), j = i + d;
+    if(j < 0 || j >= list.length) return;
+    /* A superset is "this one, then the next one with no rest between", so the pairing
+       lives on POSITION. Moving one half away from the other has to take the flag with
+       it or the pair silently re-forms around whoever lands next to it. */
+    const a = list[i], b2 = list[j];
+    const aSS = !!a.superset, bSS = !!b2.superset;
+    list[i] = b2; list[j] = a;
+    if(aSS !== bSS){ a.superset = bSS || undefined; b2.superset = aSS || undefined;
+      if(!a.superset) delete a.superset; if(!b2.superset) delete b2.superset; }
+    save(); queueSync(); render();
+  });
+  deMove("data-deup", -1);
+  deMove("data-dedown", 1);
+  document.querySelectorAll("[data-dedup]").forEach(b=> b.onclick = ()=>{
+    const [wid, i0] = b.dataset.dedup.split(":");
+    const list = S.program[wid] || [];
+    const i = parseInt(i0, 10);
+    const src = list[i];
+    if(!src) return;
+    /* A deep copy, and NOT of the superset flag: a duplicate landing between a pair and
+       its partner would otherwise make a three-exercise superset nobody asked for. */
+    const copy = JSON.parse(JSON.stringify(src));
+    delete copy.superset;
+    list.splice(i + 1, 0, copy);
+    logPlanChange("added", wid, copy.name, ["Duplicated from the same day"], {});
+    save(); queueSync(); render();
+    toast("Duplicated");
+  });
+  document.querySelectorAll("[data-dedel]").forEach(b=> b.onclick = async ()=>{
+    const [wid, i0] = b.dataset.dedel.split(":");
+    const list = S.program[wid] || [];
+    const i = parseInt(i0, 10);
+    const e = list[i];
+    if(!e) return;
+    const yes = await askConfirm({
+      title:"Take " + e.name + " out?",
+      body:"It comes off this day from now on. <b>Sessions you have already logged keep it</b> — "
+         + "nothing in your history changes.",
+      yes:"Remove it", no:"Keep it", danger:true});
+    if(!yes) return;
+    const prev = list[i-1];
+    list.splice(i, 1);
+    // the first half of a pair whose partner just left is not a superset any more
+    if(prev && prev.superset && !list[i]) delete prev.superset;
+    logPlanChange("removed", wid, e.name, ["Taken off " + widName(wid)], {});
+    save(); queueSync(); render();
+    toast("Removed");
+  });
+  document.querySelectorAll("[data-exmask]").forEach(b=> b.onclick = ()=> openMuscleEditor(b.dataset.exmask));
+  const deC = $("#deClassify");
+  if(deC) deC.onclick = async ()=>{
+    deC.disabled = true; deC.textContent = "Working them out\u2026";
+    const n = await classifyPlanExercises(8);
+    render();
+    toast(n ? n + (n === 1 ? " exercise mapped" : " exercises mapped")
+            : "Couldn't work those out \u2014 set them by hand");
+  };
   document.querySelectorAll("[data-up]").forEach(b=> b.onclick=()=> moveEx(...b.dataset.up.split(":"), -1));
   document.querySelectorAll("[data-down]").forEach(b=> b.onclick=()=> moveEx(...b.dataset.down.split(":"), 1));
 
@@ -19255,6 +19653,195 @@ function planChangeSentence(c){
 }
 
 /* ---------- program editor ---------- */
+/* =====================================================================
+   THE DAY EDITOR
+
+   The Program tab lists every day at once, which is the right shape for reading a plan
+   and the wrong one for changing it: to move an exercise you scrolled past four other
+   days, and the only way to alter anything was a modal that covered the day you were
+   working on. This is one day, on its own screen, with everything about it in reach —
+   order, add, duplicate, remove, and the whole prescription of each movement.
+
+   It edits S.program[wid] IN PLACE and saves on every change. No draft, no Save button
+   to forget: the plan is the plan, and a plan editor that can be abandoned halfway
+   leaves you unsure which version you are looking at. Undo is the change back. */
+let DAY_EDIT = null;                  // the day being edited, or null
+
+function dayEditOpen(wid){ DAY_EDIT = wid; render(); window.scrollTo(0, 0); }
+function dayEditClose(){ DAY_EDIT = null; render(); window.scrollTo(0, 0); }
+
+// The one-line prescription under a name, in the plan's own vocabulary.
+function exLineHTML(e){
+  const bits = [];
+  bits.push(e.sets + "×" + esc(e.reps || "?"));
+  if(e.rpe) bits.push("RPE " + esc(String(e.rpe)));
+  if(Array.isArray(e.rest)) bits.push(fmtClock(e.rest[0]) + "–" + fmtClock(e.rest[1]) + " rest");
+  if(e.weight != null) bits.push(fmtLoad(e.weight));
+  return bits.join(" · ");
+}
+/* What the app believes this movement trains, said in the tile itself. It is the one
+   place the muscle mapping is visible while you are the one choosing the exercise, which
+   is the only moment you can correct it cheaply. */
+function exMuscleLineHTML(e){
+  const s = muscleSourceOf(e.name);
+  if(s.map){
+    const keys = Object.keys(s.map).sort((a,b)=> s.map[b] - s.map[a]);
+    const prime = keys.filter(k=> s.map[k] >= .9).map(k=> GROUPS[k].name);
+    const rest  = keys.filter(k=> s.map[k] < .9).map(k=> GROUPS[k].name);
+    return `<div class="de-mus">
+      <span class="de-mus-p">${esc(prime.join(", ") || "—")}</span>${
+        rest.length ? `<span class="de-mus-s">+ ${esc(rest.join(", "))}</span>` : ""}${
+        s.src === "ai" ? `<span class="de-mus-t">read for you</span>`
+        : s.src === "you" ? `<span class="de-mus-t">you set this</span>` : ""}
+    </div>`;
+  }
+  if(s.src === "ask"){
+    return `<div class="de-mus de-ask">
+      <span>Not sure what this trains — its sets aren't counted anywhere yet.</span>
+      <button class="linklike" data-exmask="${attrSafe(e.name)}">Tell it</button>
+    </div>`;
+  }
+  return `<div class="de-mus de-ask">
+    <span>Not in the muscle tables yet.</span>
+    <button class="linklike" data-exmask="${attrSafe(e.name)}">Set what it trains</button>
+  </div>`;
+}
+function viewDayEdit(wid){
+  const list = S.program[wid] || [];
+  const m = dayMeta(wid);
+  const label = wid === "finisher" ? "Finisher" : m.name;
+  let h = `<div class="hdr"><h1>${esc(label.toUpperCase())}</h1>${hdrRight()}</div>
+    <button class="btn ghost small" id="deBack" style="margin-bottom:12px">‹ Program</button>
+    <div class="sub" style="margin:0 2px 14px;font-size:12.5px;color:var(--faint)">${
+      list.length ? list.length + (list.length === 1 ? " exercise" : " exercises")
+        + " · " + list.reduce((n,e)=> n + (parseInt(e.sets,10)||0), 0) + " sets."
+        : "Nothing on this day yet."} Everything here saves as you change it.</div>`;
+  list.forEach((e, i)=>{
+    const ss = supersetInfo(list, i);
+    h += `<div class="card de-ex${ss ? " de-ss" : ""}">
+      <div class="de-head">
+        <span class="de-n num">${i + 1}</span>
+        <div style="flex:1 1 auto;min-width:0">
+          <b>${esc(e.name)}</b>${supersetBadge(ss)}${techBadges(e)}${
+            altStyle(e) === "side" ? ' <span class="uni-badge">L / R</span>' : ''}${
+            altStyle(e) === "cross" ? ' <span class="uni-badge">crossover</span>' : ''}${
+            e.alt ? ' <span class="alt-badge">⇄ ' + esc(e.alt.name) + '</span>' : ''}
+          <div class="meta num">${exLineHTML(e)}</div>
+        </div>
+      </div>
+      ${e.note ? `<div class="de-note">${esc(e.note)}</div>` : ""}
+      ${exMuscleLineHTML(e)}
+      <div class="de-btns">
+        <button data-deup="${wid}:${i}" aria-label="Move earlier"${i === 0 ? " disabled" : ""}>↑</button>
+        <button data-dedown="${wid}:${i}" aria-label="Move later"${i === list.length - 1 ? " disabled" : ""}>↓</button>
+        <button data-deedit="${wid}:${i}" aria-label="Edit ${esc(e.name)}">${ICON.note}</button>
+        <button data-dedup="${wid}:${i}" aria-label="Duplicate ${esc(e.name)}">${ICON.plus}</button>
+        <button data-dedel="${wid}:${i}" aria-label="Remove ${esc(e.name)}" class="danger">${ICON.trash}</button>
+      </div>
+    </div>`;
+  });
+  h += `<div class="btn-row" style="margin-top:2px">
+    <button class="btn small" data-deadd="${wid}" style="flex:1">+ Add an exercise</button>
+  </div>`;
+  const unknown = list.filter(e=> e && e.name && !musclesFor(e.name)).length;
+  if(unknown){
+    h += `<div class="card" style="margin-top:12px">
+      <h3>${unknown} not counted yet</h3>
+      <div class="sub" style="margin:4px 0 10px">${unknown === 1 ? "One exercise on this day isn't" : unknown + " exercises on this day aren't"}
+        mapped to a muscle, so ${unknown === 1 ? "its sets don't" : "their sets don't"} reach the Body tab. Set what
+        ${unknown === 1 ? "it trains" : "they train"} and every session counts from then on.</div>
+      <div class="btn-row" style="margin-top:0"><button class="btn ghost small" id="deClassify" style="flex:1">Work them out for me</button></div>
+    </div>`;
+  }
+  return h;
+}
+/* Adding one. The name comes first because everything else is inferred FROM it — the
+   suggestion cannot exist until the app knows what movement this is. */
+function openAddExercise(wid){
+  const at = (S.program[wid] || []).length;
+  showModal(`<h3>Add to ${esc(wid === "finisher" ? "the finisher" : widName(wid))}</h3>
+    <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Type the movement and
+      Element 26 will programme it to match the rest of this day. Every number stays yours to change.</div>
+    <div class="field" style="margin:0 0 12px"><label>Exercise</label>
+      <input id="addExName" placeholder="e.g. Cable Lateral Raise" autocomplete="off"></div>
+    <div id="addExSug"></div>
+    <button class="btn" id="addExGo">Add it</button>
+    <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
+  const m = $("#modal");
+  const box = m.querySelector("#addExName");
+  box.focus();
+  let sug = null;
+  const draw = ()=>{
+    const nm = (box.value || "").trim();
+    const wrap = m.querySelector("#addExSug");
+    if(nm.length < 3){ wrap.innerHTML = ""; sug = null; return; }
+    sug = suggestProgramming(wid, nm, at);
+    wrap.innerHTML = `<div class="sug-card">
+      <div class="sug-k">Suggested for this day</div>
+      <div class="sug-v num">${sug.sets}×${esc(sug.reps)}${sug.rpe ? " @ RPE " + esc(String(sug.rpe)) : ""}</div>
+      <div class="sug-w">${esc(sug.why)}</div>
+    </div>`;
+  };
+  box.oninput = draw;
+  m.querySelector("#addExGo").onclick = ()=>{
+    const nm = (box.value || "").trim();
+    if(!nm){ toast("Name it first"); return; }
+    const s = sug || suggestProgramming(wid, nm, at);
+    const ne = {name: nm, sets: s.sets, reps: s.reps, rpe: s.rpe, weight: null, note: ""};
+    if(s.rest) ne.rest = s.rest.slice();
+    if(!Array.isArray(S.program[wid])) S.program[wid] = [];
+    S.program[wid].push(ne);
+    logPlanChange("added", wid, nm, [s.sets + "×" + s.reps + (s.rpe ? " @ RPE " + s.rpe : "")],
+      {note: s.why});
+    save(); queueSync(); hideModal(); render();
+    toast("Added — tap it to change anything");
+    // and find out what it trains, so the Body tab has it before the first session
+    classifyExercise(nm).then(rec=>{ if(rec) render(); }).catch(()=>{});
+    // straight into the full editor, since that is where the rest of the prescription is
+    setTimeout(()=> openExEditor(wid, S.program[wid].length - 1), 260);
+  };
+}
+/* Confirming, or correcting, what a movement trains. The same weights the tables use, so
+   what you set here is indistinguishable downstream from what the app already knew. */
+function openMuscleEditor(name){
+  const cur = muscleSourceOf(name);
+  const rec = exMuscleRec(name);
+  const start = cur.map || (rec && rec.guess) || {};
+  let picked = Object.assign({}, start);
+  const draw = ()=>{
+    const rows = MKEYS.map(k=>{
+      const v = picked[k] || 0;
+      return `<button class="mus-row${v ? " on" : ""}" data-musk="${k}">
+        <span class="mus-n">${esc(GROUPS[k].name)}</span>
+        <span class="mus-v">${v >= .9 ? "main" : v >= .4 ? "assists" : v > 0 ? "a little" : "—"}</span>
+      </button>`;
+    }).join("");
+    showModal(`<h3>${esc(name)}</h3>
+      <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">What does this train?
+        Tap once for <b>main</b>, again for <b>assists</b>, again for <b>a little</b>, again to clear.
+        Its sets are shared out by those weights, which is how a compound counts differently from an
+        isolation.${rec && rec.guess ? " Element 26's best guess is filled in, but it wasn't sure." : ""}</div>
+      <div class="mus-list">${rows}</div>
+      <button class="btn" id="musSave" style="margin-top:14px">Save</button>
+      <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
+    const m = $("#modal");
+    m.querySelectorAll("[data-musk]").forEach(b=> b.onclick = ()=>{
+      const k = b.dataset.musk;
+      const v = picked[k] || 0;
+      const next = v === 0 ? 1 : v >= .9 ? .5 : v >= .4 ? .2 : 0;
+      if(next) picked[k] = next; else delete picked[k];
+      draw();
+    });
+    m.querySelector("#musSave").onclick = ()=>{
+      const map = cleanMuscleMap(picked);
+      if(!map){ toast("Pick at least one main muscle"); return; }
+      exMuscleStore()[exmKey(name)] = {at: Date.now(), src: "you", map, name: String(name)};
+      save(); queueSync(); hideModal(); render();
+      toast("Counted from now on — and every session already logged");
+    };
+  };
+  draw();
+}
 function openExEditor(wid, idx){
   idx = parseInt(idx,10);
   const isNew = idx<0;
@@ -19271,6 +19858,25 @@ function openExEditor(wid, idx){
     <input id="f_rpe" value="${esc(e.rpe)}" placeholder="8-9">
     <input id="f_weight" inputmode="decimal" value="${esc(e.weight??"")}" placeholder="optional">
   </div></div>
+  <div class="field"><label>Rest between sets (seconds)</label><div class="duo">
+    <input id="f_rest_lo" inputmode="numeric" value="${esc(Array.isArray(e.rest)?e.rest[0]:"")}" placeholder="from">
+    <input id="f_rest_hi" inputmode="numeric" value="${esc(Array.isArray(e.rest)?e.rest[1]:"")}" placeholder="to">
+  </div></div>
+  <div class="sub" style="margin:-6px 0 12px">Leave both blank and Element 26 works the window out from the reps and how hard the set was, which is usually what you want. Fill them in when the plan says so.</div>
+  <div class="field"><label>Set type</label>
+    <select id="f_tech" style="width:100%;padding:13px;border-radius:11px;border:1px solid var(--line);background:var(--card2);color:var(--text);font-size:16px">
+      <option value="">Straight sets</option>
+      ${Object.keys(TECHNIQUES).map(k=>{
+        const on = (techList(e)[0] || {}).k === k;
+        return `<option value="${esc(k)}" ${on?"selected":""}>${esc(TECHNIQUES[k].label)}</option>`;
+      }).join("")}
+    </select>
+  </div>
+  <div class="sub" style="margin:-6px 0 12px">${esc(((techList(e)[0]||{}).k && TECHNIQUES[techList(e)[0].k])
+      ? TECHNIQUES[techList(e)[0].k].cue
+      : "How the sets are taken. Most exercises are straight sets — the technique ones apply to the last set unless the plan says otherwise.")}</div>
+  <div class="togglerow"><input type="checkbox" id="f_ss" ${e.superset?"checked":""}><label for="f_ss" style="margin:0;font:inherit;color:var(--text);text-transform:none;letter-spacing:0">Superset with the exercise after this one</label></div>
+  <div class="sub" style="margin:6px 0 12px">A set of each back to back, and the rest clock only runs after the pair. The exercise below this one in the day becomes the second half.</div>
   <div class="field"><label>Note</label><input id="f_note" value="${esc(e.note)}" placeholder="per dumbbell, tempo, etc."></div>
   <div class="field"><label>Sides</label>
     <select id="f_alt" style="width:100%;padding:13px;border-radius:11px;border:1px solid var(--line);background:var(--card2);color:var(--text);font-size:16px">
@@ -19334,6 +19940,14 @@ function openExEditor(wid, idx){
       note: $("#f_note").value.trim()
     };
     if(!ne.name){ toast("Name it first"); return; }
+    /* Rest, the technique and the superset flag are read straight off the form, so what
+       the boxes say IS what the plan says. Blank rest means "you decide", which is a real
+       answer and not the same as zero. */
+    const rLo = parseInt($("#f_rest_lo").value, 10), rHi = parseInt($("#f_rest_hi").value, 10);
+    if(rLo > 0 && rHi > 0) ne.rest = [Math.min(rLo, rHi), Math.max(rLo, rHi)];
+    const tk = $("#f_tech").value;
+    if(tk && TECHNIQUES[tk]) ne.tech = [{k: tk}];
+    if($("#f_ss").checked) ne.superset = true;
     /* Everything this form does not show is carried across rather than dropped. The
        fields are real prescriptions — the rest window, the superset pairing, the warm-up
        sets an imported plan prescribed, the side rule its document stated — and editing
@@ -19341,7 +19955,11 @@ function openExEditor(wid, idx){
        the set count did not change, because a six-long ramp on a four-set exercise
        describes sets that no longer exist. */
     if(!isNew){
-      ["rest","slotKind","superset","supersetEnd","warmups","warmupNote","sideMode","incr","imported","rampIn"]
+      /* `rest`, `superset` and `tech` are NOT in this list any more: the form now shows
+         all three, so carrying the old value across would put back exactly what somebody
+         has just cleared. Everything still absent from the form is carried, because
+         editing a rep range is not a request to delete a warm-up ramp. */
+      ["slotKind","supersetEnd","warmups","warmupNote","sideMode","incr","imported","rampIn"]
         .forEach(k=>{ if(e[k] !== undefined) ne[k] = e[k]; });
       if(Array.isArray(e.rpes) && e.rpes.length === ne.sets) ne.rpes = e.rpes.slice();
     }
@@ -23124,7 +23742,7 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
-  "viewMode","cycleV2","picks","gearAsked","gyms","geo","sessions","savedAt"
+  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
@@ -23300,6 +23918,7 @@ async function pullFromGist(){
     if(remote.lastCycle) S.lastCycle = remote.lastCycle;
     if(remote.lastReview) S.lastReview = remote.lastReview;
     S.checkins = Object.assign({}, S.checkins||{}, remote.checkins||{});
+    S.exMuscles = Object.assign({}, S.exMuscles||{}, remote.exMuscles||{});
     S.exAliases = Object.assign({}, remote.exAliases||{}, S.exAliases||{});
     S.stalls = mergeStalls(S.stalls, remote.stalls);
     USER_ALIASES = S.exAliases; invalidateTableOrigin();
@@ -23377,6 +23996,7 @@ async function syncNow(announce){
       if(remote.lastCycle) S.lastCycle = remote.lastCycle;
       if(remote.lastReview) S.lastReview = remote.lastReview;
       S.checkins = Object.assign({}, S.checkins||{}, remote.checkins||{});
+    S.exMuscles = Object.assign({}, S.exMuscles||{}, remote.exMuscles||{});
       S.exAliases = Object.assign({}, remote.exAliases||{}, S.exAliases||{});
       S.stalls = mergeStalls(S.stalls, remote.stalls);
       USER_ALIASES = S.exAliases; invalidateTableOrigin();
@@ -23400,6 +24020,7 @@ async function syncNow(announce){
     } else if(remote){
       const tomb = new Set([...(S.deleted||[]), ...(remote.deleted||[])]);
       S.checkins = Object.assign({}, remote.checkins||{}, S.checkins||{});
+      S.exMuscles = Object.assign({}, remote.exMuscles||{}, S.exMuscles||{});
       S.exAliases = Object.assign({}, remote.exAliases||{}, S.exAliases||{});
       S.stalls = mergeStalls(S.stalls, remote.stalls);
       USER_ALIASES = S.exAliases; invalidateTableOrigin();
@@ -24128,7 +24749,7 @@ function mergeBackup(into, d){
   ["restDays","restLog","skipLog","restDeleted","restAuto","deleted","planLog"].forEach(k=>{
     if(d[k]) into[k] = uniqDates(into[k], d[k]);
   });
-  ["checkins","exAliases","stalls","asymRetired","prefs"].forEach(k=>{
+  ["checkins","exAliases","stalls","asymRetired","prefs","exMuscles"].forEach(k=>{
     if(d[k] && typeof d[k] === "object") into[k] = Object.assign({}, into[k]||{}, d[k]);
   });
   /* The plan and everything that describes it comes across whole or not at all: half of
