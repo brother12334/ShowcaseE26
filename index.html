@@ -309,6 +309,19 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   background:var(--card2);color:var(--text);font-family:var(--mono);font-size:15px;
 }
 .prog-fields input:focus{outline:none;border-color:var(--acc-line)}
+/* The note, asked for at the one moment it is obvious whether the old one still applies. */
+.k-opt{font-size:9px;letter-spacing:.1em;color:var(--dim);opacity:.7;margin-left:6px}
+.sw-oldnote{font-size:12px;color:var(--dim);line-height:1.45;margin:0 2px 8px}
+.sw-note{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
+  background:var(--card2);color:var(--text);font:inherit;font-size:14px}
+.sw-note:focus{outline:none;border-color:var(--acc-line)}
+/* A day card that opens. It stays a card — the plan should read as a document — with
+   just enough affordance in the corner to say the whole thing is tappable. */
+.prog-day{cursor:pointer;transition:border-color .15s ease}
+.prog-day:active{border-color:var(--acc-line)}
+.prog-day:focus-visible{outline:2px solid var(--acc-line);outline-offset:2px}
+.prog-day-go{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.prog-day:active .prog-day-go{color:var(--acc)}
 button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:pointer}
 /* Saying what a movement trains, in the same weights the tables use. */
 .mus-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow-y:auto}
@@ -3829,7 +3842,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.4";
+const APP_VERSION = "11.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -17828,11 +17841,17 @@ function viewProgram(){
   h += importMetaCardHTML();
   DAYS.forEach(wid=>{
     const m = dayMeta(wid);
-    h += `<div class="card">
+    /* THE CARD IS THE BUTTON. It used to carry two ways into the day editor — a link by
+       the name and a button under the list — for one destination, which is one more than
+       the card needs and reads as clutter on a screen that already repeats per day.
+       Tapping the day opens it instead; rename still has its own link, because it is a
+       different action and must not fire from a stray tap on the card. */
+    h += `<div class="card prog-day" data-dayedit="${wid}" role="button" tabindex="0"
+            aria-label="Edit ${esc(m.name)}">
       <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px">
         <span class="dot" style="background:${m.color}"></span><h3>${esc(m.name)}</h3>
         <button class="linklike" data-renameday="${wid}" style="margin-left:auto;font-size:12.5px">rename</button>
-        <button class="linklike" data-dayedit="${wid}" style="font-size:12.5px">edit day</button>
+        <span class="prog-day-go" aria-hidden="true">edit ›</span>
       </div>`;
     // `|| []` rather than a bare index: a day key can legitimately be missing for a
     // moment after a sync restores an older plan, and a thrown Program tab is a much
@@ -17862,7 +17881,7 @@ function viewProgram(){
         <div><b>${title}</b><div class="meta">${meta}</div></div>
       </div>`;
     });
-    h += `<button class="btn ghost small" data-dayedit="${wid}" style="margin-top:10px">Edit this day</button></div>`;
+    h += `</div>`;
   });
   /* The finisher, which runs at the end of every workout. It's empty by default,
      because a plan generally puts core work on specific days rather than taxing every one,
@@ -18307,7 +18326,8 @@ function bind(){
      Your plan, next to what you are training for and the rest of the frame around the
      programme, where a change of that size is a deliberate trip rather than a stray tap.
      The Program tab is what the plan says; the frame around it is set elsewhere. */
-  document.querySelectorAll("[data-renameday]").forEach(b=> b.onclick = ()=>{
+  document.querySelectorAll("[data-renameday]").forEach(b=> b.onclick = (ev)=>{
+    ev.stopPropagation();                 // the card behind it opens the day editor
     const wid = b.dataset.renameday;
     const cur = dayName(wid);
     const v = prompt("Name this training day", cur);
@@ -19133,7 +19153,13 @@ function bind(){
   document.querySelectorAll("[data-edit]").forEach(b=> b.onclick=()=> openExEditor(...b.dataset.edit.split(":")));
   document.querySelectorAll("[data-addex]").forEach(b=> b.onclick=()=> openExEditor(b.dataset.addex, -1));
   /* ---- the day editor ---- */
-  document.querySelectorAll("[data-dayedit]").forEach(b=> b.onclick = ()=> dayEditOpen(b.dataset.dayedit));
+  document.querySelectorAll("[data-dayedit]").forEach(b=>{
+    b.onclick = ()=> dayEditOpen(b.dataset.dayedit);
+    // the day card is a div, so it needs the keyboard behaviour a button gets for free
+    if(b.tagName !== "BUTTON") b.onkeydown = (ev)=>{
+      if(ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); dayEditOpen(b.dataset.dayedit); }
+    };
+  });
   const deB = $("#deBack");
   if(deB) deB.onclick = dayEditClose;
   document.querySelectorAll("[data-deadd]").forEach(b=> b.onclick = ()=> openAddExercise(b.dataset.deadd));
@@ -20307,6 +20333,10 @@ function openSwitchExercise(wid, idx){
     <div id="swProg"></div>
     <div class="k-lab" style="margin-top:4px">Sets and reps</div>
     ${progFieldsHTML("sw", e)}
+    <div class="k-lab" style="margin-top:12px">Note <span class="k-opt">optional</span></div>
+    ${e.note ? `<div class="sw-oldnote">The note on this slot — “${esc(e.note)}” — was about
+      ${esc(e.name)}, so it goes with it. Write a new one if the replacement needs one.</div>` : ""}
+    <input id="swNote" class="sw-note" placeholder="e.g. per hand, or leave it blank" autocomplete="off">
     <button class="btn" id="swGo" style="margin-top:12px">Switch it</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
   const m = $("#modal");
@@ -20377,16 +20407,16 @@ function openSwitchExercise(wid, idx){
        two-arm machine row does not inherit a one-arm-at-a-time rule. */
     delete e.cue; delete e.uni; delete e.cross;
     if(e.sideMode) delete e.sideMode;
-    /* THE NOTE, BUT ONLY IF IT WAS THE APP TALKING. "Touch the chest under control" is
-       coaching for a bench press and nonsense on a lateral raise, so a note that IS the
-       old movement's library cue goes with it. Anything else was typed by a person about
-       this slot — "per dumbbell", "tempo 3-1-1" — and deleting somebody's own words to
-       tidy up is not a trade worth making. */
-    const oldCue = libraryCueFor(was);
-    if(e.note && oldCue && nrm(e.note) === nrm(oldCue)){
-      const newCue = libraryCueFor(nm);
-      if(newCue) e.note = newCue; else delete e.note;
-    }
+    /* THE NOTE GOES WITH THE MOVEMENT IT WAS ABOUT. "Touch the chest under control" is
+       coaching for a bench press and nonsense on a lateral raise; so is "elbows tucked"
+       or "per dumbbell" if the replacement is a machine. Rather than guess which of
+       those still applies, the sheet says the old note is going and gives you a box to
+       write the new one — so nothing is silently kept and nothing is silently lost. */
+    delete e.note;
+    const typedNote = (($("#swNote") || {}).value || "").trim();
+    if(typedNote) e.note = typedNote;
+    else { const newCue = libraryCueFor(nm); if(newCue) e.note = newCue; }
+    if(typedNote) lines.push("note: " + typedNote);
     /* WHAT IS IN THE BOXES IS WHAT GETS WRITTEN, whether it came from a shortcut or from
        the keyboard. Re-programmed means "these numbers are not the ones this slot had" —
        there is no mode to keep in step with, so there is nothing to get out of step. */
