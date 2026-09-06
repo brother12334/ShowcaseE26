@@ -2090,13 +2090,58 @@ nav button:active{transform:scale(.94)}
 .term[data-tip]:focus-visible::after{display:block;opacity:1;transform:translateX(-50%) translateY(0)}
 .term[data-tip]:focus-visible::before{display:block;opacity:1}
 
-/* toast */
-#toast{
-  position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(20px);
-  background:var(--text);color:var(--bg);padding:12px 20px;border-radius:12px;
-  font:14px var(--mono);opacity:0;pointer-events:none;transition:all .25s;z-index:60;max-width:90vw;text-align:center;
+/* NOTICES, COMING DOWN FROM THE TOP.
+
+   They used to be a black lozenge at the bottom of the screen, which is where a phone
+   puts its own keyboard, its home bar and this app's own tab bar — so the one thing that
+   had something to say was in the busiest strip on the display, in a colour scheme
+   belonging to no part of the app. They come from the top now, in the app's own card
+   material, with the copper rail down the left that marks anything Element 26 wants you
+   to look at. They stack rather than replace each other, and a tap dismisses.
+
+   An update notice is the one that must not be missed, so it holds: no timer, a heading,
+   and it sits there until it is acknowledged. */
+#toasts{
+  position:fixed;top:calc(env(safe-area-inset-top) + 10px);left:50%;transform:translateX(-50%);
+  width:min(440px, calc(100vw - 20px));display:flex;flex-direction:column;gap:8px;
+  z-index:190;pointer-events:none;
 }
-#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.tst{
+  display:flex;align-items:flex-start;gap:10px;pointer-events:auto;cursor:pointer;
+  padding:11px 12px;border-radius:13px;
+  background:var(--card2);color:var(--text);
+  border:1px solid var(--line);border-left:3px solid var(--acc);
+  box-shadow:0 14px 34px rgba(0,0,0,.42), 0 2px 6px rgba(0,0,0,.3);
+  font-size:13.5px;line-height:1.45;
+  animation:tstIn .34s cubic-bezier(.18,.9,.28,1.16) both;
+}
+/* The rail carries the meaning, so the text never has to say "error" to look like one. */
+.tst.tst-good{border-left-color:var(--ok)}
+.tst.tst-warn{border-left-color:var(--bad)}
+.tst.tst-update{border-left-color:var(--acc);background-color:var(--card2);
+  background-image:linear-gradient(180deg,var(--acc-soft),rgba(0,0,0,0))}
+.tst-ico{
+  flex:0 0 auto;width:22px;height:22px;border-radius:7px;display:flex;align-items:center;
+  justify-content:center;background:var(--acc-soft);color:var(--acc);margin-top:1px;
+}
+.tst-good .tst-ico{background:rgba(74,147,88,.16);color:var(--ok)}
+.tst-warn .tst-ico{background:rgba(209,88,79,.16);color:var(--bad)}
+.tst-ico svg{width:14px;height:14px}
+.tst-body{flex:1 1 auto;min-width:0}
+.tst-h{display:block;font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--acc);margin-bottom:3px}
+.tst-warn .tst-h{color:var(--bad)}
+.tst-good .tst-h{color:var(--ok)}
+.tst-x{flex:0 0 auto;color:var(--faint);font-size:16px;line-height:1;padding:2px 2px 2px 6px}
+.tst.out{animation:tstOut .2s ease-in forwards}
+@keyframes tstIn{
+  from{opacity:0;transform:translateY(-16px) scale(.97)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+@keyframes tstOut{to{opacity:0;transform:translateY(-10px) scale(.98)}}
+@media (prefers-reduced-motion: reduce){
+  .tst{animation:none}
+  .tst.out{animation:none;opacity:0}
+}
 
 .fin-label{font-family:var(--disp);font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);border-top:1px dashed var(--line);padding-top:12px;margin:6px 0 10px}
 .syncdot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-left:9px;vertical-align:middle;background:var(--faint)}
@@ -3846,14 +3891,14 @@ body.cele-open{overflow:hidden}
      the flow still opens over it. -->
 <div class="ai-full" id="aiFull" hidden><div class="ai-full-in" id="aiFullIn"></div></div>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
-<div id="toast"></div>
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
 
 <script>
 "use strict";
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.8";
+const APP_VERSION = "11.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7042,7 +7087,62 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<"
    its temporal dead zone at that moment and took the whole script down. */
 function todayStr(){ return new Date().toLocaleDateString("en-CA"); }
 const fmtDate = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
-function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2600); }
+/* ONE FUNCTION, STILL CALLED THE SAME WAY. Every one of the app's notices goes through
+   toast(msg) and none of them had to change: the kind is worked out from the message
+   unless the caller says otherwise, so "Couldn't send that" arrives as a warning and
+   "Saved" as a confirmation without 160 call sites being rewritten. */
+const TOAST_KIND_WARN = /(couldn'?t|could not|didn'?t|did not|failed|can'?t|cannot|no (?:connection|network)|try again|not sent|went wrong|too (?:long|big)|invalid|expired|unavailable|first\b.*\bthen|name it first|pick )/i;
+const TOAST_KIND_GOOD = /(saved|added|done|counted|updated|restored|switched|removed|deleted|synced|copied|backed up|logged|set\b)/i;
+function toastKindOf(msg){
+  const m = String(msg || "");
+  if(TOAST_KIND_WARN.test(m)) return "warn";
+  if(TOAST_KIND_GOOD.test(m)) return "good";
+  return "info";
+}
+const TOAST_ICONS = {
+  info:   '<path d="M12 8h.01M11 12h1v5h1"/><circle cx="12" cy="12" r="9"/>',
+  good:   '<path d="M20 6 9 17l-5-5"/>',
+  warn:   '<path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/>',
+  update: '<path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/>'
+};
+function toast(msg, kind, opts){
+  opts = opts || {};
+  const host = $("#toasts");
+  if(!host){ return; }                       // before the shell paints, nothing to do
+  const k = kind || toastKindOf(msg);
+  /* The same message twice in a row is one message. Tapping Save twice should not build
+     a tower of identical notices, and a repeated warning is not more true. */
+  const last = host.lastElementChild;
+  if(last && last.dataset.msg === String(msg)){
+    last.classList.remove("tst");  void last.offsetWidth;  last.classList.add("tst");
+    return;
+  }
+  const el = document.createElement("div");
+  el.className = "tst tst-" + k;
+  el.dataset.msg = String(msg);
+  el.innerHTML = `<span class="tst-ico">${svgIcon(TOAST_ICONS[k] || TOAST_ICONS.info)}</span>
+    <span class="tst-body">${opts.title ? `<span class="tst-h">${esc(opts.title)}</span>` : ""}${esc(String(msg))}</span>
+    ${opts.sticky ? `<span class="tst-x" aria-hidden="true">\u00d7</span>` : ""}`;
+  const close = ()=>{
+    if(el._gone) return;
+    el._gone = true;
+    clearTimeout(el._h);
+    el.classList.add("out");
+    setTimeout(()=> el.remove(), 220);
+  };
+  el.onclick = close;
+  host.appendChild(el);
+  /* Three at once is the most that can be read before the first has gone. Beyond that
+     the oldest leaves early rather than the newest being dropped, because the newest is
+     the one that just happened. */
+  while(host.children.length > 3 && host.firstElementChild !== el){
+    const first = host.firstElementChild;
+    if(first._gone){ first.remove(); continue; }
+    first.click();
+  }
+  if(!opts.sticky) el._h = setTimeout(close, opts.ms || (k === "warn" ? 4200 : 2800));
+  return el;
+}
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
 /* ---------- celebrations ---------- */
@@ -26039,7 +26139,8 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
     if(ev.data && ev.data.type === "e26-updated"){
       /* Deliberately not auto-reloading. Doing that mid-session would tear down an
          in-progress workout to deliver a cosmetic change. */
-      try{ toast("Updated to v" + ev.data.version + " \u2014 reopen when you're done"); }catch(e){}
+      try{ toast("You're on v" + ev.data.version + " the next time you open the app. Finish your session first.",
+                 "update", {title:"Update downloaded", sticky:true}); }catch(e){}
     }
     /* THE NEW PAGE IS DOWNLOADED AND WAITING. The service worker serves the copy from
        last launch and fetches the new one behind it, so an update is always one open
@@ -26049,7 +26150,8 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
     if(ev.data && ev.data.type === "e26-shell-updated" && !UPDATE_SEEN){
       UPDATE_SEEN = true;
       if(!S.active){
-        try{ toast("A new version is ready \u2014 close and reopen Element 26"); }catch(e){}
+        try{ toast("Close Element 26 and open it again to move to it. Nothing you have logged is affected.",
+                 "update", {title:"A new version is ready", sticky:true}); }catch(e){}
       }
     }
   });
