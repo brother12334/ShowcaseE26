@@ -242,7 +242,8 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .de-mus-t{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
 .de-ask{color:var(--faint)}
 .de-ask .linklike{font-size:12px}
-.de-btns{display:flex;gap:6px;margin:11px 0 0;padding-left:33px}
+.de-btns{display:flex;gap:5px;margin:11px 0 0}
+.de-btns button{padding:0}
 .de-btns button{
   flex:1 1 0;min-height:38px;border-radius:9px;border:1px solid var(--line);
   background:var(--card2);color:var(--dim);cursor:pointer;font-size:13px;
@@ -251,6 +252,27 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .de-btns button .ico{width:15px;height:15px}
 .de-btns button:disabled{opacity:.35}
 .de-btns button.danger{color:var(--bad)}
+/* The name box's suggestions. A list under the input rather than a native datalist:
+   datalist is unstyleable, inconsistent on iOS, and cannot say which of these are your
+   own movements — which is the one piece of ranking that matters here. */
+.ex-sug{display:flex;flex-direction:column;gap:4px;margin:0 0 10px;max-height:34vh;overflow-y:auto}
+.ex-sug:empty{display:none}
+.ex-sug-b{
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px;width:100%;
+  padding:11px 13px;border-radius:9px;border:1px solid var(--line);background:var(--card2);
+  color:var(--text);cursor:pointer;font:inherit;font-size:14px;text-align:left;
+}
+.ex-sug-b:active{border-color:var(--acc-line)}
+.ex-sug-b i{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--acc);font-style:normal;flex:0 0 auto}
+.k-lab{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:0 2px 8px}
+.sw-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.sw-chip{
+  display:inline-flex;align-items:baseline;gap:6px;padding:9px 12px;border-radius:999px;
+  border:1px solid var(--line);background:var(--card2);color:var(--text);cursor:pointer;
+  font:inherit;font-size:13px;
+}
+.sw-chip i{font:9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-style:normal}
+.sw-chip:active{border-color:var(--acc-line)}
 /* The suggestion, shown before it is taken. It is a proposal on the screen, not a value
    already written into the plan — hence its own panel rather than pre-filled boxes. */
 .sug-card{border:1px solid var(--acc-line);background:var(--acc-soft);border-radius:11px;
@@ -3777,7 +3799,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.0";
+const APP_VERSION = "11.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -5683,6 +5705,327 @@ Object.keys(EX_LIBRARY_EXTRA).forEach(k=>{
   });
 });
 
+/* =====================================================================
+   THE CATALOGUE
+
+   EX_LIBRARY holds the movements the SWAP shortlist is built from, and it is curated:
+   every entry carries a coaching cue and earns its place by being a sensible substitute
+   for the others in its slot. That is the right bar for "the pec deck is taken, what
+   else" and the wrong one for "what am I about to type", where the only wrong answer is
+   a name that is not there.
+
+   So the catalogue is the same shape without the cue: name, the gear it uses, the slot it
+   belongs to. It is merged into EX_LIBRARY at load, which means it also widens the swap
+   shortlists — a plan written for one gym meeting another gym is exactly when a longer
+   list helps — and it is what the autocomplete searches, alongside every movement already
+   in YOUR plan and history, which rank first because they are your own words.
+
+   Compact on purpose: three fields per line, no prose. Anything here that deserves a cue
+   belongs in EX_LIBRARY proper. */
+const EX_CATALOG = [
+  // ---- horizontal press ----
+  ["Incline Barbell Bench Press","barbell","press_incline"],
+  ["Decline Barbell Bench Press","barbell","press_horizontal"],
+  ["Close-Grip Bench Press","barbell","press_horizontal"],
+  ["Floor Press","barbell","press_horizontal"],
+  ["Smith Machine Bench Press","smith","press_horizontal"],
+  ["Smith Machine Incline Press","smith","press_incline"],
+  ["Incline Dumbbell Bench Press","dumbbell","press_incline"],
+  ["Decline Dumbbell Press","dumbbell","press_horizontal"],
+  ["Neutral-Grip Dumbbell Press","dumbbell","press_horizontal"],
+  ["Incline Chest Press Machine","machine","press_incline"],
+  ["Decline Chest Press Machine","machine","press_horizontal"],
+  ["Hammer Strength Chest Press","machine","press_horizontal"],
+  ["Cable Chest Press","cable","press_horizontal"],
+  ["Incline Cable Press","cable","press_incline"],
+  ["Weighted Push-Up","bodyweight","press_horizontal"],
+  ["Deficit Push-Up","bodyweight","press_horizontal"],
+  ["Incline Push-Up","bodyweight","press_horizontal"],
+  ["Chest Dip","bodyweight","press_horizontal"],
+  ["Assisted Dip","machine","press_horizontal"],
+  ["Ring Push-Up","bodyweight","press_horizontal"],
+  // ---- fly ----
+  ["Pec Deck","machine","fly"],
+  ["Low-to-High Cable Fly","cable","fly"],
+  ["High-to-Low Cable Fly","cable","fly"],
+  ["Incline Dumbbell Fly","dumbbell","fly"],
+  ["Flat Dumbbell Fly","dumbbell","fly"],
+  ["Cable Crossover","cable","fly"],
+  ["Svend Press","dumbbell","fly"],
+  // ---- overhead press ----
+  ["Standing Barbell Overhead Press","barbell","press_overhead"],
+  ["Seated Barbell Overhead Press","barbell","press_overhead"],
+  ["Push Press","barbell","press_overhead"],
+  ["Seated Dumbbell Shoulder Press","dumbbell","press_overhead"],
+  ["Arnold Press","dumbbell","press_overhead"],
+  ["Smith Machine Shoulder Press","smith","press_overhead"],
+  ["Shoulder Press Machine","machine","press_overhead"],
+  ["Landmine Press","barbell","press_overhead"],
+  ["Z Press","barbell","press_overhead"],
+  ["Pike Push-Up","bodyweight","press_overhead"],
+  // ---- lateral raise ----
+  ["Dumbbell Lateral Raise","dumbbell","lateral"],
+  ["Cable Lateral Raise","cable","lateral"],
+  ["Machine Lateral Raise","machine","lateral"],
+  ["Leaning Cable Lateral Raise","cable","lateral"],
+  ["Lu Raise","dumbbell","lateral"],
+  ["Upright Row","barbell","lateral"],
+  ["Cable Upright Row","cable","lateral"],
+  ["Plate Front Raise","barbell","lateral"],
+  ["Dumbbell Front Raise","dumbbell","lateral"],
+  ["Cable Front Raise","cable","lateral"],
+  // ---- rear delt ----
+  ["Reverse Pec Deck","machine","rear_delt"],
+  ["Bent-Over Dumbbell Reverse Fly","dumbbell","rear_delt"],
+  ["Cable Reverse Fly","cable","rear_delt"],
+  ["Face Pull","cable","rear_delt"],
+  ["Seated Face Pull","cable","rear_delt"],
+  ["Prone Incline Rear Delt Raise","dumbbell","rear_delt"],
+  ["Band Pull-Apart","bodyweight","rear_delt"],
+  // ---- vertical pull ----
+  ["Pull-Up","bodyweight","pull_vertical"],
+  ["Chin-Up","bodyweight","pull_vertical"],
+  ["Neutral-Grip Pull-Up","bodyweight","pull_vertical"],
+  ["Weighted Pull-Up","bodyweight","pull_vertical"],
+  ["Assisted Pull-Up Machine","machine","pull_vertical"],
+  ["Wide-Grip Lat Pulldown","cable","pull_vertical"],
+  ["Close-Grip Lat Pulldown","cable","pull_vertical"],
+  ["Neutral-Grip Lat Pulldown","cable","pull_vertical"],
+  ["Single-Arm Lat Pulldown","cable","pull_vertical"],
+  ["Kneeling Lat Pulldown","cable","pull_vertical"],
+  ["Pulldown Machine","machine","pull_vertical"],
+  // ---- horizontal pull ----
+  ["Barbell Bent-Over Row","barbell","pull_horizontal"],
+  ["Pendlay Row","barbell","pull_horizontal"],
+  ["Yates Row","barbell","pull_horizontal"],
+  ["T-Bar Row","barbell","pull_horizontal"],
+  ["Landmine Row","barbell","pull_horizontal"],
+  ["Single-Arm Dumbbell Row","dumbbell","pull_horizontal"],
+  ["Chest-Supported Dumbbell Row","dumbbell","pull_horizontal"],
+  ["Seated Cable Row","cable","pull_horizontal"],
+  ["Wide-Grip Seated Row","cable","pull_horizontal"],
+  ["Single-Arm Cable Row","cable","pull_horizontal"],
+  ["Hammer Strength Row","machine","pull_horizontal"],
+  ["Seal Row","dumbbell","pull_horizontal"],
+  ["Inverted Row","bodyweight","pull_horizontal"],
+  ["Meadows Row","barbell","pull_horizontal"],
+  // ---- lat isolation ----
+  ["Straight-Arm Pulldown","cable","lat_iso"],
+  ["Dumbbell Pullover","dumbbell","lat_iso"],
+  ["Cable Pullover","cable","lat_iso"],
+  ["Machine Pullover","machine","lat_iso"],
+  // ---- traps ----
+  ["Barbell Shrug","barbell","shrug"],
+  ["Dumbbell Shrug","dumbbell","shrug"],
+  ["Cable Shrug","cable","shrug"],
+  ["Smith Machine Shrug","smith","shrug"],
+  ["Trap Bar Shrug","barbell","shrug"],
+  // ---- squat ----
+  ["Barbell Back Squat","barbell","squat"],
+  ["High-Bar Back Squat","barbell","squat"],
+  ["Low-Bar Back Squat","barbell","squat"],
+  ["Front Squat","barbell","squat"],
+  ["Goblet Squat","dumbbell","squat"],
+  ["Hack Squat","machine","squat"],
+  ["Pendulum Squat","machine","squat"],
+  ["Smith Machine Squat","smith","squat"],
+  ["Leg Press","machine","squat"],
+  ["Single-Leg Press","machine","squat"],
+  ["Belt Squat","machine","squat"],
+  ["Zercher Squat","barbell","squat"],
+  ["Box Squat","barbell","squat"],
+  ["Safety Bar Squat","barbell","squat"],
+  ["Sissy Squat","bodyweight","quad_iso"],
+  // ---- lunge / unilateral ----
+  ["Walking Lunge","dumbbell","lunge"],
+  ["Reverse Lunge","dumbbell","lunge"],
+  ["Forward Lunge","dumbbell","lunge"],
+  ["Bulgarian Split Squat","dumbbell","lunge"],
+  ["Split Squat","dumbbell","lunge"],
+  ["Step-Up","dumbbell","lunge"],
+  ["Curtsy Lunge","dumbbell","lunge"],
+  ["Smith Machine Split Squat","smith","lunge"],
+  ["Deficit Reverse Lunge","dumbbell","lunge"],
+  // ---- hinge ----
+  ["Conventional Deadlift","barbell","hinge"],
+  ["Sumo Deadlift","barbell","hinge"],
+  ["Trap Bar Deadlift","barbell","hinge"],
+  ["Romanian Deadlift","barbell","hinge"],
+  ["Dumbbell Romanian Deadlift","dumbbell","hinge"],
+  ["Single-Leg Romanian Deadlift","dumbbell","hinge"],
+  ["Stiff-Leg Deadlift","barbell","hinge"],
+  ["Deficit Deadlift","barbell","hinge"],
+  ["Rack Pull","barbell","hinge"],
+  ["Good Morning","barbell","hinge"],
+  ["Cable Pull-Through","cable","hinge"],
+  ["Back Extension","bodyweight","hinge"],
+  ["45-Degree Back Extension","bodyweight","hinge"],
+  ["Reverse Hyperextension","machine","hinge"],
+  ["Smith Machine Romanian Deadlift","smith","hinge"],
+  // ---- hip thrust / glute ----
+  ["Barbell Hip Thrust","barbell","hip_thrust"],
+  ["Machine Hip Thrust","machine","hip_thrust"],
+  ["Smith Machine Hip Thrust","smith","hip_thrust"],
+  ["Glute Bridge","barbell","hip_thrust"],
+  ["Single-Leg Hip Thrust","bodyweight","hip_thrust"],
+  ["Cable Kickback","cable","hip_thrust"],
+  ["Hip Abduction Machine","machine","hip_thrust"],
+  ["Hip Adduction Machine","machine","hip_thrust"],
+  ["Frog Pump","dumbbell","hip_thrust"],
+  // ---- quad isolation ----
+  ["Leg Extension","machine","quad_iso"],
+  ["Single-Leg Extension","machine","quad_iso"],
+  ["Reverse Nordic Curl","bodyweight","quad_iso"],
+  ["Cyclist Squat","barbell","quad_iso"],
+  // ---- hamstring isolation ----
+  ["Lying Leg Curl","machine","ham_iso"],
+  ["Seated Leg Curl","machine","ham_iso"],
+  ["Standing Leg Curl","machine","ham_iso"],
+  ["Nordic Hamstring Curl","bodyweight","ham_iso"],
+  ["Glute-Ham Raise","bodyweight","ham_iso"],
+  ["Stability Ball Leg Curl","bodyweight","ham_iso"],
+  // ---- calves ----
+  ["Standing Calf Raise","machine","calf"],
+  ["Seated Calf Raise","machine","calf"],
+  ["Leg Press Calf Raise","machine","calf"],
+  ["Smith Machine Calf Raise","smith","calf"],
+  ["Dumbbell Calf Raise","dumbbell","calf"],
+  ["Single-Leg Calf Raise","bodyweight","calf"],
+  ["Tibialis Raise","bodyweight","calf"],
+  // ---- biceps ----
+  ["Barbell Curl","barbell","curl"],
+  ["EZ-Bar Curl","barbell","curl"],
+  ["Dumbbell Curl","dumbbell","curl"],
+  ["Alternating Dumbbell Curl","dumbbell","curl"],
+  ["Incline Dumbbell Curl","dumbbell","curl"],
+  ["Hammer Curl","dumbbell","curl"],
+  ["Cross-Body Hammer Curl","dumbbell","curl"],
+  ["Preacher Curl","barbell","curl"],
+  ["Machine Preacher Curl","machine","curl"],
+  ["Cable Curl","cable","curl"],
+  ["Bayesian Cable Curl","cable","curl"],
+  ["Cable Hammer Curl","cable","curl"],
+  ["Concentration Curl","dumbbell","curl"],
+  ["Spider Curl","dumbbell","curl"],
+  ["Reverse Curl","barbell","curl"],
+  ["Zottman Curl","dumbbell","curl"],
+  ["Drag Curl","barbell","curl"],
+  // ---- triceps ----
+  ["Tricep Pushdown","cable","triceps"],
+  ["Rope Pushdown","cable","triceps"],
+  ["V-Bar Pushdown","cable","triceps"],
+  ["Single-Arm Pushdown","cable","triceps"],
+  ["Overhead Cable Extension","cable","triceps"],
+  ["Overhead Rope Extension","cable","triceps"],
+  ["Skull Crusher","barbell","triceps"],
+  ["EZ-Bar Skull Crusher","barbell","triceps"],
+  ["Dumbbell Skull Crusher","dumbbell","triceps"],
+  ["Overhead Dumbbell Extension","dumbbell","triceps"],
+  ["Tricep Dip","bodyweight","triceps"],
+  ["Bench Dip","bodyweight","triceps"],
+  ["Tricep Kickback","dumbbell","triceps"],
+  ["JM Press","barbell","triceps"],
+  ["Tricep Extension Machine","machine","triceps"],
+  ["Diamond Push-Up","bodyweight","triceps"],
+  // ---- forearms ----
+  ["Wrist Curl","dumbbell","curl"],
+  ["Reverse Wrist Curl","dumbbell","curl"],
+  ["Farmer's Carry","dumbbell","shrug"],
+  ["Plate Pinch Hold","bodyweight","shrug"],
+  // ---- abs ----
+  ["Cable Crunch","cable","abs"],
+  ["Machine Crunch","machine","abs"],
+  ["Hanging Leg Raise","bodyweight","abs"],
+  ["Hanging Knee Raise","bodyweight","abs"],
+  ["Captain's Chair Leg Raise","bodyweight","abs"],
+  ["Lying Leg Raise","bodyweight","abs"],
+  ["Decline Sit-Up","bodyweight","abs"],
+  ["Ab Wheel Rollout","bodyweight","abs"],
+  ["Plank","bodyweight","abs"],
+  ["Side Plank","bodyweight","abs"],
+  ["Dead Bug","bodyweight","abs"],
+  ["Pallof Press","cable","abs"],
+  ["Russian Twist","dumbbell","abs"],
+  ["Cable Woodchop","cable","abs"],
+  ["Side Bend","dumbbell","abs"],
+  ["Hollow Body Hold","bodyweight","abs"],
+  ["Toes-to-Bar","bodyweight","abs"],
+  ["Weighted Crunch","dumbbell","abs"],
+  // ---- neck ----
+  ["Neck Curl","bodyweight","shrug"],
+  ["Neck Extension","bodyweight","shrug"]
+];
+/* Merged in at load, so the swap shortlists get them too. Deliberately after
+   EX_LIBRARY_EXTRA, and skipping anything already present under either name — the
+   curated entry keeps its cue. */
+Object.keys(EX_LIBRARY).forEach(k=>{ EX_LIBRARY[k] = EX_LIBRARY[k] || []; });
+EX_CATALOG.forEach(row=>{
+  const [name, gear, slot] = row;
+  if(!EX_LIBRARY[slot]) EX_LIBRARY[slot] = [];
+  const have = EX_LIBRARY[slot].some(x=> canonEx(x.name) === canonEx(name));
+  if(!have) EX_LIBRARY[slot].push({name, gear});
+});
+
+/* WHAT THE APP CAN OFFER YOU AS YOU TYPE.
+
+   Three sources, in the order they deserve to be trusted: the movements already in YOUR
+   plan and history, because those are your own words for them and the ones you are most
+   likely to be reaching for again; then the catalogue; then anything the muscle tables
+   know that the catalogue somehow does not. Deduplicated on the app's own canonical form,
+   so "Pushup" and "Push-Up" are one suggestion rather than two.
+
+   Built once, on first use, and rebuilt when the plan changes — never at load, because
+   this file has been killed twice by reading a const before its declaration line runs. */
+let _EX_NAMES = null;
+function invalidateExNames(){ _EX_NAMES = null; }
+function exNameIndex(){
+  if(_EX_NAMES) return _EX_NAMES;
+  const seen = {}, out = [];
+  const add = (name, src)=>{
+    const nm = String(name || "").trim();
+    if(!nm) return;
+    const c = canonEx(nm);
+    if(!c || seen[c]) return;
+    seen[c] = 1;
+    out.push({name: nm, c, src});
+  };
+  DAYS.concat(["finisher"]).forEach(d=> (S.program[d] || []).forEach(e=>{
+    if(!e) return;
+    add(e.name, "yours");
+    if(e.alt) add(e.alt.name, "yours");
+  }));
+  S.sessions.forEach(s=> (s.entries || []).forEach(e=> add(e.name, "yours")));
+  Object.keys(EX_LIBRARY).forEach(k=> EX_LIBRARY[k].forEach(x=> add(x.name, "lib")));
+  Object.keys(EX_MUSCLES).forEach(k=> add(k.replace(/\b\w/g, ch=> ch.toUpperCase()), "lib"));
+  _EX_NAMES = out;
+  return out;
+}
+/* Ranked, not filtered. A list that only does "starts with" misses "cable lateral raise"
+   when you type "lateral", and one that only does "contains" puts "Leaning Cable Lateral
+   Raise" above "Lateral Raise". Whole-string prefix beats word prefix beats anywhere,
+   your own names beat the catalogue at equal rank, and shorter beats longer so the plain
+   version of a movement comes before its variations. */
+function exSearch(q, limit){
+  const s = canonEx(String(q || "").trim());
+  if(!s) return [];
+  const words = s.split(/\s+/).filter(Boolean);
+  const out = [];
+  exNameIndex().forEach(rec=>{
+    const c = rec.c;
+    let score;
+    if(c === s) score = 0;
+    else if(c.indexOf(s) === 0) score = 1;
+    else if(new RegExp("\\b" + s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(c)) score = 2;
+    else if(c.indexOf(s) > -1) score = 3;
+    else if(words.length > 1 && words.every(w=> c.indexOf(w) > -1)) score = 4;
+    else return;
+    if(rec.src === "yours") score -= 0.5;
+    out.push({name: rec.name, src: rec.src, score, len: c.length});
+  });
+  out.sort((a,b)=> a.score - b.score || a.len - b.len || a.name.localeCompare(b.name));
+  return out.slice(0, limit || 8);
+}
+
 /* One slot = one job in a session, written [libraryKey, kind] or [libraryKey, kind,
    setsOverride]. `kind` picks the rep range, the RPE ramp and the rest band; the
    optional third value overrides the set count for slots that need more work than
@@ -5854,6 +6197,24 @@ function swapOptionsFor(name){
     .sort((a,b)=> SWAP_PREFERENCE.indexOf(a.gear) - SWAP_PREFERENCE.indexOf(b.gear));
   const other = all.filter(x=> SWAP_STATION_GEAR.indexOf(x.gear) > -1 && x.gear !== hit.gear);
   return free.concat(other);
+}
+/* THE SAME JOB, ANY EQUIPMENT — which is a different question from swapOptionsFor().
+
+   That one answers "the pec deck is taken, what else is free", so it is gated on the
+   movement being a STATION and it puts free weights first because they are the ones
+   nobody is queueing for. Editing a plan is not standing in a gym: nothing is taken,
+   and a barbell bench being swapped for a dumbbell press is the most ordinary edit
+   there is. So this is simply everything else in the slot, in a stable order. */
+function slotSiblingsFor(name){
+  const hit = exSlotFor(name);
+  if(!hit) return [];
+  const here = swapSquash(name);
+  const all = (EX_LIBRARY[hit.key] || []).filter(x=> swapSquash(x.name) !== here);
+  const rank = g=>{
+    const i = SWAP_PREFERENCE.indexOf(g);
+    return i > -1 ? i : SWAP_PREFERENCE.length + SWAP_STATION_GEAR.indexOf(g);
+  };
+  return all.slice().sort((a,b)=> rank(a.gear) - rank(b.gear) || a.name.localeCompare(b.name));
 }
 /* EVERY exercise is switchable, not only the ones tied to a station. The station case —
    somebody is on the pec deck — is the one with a good automatic answer, so it still gets
@@ -6570,6 +6931,10 @@ function persist(){
 function save(){
   // marks a real user-driven change: advance savedAt so this device wins the merge
   S.savedAt = Date.now();
+  /* The autocomplete offers your own movements first, so its index is only right until
+     the next thing you save. Cheap to drop and rebuilt on the next search rather than
+     here — a save happens on every tick of a checkbox. */
+  invalidateExNames();
   persist();
 }
 function saveQuiet(){
@@ -17450,16 +17815,16 @@ function viewProgram(){
       if(e.alt) meta += isPick
         ? `<br>either one \u2014 you pick on the day${nextUp ? ", currently " + esc(nextUp) : ""}`
         : `<br>next ${m.name.toLowerCase()} day: ${esc(nextUp)}`;
+      /* NO CONTROLS ON THIS ROW, deliberately. Moving and editing an exercise existed in
+         two places — here and in the day editor — which meant two mental models of the
+         same action and an ordering you could change on a screen that shows four days at
+         once, where the day you are reordering scrolls out of view while you do it. One
+         way in: "edit day", above. This list is the plan as written. */
       h += `<div class="prog-ex">
         <div><b>${title}</b><div class="meta">${meta}</div></div>
-        <div class="icon-btns">
-          <button data-up="${wid}:${i}" aria-label="Move up">↑</button>
-          <button data-down="${wid}:${i}" aria-label="Move down">↓</button>
-          <button data-edit="${wid}:${i}" aria-label="Edit">✎</button>
-        </div>
       </div>`;
     });
-    h += `<button class="btn ghost small" data-addex="${wid}" style="margin-top:10px">+ Add exercise</button></div>`;
+    h += `<button class="btn ghost small" data-dayedit="${wid}" style="margin-top:10px">Edit this day</button></div>`;
   });
   /* The finisher, which runs at the end of every workout. It's empty by default,
      because a plan generally puts core work on specific days rather than taxing every one,
@@ -17475,18 +17840,13 @@ function viewProgram(){
     fin.forEach((e,i)=>{
       h += `<div class="prog-ex">
         <div><b>${esc(e.name)}</b><div class="meta">${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}</div></div>
-        <div class="icon-btns">
-          <button data-up="finisher:${i}" aria-label="Move up">↑</button>
-          <button data-down="finisher:${i}" aria-label="Move down">↓</button>
-          <button data-edit="finisher:${i}" aria-label="Edit">✎</button>
-        </div>
       </div>`;
     });
-    h += `<button class="btn ghost small" data-addex="finisher" style="margin-top:10px">+ Add exercise</button></div>`;
+    h += `<button class="btn ghost small" data-dayedit="finisher" style="margin-top:10px">Edit the finisher</button></div>`;
   } else {
     h += `<div class="sub" style="text-align:center;margin:4px 2px 8px">
       No finisher. Core work is placed on specific days in your plan rather than taxing every session.
-      <button class="linklike" data-addex="finisher" style="margin-left:4px">Add a finisher</button>
+      <button class="linklike" data-dayedit="finisher" style="margin-left:4px">Add a finisher</button>
     </div>`;
   }
   return h;
@@ -18790,6 +19150,10 @@ function bind(){
     save(); queueSync(); render();
     toast("Removed");
   });
+  document.querySelectorAll("[data-deswap]").forEach(b=> b.onclick = ()=>{
+    const [wid, i] = b.dataset.deswap.split(":");
+    openSwitchExercise(wid, parseInt(i, 10));
+  });
   document.querySelectorAll("[data-exmask]").forEach(b=> b.onclick = ()=> openMuscleEditor(b.dataset.exmask));
   const deC = $("#deClassify");
   if(deC) deC.onclick = async ()=>{
@@ -19735,6 +20099,7 @@ function viewDayEdit(wid){
         <button data-deup="${wid}:${i}" aria-label="Move earlier"${i === 0 ? " disabled" : ""}>↑</button>
         <button data-dedown="${wid}:${i}" aria-label="Move later"${i === list.length - 1 ? " disabled" : ""}>↓</button>
         <button data-deedit="${wid}:${i}" aria-label="Edit ${esc(e.name)}">${ICON.note}</button>
+        <button data-deswap="${wid}:${i}" aria-label="Switch ${esc(e.name)} for something else">${ICON.swap}</button>
         <button data-dedup="${wid}:${i}" aria-label="Duplicate ${esc(e.name)}">${ICON.plus}</button>
         <button data-dedel="${wid}:${i}" aria-label="Remove ${esc(e.name)}" class="danger">${ICON.trash}</button>
       </div>
@@ -19755,6 +20120,90 @@ function viewDayEdit(wid){
   }
   return h;
 }
+/* THE NAME BOX, WITH THE LIBRARY BEHIND IT.
+
+   One control, used by both the add sheet and the switch sheet, because they are the
+   same question asked at different moments. It types freely — a movement the catalogue
+   has never heard of is still a movement, and refusing to accept one would make the
+   library a cage rather than a help — and it offers matches underneath as you go, your
+   own exercises first. */
+function exPickerHTML(id, value, placeholder){
+  return `<div class="field" style="margin:0 0 8px"><label>Exercise</label>
+    <input id="${id}" value="${esc(value || "")}" placeholder="${esc(placeholder || "start typing")}"
+      autocomplete="off" autocapitalize="words" spellcheck="false"></div>
+  <div class="ex-sug" id="${id}_list"></div>`;
+}
+function wireExPicker(id, onPick){
+  const box = $("#" + id), list = $("#" + id + "_list");
+  if(!box || !list) return null;
+  const draw = ()=>{
+    const q = (box.value || "").trim();
+    const hits = q.length < 2 ? [] : exSearch(q, 7);
+    /* An exact match needs no suggestion: offering "Barbell Curl" to somebody who has
+       just finished typing Barbell Curl is a list telling you what you already know. */
+    if(hits.length === 1 && canonEx(hits[0].name) === canonEx(q)){ list.innerHTML = ""; return; }
+    list.innerHTML = hits.map(h=>
+      `<button type="button" class="ex-sug-b" data-expick="${attrSafe(h.name)}">
+        <span>${esc(h.name)}</span>${h.src === "yours" ? `<i>in your plan</i>` : ""}
+      </button>`).join("");
+    list.querySelectorAll("[data-expick]").forEach(b=> b.onclick = ()=>{
+      box.value = b.dataset.expick;
+      list.innerHTML = "";
+      if(onPick) onPick(box.value);
+    });
+  };
+  box.oninput = ()=>{ draw(); if(onPick) onPick(box.value); };
+  draw();
+  return box;
+}
+/* SWITCHING ONE MOVEMENT FOR ANOTHER, in the plan rather than mid-session.
+
+   Deliberately NOT the rename in openExEditor(). A rename says "this is the same
+   exercise, I called it something else" and so it registers an alias and rewrites the
+   logged entries, which is right for a typo and catastrophic here: swapping a barbell
+   bench for a dumbbell press would silently relabel every barbell set you have ever
+   done. A switch says "different movement, same slot" — the prescription stays, the
+   history stays where it was, and the new movement starts its own. */
+function openSwitchExercise(wid, idx){
+  const list = S.program[wid] || [];
+  const e = list[idx];
+  if(!e) return;
+  const near = slotSiblingsFor(e.name).slice(0, 6);
+  showModal(`<h3>Switch out ${esc(e.name)}</h3>
+    <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">The slot keeps its
+      programming — ${e.sets}×${esc(e.reps)}${e.rpe ? " @ RPE " + esc(String(e.rpe)) : ""} — and only the
+      movement changes. <b>Sessions you have already logged keep the old one</b>, so its history stays its
+      own rather than being handed to the new exercise.</div>
+    ${near.length ? `<div class="k-lab">Does the same job</div>
+      <div class="sw-chips">${near.map(x=>
+        `<button type="button" class="sw-chip" data-expick2="${attrSafe(x.name)}">${esc(x.name)}<i>${esc(x.gear)}</i></button>`).join("")}</div>` : ""}
+    ${exPickerHTML("swName", "", "or type any movement")}
+    <button class="btn" id="swGo" style="margin-top:10px">Switch it</button>
+    <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
+  const m = $("#modal");
+  wireExPicker("swName");
+  m.querySelectorAll("[data-expick2]").forEach(b=> b.onclick = ()=>{
+    $("#swName").value = b.dataset.expick2;
+    $("#swName_list").innerHTML = "";
+  });
+  m.querySelector("#swGo").onclick = ()=>{
+    const nm = ($("#swName").value || "").trim();
+    if(!nm){ toast("Pick something to switch to"); return; }
+    if(nrm(nm) === nrm(e.name)){ hideModal(); return; }
+    const was = e.name;
+    e.name = nm;
+    /* The cue and the side rule belonged to the old movement, not to this slot. A
+       dumbbell press does not inherit "touch the chest under control, no bounce", and a
+       two-arm machine row does not inherit a one-arm-at-a-time rule. */
+    delete e.cue; delete e.uni; delete e.cross;
+    if(e.sideMode) delete e.sideMode;
+    logPlanChange("swapped", wid, nm, [was + " → " + nm],
+      {note:"Switched in the plan. Logged sessions keep " + was + "."});
+    save(); queueSync(); hideModal(); render();
+    toast("Switched to " + nm);
+    classifyExercise(nm).then(rec=>{ if(rec) render(); }).catch(()=>{});
+  };
+}
 /* Adding one. The name comes first because everything else is inferred FROM it — the
    suggestion cannot exist until the app knows what movement this is. */
 function openAddExercise(wid){
@@ -19762,8 +20211,7 @@ function openAddExercise(wid){
   showModal(`<h3>Add to ${esc(wid === "finisher" ? "the finisher" : widName(wid))}</h3>
     <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Type the movement and
       Element 26 will programme it to match the rest of this day. Every number stays yours to change.</div>
-    <div class="field" style="margin:0 0 12px"><label>Exercise</label>
-      <input id="addExName" placeholder="e.g. Cable Lateral Raise" autocomplete="off"></div>
+    ${exPickerHTML("addExName", "", "e.g. Cable Lateral Raise")}
     <div id="addExSug"></div>
     <button class="btn" id="addExGo">Add it</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
@@ -19771,6 +20219,9 @@ function openAddExercise(wid){
   const box = m.querySelector("#addExName");
   box.focus();
   let sug = null;
+  /* Redrawn from the picker as well as from typing, so choosing a suggestion updates the
+     programming underneath it in the same breath. */
+  wireExPicker("addExName", ()=> draw());
   const draw = ()=>{
     const nm = (box.value || "").trim();
     const wrap = m.querySelector("#addExSug");
@@ -19782,7 +20233,6 @@ function openAddExercise(wid){
       <div class="sug-w">${esc(sug.why)}</div>
     </div>`;
   };
-  box.oninput = draw;
   m.querySelector("#addExGo").onclick = ()=>{
     const nm = (box.value || "").trim();
     if(!nm){ toast("Name it first"); return; }
