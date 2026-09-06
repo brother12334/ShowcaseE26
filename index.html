@@ -331,6 +331,7 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .ramp-cell input:focus{outline:none;border-color:var(--acc-line)}
 .ramp-sub{margin:8px 0 0;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--dim)}
 .ramp-why{display:block;color:var(--faint);font-size:11.5px;margin-top:2px}
+.ramp-no{margin-left:10px;color:var(--dim)}
 .prog-day:active .prog-day-go{color:var(--acc)}
 button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:pointer}
 /* Saying what a movement trains, in the same weights the tables use. */
@@ -3852,7 +3853,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.7";
+const APP_VERSION = "11.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6693,6 +6694,8 @@ function migrate(){
   /* Where you train. Both are absent for everybody who installed before this existed,
      and absent means "never asked" — see checkGymAtStart(). */
   if(!S.exMuscles || typeof S.exMuscles !== "object") S.exMuscles = {};
+  // which movements have had the RPE-ramp suggestion turned down, so it stays down
+  if(!S.rpeSugSkip || typeof S.rpeSugSkip !== "object") S.rpeSugSkip = {};
   if(!Array.isArray(S.gyms)) S.gyms = [];
   S.gyms = S.gyms.filter(g=> g && g.id && Array.isArray(g.spots));
   if(S.geo !== "on" && S.geo !== "off") S.geo = null;
@@ -8881,23 +8884,55 @@ function rampInputsHTML(id, n, list){
   }
   return h;
 }
-function rampBlockHTML(id, n, list, sug){
+/* WHEN NOT TO SUGGEST ANYTHING.
+
+   A suggestion is for a decision that has not been made. An exercise that ARRIVED with a
+   ramp — from an imported plan, or from a ramp somebody wrote here earlier — has already
+   had that decision made about it, and offering an alternative alongside it is the app
+   second-guessing the plan it was handed. So the row of numbers is shown on its own and
+   nothing is proposed.
+
+   The suggestion belongs to the other case: a new exercise, or one whose ramp is being
+   written for the first time. And even there it can be turned down — declining puts it
+   away for that movement and it does not come back. */
+function rpeSugSkipped(name){
+  const k = name ? tableKey(name) : "";
+  return !!(k && S.rpeSugSkip && S.rpeSugSkip[k]);
+}
+function rpeSugSkip(name){
+  const k = name ? tableKey(name) : "";
+  if(!k) return;
+  if(!S.rpeSugSkip || typeof S.rpeSugSkip !== "object") S.rpeSugSkip = {};
+  S.rpeSugSkip[k] = 1;
+  save();
+}
+function rampBlockHTML(id, n, list, sug, opts){
+  opts = opts || {};
   const on = Array.isArray(list) && list.length > 0;
+  // no proposal over the top of a ramp the plan already states, and none once declined
+  const showSug = !on && !opts.noSuggest;
   return `<div class="togglerow"><input type="checkbox" id="${id}_ramp" ${on ? "checked" : ""}>
       <label for="${id}_ramp" style="margin:0;font:inherit;color:var(--text);text-transform:none;letter-spacing:0">Set an exact RPE for each set</label></div>
     <div id="${id}_rampWrap" class="ramp-wrap"${on ? "" : " hidden"}>
-      <div class="ramp-row" id="${id}_rampRow">${rampInputsHTML(id, n, on ? list : sug.list)}</div>
-      <div class="sub ramp-sub">Suggested: <b class="num" id="${id}_rampSugV">${sug.list.join(" · ")}</b>
+      <div class="ramp-row" id="${id}_rampRow">${rampInputsHTML(id, n,
+        on ? list : (showSug ? sug.list : []))}</div>
+      <div class="sub ramp-sub" id="${id}_rampSug"${showSug ? "" : " hidden"}>Suggested:
+        <b class="num" id="${id}_rampSugV">${sug.list.join(" · ")}</b>
         <button type="button" class="linklike" id="${id}_rampUse">use it</button>
+        <button type="button" class="linklike ramp-no" id="${id}_rampNo">no thanks</button>
         <span class="ramp-why">${esc(sug.why)}</span></div>
     </div>`;
 }
 /* Keeps the boxes in step with the set count and the suggestion in step with both, and
    hands back a read() the caller uses when it commits. `getSets` is a function rather
    than a number because the set count is a box the person is still typing into. */
-function wireRamp(id, getSets, getSug){
+function wireRamp(id, getSets, getSug, opts){
+  opts = opts || {};
   const wrap = ()=> $("#" + id + "_rampWrap");
   const box  = ()=> $("#" + id + "_ramp");
+  const sugRow = ()=> $("#" + id + "_rampSug");
+  // hidden from the start when the exercise arrived with a ramp; also set by declining
+  let hushed = !sugRow() || sugRow().hidden;
   const readNow = ()=>{
     const n = Math.max(1, Math.min(20, parseInt(getSets(), 10) || 1));
     const out = [];
@@ -8908,18 +8943,24 @@ function wireRamp(id, getSets, getSug){
     }
     return out;
   };
+  const declined = ()=> hushed || (opts.declined ? !!opts.declined() : false);
   const paint = (list)=>{
     const n = Math.max(1, Math.min(20, parseInt(getSets(), 10) || 1));
     const sug = getSug(n);
-    // nothing typed yet means "show me the proposal"; a part-filled row is kept as it is,
-    // blanks and all, because those blanks are somebody mid-sentence
-    const use = (Array.isArray(list) && list.some(v=> v != null)) ? list : sug.list;
+    /* Nothing typed yet means "show me the proposal" — unless there is no proposal on
+       offer, in which case the boxes stay empty and wait to be filled in by hand. A
+       part-filled row is kept as it is, blanks and all, because those blanks are
+       somebody mid-sentence. */
+    const typed = Array.isArray(list) && list.some(v=> v != null);
+    const use = typed ? list : (declined() ? [] : sug.list);
     const row = $("#" + id + "_rampRow");
     if(row) row.innerHTML = rampInputsHTML(id, n, use);
     const sv = $("#" + id + "_rampSugV");
     if(sv) sv.textContent = sug.list.join(" · ");
     const why = wrap() && wrap().querySelector(".ramp-why");
     if(why) why.textContent = sug.why;
+    const sr = sugRow();
+    if(sr) sr.hidden = declined();
   };
   const b = box();
   if(b) b.onchange = ()=>{
@@ -8934,6 +8975,18 @@ function wireRamp(id, getSets, getSug){
   };
   const use = $("#" + id + "_rampUse");
   if(use) use.onclick = ()=> paint(null);
+  /* DECLINING. The proposal goes away and takes its numbers with it — leaving them in
+     the boxes would be the app writing the ramp anyway — and it is remembered against
+     the movement, so it does not reappear the next time this sheet is opened. */
+  const no = $("#" + id + "_rampNo");
+  if(no) no.onclick = ()=>{
+    hushed = true;
+    if(opts.name) rpeSugSkip(opts.name());
+    const n = Math.max(1, Math.min(20, parseInt(getSets(), 10) || 1));
+    const row = $("#" + id + "_rampRow");
+    if(row) row.innerHTML = rampInputsHTML(id, n, []);
+    const sr = sugRow(); if(sr) sr.hidden = true;
+  };
   return {
     resize: ()=>{ if(box() && box().checked) paint(readNow()); else paint(null); },
     read: ()=>{
@@ -20566,7 +20619,8 @@ function openSwitchExercise(wid, idx){
     <div class="k-lab" style="margin-top:4px">Sets and reps</div>
     ${progFieldsHTML("sw", e)}
     ${rampBlockHTML("sw", Math.max(1, parseInt(e.sets,10) || 3), e.rpes,
-        suggestRpeRamp(wid, e.name, e.sets, idx, e))}
+        suggestRpeRamp(wid, e.name, e.sets, idx, e),
+        {noSuggest: rpeSugSkipped(e.name)})}
     <div class="k-lab" style="margin-top:12px">Note <span class="k-opt">optional</span></div>
     ${e.note ? `<div class="sw-oldnote">The note on this slot — “${esc(e.note)}” — was about
       ${esc(e.name)}, so it goes with it. Write a new one if the replacement needs one.</div>` : ""}
@@ -20628,7 +20682,9 @@ function openSwitchExercise(wid, idx){
      many sets — so it is re-derived whenever either answer changes. */
   const ramp = wireRamp("sw", ()=> $("#sw_sets").value,
     n=> suggestRpeRamp(wid, ($("#swName").value || "").trim() || e.name, n, idx,
-                       {rpe: ($("#sw_rpe") || {}).value || "", slotKind: e.slotKind}));
+                       {rpe: ($("#sw_rpe") || {}).value || "", slotKind: e.slotKind}),
+    {name: ()=> ($("#swName").value || "").trim() || e.name,
+     declined: ()=> rpeSugSkipped(($("#swName").value || "").trim() || e.name)});
   wireExPicker("swName", drawProg);
   m.querySelectorAll("[data-expick2]").forEach(b=> b.onclick = ()=>{
     $("#swName").value = b.dataset.expick2;
@@ -20712,7 +20768,7 @@ function openAddExercise(wid){
     <div id="addExSug"></div>
     <div class="k-lab" style="margin-top:4px">Sets and reps</div>
     ${progFieldsHTML("add", {sets: 3, reps: "", rpe: ""})}
-    ${rampBlockHTML("add", 3, null, suggestRpeRamp(wid, "", 3, at, null))}
+    ${rampBlockHTML("add", 3, null, suggestRpeRamp(wid, "", 3, at, null), {})}
     <button class="btn" id="addExGo" style="margin-top:12px">Add it</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
   const m = $("#modal");
@@ -20723,7 +20779,9 @@ function openAddExercise(wid){
      programming underneath it in the same breath. */
   const ramp = wireRamp("add", ()=> $("#add_sets").value,
     n=> suggestRpeRamp(wid, (box.value || "").trim(), n, at,
-                       {rpe: ($("#add_rpe") || {}).value || ""}));
+                       {rpe: ($("#add_rpe") || {}).value || ""}),
+    {name: ()=> (box.value || "").trim(),
+     declined: ()=> rpeSugSkipped((box.value || "").trim())});
   wireExPicker("addExName", ()=> draw());
   const draw = ()=>{
     const nm = (box.value || "").trim();
@@ -20832,7 +20890,8 @@ function openExEditor(wid, idx){
     <input id="f_weight" inputmode="decimal" value="${esc(e.weight??"")}" placeholder="optional">
   </div></div>
   ${rampBlockHTML("f", Math.max(1, parseInt(e.sets,10) || 3), e.rpes,
-      suggestRpeRamp(wid, e.name, e.sets, isNew ? null : idx, e))}
+      suggestRpeRamp(wid, e.name, e.sets, isNew ? null : idx, e),
+      {noSuggest: rpeSugSkipped(e.name)})}
   <div class="sub" style="margin:6px 0 12px">A ramp is what most written plans mean by "RPE 7-9":
     the opener is not the last set. Every logged set is graded against its own number, and the
     range above is kept in step with whatever these say.</div>
@@ -20915,7 +20974,9 @@ function openExEditor(wid, idx){
      boxes changes with it, change the range and the suggestion is re-derived from it. */
   const ramp = wireRamp("f", ()=> $("#f_sets").value,
     n=> suggestRpeRamp(wid, $("#f_name").value.trim() || e.name, n, isNew ? null : idx,
-                       {rpe: $("#f_rpe").value.trim(), slotKind: e.slotKind}));
+                       {rpe: $("#f_rpe").value.trim(), slotKind: e.slotKind}),
+    {name: ()=> $("#f_name").value.trim() || e.name,
+     declined: ()=> rpeSugSkipped($("#f_name").value.trim() || e.name)});
   $("#f_sets").addEventListener("input", ramp.resize);
   $("#saveEx").onclick = ()=>{
     const ne = {
@@ -24737,7 +24798,7 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
-  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","sessions","savedAt"
+  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
@@ -24914,6 +24975,7 @@ async function pullFromGist(){
     if(remote.lastReview) S.lastReview = remote.lastReview;
     S.checkins = Object.assign({}, S.checkins||{}, remote.checkins||{});
     S.exMuscles = Object.assign({}, S.exMuscles||{}, remote.exMuscles||{});
+    S.rpeSugSkip = Object.assign({}, S.rpeSugSkip||{}, remote.rpeSugSkip||{});
     S.exAliases = Object.assign({}, remote.exAliases||{}, S.exAliases||{});
     S.stalls = mergeStalls(S.stalls, remote.stalls);
     USER_ALIASES = S.exAliases; invalidateTableOrigin();
@@ -24992,6 +25054,7 @@ async function syncNow(announce){
       if(remote.lastReview) S.lastReview = remote.lastReview;
       S.checkins = Object.assign({}, S.checkins||{}, remote.checkins||{});
     S.exMuscles = Object.assign({}, S.exMuscles||{}, remote.exMuscles||{});
+    S.rpeSugSkip = Object.assign({}, S.rpeSugSkip||{}, remote.rpeSugSkip||{});
       S.exAliases = Object.assign({}, remote.exAliases||{}, S.exAliases||{});
       S.stalls = mergeStalls(S.stalls, remote.stalls);
       USER_ALIASES = S.exAliases; invalidateTableOrigin();
@@ -25016,6 +25079,7 @@ async function syncNow(announce){
       const tomb = new Set([...(S.deleted||[]), ...(remote.deleted||[])]);
       S.checkins = Object.assign({}, remote.checkins||{}, S.checkins||{});
       S.exMuscles = Object.assign({}, remote.exMuscles||{}, S.exMuscles||{});
+      S.rpeSugSkip = Object.assign({}, remote.rpeSugSkip||{}, S.rpeSugSkip||{});
       S.exAliases = Object.assign({}, remote.exAliases||{}, S.exAliases||{});
       S.stalls = mergeStalls(S.stalls, remote.stalls);
       USER_ALIASES = S.exAliases; invalidateTableOrigin();
@@ -25745,7 +25809,7 @@ function mergeBackup(into, d){
   ["restDays","restLog","skipLog","restDeleted","restAuto","deleted","planLog"].forEach(k=>{
     if(d[k]) into[k] = uniqDates(into[k], d[k]);
   });
-  ["checkins","exAliases","stalls","asymRetired","prefs","exMuscles"].forEach(k=>{
+  ["checkins","exAliases","stalls","asymRetired","prefs","exMuscles","rpeSugSkip"].forEach(k=>{
     if(d[k] && typeof d[k] === "object") into[k] = Object.assign({}, into[k]||{}, d[k]);
   });
   /* The plan and everything that describes it comes across whole or not at all: half of
