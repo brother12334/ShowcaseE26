@@ -273,6 +273,24 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 }
 .sw-chip i{font:9.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-style:normal}
 .sw-chip:active{border-color:var(--acc-line)}
+/* Keep the slot's programming, or take the one worked out for the new movement. Two
+   rows rather than a segmented control: each carries a reason, and a reason does not fit
+   in a segment. */
+.sw-opts{display:flex;flex-direction:column;gap:8px;margin:0 0 4px}
+.sw-opt{
+  display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;
+  padding:12px 14px;border-radius:11px;border:1px solid var(--line);background:var(--card2);
+  color:var(--text);cursor:pointer;font:inherit;
+}
+.sw-opt.on{border-color:var(--acc-line);background:var(--acc-soft)}
+.sw-opt-v{font-family:var(--mono);font-size:16px}
+.sw-opt-w{font-size:12px;color:var(--dim);line-height:1.4}
+.sw-opt.on .sw-opt-w{color:var(--text)}
+/* What it trains, said once as the movement lands in the plan. */
+.mus-out{display:flex;flex-direction:column;gap:8px;margin:10px 0 0;padding:12px 13px;
+  border:1px solid var(--line);border-radius:11px;background:var(--card2)}
+.mus-out-r{display:flex;flex-direction:column;gap:2px;font-size:13.5px}
+.mus-out-r b{font-size:14.5px}
 /* The suggestion, shown before it is taken. It is a proposal on the screen, not a value
    already written into the plan — hence its own panel rather than pre-filled boxes. */
 .sug-card{border:1px solid var(--acc-line);background:var(--acc-soft);border-radius:11px;
@@ -3799,7 +3817,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.2";
+const APP_VERSION = "11.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6197,6 +6215,15 @@ function swapOptionsFor(name){
     .sort((a,b)=> SWAP_PREFERENCE.indexOf(a.gear) - SWAP_PREFERENCE.indexOf(b.gear));
   const other = all.filter(x=> SWAP_STATION_GEAR.indexOf(x.gear) > -1 && x.gear !== hit.gear);
   return free.concat(other);
+}
+// The coaching line the library ships for a movement, or "" — see the note rule in
+// openSwitchExercise().
+function libraryCueFor(name){
+  const hit = exSlotFor(name);
+  if(!hit) return "";
+  const here = swapSquash(name);
+  const rec = (EX_LIBRARY[hit.key] || []).find(x=> swapSquash(x.name) === here);
+  return (rec && rec.cue) || "";
 }
 /* THE SAME JOB, ANY EQUIPMENT — which is a different question from swapOptionsFor().
 
@@ -20168,44 +20195,162 @@ function wireExPicker(id, onPick){
    bench for a dumbbell press would silently relabel every barbell set you have ever
    done. A switch says "different movement, same slot" — the prescription stays, the
    history stays where it was, and the new movement starts its own. */
+/* WHAT THIS MOVEMENT TRAINS, SHOWN AT THE MOMENT IT ENTERS THE PLAN.
+
+   The classification happens either way — it is what makes the sets reach the Body tab —
+   but doing it silently means the one person who could correct it never sees it. This is
+   that moment: it works out the muscles, says what it found in plain names, and offers
+   the correction while the exercise is still the thing you are thinking about.
+
+   Nothing waits on it. The exercise is already in the plan by the time this opens; if
+   the network is out or the model is unsure, the sheet says so and the slot is still
+   there, still editable, just not yet counted. */
+function openExerciseIntro(name, head){
+  const done = ()=>{ hideModal(); render(); };
+  const draw = (state, s)=>{
+    let body;
+    if(state === "working"){
+      body = `<div class="ai-busy" style="margin:8px 0 4px"><span class="ai-spin"></span>
+        <span>Working out what this trains…</span></div>`;
+    } else if(state === "known"){
+      const keys = Object.keys(s.map).sort((a,b)=> s.map[b] - s.map[a]);
+      const prime = keys.filter(k=> s.map[k] >= .9);
+      const rest  = keys.filter(k=> s.map[k] < .9);
+      body = `<div class="mus-out">
+          <div class="mus-out-r"><span class="k-lab" style="margin:0">Mainly</span>
+            <b>${esc(prime.map(k=> GROUPS[k].name).join(", ") || "—")}</b></div>
+          ${rest.length ? `<div class="mus-out-r"><span class="k-lab" style="margin:0">Also</span>
+            <span>${esc(rest.map(k=> GROUPS[k].name + " (" + Math.round(s.map[k]*100) + "%)").join(", "))}</span></div>` : ""}
+        </div>
+        <div class="sub" style="margin:10px 0 0;font-size:12.5px;color:var(--faint)">${
+          s.src === "table" ? "From Element 26's own tables."
+          : s.src === "you" ? "You set this."
+          : "Worked out for this exercise and saved, so it is never asked again."} Every set you log is
+          shared out by these weights, which is how a compound counts differently from an isolation.</div>`;
+    } else {
+      body = `<div class="sync-warn" style="margin:4px 0 0">Element 26 couldn't place this one confidently.
+        Until it knows, its sets are not counted anywhere — set what it trains and every session counts
+        from then on, including ones already logged.</div>`;
+    }
+    showModal(`<h3>${esc(head || name)}</h3>
+      ${body}
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn small" id="miOK" style="flex:1">${state === "known" ? "That's right" : "OK"}</button>
+      </div>
+      <div class="btn-row"><button class="btn ghost small" id="miFix" style="flex:1">${
+        state === "known" ? "Change what it trains" : "Set what it trains"}</button></div>`);
+    const m = $("#modal");
+    m.querySelector("#miOK").onclick = done;
+    m.querySelector("#miFix").onclick = ()=> openMuscleEditor(name);
+  };
+  const now = muscleSourceOf(name);
+  if(now.map){ draw("known", now); return; }
+  if(!aiReady()){ draw("unknown"); return; }
+  draw("working");
+  classifyExercise(name).then(()=>{
+    const after = muscleSourceOf(name);
+    draw(after.map ? "known" : "unknown", after);
+  }).catch(()=> draw("unknown"));
+}
 function openSwitchExercise(wid, idx){
   const list = S.program[wid] || [];
   const e = list[idx];
   if(!e) return;
   const near = slotSiblingsFor(e.name).slice(0, 6);
+  const keepTxt = e.sets + "×" + esc(e.reps || "?") + (e.rpe ? " @ RPE " + esc(String(e.rpe)) : "");
   showModal(`<h3>Switch out ${esc(e.name)}</h3>
-    <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">The slot keeps its
-      programming — ${e.sets}×${esc(e.reps)}${e.rpe ? " @ RPE " + esc(String(e.rpe)) : ""} — and only the
-      movement changes. <b>Sessions you have already logged keep the old one</b>, so its history stays its
-      own rather than being handed to the new exercise.</div>
+    <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Only the movement
+      changes. <b>Sessions you have already logged keep the old one</b>, so its history stays its own
+      rather than being handed to the new exercise.</div>
     ${near.length ? `<div class="k-lab">Does the same job</div>
       <div class="sw-chips">${near.map(x=>
         `<button type="button" class="sw-chip" data-expick2="${attrSafe(x.name)}">${esc(x.name)}<i>${esc(x.gear)}</i></button>`).join("")}</div>` : ""}
     ${exPickerHTML("swName", "", "or type any movement")}
+    <div id="swProg"></div>
     <button class="btn" id="swGo" style="margin-top:10px">Switch it</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
   const m = $("#modal");
-  wireExPicker("swName");
+  /* KEEP OR RE-PROGRAMME, ASKED RATHER THAN ASSUMED. Swapping a barbell bench for a
+     dumbbell press is the same job and the sets should carry; swapping it for a lateral
+     raise is not, and 4×6-10 on a lateral raise is a prescription nobody wants. The app
+     cannot tell those apart with any confidence, so it shows both and lets you say —
+     with keeping it as the default, because a switch is usually a like-for-like. */
+  let mode = "keep", sug = null;
+  const drawProg = ()=>{
+    const nm = ($("#swName").value || "").trim();
+    const wrap = m.querySelector("#swProg");
+    if(nm.length < 3 || nrm(nm) === nrm(e.name)){ wrap.innerHTML = ""; sug = null; return; }
+    sug = suggestProgramming(wid, nm, idx);
+    const same = sug.sets === e.sets && String(sug.reps) === String(e.reps)
+              && String(sug.rpe || "") === String(e.rpe || "");
+    if(same){
+      wrap.innerHTML = `<div class="sug-card"><div class="sug-k">Programming</div>
+        <div class="sug-v num">${keepTxt}</div>
+        <div class="sug-w">Same as this slot already has — nothing to decide.</div></div>`;
+      mode = "keep";
+      return;
+    }
+    wrap.innerHTML = `<div class="k-lab" style="margin-top:4px">Sets and reps</div>
+      <div class="sw-opts">
+        <button type="button" class="sw-opt${mode==="keep"?" on":""}" data-swmode="keep">
+          <span class="sw-opt-v num">${keepTxt}</span>
+          <span class="sw-opt-w">Keep what this slot has</span>
+        </button>
+        <button type="button" class="sw-opt${mode==="new"?" on":""}" data-swmode="new">
+          <span class="sw-opt-v num">${sug.sets}×${esc(sug.reps)}${sug.rpe ? " @ RPE " + esc(String(sug.rpe)) : ""}</span>
+          <span class="sw-opt-w">${esc(sug.why)}</span>
+        </button>
+      </div>`;
+    wrap.querySelectorAll("[data-swmode]").forEach(b=> b.onclick = ()=>{
+      mode = b.dataset.swmode;
+      wrap.querySelectorAll("[data-swmode]").forEach(x=> x.classList.toggle("on", x.dataset.swmode === mode));
+    });
+  };
+  wireExPicker("swName", drawProg);
   m.querySelectorAll("[data-expick2]").forEach(b=> b.onclick = ()=>{
     $("#swName").value = b.dataset.expick2;
     $("#swName_list").innerHTML = "";
+    drawProg();
   });
   m.querySelector("#swGo").onclick = ()=>{
     const nm = ($("#swName").value || "").trim();
     if(!nm){ toast("Pick something to switch to"); return; }
     if(nrm(nm) === nrm(e.name)){ hideModal(); return; }
     const was = e.name;
+    const lines = [was + " → " + nm];
     e.name = nm;
     /* The cue and the side rule belonged to the old movement, not to this slot. A
        dumbbell press does not inherit "touch the chest under control, no bounce", and a
        two-arm machine row does not inherit a one-arm-at-a-time rule. */
     delete e.cue; delete e.uni; delete e.cross;
     if(e.sideMode) delete e.sideMode;
-    logPlanChange("swapped", wid, nm, [was + " → " + nm],
+    /* THE NOTE, BUT ONLY IF IT WAS THE APP TALKING. "Touch the chest under control" is
+       coaching for a bench press and nonsense on a lateral raise, so a note that IS the
+       old movement's library cue goes with it. Anything else was typed by a person about
+       this slot — "per dumbbell", "tempo 3-1-1" — and deleting somebody's own words to
+       tidy up is not a trade worth making. */
+    const oldCue = libraryCueFor(was);
+    if(e.note && oldCue && nrm(e.note) === nrm(oldCue)){
+      const newCue = libraryCueFor(nm);
+      if(newCue) e.note = newCue; else delete e.note;
+    }
+    if(mode === "new" && sug){
+      lines.push(e.sets + "×" + e.reps + (e.rpe ? " @ RPE " + e.rpe : "")
+               + " → " + sug.sets + "×" + sug.reps + (sug.rpe ? " @ RPE " + sug.rpe : ""));
+      e.sets = sug.sets; e.reps = sug.reps; e.rpe = sug.rpe;
+      if(sug.rest) e.rest = sug.rest.slice(); else delete e.rest;
+      /* And the starting weight, which was a load for a different movement. Re-programming
+         is exactly the case where carrying it forward puts a bench press number on a
+         lateral raise; "keep" is the case where the two are alike enough to survive. */
+      e.weight = null;
+      /* A per-set RPE ramp was written for the OLD set count and the old movement, and a
+         four-long ramp on a three-set exercise describes a set that no longer exists. */
+      delete e.rpes; delete e.rebuild;
+    }
+    logPlanChange("swapped", wid, nm, lines,
       {note:"Switched in the plan. Logged sessions keep " + was + "."});
-    save(); queueSync(); hideModal(); render();
-    toast("Switched to " + nm);
-    classifyExercise(nm).then(rec=>{ if(rec) render(); }).catch(()=>{});
+    save(); queueSync(); render();
+    openExerciseIntro(nm, "Switched to " + nm);
   };
 }
 /* Adding one. The name comes first because everything else is inferred FROM it — the
@@ -20247,12 +20392,10 @@ function openAddExercise(wid){
     S.program[wid].push(ne);
     logPlanChange("added", wid, nm, [s.sets + "×" + s.reps + (s.rpe ? " @ RPE " + s.rpe : "")],
       {note: s.why});
-    save(); queueSync(); hideModal(); render();
-    toast("Added — tap it to change anything");
-    // and find out what it trains, so the Body tab has it before the first session
-    classifyExercise(nm).then(rec=>{ if(rec) render(); }).catch(()=>{});
-    // straight into the full editor, since that is where the rest of the prescription is
-    setTimeout(()=> openExEditor(wid, S.program[wid].length - 1), 260);
+    save(); queueSync(); render();
+    /* Same moment as a switch: what it trains, said while the exercise is still what you
+       are thinking about, and correctable there. */
+    openExerciseIntro(nm, "Added " + nm);
   };
 }
 /* Confirming, or correcting, what a movement trains. The same weights the tables use, so
