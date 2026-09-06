@@ -298,6 +298,18 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .sug-k{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--acc)}
 .sug-v{font-family:var(--mono);font-size:19px;color:var(--text);margin-top:5px}
 .sug-w{font-size:12px;color:var(--dim);line-height:1.45;margin-top:5px}
+/* The three numbers, always typeable. They sit under the shortcuts rather than inside
+   them, because what you commit is what is in the boxes — a tapped shortcut just fills
+   them in, and anything you then type wins. */
+.prog-fields{display:flex;gap:8px;margin:0 0 4px}
+.prog-fields label{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:4px}
+.prog-fields span{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.prog-fields input{
+  width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);
+  background:var(--card2);color:var(--text);font-family:var(--mono);font-size:15px;
+}
+.prog-fields input:focus{outline:none;border-color:var(--acc-line)}
+button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:pointer}
 /* Saying what a movement trains, in the same weights the tables use. */
 .mus-list{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow-y:auto}
 .mus-row{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
@@ -3817,7 +3829,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.3";
+const APP_VERSION = "11.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20252,6 +20264,32 @@ function openExerciseIntro(name, head){
     draw(after.map ? "known" : "unknown", after);
   }).catch(()=> draw("unknown"));
 }
+/* SETS, REPS AND EFFORT, TYPEABLE WHEREVER A MOVEMENT IS CHOSEN.
+
+   The keep-or-suggest choice answers "which of these two", and there is always a third
+   answer: neither, I want four sets of eight. Offering only the two turns a suggestion
+   into a menu, and a menu is what somebody with a coach and a written programme has to
+   fight. So the numbers are boxes, always: tapping an option fills them, and what is in
+   them when you commit is what gets written. */
+function progFieldsHTML(id, v){
+  return `<div class="prog-fields">
+    <label><span>Sets</span><input id="${id}_sets" inputmode="numeric" value="${esc(v.sets)}"></label>
+    <label><span>Reps</span><input id="${id}_reps" value="${esc(v.reps || "")}" placeholder="8-12"></label>
+    <label><span>RPE</span><input id="${id}_rpe" value="${esc(v.rpe || "")}" placeholder="7-9"></label>
+  </div>`;
+}
+function progFieldsRead(id){
+  const g = k=> ($("#" + id + "_" + k) || {}).value;
+  return {
+    sets: Math.max(1, Math.min(20, parseInt(g("sets"), 10) || 3)),
+    reps: String(g("reps") || "").trim(),
+    rpe:  String(g("rpe")  || "").trim()
+  };
+}
+function progFieldsSet(id, v){
+  const set = (k, val)=>{ const el = $("#" + id + "_" + k); if(el) el.value = val == null ? "" : val; };
+  set("sets", v.sets); set("reps", v.reps); set("rpe", v.rpe);
+}
 function openSwitchExercise(wid, idx){
   const list = S.program[wid] || [];
   const e = list[idx];
@@ -20267,7 +20305,9 @@ function openSwitchExercise(wid, idx){
         `<button type="button" class="sw-chip" data-expick2="${attrSafe(x.name)}">${esc(x.name)}<i>${esc(x.gear)}</i></button>`).join("")}</div>` : ""}
     ${exPickerHTML("swName", "", "or type any movement")}
     <div id="swProg"></div>
-    <button class="btn" id="swGo" style="margin-top:10px">Switch it</button>
+    <div class="k-lab" style="margin-top:4px">Sets and reps</div>
+    ${progFieldsHTML("sw", e)}
+    <button class="btn" id="swGo" style="margin-top:12px">Switch it</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
   const m = $("#modal");
   /* KEEP OR RE-PROGRAMME, ASKED RATHER THAN ASSUMED. Swapping a barbell bench for a
@@ -20275,7 +20315,7 @@ function openSwitchExercise(wid, idx){
      raise is not, and 4×6-10 on a lateral raise is a prescription nobody wants. The app
      cannot tell those apart with any confidence, so it shows both and lets you say —
      with keeping it as the default, because a switch is usually a like-for-like. */
-  let mode = "keep", sug = null;
+  let sug = null;
   const drawProg = ()=>{
     const nm = ($("#swName").value || "").trim();
     const wrap = m.querySelector("#swProg");
@@ -20286,25 +20326,38 @@ function openSwitchExercise(wid, idx){
     if(same){
       wrap.innerHTML = `<div class="sug-card"><div class="sug-k">Programming</div>
         <div class="sug-v num">${keepTxt}</div>
-        <div class="sug-w">Same as this slot already has — nothing to decide.</div></div>`;
-      mode = "keep";
+        <div class="sug-w">What this day would give the new movement is what this slot already has.</div></div>`;
       return;
     }
-    wrap.innerHTML = `<div class="k-lab" style="margin-top:4px">Sets and reps</div>
-      <div class="sw-opts">
-        <button type="button" class="sw-opt${mode==="keep"?" on":""}" data-swmode="keep">
+    /* Two shortcuts over the boxes, not two alternatives to them: tapping one fills the
+       numbers in and you carry on editing from there. */
+    wrap.innerHTML = `<div class="sw-opts">
+        <button type="button" class="sw-opt" data-swfill="keep">
           <span class="sw-opt-v num">${keepTxt}</span>
           <span class="sw-opt-w">Keep what this slot has</span>
         </button>
-        <button type="button" class="sw-opt${mode==="new"?" on":""}" data-swmode="new">
+        <button type="button" class="sw-opt" data-swfill="new">
           <span class="sw-opt-v num">${sug.sets}×${esc(sug.reps)}${sug.rpe ? " @ RPE " + esc(String(sug.rpe)) : ""}</span>
           <span class="sw-opt-w">${esc(sug.why)}</span>
         </button>
       </div>`;
-    wrap.querySelectorAll("[data-swmode]").forEach(b=> b.onclick = ()=>{
-      mode = b.dataset.swmode;
-      wrap.querySelectorAll("[data-swmode]").forEach(x=> x.classList.toggle("on", x.dataset.swmode === mode));
+    const mark = ()=>{
+      const cur = progFieldsRead("sw");
+      wrap.querySelectorAll("[data-swfill]").forEach(x=>{
+        const v = x.dataset.swfill === "keep" ? e : sug;
+        x.classList.toggle("on", cur.sets === v.sets && cur.reps === String(v.reps || "")
+                                 && cur.rpe === String(v.rpe || ""));
+      });
+    };
+    wrap.querySelectorAll("[data-swfill]").forEach(b=> b.onclick = ()=>{
+      progFieldsSet("sw", b.dataset.swfill === "keep" ? e : sug);
+      mark();
     });
+    ["sets","reps","rpe"].forEach(k=>{
+      const el = $("#sw_" + k);
+      if(el) el.oninput = mark;
+    });
+    mark();
   };
   wireExPicker("swName", drawProg);
   m.querySelectorAll("[data-expick2]").forEach(b=> b.onclick = ()=>{
@@ -20334,14 +20387,28 @@ function openSwitchExercise(wid, idx){
       const newCue = libraryCueFor(nm);
       if(newCue) e.note = newCue; else delete e.note;
     }
-    if(mode === "new" && sug){
+    /* WHAT IS IN THE BOXES IS WHAT GETS WRITTEN, whether it came from a shortcut or from
+       the keyboard. Re-programmed means "these numbers are not the ones this slot had" —
+       there is no mode to keep in step with, so there is nothing to get out of step. */
+    const want = progFieldsRead("sw");
+    const changed = want.sets !== e.sets || want.reps !== String(e.reps || "")
+                 || want.rpe !== String(e.rpe || "");
+    if(changed){
       lines.push(e.sets + "×" + e.reps + (e.rpe ? " @ RPE " + e.rpe : "")
-               + " → " + sug.sets + "×" + sug.reps + (sug.rpe ? " @ RPE " + sug.rpe : ""));
-      e.sets = sug.sets; e.reps = sug.reps; e.rpe = sug.rpe;
-      if(sug.rest) e.rest = sug.rest.slice(); else delete e.rest;
+               + " → " + want.sets + "×" + want.reps + (want.rpe ? " @ RPE " + want.rpe : ""));
+      e.sets = want.sets; e.reps = want.reps; e.rpe = want.rpe;
+      /* The rest window came from the slot's old shape. Three sets of six on a bench
+         wanted three minutes; five of twenty on a lateral raise does not, and carrying it
+         over is how a re-programmed slot ends up with a rest timer nobody chose. Take the
+         suggestion's window when the numbers are the suggestion's, otherwise drop it and
+         let the movement's own default apply. */
+      if(sug && sug.rest && want.sets === sug.sets && want.reps === String(sug.reps)){
+        e.rest = sug.rest.slice();
+      } else delete e.rest;
       /* And the starting weight, which was a load for a different movement. Re-programming
          is exactly the case where carrying it forward puts a bench press number on a
-         lateral raise; "keep" is the case where the two are alike enough to survive. */
+         lateral raise; leaving the numbers alone is the case where the two are alike
+         enough for it to survive. */
       e.weight = null;
       /* A per-set RPE ramp was written for the OLD set count and the old movement, and a
          four-long ramp on a three-set exercise describes a set that no longer exists. */
@@ -20362,12 +20429,14 @@ function openAddExercise(wid){
       Element 26 will programme it to match the rest of this day. Every number stays yours to change.</div>
     ${exPickerHTML("addExName", "", "e.g. Cable Lateral Raise")}
     <div id="addExSug"></div>
-    <button class="btn" id="addExGo">Add it</button>
+    <div class="k-lab" style="margin-top:4px">Sets and reps</div>
+    ${progFieldsHTML("add", {sets: 3, reps: "", rpe: ""})}
+    <button class="btn" id="addExGo" style="margin-top:12px">Add it</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
   const m = $("#modal");
   const box = m.querySelector("#addExName");
   box.focus();
-  let sug = null;
+  let sug = null, typed = false;
   /* Redrawn from the picker as well as from typing, so choosing a suggestion updates the
      programming underneath it in the same breath. */
   wireExPicker("addExName", ()=> draw());
@@ -20376,21 +20445,35 @@ function openAddExercise(wid){
     const wrap = m.querySelector("#addExSug");
     if(nm.length < 3){ wrap.innerHTML = ""; sug = null; return; }
     sug = suggestProgramming(wid, nm, at);
-    wrap.innerHTML = `<div class="sug-card">
-      <div class="sug-k">Suggested for this day</div>
+    wrap.innerHTML = `<button type="button" class="sug-card" id="addExFill">
+      <div class="sug-k">Suggested for this day${typed ? " · tap to use it" : ""}</div>
       <div class="sug-v num">${sug.sets}×${esc(sug.reps)}${sug.rpe ? " @ RPE " + esc(String(sug.rpe)) : ""}</div>
       <div class="sug-w">${esc(sug.why)}</div>
-    </div>`;
+    </button>`;
+    /* The suggestion follows the name until you disagree with it. Once a number has been
+       typed the boxes are yours and a later name change stops overwriting them — the
+       card is still there to take back if you want it. */
+    if(!typed) progFieldsSet("add", sug);
+    wrap.querySelector("#addExFill").onclick = ()=>{ typed = false; progFieldsSet("add", sug); draw(); };
   };
+  ["sets","reps","rpe"].forEach(k=>{
+    const el = $("#add_" + k);
+    if(el) el.oninput = ()=>{ typed = true; };
+  });
   m.querySelector("#addExGo").onclick = ()=>{
     const nm = (box.value || "").trim();
     if(!nm){ toast("Name it first"); return; }
     const s = sug || suggestProgramming(wid, nm, at);
-    const ne = {name: nm, sets: s.sets, reps: s.reps, rpe: s.rpe, weight: null, note: ""};
-    if(s.rest) ne.rest = s.rest.slice();
+    const want = progFieldsRead("add");
+    if(!want.reps) want.reps = String(s.reps || "");
+    const ne = {name: nm, sets: want.sets, reps: want.reps, rpe: want.rpe, weight: null, note: ""};
+    /* The rest window belongs to the suggestion's shape, so it only comes along while the
+       shape is still the suggested one. Typed-in sets and reps get the day's default. */
+    if(s.rest && want.sets === s.sets && want.reps === String(s.reps || "")) ne.rest = s.rest.slice();
     if(!Array.isArray(S.program[wid])) S.program[wid] = [];
     S.program[wid].push(ne);
-    logPlanChange("added", wid, nm, [s.sets + "×" + s.reps + (s.rpe ? " @ RPE " + s.rpe : "")],
+    logPlanChange("added", wid, nm,
+      [ne.sets + "×" + ne.reps + (ne.rpe ? " @ RPE " + ne.rpe : "")],
       {note: s.why});
     save(); queueSync(); render();
     /* Same moment as a switch: what it trains, said while the exercise is still what you
