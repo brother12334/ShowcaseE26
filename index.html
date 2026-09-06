@@ -3842,7 +3842,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.5";
+const APP_VERSION = "11.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -5308,9 +5308,12 @@ function sideTag(style, side){
   if(!side) return "";
   return style === "cross" ? side+"▸" : side;
 }
-function sideFull(style, side){
+function sideFull(style, side, name){
   const w = side === "L" ? "LEFT" : "RIGHT";
-  return style === "cross" ? w+" arm on top" : w+" arm";
+  // Crossover only happens with arms; everything else asks the exercise.
+  if(style === "cross") return w + " arm on top";
+  const limb = typeof limbWord === "function" ? limbWord(name) : "arm";
+  return limb === "side" ? w + " side" : w + " " + limb;
 }
 const ALT_CROSS_NOTE = "both arms, alternate which arm crosses on top each set";
 
@@ -6737,7 +6740,7 @@ function migrate(){
       const style = altStyle(e);
       if(!style) return;
       const n = String(e.note||"").trim();
-      const want = style === "cross" ? ALT_CROSS_NOTE : ALT_ARM_NOTE;
+      const want = style === "cross" ? ALT_CROSS_NOTE : altSideNote(e.name);
       if(style === "cross" ? /crosses? on top|arm on top/i.test(n) : /alternate\s+l\s*\/\s*r/i.test(n)) return;
       e.note = n ? n.replace(/\s*·\s*$/,"") + " · " + want : want;
       noted = true;
@@ -6747,6 +6750,29 @@ function migrate(){
       S.program[k].forEach(e=>{ stamp(e); if(e.alt) stamp(e.alt); });
     });
     if(noted) saveQuiet();
+  }
+  /* THE NOTE THAT CALLED A LEG AN ARM. Until now every one-limb movement was stamped
+     with "single arm, alternate L/R each set" regardless of what it was, so a cable hip
+     abduction marked unilateral read as an arm exercise. The wording is now the
+     movement's own, and the ones already stamped are corrected here — but ONLY where the
+     note is still this app's exact sentence. Anything a person typed, or anything an
+     imported document said, is left alone. */
+  if(!S.fixLimbNoteV1 && S.program){
+    let fixed = false;   // kept for readability: what changed, if anything
+    const relimb = e=>{
+      if(!e || !e.name || !e.note) return;
+      if(!e.note.includes(ALT_ARM_NOTE)) return;
+      const want = altSideNote(e.name);
+      if(want === ALT_ARM_NOTE) return;
+      e.note = e.note.split(ALT_ARM_NOTE).join(want);
+      fixed = true;
+    };
+    Object.keys(S.program).forEach(k=>{
+      if(!Array.isArray(S.program[k])) return;
+      S.program[k].forEach(e=>{ relimb(e); if(e.alt) relimb(e.alt); });
+    });
+    S.fixLimbNoteV1 = true;
+    saveQuiet();   // no queueSync from inside migrate(); the next real change carries it
   }
   if(S.sync && S.sync.repo===undefined){ S.sync.repo=""; S.sync.branch="main"; S.sync.lastRepo=null; saveQuiet(); }
   if(!Array.isArray(S.cycleDone)) S.cycleDone = [];
@@ -7907,14 +7933,61 @@ function startSideFor(wid){
   return altIndex(wid) === 0 ? "R" : "L";
 }
 function sideWord(side){ return side === "L" ? "LEFT" : "RIGHT"; }
-/* Which limb the alternating hint should name. "Start with your RIGHT arm" is wrong
-   on a Bulgarian split squat, and vague instructions are how somebody ends up doing
-   three sets on one leg. */
+/* WHICH LIMB IS ACTUALLY DOING THE WORK.
+
+   "Start with your RIGHT arm" is wrong on a Bulgarian split squat and absurd on a cable
+   hip abduction, and vague instructions are how somebody ends up doing three sets on one
+   leg. Every sentence the app writes about sides — the note on the slot, the hint above
+   the first session, the label on the L/R chip — comes through here, so getting it wrong
+   once gets it wrong everywhere and getting it right once fixes all of them.
+
+   Two sources, in order of how much they know:
+
+     1. WHAT IT TRAINS. If the muscles the app has for this movement are lower-body ones,
+        it is a leg, whatever the name says — this catches "abduction", "adduction",
+        "kickback" and every machine name nobody thought to put in a list.
+     2. THE NAME. The fallback, and the only thing available for a movement that has not
+        been classified yet, or during startup before the muscle tables exist.
+
+   Trunk work ("side bend", "oblique twist") is neither, and calling it a limb is worse
+   than saying "side", which is what the L/R chip means there anyway. */
+const LIMB_LEG_M  = {glutes:1, quads:1, hams:1, calves:1, adductors:1};
+const LIMB_SIDE_M = {abs:1, obliques:1, lower_back:1};
+function limbFromMuscles(name){
+  // Guarded: migrate() runs before the muscle tables are initialised, and a TDZ throw
+  // here would take the whole script with it.
+  try{
+    if(typeof musclesFor !== "function") return null;
+    const map = musclesFor(name);
+    if(!map) return null;
+    let leg = 0, side = 0, other = 0;
+    Object.keys(map).forEach(k=>{
+      const w = map[k] || 0;
+      if(LIMB_LEG_M[k]) leg += w; else if(LIMB_SIDE_M[k]) side += w; else other += w;
+    });
+    if(leg > other && leg >= side) return "leg";
+    if(side > other && side > leg) return "side";
+    if(other > 0) return "arm";
+    return null;
+  }catch(err){ return null; }
+}
 function limbWord(name){
   const n = name || "";
-  if(/\bsplit squat|\blunges?\b|\bstep[- ]?ups?\b|\bpistol\b|\bkickbacks?\b|\bskater squat|\bshrimp squat|\bsquat\b|\bleg\b|\bcalf\b|\bglute\b|\bhip\b|\brdl\b|\bdeadlift\b|\bhamstring\b|\bquad\b/i.test(n)) return "leg";
-  if(/\bcrunch|\bab\b|\btwist\b|\bside bend\b/i.test(n)) return "side";
+  /* The name wins on the words that are unambiguous, because a hip thrust is mapped to
+     glutes and is still not "one leg at a time" — but "abduction" only ever means the
+     hip when it is being done one side at a time. */
+  if(/\bsplit squat|\blunges?\b|\bstep[- ]?ups?\b|\bpistol\b|\bkickbacks?\b|\bskater squat|\bshrimp squat|\bsquat\b|\bleg\b|\bcalf\b|\bglute\b|\bhip\b|\bthigh\b|\bab(?:duction|ductor)\b|\bad(?:duction|ductor)\b|\brdl\b|\bdeadlift\b|\bhamstring\b|\bquad\b|\bhack\b/i.test(n)) return "leg";
+  if(/\bcrunch|\bab\b|\btwist\b|\bside bend\b|\bpallof\b|\bwood ?chop|\bsuitcase\b/i.test(n)) return "side";
+  const byMuscle = limbFromMuscles(n);
+  if(byMuscle) return byMuscle;
   return "arm";
+}
+/* The one canonical note a one-limb movement carries, in that movement's own words. */
+function altSideNote(name){
+  const limb = limbWord(name);
+  return limb === "leg"  ? "single leg, alternate L/R each set"
+       : limb === "side" ? "one side at a time, alternate L/R each set"
+       : ALT_ARM_NOTE;
 }
 /* =====================================================================
    A SLOT THAT OFFERS A CHOICE
@@ -15556,10 +15629,11 @@ function sideChip(en, si){
      can be corrected, and it is on the row you are typing into. */
   const ei = entryIndexOf(en);
   const own = (en.sets[si] || {}).side ? " sc-set" : "";
-  if(ei < 0) return `<i class="side-chip ${side==="L"?"sc-l":"sc-r"}" title="${esc(sideFull(style, side))}">${esc(sideTag(style, side))}</i>`;
+  const full = sideFull(style, side, en.name);
+  if(ei < 0) return `<i class="side-chip ${side==="L"?"sc-l":"sc-r"}" title="${esc(full)}">${esc(sideTag(style, side))}</i>`;
   return `<button type="button" class="side-chip ${side==="L"?"sc-l":"sc-r"}${own}" data-sideflip="${ei}:${si}"
-    title="${esc(sideFull(style, side))} \u2014 tap to switch sides"
-    aria-label="${esc(sideFull(style, side))}, tap to switch sides">${esc(sideTag(style, side))}</button>`;
+    title="${esc(full)} \u2014 tap to switch sides"
+    aria-label="${esc(full)}, tap to switch sides">${esc(sideTag(style, side))}</button>`;
 }
 /* =====================================================================
    PER-SET RPE TARGETS
@@ -18585,7 +18659,7 @@ function bind(){
     b.classList.toggle("sc-r", side === "R");
     b.classList.toggle("sc-set", !!st.side);
     b.classList.remove("side-flip"); void b.offsetWidth; b.classList.add("side-flip");
-    toast(sideFull(en.altStyle || "side", side));
+    toast(sideFull(en.altStyle || "side", side, en.name));
   });
   document.querySelectorAll(".set input.is-locked, .rpe-cell.is-locked").forEach(el=>{
     el.addEventListener("pointerdown", e=>{ e.preventDefault(); toast(LOCK_WHY); });
@@ -20591,7 +20665,10 @@ function openExEditor(wid, idx){
   <div class="field"><label>Sides</label>
     <select id="f_alt" style="width:100%;padding:13px;border-radius:11px;border:1px solid var(--line);background:var(--card2);color:var(--text);font-size:16px">
       <option value="" ${!altStyle(e)?"selected":""}>Both limbs together, no L/R marking</option>
-      <option value="side" ${altStyle(e)==="side"?"selected":""}>One limb at a time, mark each set L or R</option>
+      <option value="side" ${altStyle(e)==="side"?"selected":""}>${
+        limbWord(e.name) === "leg"  ? "One leg at a time, mark each set L or R"
+      : limbWord(e.name) === "side" ? "One side at a time, mark each set L or R"
+      :                               "One arm at a time, mark each set L or R"}</option>
       <option value="cross" ${altStyle(e)==="cross"?"selected":""}>Crossover, mark which arm is on top each set</option>
     </select>
   </div>
@@ -24793,7 +24870,7 @@ function planExerciseRow(e, wid, opts){
   opts = opts || {};
   const asty = altStyle(e);
   const bits = [];
-  if(asty === "side")  bits.push("one limb at a time, alternating L/R each set");
+  if(asty === "side")  bits.push("one " + limbWord(e.name) + " at a time, alternating L/R each set");
   if(asty === "cross") bits.push("both arms, alternating which crosses on top");
   if(e.note) bits.push(e.note);
   const load = (e.weight != null && e.weight !== "") ? e.weight + " " + unitWord() : "bodyweight";
