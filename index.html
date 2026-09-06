@@ -321,6 +321,16 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .prog-day:active{border-color:var(--acc-line)}
 .prog-day:focus-visible{outline:2px solid var(--acc-line);outline-offset:2px}
 .prog-day-go{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+/* The per-set RPE ramp: one numbered box per set, wrapping on a narrow phone. */
+.ramp-wrap{margin:2px 0 12px}
+.ramp-row{display:flex;flex-wrap:wrap;gap:6px}
+.ramp-cell{display:flex;flex-direction:column;align-items:center;gap:3px;flex:0 0 auto;width:52px}
+.ramp-cell span{font:9.5px var(--mono);letter-spacing:.12em;color:var(--faint)}
+.ramp-cell input{width:100%;padding:9px 4px;border-radius:9px;border:1px solid var(--line);
+  background:var(--card2);color:var(--text);font-family:var(--mono);font-size:15px;text-align:center}
+.ramp-cell input:focus{outline:none;border-color:var(--acc-line)}
+.ramp-sub{margin:8px 0 0;text-transform:none;letter-spacing:0;font-size:12.5px;color:var(--dim)}
+.ramp-why{display:block;color:var(--faint);font-size:11.5px;margin-top:2px}
 .prog-day:active .prog-day-go{color:var(--acc)}
 button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:pointer}
 /* Saying what a movement trains, in the same weights the tables use. */
@@ -3842,7 +3852,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "11.6";
+const APP_VERSION = "11.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8792,6 +8802,152 @@ function suggestProgramming(wid, name, atIdx){
         + nKin + (nKin === 1 ? " exercise" : " exercises") + " at " + sets + "×" + reps
         + (rpe ? " @ RPE " + rpe : "") + "."
       : "Built from the rest of this day."};
+}
+
+/* =====================================================================
+   AN RPE FOR EVERY SET, NOT ONE FOR THE EXERCISE
+
+   The plans people arrive with are written as ramps — 7, 8, 8, 9 — and the app has read
+   and graded them that way since the schema changed: `e.rpes` is the ordered list of
+   per-set targets and `e.rpe` is only a summary of it. What was missing was the other
+   half, which is being able to WRITE one. An imported plan could say "set 4 at RPE 9"
+   and there was no way to add that to an exercise yourself, or to change it once it was
+   there.
+
+   suggestRpeRamp() is the starting point, in the same spirit as the rest of the day
+   editor: it proposes, you edit, and what is in the boxes is what gets written.
+
+     1. THE SAME MOVEMENT ELSEWHERE IN THE PLAN. If it is ramped on another day, that is
+        what the plan wants and there is nothing to invent.
+     2. THE SLOT IT SITS IN. An imported exercise carries slotKind; the built-in plans
+        are written from SLOT_RPES for exactly this reason.
+     3. THE RANGE IT ALREADY HAS. "7-9" over four sets is a ramp somebody has already
+        described in shorthand — opening at the bottom, finishing at the top, climbing in
+        halves through the middle — so it is spelled out rather than guessed at.
+     4. FAILING ALL THAT, whether it is a compound or an isolation.
+
+   Rounded to halves throughout, because RPE 8.25 is a number nobody can feel. */
+function rampFromRange(str, n){
+  /* Its own parse rather than repRange(): RPE is written in halves ("7.5-9") and the rep
+     parser only reads whole numbers, which turns 7.5-9 into 5-9. */
+  const t = String(str || "");
+  const two = t.match(/(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)/);
+  const one = two ? null : t.match(/(\d+(?:\.\d+)?)/);
+  const r = two ? [parseFloat(two[1]), parseFloat(two[2])]
+          : one ? [parseFloat(one[1]), parseFloat(one[1])] : null;
+  if(!r) return null;
+  const lo = Math.max(5, Math.min(10, r[0])), hi = Math.max(lo, Math.min(10, r[1]));
+  if(n <= 1) return [hi];
+  const out = [];
+  for(let i = 0; i < n; i++){
+    const v = lo + (hi - lo) * (i / (n - 1));
+    out.push(Math.round(v * 2) / 2);
+  }
+  return out;
+}
+function suggestRpeRamp(wid, name, sets, atIdx, cur){
+  const n = Math.max(1, Math.min(20, parseInt(sets, 10) || 3));
+  const fit = list=>{
+    const out = list.slice(0, n);
+    while(out.length < n) out.push(out[out.length - 1]);
+    return out;
+  };
+  const twin = planTwinOf(name, wid, atIdx);
+  if(twin && Array.isArray(twin.e.rpes) && twin.e.rpes.length){
+    return {list: fit(twin.e.rpes), why: "The same ramp this movement has on " + widName(twin.wid) + "."};
+  }
+  const kind = cur && cur.slotKind;
+  if(kind && SLOT_RPES[kind]){
+    return {list: fit(SLOT_RPES[kind]), why: "The standard ramp for a " + kind + " slot."};
+  }
+  const fromRange = rampFromRange((cur && cur.rpe) || "", n);
+  if(fromRange){
+    return {list: fromRange, why: fromRange[0] === fromRange[n-1]
+      ? "Every set at the target this exercise already has."
+      : "Spelled out from the " + String(cur.rpe) + " this exercise already has."};
+  }
+  const comp = isCompound(name);
+  return {list: fit(SLOT_RPES[comp ? "heavy" : "iso"]),
+          why: "A standard " + (comp ? "compound" : "isolation") + " ramp."};
+}
+/* THE BOXES. One per set, numbered, and they follow the set count as it is typed — a
+   ramp with four numbers on a three-set exercise describes a set that does not exist. */
+function rampInputsHTML(id, n, list){
+  let h = "";
+  for(let i = 0; i < n; i++){
+    const v = Array.isArray(list) && list.length ? list[Math.min(i, list.length - 1)] : "";
+    h += `<label class="ramp-cell"><span>${i + 1}</span>
+      <input id="${id}_r${i}" inputmode="decimal" value="${esc(v == null ? "" : v)}"></label>`;
+  }
+  return h;
+}
+function rampBlockHTML(id, n, list, sug){
+  const on = Array.isArray(list) && list.length > 0;
+  return `<div class="togglerow"><input type="checkbox" id="${id}_ramp" ${on ? "checked" : ""}>
+      <label for="${id}_ramp" style="margin:0;font:inherit;color:var(--text);text-transform:none;letter-spacing:0">Set an exact RPE for each set</label></div>
+    <div id="${id}_rampWrap" class="ramp-wrap"${on ? "" : " hidden"}>
+      <div class="ramp-row" id="${id}_rampRow">${rampInputsHTML(id, n, on ? list : sug.list)}</div>
+      <div class="sub ramp-sub">Suggested: <b class="num" id="${id}_rampSugV">${sug.list.join(" · ")}</b>
+        <button type="button" class="linklike" id="${id}_rampUse">use it</button>
+        <span class="ramp-why">${esc(sug.why)}</span></div>
+    </div>`;
+}
+/* Keeps the boxes in step with the set count and the suggestion in step with both, and
+   hands back a read() the caller uses when it commits. `getSets` is a function rather
+   than a number because the set count is a box the person is still typing into. */
+function wireRamp(id, getSets, getSug){
+  const wrap = ()=> $("#" + id + "_rampWrap");
+  const box  = ()=> $("#" + id + "_ramp");
+  const readNow = ()=>{
+    const n = Math.max(1, Math.min(20, parseInt(getSets(), 10) || 1));
+    const out = [];
+    for(let i = 0; i < n; i++){
+      const el = $("#" + id + "_r" + i);
+      const v = el ? parseFloat(el.value) : NaN;
+      out.push(isNaN(v) ? null : Math.max(1, Math.min(10, Math.round(v * 2) / 2)));
+    }
+    return out;
+  };
+  const paint = (list)=>{
+    const n = Math.max(1, Math.min(20, parseInt(getSets(), 10) || 1));
+    const sug = getSug(n);
+    // nothing typed yet means "show me the proposal"; a part-filled row is kept as it is,
+    // blanks and all, because those blanks are somebody mid-sentence
+    const use = (Array.isArray(list) && list.some(v=> v != null)) ? list : sug.list;
+    const row = $("#" + id + "_rampRow");
+    if(row) row.innerHTML = rampInputsHTML(id, n, use);
+    const sv = $("#" + id + "_rampSugV");
+    if(sv) sv.textContent = sug.list.join(" · ");
+    const why = wrap() && wrap().querySelector(".ramp-why");
+    if(why) why.textContent = sug.why;
+  };
+  const b = box();
+  if(b) b.onchange = ()=>{
+    const w = wrap(); if(!w) return;
+    w.hidden = !b.checked;
+    // opening it with nothing in the boxes fills them from the suggestion, since an
+    // empty grid of ten boxes is a worse starting point than a proposal
+    if(b.checked){
+      const cur = readNow();
+      paint(cur.some(v=> v != null) ? cur : null);
+    }
+  };
+  const use = $("#" + id + "_rampUse");
+  if(use) use.onclick = ()=> paint(null);
+  return {
+    resize: ()=>{ if(box() && box().checked) paint(readNow()); else paint(null); },
+    read: ()=>{
+      if(!box() || !box().checked) return null;
+      const out = readNow();
+      // a blank box is not zero: it takes the value of the set before it
+      let last = null;
+      for(let i = 0; i < out.length; i++){
+        if(out[i] == null) out[i] = last != null ? last : null; else last = out[i];
+      }
+      for(let i = out.length - 1; i >= 0; i--){ if(out[i] == null) out[i] = out[i+1] != null ? out[i+1] : 8; }
+      return out;
+    }
+  };
 }
 
 /* =====================================================================
@@ -20181,7 +20337,9 @@ function dayEditClose(){ DAY_EDIT = null; render(); window.scrollTo(0, 0); }
 function exLineHTML(e){
   const bits = [];
   bits.push(e.sets + "×" + esc(e.reps || "?"));
-  if(e.rpe) bits.push("RPE " + esc(String(e.rpe)));
+  // a ramp is shown as the ramp, since "RPE 7-9" is exactly what it was written to replace
+  if(Array.isArray(e.rpes) && e.rpes.length) bits.push("RPE " + esc(e.rpes.join(" · ")));
+  else if(e.rpe) bits.push("RPE " + esc(String(e.rpe)));
   if(Array.isArray(e.rest)) bits.push(fmtClock(e.rest[0]) + "–" + fmtClock(e.rest[1]) + " rest");
   if(e.weight != null) bits.push(fmtLoad(e.weight));
   return bits.join(" · ");
@@ -20407,6 +20565,8 @@ function openSwitchExercise(wid, idx){
     <div id="swProg"></div>
     <div class="k-lab" style="margin-top:4px">Sets and reps</div>
     ${progFieldsHTML("sw", e)}
+    ${rampBlockHTML("sw", Math.max(1, parseInt(e.sets,10) || 3), e.rpes,
+        suggestRpeRamp(wid, e.name, e.sets, idx, e))}
     <div class="k-lab" style="margin-top:12px">Note <span class="k-opt">optional</span></div>
     ${e.note ? `<div class="sw-oldnote">The note on this slot — “${esc(e.note)}” — was about
       ${esc(e.name)}, so it goes with it. Write a new one if the replacement needs one.</div>` : ""}
@@ -20459,10 +20619,16 @@ function openSwitchExercise(wid, idx){
     });
     ["sets","reps","rpe"].forEach(k=>{
       const el = $("#sw_" + k);
-      if(el) el.oninput = mark;
+      if(el) el.oninput = ()=>{ mark(); if(k !== "reps") ramp.resize(); };
     });
     mark();
+    ramp.resize();
   };
+  /* The ramp asks the same two questions the boxes above it do — which movement, and how
+     many sets — so it is re-derived whenever either answer changes. */
+  const ramp = wireRamp("sw", ()=> $("#sw_sets").value,
+    n=> suggestRpeRamp(wid, ($("#swName").value || "").trim() || e.name, n, idx,
+                       {rpe: ($("#sw_rpe") || {}).value || "", slotKind: e.slotKind}));
   wireExPicker("swName", drawProg);
   m.querySelectorAll("[data-expick2]").forEach(b=> b.onclick = ()=>{
     $("#swName").value = b.dataset.expick2;
@@ -20514,10 +20680,21 @@ function openSwitchExercise(wid, idx){
          lateral raise; leaving the numbers alone is the case where the two are alike
          enough for it to survive. */
       e.weight = null;
-      /* A per-set RPE ramp was written for the OLD set count and the old movement, and a
-         four-long ramp on a three-set exercise describes a set that no longer exists. */
-      delete e.rpes; delete e.rebuild;
+      delete e.rebuild;
     }
+    /* THE RAMP, WRITTEN OR REMOVED, EVERY TIME. A per-set ramp belonged to the old
+       movement and the old set count, so it never simply survives a switch: either the
+       boxes say what the new one's targets are, or there is no ramp and the summary
+       range is all there is. */
+    const rl = ramp.read();
+    if(rl && rl.length){
+      const wasRamp = Array.isArray(e.rpes) ? e.rpes.join(" · ") : null;
+      e.rpes = rl.slice(0, e.sets);
+      while(e.rpes.length < e.sets) e.rpes.push(e.rpes[e.rpes.length - 1]);
+      e.rpe = rpeSummary(e.rpes);
+      const now = e.rpes.join(" · ");
+      if(wasRamp !== now) lines.push("RPE per set: " + now);
+    } else if(e.rpes){ delete e.rpes; lines.push("per-set RPE targets removed"); }
     logPlanChange("swapped", wid, nm, lines,
       {note:"Switched in the plan. Logged sessions keep " + was + "."});
     save(); queueSync(); render();
@@ -20535,6 +20712,7 @@ function openAddExercise(wid){
     <div id="addExSug"></div>
     <div class="k-lab" style="margin-top:4px">Sets and reps</div>
     ${progFieldsHTML("add", {sets: 3, reps: "", rpe: ""})}
+    ${rampBlockHTML("add", 3, null, suggestRpeRamp(wid, "", 3, at, null))}
     <button class="btn" id="addExGo" style="margin-top:12px">Add it</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
   const m = $("#modal");
@@ -20543,6 +20721,9 @@ function openAddExercise(wid){
   let sug = null, typed = false;
   /* Redrawn from the picker as well as from typing, so choosing a suggestion updates the
      programming underneath it in the same breath. */
+  const ramp = wireRamp("add", ()=> $("#add_sets").value,
+    n=> suggestRpeRamp(wid, (box.value || "").trim(), n, at,
+                       {rpe: ($("#add_rpe") || {}).value || ""}));
   wireExPicker("addExName", ()=> draw());
   const draw = ()=>{
     const nm = (box.value || "").trim();
@@ -20558,11 +20739,12 @@ function openAddExercise(wid){
        typed the boxes are yours and a later name change stops overwriting them — the
        card is still there to take back if you want it. */
     if(!typed) progFieldsSet("add", sug);
+    ramp.resize();                   // the ramp is derived from the name and the set count
     wrap.querySelector("#addExFill").onclick = ()=>{ typed = false; progFieldsSet("add", sug); draw(); };
   };
   ["sets","reps","rpe"].forEach(k=>{
     const el = $("#add_" + k);
-    if(el) el.oninput = ()=>{ typed = true; };
+    if(el) el.oninput = ()=>{ typed = true; if(k !== "reps") ramp.resize(); };
   });
   m.querySelector("#addExGo").onclick = ()=>{
     const nm = (box.value || "").trim();
@@ -20571,6 +20753,13 @@ function openAddExercise(wid){
     const want = progFieldsRead("add");
     if(!want.reps) want.reps = String(s.reps || "");
     const ne = {name: nm, sets: want.sets, reps: want.reps, rpe: want.rpe, weight: null, note: ""};
+    /* A ramp, when one was asked for, and it settles the summary range too. */
+    const rl = ramp.read();
+    if(rl && rl.length){
+      ne.rpes = rl.slice(0, ne.sets);
+      while(ne.rpes.length < ne.sets) ne.rpes.push(ne.rpes[ne.rpes.length - 1]);
+      ne.rpe = rpeSummary(ne.rpes);
+    }
     /* The rest window belongs to the suggestion's shape, so it only comes along while the
        shape is still the suggested one. Typed-in sets and reps get the day's default. */
     if(s.rest && want.sets === s.sets && want.reps === String(s.reps || "")) ne.rest = s.rest.slice();
@@ -20642,6 +20831,11 @@ function openExEditor(wid, idx){
     <input id="f_rpe" value="${esc(e.rpe)}" placeholder="8-9">
     <input id="f_weight" inputmode="decimal" value="${esc(e.weight??"")}" placeholder="optional">
   </div></div>
+  ${rampBlockHTML("f", Math.max(1, parseInt(e.sets,10) || 3), e.rpes,
+      suggestRpeRamp(wid, e.name, e.sets, isNew ? null : idx, e))}
+  <div class="sub" style="margin:6px 0 12px">A ramp is what most written plans mean by "RPE 7-9":
+    the opener is not the last set. Every logged set is graded against its own number, and the
+    range above is kept in step with whatever these say.</div>
   <div class="field"><label>Rest between sets (seconds)</label><div class="duo">
     <input id="f_rest_lo" inputmode="numeric" value="${esc(Array.isArray(e.rest)?e.rest[0]:"")}" placeholder="from">
     <input id="f_rest_hi" inputmode="numeric" value="${esc(Array.isArray(e.rest)?e.rest[1]:"")}" placeholder="to">
@@ -20717,6 +20911,12 @@ function openExEditor(wid, idx){
       ? "Your plan offers both and either is fine. The workout card lets you pick, and remembers what you picked last."
       : "One this " + dayLabel + ", the other the next. The app decides, off the session count.";
   });
+  /* The ramp follows the two boxes above it: change the set count and the row of RPE
+     boxes changes with it, change the range and the suggestion is re-derived from it. */
+  const ramp = wireRamp("f", ()=> $("#f_sets").value,
+    n=> suggestRpeRamp(wid, $("#f_name").value.trim() || e.name, n, isNew ? null : idx,
+                       {rpe: $("#f_rpe").value.trim(), slotKind: e.slotKind}));
+  $("#f_sets").addEventListener("input", ramp.resize);
   $("#saveEx").onclick = ()=>{
     const ne = {
       name: $("#f_name").value.trim(),
@@ -20738,9 +20938,8 @@ function openExEditor(wid, idx){
     /* Everything this form does not show is carried across rather than dropped. The
        fields are real prescriptions — the rest window, the superset pairing, the warm-up
        sets an imported plan prescribed, the side rule its document stated — and editing
-       a rep range is not a request to delete them. Per-set RPE targets only survive when
-       the set count did not change, because a six-long ramp on a four-set exercise
-       describes sets that no longer exist. */
+       a rep range is not a request to delete them. Per-set RPE targets are no longer
+       among them: the form shows the ramp now, so what it says is what gets written. */
     if(!isNew){
       /* `rest`, `superset` and `tech` are NOT in this list any more: the form now shows
          all three, so carrying the old value across would put back exactly what somebody
@@ -20748,7 +20947,16 @@ function openExEditor(wid, idx){
          editing a rep range is not a request to delete a warm-up ramp. */
       ["slotKind","supersetEnd","warmups","warmupNote","sideMode","incr","imported","rampIn"]
         .forEach(k=>{ if(e[k] !== undefined) ne[k] = e[k]; });
-      if(Array.isArray(e.rpes) && e.rpes.length === ne.sets) ne.rpes = e.rpes.slice();
+    }
+    /* THE RAMP IS WHAT THE BOXES SAY, on a new exercise as much as an edited one. When it
+       is on, it also writes `rpe` — the summary range every older reader still uses — so
+       the two can never drift apart. When it is off it is off: the person unticked it,
+       and carrying the old list across would put back what they just removed. */
+    const rl = ramp.read();
+    if(rl && rl.length){
+      ne.rpes = rl.slice(0, ne.sets);
+      while(ne.rpes.length < ne.sets) ne.rpes.push(ne.rpes[ne.rpes.length - 1]);
+      ne.rpe = rpeSummary(ne.rpes);
     }
     // store the override only when it disagrees with the built-in tables, so those can
     // keep improving for exercises the user never touched
@@ -24878,7 +25086,8 @@ function planExerciseRow(e, wid, opts){
     <td><b>${esc(e.name)}</b>${opts.altOf ? `<br><span class="sm">alternates with ${esc(opts.altOf)}</span>` : ""}</td>
     <td class="c">${esc(String(e.sets))}</td>
     <td class="c">${esc(e.reps || "—")}</td>
-    <td class="c">${e.rpe ? esc(String(e.rpe)) : "—"}</td>
+    <td class="c">${Array.isArray(e.rpes) && e.rpes.length ? esc(e.rpes.join(" · "))
+                  : e.rpe ? esc(String(e.rpe)) : "—"}</td>
     <td class="c">${esc(load)}</td>
     <td>${bits.length ? esc(bits.join(" · ")) : ""}</td>
   </tr>`;
