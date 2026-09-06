@@ -161,6 +161,26 @@ const VAPID_TTL = "86400";
 const SCHED_KINDS = ["train", "bed", "wake"];
 const PEND_MAX = 4;
 const SCHED_MAX_AHEAD = 60 * 24 * 3600 * 1000;   // sanity bound, not a policy
+/* WHAT IS DUE, IN ONE KEY.
+
+   The cron used to answer "is anything due" by listing the sched: prefix. A list is
+   metered per CALL on Workers KV, so a minute-by-minute cron spent 1,440 list operations
+   a day against a free-plan allowance of 1,000 — over the cap by lunchtime, every day,
+   whether or not a single reminder existed or anybody opened the app. The comment on the
+   trigger said an idle minute was cheap; it was cheap on the paid plan and the most
+   expensive thing on the free one.
+
+   So the due times live in one key that the cron READS instead. Reads are allowed
+   100,000 a day, which makes the same minute-by-minute sweep cost 1.4% of an allowance
+   rather than 144% of one, and the reminders keep their minute of precision.
+
+   The index is a HINT, never the truth. fireDue() still reads the real sched: key and
+   re-checks its time before sending anything, so an index that is out of date can make a
+   reminder late but can never make one wrong, or fire one twice. It is rebuilt from a
+   real listing every SCHED_RECONCILE_MS, which repairs anything a lost write dropped —
+   96 listings a day, a tenth of the allowance. */
+const SCHED_INDEX = "schedindex";
+const SCHED_RECONCILE_MS = 15 * 60 * 1000;
 const TOKEN_RE = /^[a-f0-9]{32}$/;
 /* Every device label the app can send; see deviceLabel() in index.html. */
 const UA_LABELS = ["iPhone", "iPad", "Android", "Mac", "Windows", "Linux", "Device"]
@@ -250,6 +270,43 @@ async function sendPush(env, endpoint) {
   });
   return res.status === 404 || res.status === 410;
 }
+/* Reads the index. A missing or unreadable one is not an error: it means the next sweep
+   rebuilds from a listing, which is the behaviour this replaced. */
+async function readSchedIndex(env) {
+  try {
+    const raw = await env.E26_ACCOUNTS.get(SCHED_INDEX);
+    if (!raw) return null;
+    const doc = JSON.parse(raw);
+    return Array.isArray(doc.items) ? { at: Number(doc.at) || 0, items: doc.items } : null;
+  } catch (e) {
+    return null;
+  }
+}
+async function writeSchedIndex(env, items, at) {
+  try {
+    await env.E26_ACCOUNTS.put(SCHED_INDEX, JSON.stringify({ at, items }));
+  } catch (e) {
+    /* A failed index write costs a late reminder until the next reconcile, which is not
+       worth failing the request that caused it. */
+  }
+}
+/* Replaces everything held for one account, which is the same shape /push/schedule
+   works in: the whole set, every time. `at` is carried over rather than refreshed —
+   editing the index is not evidence that it agrees with the namespace, so it must not
+   postpone the next reconcile. */
+async function indexAccount(env, id, kept) {
+  const idx = await readSchedIndex(env);
+  if (!idx) return;
+  const items = idx.items.filter((e) => e && e.id !== id)
+    .concat(kept.map((k) => ({ id, kind: k.kind, at: k.at })));
+  await writeSchedIndex(env, items, idx.at);
+}
+async function unindexOne(env, id, kind) {
+  const idx = await readSchedIndex(env);
+  if (!idx) return;
+  await writeSchedIndex(env, idx.items.filter((e) => !(e && e.id === id && e.kind === kind)), idx.at);
+}
+
 async function forgetPush(env, id) {
   const raw = await env.E26_ACCOUNTS.get("push:" + id);
   if (raw) {
@@ -258,6 +315,7 @@ async function forgetPush(env, id) {
   await env.E26_ACCOUNTS.delete("push:" + id);
   for (const k of SCHED_KINDS) await env.E26_ACCOUNTS.delete("sched:" + id + ":" + k);
   await env.E26_ACCOUNTS.delete("pend:" + id);
+  await indexAccount(env, id, []);
 }
 /* ONE ACCOUNT'S DUE REMINDERS, ALL OF THEM, IN ONE PASS — and it has to be one pass.
 
@@ -285,6 +343,7 @@ async function fireDue(env, id, items) {
     if (!(Number(sched.at) <= now)) continue;
     await env.E26_ACCOUNTS.put(guard, "1", { expirationTtl: 900 });
     await env.E26_ACCOUNTS.delete(key);
+    await unindexOne(env, id, it.kind);
     msgs.push({ title: sched.title, body: sched.body, tag: sched.tag || ("e26-" + it.kind) });
   }
   if (!msgs.length) return;
@@ -539,6 +598,9 @@ export default {
         );
         kept.push({ kind, at });
       }
+      /* The cron reads this rather than listing the namespace, so it has to learn about
+         a new schedule now, not whenever the index next rebuilds. */
+      await indexAccount(env, who.id, kept);
       return json({ ok: true, scheduled: kept }, 200, origin);
     }
 
@@ -615,25 +677,42 @@ export default {
   async scheduled(event, env, ctx) {
     if (!env || !env.E26_ACCOUNTS || !pushConfigured(env)) return;
     const now = Date.now();
-    const due = new Map();
-    let cursor;
-    for (let page = 0; page < 20; page++) {
-      const res = await env.E26_ACCOUNTS.list({ prefix: "sched:", cursor, limit: 1000 });
-      for (const k of res.keys) {
-        const at = k.metadata && Number(k.metadata.at);
-        if (!isFinite(at) || at > now) continue;
-        const rest = k.name.slice(6);                 // "<id>:<kind>"
-        const cut = rest.lastIndexOf(":");
-        if (cut < 0) continue;
-        const id = rest.slice(0, cut);
-        /* Grouped by account, not left flat: everything due for one account has to be
-           handled together — see fireDue(). */
-        if (!due.has(id)) due.set(id, []);
-        due.get(id).push({ kind: rest.slice(cut + 1), at });
+
+    /* One read, not one listing. See SCHED_INDEX. */
+    let idx = await readSchedIndex(env);
+
+    if (!idx || now - idx.at >= SCHED_RECONCILE_MS) {
+      /* The listing, kept for the two cases that need it: no index yet, and repairing one
+         that has drifted. Reading the due time out of each key's metadata rather than
+         fetching the records means this still costs no reads. */
+      const items = [];
+      let cursor;
+      for (let page = 0; page < 20; page++) {
+        const res = await env.E26_ACCOUNTS.list({ prefix: "sched:", cursor, limit: 1000 });
+        for (const k of res.keys) {
+          const at = k.metadata && Number(k.metadata.at);
+          if (!isFinite(at)) continue;
+          const rest = k.name.slice(6);               // "<id>:<kind>"
+          const cut = rest.lastIndexOf(":");
+          if (cut < 0) continue;
+          items.push({ id: rest.slice(0, cut), kind: rest.slice(cut + 1), at });
+        }
+        if (res.list_complete) break;
+        cursor = res.cursor;
       }
-      if (res.list_complete) break;
-      cursor = res.cursor;
+      idx = { at: now, items };
+      await writeSchedIndex(env, items, now);
     }
+
+    const due = new Map();
+    for (const e of idx.items) {
+      if (!e || !isFinite(Number(e.at)) || Number(e.at) > now) continue;
+      /* Grouped by account, not left flat: everything due for one account has to be
+         handled together — see fireDue(). */
+      if (!due.has(e.id)) due.set(e.id, []);
+      due.get(e.id).push({ kind: e.kind, at: Number(e.at) });
+    }
+
     /* Bounded concurrency ACROSS accounts, never within one: a hundred simultaneous
        fetches to a push service is how you get rate-limited by it, and two workers on the
        same account is the race fireDue() exists to avoid. */
