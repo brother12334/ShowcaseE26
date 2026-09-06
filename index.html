@@ -2050,6 +2050,30 @@ nav button.on{color:var(--acc)}
 nav button.on .nav-ic{background:var(--acc-soft)}
 nav button.on svg{filter:drop-shadow(0 0 7px rgba(201,138,75,.45))}
 nav button:active{transform:scale(.94)}
+/* The live dot on the Workout tab. It is the only moving thing in the bar, which is
+   the point: something is running and it is over here. */
+nav .nav-ic{position:relative}
+.nav-live{
+  position:absolute;top:1px;right:1px;width:7px;height:7px;border-radius:50%;
+  background:var(--acc);box-shadow:0 0 0 2px #141417;
+  animation:navPulse 2s ease-in-out infinite;
+}
+nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px #141417}
+@keyframes navPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+@media (prefers-reduced-motion: reduce){ .nav-live{animation:none} }
+/* Six tabs on a 320px phone. The labels are what runs out of room first, so they lose a
+   little size and their letter-spacing rather than the icons losing their target area —
+   and only while the sixth tab is actually there. */
+@media (max-width:370px){
+  body.has-workout-tab nav .nav-lbl{font-size:9px;letter-spacing:.01em}
+  body.has-workout-tab nav button{padding-left:0;padding-right:0;gap:2px}
+}
+/* Today, while a session is running: one card that points at the tab doing the work. */
+.live-card{border:1px solid var(--acc-line);background:linear-gradient(180deg,var(--acc-soft),transparent)}
+.lc-k{display:flex;align-items:center;gap:7px;font:10px var(--mono);letter-spacing:.16em;
+  text-transform:uppercase;color:var(--acc);margin-bottom:8px}
+.lc-k i{width:7px;height:7px;border-radius:50%;background:var(--acc);animation:navPulse 2s ease-in-out infinite}
+.lc-h{font-family:var(--disp);font-size:22px;font-weight:700;letter-spacing:.02em;margin:0 0 4px}
 
 /* ================= INLINE TERMS =================
    Every piece of jargon is a dotted-underlined word: tap for the full entry, hover for
@@ -3860,6 +3884,16 @@ body.cele-open{overflow:hidden}
       <path d="M13 3 6.4 13h4.6L9.3 21l8.3-11h-4.6L13 3Z"/>
     </svg></span><span class="nav-lbl">Today</span>
   </button>
+  <!-- THE WORKOUT TAB EXISTS ONLY WHILE ONE IS RUNNING. A session is a mode: for the
+       hour you are in it, logging is the only thing you want on screen, and Today's
+       plate strip, rest-day cards and tomorrow's preview are all answers to questions
+       you are not asking. So it appears next to Today when you start, carries a live
+       dot while it runs, and is gone the moment the session is saved. -->
+  <button data-tab="workout" id="navWorkout" aria-label="Workout" hidden>
+    <span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 9v6M7 6.5v11M17 6.5v11M20 9v6M7 12h10"/>
+    </svg><i class="nav-live" aria-hidden="true"></i></span><span class="nav-lbl">Workout</span>
+  </button>
   <button data-tab="history" aria-label="History">
     <span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="8.2"/>
@@ -3898,7 +3932,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "12.0";
+const APP_VERSION = "12.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10025,6 +10059,25 @@ function weakPoints(A){
 
 /* ================= RENDER ================= */
 let TAB = "today";
+/* Shows or hides the Workout tab, and moves off it when there is nothing to show. Safe
+   to call before the nav exists, since render() runs on screens that have no tab bar. */
+function syncWorkoutTab(){
+  const live = !!(typeof S !== "undefined" && S && S.active);
+  const btn = document.getElementById("navWorkout");
+  if(btn) btn.hidden = !live;
+  document.body.classList.toggle("has-workout-tab", live);
+  if(!live && TAB === "workout") TAB = "today";
+  if(btn) document.querySelectorAll("nav button").forEach(x=>
+    x.classList.toggle("on", x.dataset.tab === TAB));
+}
+// One way in and out of a tab, so the highlight, the scroll position and the nav reveal
+// never disagree about which one you are on.
+function goTab(t){
+  TAB = t;
+  syncWorkoutTab();
+  document.querySelectorAll("nav button").forEach(x=> x.classList.toggle("on", x.dataset.tab === t));
+  render(); window.scrollTo(0, 0); showNav();
+}
 document.querySelectorAll("nav button").forEach(b=>{
   b.onclick = ()=>{
     const changed = TAB !== b.dataset.tab;
@@ -14617,7 +14670,12 @@ function render(){
   document.body.classList.remove("onboarding");
   if(TAB !== "sync"){ ADV_OPEN = false; SET_PAGE = null; }
   if(TAB !== "program") DAY_EDIT = null;
+  /* The tab only exists while a session does, and TAB can be pointing at it when one
+     ends in another tab or on another device, so both are settled before anything is
+     painted. */
+  syncWorkoutTab();
   if(TAB==="today") app.innerHTML = viewToday();
+  else if(TAB==="workout") app.innerHTML = viewWorkoutTab();
   else if(TAB==="history") app.innerHTML = viewHistory();
   else if(TAB==="body") app.innerHTML = viewBody();
   else if(TAB==="program") app.innerHTML = viewProgram();
@@ -15598,8 +15656,23 @@ function viewToday(){
 
   h += plateStrip();
 
+  /* THE SESSION LIVES IN ITS OWN TAB NOW. What Today has to say while one is running is
+     one thing — it is over there, carry on — and saying it in one card rather than
+     repeating the whole logging screen means the two are never a scroll apart or, worse,
+     two places to tap the same tick. */
   if(S.active){
-    return h + viewActiveSession();
+    const a = S.active;
+    const total = a.entries.reduce((n,e)=> n + (e.sets ? e.sets.length : 0), 0);
+    const done  = a.entries.reduce((n,e)=> n + (e.sets ? e.sets.filter(x=> x.done).length : 0), 0);
+    return h + `<div class="today-rest"><div class="card live-card">
+      <div class="lc-k"><i></i>In progress</div>
+      <div class="lc-h">${esc(m.name)}</div>
+      <div class="sub">${done ? done + " of " + total + " sets logged" : "Nothing logged yet"}
+        · started ${new Date(a.startedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</div>
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn" data-goto="workout" style="flex:1">Continue in the Workout tab</button>
+      </div>
+    </div></div>`;
   }
 
   if(isRestToday()){
@@ -15780,16 +15853,29 @@ function bestSet(sets){
   return best || sets[0];
 }
 
+/* THE WORKOUT TAB. Deliberately thin: a header saying which day this is and how long
+   it has been running, then the session itself. Everything Today puts around it — the
+   plate strip, the rest-day card, tomorrow's preview — is a question about the plan,
+   and none of those are questions you have while you are under a bar. */
+function viewWorkoutTab(){
+  const a = S.active;
+  if(!a) return viewToday();                  // finished in another tab; nothing to show
+  const m = dayMeta(a.workoutId);
+  const started = new Date(a.startedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+  const h = `<div class="hdr"><h1><span class="dot" style="background:${m.color};width:13px;height:13px;
+      display:inline-block;margin-right:9px;vertical-align:middle"></span>${esc(m.name.toUpperCase())}</h1>
+    <span class="hdr-r"><span class="date num">from ${esc(started)}</span></span></div>`;
+  return h + viewActiveSession();
+}
 function viewActiveSession(){
   if(S.viewMode === "focus") return viewFocusSession();
   const a = S.active;
   const m = dayMeta(a.workoutId);
-  let h = `<div class="card">
-    <div style="display:flex;align-items:center;gap:10px">
-      <span class="dot" style="background:${m.color};width:17px;height:17px"></span>
-      <h3 style="font-size:24px">${esc(m.name)}, in progress</h3>
-    </div>
-    <div class="sub">Started ${new Date(a.startedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}. Fill sets as you go, tapping ✓ on an empty row copies last time's numbers. Tap <span class="rpe-help">RPE</span> anywhere to see what it means.</div>
+  /* The name and the start time are in the tab's own header now, so this says the one
+     thing the header cannot: how the screen works. */
+  let h = `<div class="card" style="padding:12px 13px">
+    <div class="sub" style="margin:0">Fill sets as you go. Tapping ✓ on an empty row copies last
+      time's numbers, and tapping <span class="rpe-help">RPE</span> anywhere says what it means.</div>
   </div>`;
 
   let finLab = false;
@@ -19186,10 +19272,7 @@ function bind(){
      through the same path the nav buttons use so the tab highlight, the scroll reset and
      the nav reveal all behave identically. */
   document.querySelectorAll("[data-goto]").forEach(b=> b.onclick=()=>{
-    const t = b.dataset.goto;
-    TAB = t;
-    document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on", x.dataset.tab===t));
-    render(); window.scrollTo(0,0); showNav(); replayViewIn();
+    goTab(b.dataset.goto); replayViewIn();
   });
   document.querySelectorAll("[data-coachoff]").forEach(b=> b.onclick=()=>{
     S.coachOff = true; save(); queueSync(); render();
@@ -20168,7 +20251,8 @@ function startWorkout(wid){
       return rp.map(({chosen:e, isFinisher}, wi)=> planEntry(e, isFinisher, wi, chosen, side));
     })()
   };
-  save(); render();
+  save();
+  goTab("workout");                 // the session has its own tab; open it
   /* Energy first — it is one tap and it is about right now — then the location check,
      which may want a sheet of its own and would otherwise refuse to open on top of it. */
   askEnergyAtStart(()=> checkGymAtStart());
@@ -20235,10 +20319,7 @@ function resumeSession(id){
   S.sessions.splice(idx,1); // remove from history while it's live again
   recomputeCycle(false);
   save(); queueSync();
-  TAB = "today";
-  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on", x.dataset.tab==="today"));
-  render();
-  window.scrollTo(0,0);
+  goTab("workout");
   toast("Workout resumed, finish again when you're done");
 }
 function finishWorkout(){
