@@ -4026,7 +4026,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "12.7";
+const APP_VERSION = "12.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6995,6 +6995,26 @@ function migrate(){
     });
     S.fixLimbNoteV1 = true;
     saveQuiet();   // no queueSync from inside migrate(); the next real change carries it
+  }
+  /* A SESSION THAT NEVER HAPPENED.
+
+     Tapping Start creates the session there and then — that is what makes the first set
+     loggable without a second confirmation — so tapping it and walking away leaves one
+     behind, live, forever. It used to sit quietly on the Today tab; now it also parks a
+     tab in the nav bar, and being asked to finish a workout you never did is worse than
+     having lost it.
+
+     So an active session from an EARLIER DAY with nothing logged in it is dropped at
+     load. One from an earlier day WITH sets in it is left exactly where it is: that is
+     data somebody typed, and deleting it to tidy up the tab bar is not a trade worth
+     making. Today's card says how old it is and offers to discard it. */
+  if(S.active && (!Array.isArray(S.active.entries) || !S.active.entries.length)){
+    S.active = null; saveQuiet();          // nothing in it to log into, so it is not a session
+  }
+  if(S.active && S.active.date && S.active.date !== todayStr()){
+    const logged = (S.active.entries || []).some(e=>
+      (e.sets || []).some(st=> st && (st.done || st.reps || st.weight)));
+    if(!logged){ S.active = null; saveQuiet(); }
   }
   if(S.sync && S.sync.repo===undefined){ S.sync.repo=""; S.sync.branch="main"; S.sync.lastRepo=null; saveQuiet(); }
   if(!Array.isArray(S.cycleDone)) S.cycleDone = [];
@@ -15919,13 +15939,20 @@ function viewToday(){
     const a = S.active;
     const total = a.entries.reduce((n,e)=> n + (e.sets ? e.sets.length : 0), 0);
     const done  = a.entries.reduce((n,e)=> n + (e.sets ? e.sets.filter(x=> x.done).length : 0), 0);
+    const stale = a.date && a.date !== todayStr();
     return h + `<div class="today-rest"><div class="card live-card">
       <div class="lc-k"><i></i>In progress</div>
       <div class="lc-h">${esc(m.name)}</div>
       <div class="sub">${done ? done + " of " + total + " sets logged" : "Nothing logged yet"}
-        · started ${new Date(a.startedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</div>
+        · started ${stale ? esc(fmtDate(a.date)) + ", " : ""}${
+        new Date(a.startedAt).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})}</div>
+      ${stale ? `<div class="sub" style="margin-top:6px">That was not today. Finish it if those sets
+        are real, or throw it away and start fresh.</div>` : ""}
       <div class="btn-row" style="margin-top:14px">
         <button class="btn" data-goto="workout" style="flex:1">Continue in the Workout tab</button>
+      </div>
+      <div style="text-align:center;margin-top:12px">
+        <button class="nb-link" id="liveDiscard">Discard this workout</button>
       </div>
     </div></div>`;
   }
@@ -19784,10 +19811,18 @@ function bind(){
     save();
     document.querySelectorAll("#app [data-feel]").forEach(x=>x.classList.toggle("on", parseInt(x.dataset.feel,10)===S.active.feel));
   });
-  const disc = $("#discardBtn");
-  if(disc) disc.onclick = ()=>{
-    if(confirm("Discard this workout? Nothing will be saved.")){ S.active=null; hideRestUI(); save(); render(); }
+  /* Two buttons, one action: the one on the workout screen and the one on Today's
+     in-progress card. The second exists because that card is where somebody meets a
+     session they did not mean to have — a Start that was tapped and walked away from. */
+  const discard = ()=>{
+    if(!confirm("Discard this workout? Nothing will be saved.")) return;
+    S.active = null; hideRestUI(); save(); render();
+    toast("Workout discarded");
   };
+  const disc = $("#discardBtn");
+  if(disc) disc.onclick = discard;
+  const disc2 = $("#liveDiscard");
+  if(disc2) disc2.onclick = discard;
 
   const plan = $("#planBtn");
   if(plan) plan.onclick = openPlan;
