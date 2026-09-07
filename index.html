@@ -2018,10 +2018,14 @@ body.tour-live{overflow:hidden}
    It also retracts on the way down and comes back the moment you scroll up, so a long
    Body tab isn't read through a 78px letterbox. `--navY` is driven from JS. */
 nav{
+  /* --navGap is the strip of layout viewport hidden behind Safari's own bottom toolbar.
+     Without it the bar anchors to the layout bottom, which during and after a toolbar
+     change sits BELOW the visible area — and the bar appears to float an inch up the
+     screen. See the visualViewport handler in the tab-bar block. */
   position:fixed;bottom:0;left:0;right:0;background:#141417;
   border-top:1px solid var(--line);display:flex;justify-content:space-around;
   padding:7px 0 calc(7px + env(safe-area-inset-bottom));z-index:40;
-  transform:translate3d(0,var(--navY,0),0);
+  transform:translate3d(0,calc(var(--navY,0px) - var(--navGap,0px)),0);
   transition:transform .26s cubic-bezier(.4,0,.2,1);
   will-change:transform;
 }
@@ -2061,6 +2065,30 @@ nav .nav-ic{position:relative}
 nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px #141417}
 @keyframes navPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
 @media (prefers-reduced-motion: reduce){ .nav-live{animation:none} }
+/* THE PAIR. Today and Workout share one tray so they read as one place in two states
+   rather than two unrelated destinations, and the tray only appears when there are two
+   of them — on its own, Today is just a tab like the others. */
+.nav-pair{display:flex;flex:1 1 0;min-width:0;position:relative;align-items:stretch}
+.nav-pair::before{
+  content:"";position:absolute;top:-1px;bottom:-1px;left:3px;right:-3px;border-radius:15px;
+  background:var(--card2);border:1px solid var(--line);
+  opacity:0;transform:scaleX(.72);transform-origin:18% 50%;
+  transition:opacity .26s ease, transform .34s cubic-bezier(.2,.9,.28,1.14);
+  pointer-events:none;
+}
+body.has-workout-tab .nav-pair{flex:2 1 0}
+body.has-workout-tab .nav-pair::before{opacity:1;transform:scaleX(1)}
+.nav-pair>button{position:relative;z-index:1;flex:1 1 0}
+/* and the new tab grows sideways out from under Today rather than blinking into place */
+body.has-workout-tab #navWorkout{animation:navSprout .38s cubic-bezier(.2,.9,.28,1.14) both}
+@keyframes navSprout{
+  from{opacity:0;transform:translateX(-16px) scale(.82)}
+  to{opacity:1;transform:translateX(0) scale(1)}
+}
+@media (prefers-reduced-motion: reduce){
+  body.has-workout-tab #navWorkout{animation:none}
+  .nav-pair::before{transition:none}
+}
 /* Six tabs on a 320px phone. The labels are what runs out of room first, so they lose a
    little size and their letter-spacing rather than the icons losing their target area —
    and only while the sixth tab is actually there. */
@@ -3879,6 +3907,11 @@ body.cele-open{overflow:hidden}
        icon (.nav-ic, styled in the TAB BAR block above) — nothing in the icon itself
        is invisible-until-selected any more, so there is no fill state to keep in sync
        with the outline. 24px grid, 2px strokes, round joins throughout. -->
+  <!-- TODAY AND WORKOUT ARE ONE PLACE, IN TWO STATES. The session belongs to the day it
+       is part of, so its tab grows out of Today's rather than arriving as a stranger at
+       the other end of the bar: they share a tray, they sit inside one rounded outline,
+       and the new one sprouts sideways from under Today when a session starts. -->
+  <div class="nav-pair">
   <button data-tab="today" class="on" aria-label="Today">
     <span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M13 3 6.4 13h4.6L9.3 21l8.3-11h-4.6L13 3Z"/>
@@ -3894,6 +3927,7 @@ body.cele-open{overflow:hidden}
       <path d="M4 9v6M7 6.5v11M17 6.5v11M20 9v6M7 12h10"/>
     </svg><i class="nav-live" aria-hidden="true"></i></span><span class="nav-lbl">Workout</span>
   </button>
+  </div>
   <button data-tab="history" aria-label="History">
     <span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="8.2"/>
@@ -3932,7 +3966,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "12.4";
+const APP_VERSION = "12.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10204,7 +10238,30 @@ let refreshNavBounds = ()=>{};
     const app = document.getElementById("app");
     if(app) ro.observe(app);
   }
-  showNav = ()=>{ lastY = Math.max(0, window.pageYOffset || 0); setHidden(false); refreshNavBounds(); };
+  /* SITTING ON THE VISIBLE BOTTOM, NOT THE LAYOUT ONE.
+
+     A `position:fixed; bottom:0` element anchors to the layout viewport. On iOS Safari
+     that is not what you can see: the browser's own bottom toolbar collapses and expands
+     as you scroll, and between the two states the layout bottom is a strip of screen you
+     cannot see — so the bar reads as floating an inch above the bottom of the phone,
+     which is exactly the complaint. visualViewport reports the part actually on screen,
+     and the difference is the correction.
+
+     Capped at 90px on purpose: a toolbar is 40-90px and a keyboard is 250 or more. With
+     the keyboard up the bar stays where it is rather than climbing to sit on top of it,
+     because a weight is being typed and the tab bar is not what anyone is aiming for. */
+  const vv = window.visualViewport;
+  const anchorNav = ()=>{
+    if(!vv) return;
+    const gap = Math.round(window.innerHeight - (vv.height + vv.offsetTop));
+    nav.style.setProperty("--navGap", (gap > 0 && gap <= 90 ? gap : 0) + "px");
+  };
+  if(vv){
+    vv.addEventListener("resize", anchorNav, {passive:true});
+    vv.addEventListener("scroll", anchorNav, {passive:true});
+    anchorNav();
+  }
+  showNav = ()=>{ lastY = Math.max(0, window.pageYOffset || 0); setHidden(false); refreshNavBounds(); anchorNav(); };
 })();
 
 /* =====================================================================
