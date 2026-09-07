@@ -2413,6 +2413,21 @@ body.pfl-open{overflow:hidden}
   transition:border-color .15s ease,color .15s ease}
 .ws-tool .ico{width:19px;height:19px}
 .ws-tool:active{border-color:var(--acc-line);color:var(--acc)}
+/* How to say it: the shape of the phrase, then the examples. */
+.vh-shape{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:13px;border-radius:12px;
+  border:1px solid var(--acc-line);background:var(--acc-soft)}
+.vh-shape span{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acc);
+  border:1px solid var(--acc-line);border-radius:8px;padding:5px 9px}
+.vh-shape i{font:11px var(--mono);color:var(--faint);font-style:normal}
+.vh-ex{display:flex;flex-direction:column;gap:2px;padding:9px 0;border-top:1px solid var(--line)}
+.vh-ex:first-of-type{border-top:0}
+.vh-ex b{font-size:14.5px;font-weight:600}
+.vh-ex span{font-size:12.5px;color:var(--dim)}
+.vh-rule{font-size:13px;line-height:1.5;color:var(--dim);margin-bottom:8px}
+.vh-rule b{color:var(--text)}
+.voice-say{flex:1 1 auto;min-width:0}
+.voice-say b{color:var(--acc);font-weight:600}
+.voice-help{flex:0 0 auto;font-size:11.5px;white-space:nowrap}
 /* SAYING THE SET. The strip only exists while it is listening, so the screen is not
    carrying an explanation of a feature nobody is using. */
 #voiceBtn.on{border-color:var(--acc);color:var(--acc)}
@@ -4388,7 +4403,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "13.9";
+const APP_VERSION = "14.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -16797,7 +16812,9 @@ function viewActiveSession(){
         title="Say the set">${ICON.mic}</button>` : ""}
     </div>
     ${voiceSupported() ? `<div class="voice-strip"><span class="voice-dot"></span>
-      <span id="voiceHeard">Listening — say “one twenty for eight at eight”</span></div>` : ""}
+      <span class="voice-say"><span id="voiceHeard">Listening… <b>weight</b> for <b>reps</b> at <b>effort</b>
+        — “one twenty for eight at eight”</span></span>
+      <button class="linklike voice-help" id="voiceHelpBtn">how to say it</button></div>` : ""}
   </div>`;
   if(a.gymPlan && a.gymPlan.swaps.length){
     h += `<div class="card tb-card">
@@ -19513,18 +19530,62 @@ function voiceApply(said){
   }
   const gotReps = p.reps != null || p.same;
   if(!gotReps && !p.tick){
-    toast("Heard “" + p.heard + "” — say it as “one twenty for eight”", "warn");
+    /* What it heard, what it needed, and the shape that works — a failure that does not
+       teach you the format is a feature you use once. */
+    toast("Heard “" + p.heard + "” — it needs a rep count: “one twenty for eight”", "warn");
     return;
   }
+  // three successful sets and the instructions stop appearing on their own
+  const pr = trainPrefs();
+  pr.voiceUsed = Math.min(9, voiceHelpCount() + 1);
+  save();
   /* The real tick, not a shortcut past it: same handler, same rest gate, same PR check.
      If a rest is still running it refuses exactly as a thumb would, and says why. */
   if(row) row.click();
   toast(esc(en.name) + ": " + (p.weight != null ? fmtLoad(p.weight) + " × " : "")
         + (p.reps != null ? p.reps : "") + (p.rpe != null ? " @ RPE " + p.rpe : ""), "good");
 }
-function voiceStart(){
+/* HOW TO SAY IT, SAID BEFORE IT LISTENS.
+
+   A microphone button with no instructions is a microphone button nobody uses twice:
+   the first attempt is a sentence the parser was never going to understand, it fails,
+   and the feature is written off. So the first few taps open this — the shape of the
+   phrase, six real examples, and the two rules that decide whether it works.
+
+   Shown automatically until three sets have actually been logged by voice, and reachable
+   after that from the "how to say it" link on the listening strip. */
+function voiceHelpCount(){ return parseInt(trainPrefs().voiceUsed, 10) || 0; }
+function openVoiceHelp(then){
+  const ex = (said, means)=> `<div class="vh-ex"><b>“${esc(said)}”</b><span>${esc(means)}</span></div>`;
+  showModal(`<h3>Say the set</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Say it the way you
+      would say it to a training partner. It fills the next set you have not logged, and ticks it.</div>
+    <div class="vh-shape">
+      <span>weight</span><i>for</i><span>reps</span><i>at</i><span>effort</span>
+    </div>
+    <div class="k-lab" style="margin-top:14px">Like this</div>
+    ${ex("one twenty for eight", "120 " + unitWord() + " for 8 reps")}
+    ${ex("one twenty for eight at eight", "…and it felt like an RPE 8")}
+    ${ex("two twenty five by five", "“by” and “times” work as well as “for”")}
+    ${ex("eight reps at ninety five", "reps first, if that is how it comes out")}
+    ${ex("same as last time", "takes the greyed-out numbers already in the row")}
+    ${ex("nine and a half", "halves work for effort: RPE 9.5")}
+    <div class="k-lab" style="margin-top:14px">Two rules</div>
+    <div class="vh-rule"><b>Numbers, the way you say them out loud.</b> “One twenty” is 120, “a buck ten”
+      is 110, “a hundred and thirty five” is 135. You never have to say “one hundred and twenty”.</div>
+    <div class="vh-rule"><b>Reps are the one thing it needs.</b> Without a rep count it will not log
+      anything — it tells you what it heard instead. The weight is optional on push-ups, pull-ups and
+      anything else you do without loading it.</div>
+    <div class="btn-row" style="margin-top:16px"><button class="btn" id="vhGo" style="flex:1">Start listening</button></div>
+    <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Not now</button></div>`);
+  $("#modal").querySelector("#vhGo").onclick = ()=>{ hideModal(); if(then) then(); };
+}
+function voiceStart(fromHelp){
   if(!voiceSupported()){ toast("This browser can't listen — type it in instead", "warn"); return; }
   if(VOICE_REC){ voiceStop(); return; }
+  /* The first three times, the instructions come first. After that the button is what it
+     looks like — one tap, straight to listening. */
+  if(!fromHelp && voiceHelpCount() < 3){ openVoiceHelp(()=> voiceStart(true)); return; }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const rec = new SR();
   rec.lang = navigator.language || "en-US";
@@ -21165,7 +21226,9 @@ function bind(){
   if(disc2) disc2.onclick = discard;
 
   const vB = $("#voiceBtn");
-  if(vB) vB.onclick = voiceStart;
+  if(vB) vB.onclick = ()=> voiceStart();
+  const vH = $("#voiceHelpBtn");
+  if(vH) vH.onclick = ()=>{ voiceStop(); openVoiceHelp(()=> voiceStart(true)); };
   const tbBtn = $("#timeBoxBtn");
   if(tbBtn) tbBtn.onclick = openTimeBox;
   const tbU = $("#tbUndo");
