@@ -2413,18 +2413,11 @@ body.pfl-open{overflow:hidden}
   transition:border-color .15s ease,color .15s ease}
 .ws-tool .ico{width:19px;height:19px}
 .ws-tool:active{border-color:var(--acc-line);color:var(--acc)}
-/* How to say it: the shape of the phrase, then the examples. */
-.vh-shape{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:13px;border-radius:12px;
-  border:1px solid var(--acc-line);background:var(--acc-soft)}
-.vh-shape span{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acc);
-  border:1px solid var(--acc-line);border-radius:8px;padding:5px 9px}
-.vh-shape i{font:11px var(--mono);color:var(--faint);font-style:normal}
-.vh-ex{display:flex;flex-direction:column;gap:2px;padding:9px 0;border-top:1px solid var(--line)}
-.vh-ex:first-of-type{border-top:0}
-.vh-ex b{font-size:14.5px;font-weight:600}
-.vh-ex span{font-size:12.5px;color:var(--dim)}
-.vh-rule{font-size:13px;line-height:1.5;color:var(--dim);margin-bottom:8px}
-.vh-rule b{color:var(--text)}
+/* How to say it: the phrase itself, then three short lines. */
+.vh-say{font-family:var(--mono);font-size:19px;line-height:1.35;color:var(--text);
+  padding:14px;border-radius:12px;border:1px solid var(--acc-line);background:var(--acc-soft);
+  margin:8px 0 14px;text-align:center}
+.vh-note{font-size:13.5px;line-height:1.5;color:var(--dim);margin-bottom:7px}
 .voice-say{flex:1 1 auto;min-width:0}
 .voice-say b{color:var(--acc);font-weight:600}
 .voice-help{flex:0 0 auto;font-size:11.5px;white-space:nowrap}
@@ -2438,6 +2431,10 @@ body.voice-live .voice-strip{display:flex}
 /* resting: the same strip, gone quiet — no pulse, no accent, because nothing is open */
 body.voice-rest .voice-strip{border-color:var(--line);background:var(--card2);color:var(--dim)}
 body.voice-rest .voice-dot{background:var(--faint);animation:none}
+/* not open, and one tap away from being open */
+.voice-strip.tap-me{cursor:pointer;border-style:dashed}
+.voice-strip.tap-me .voice-dot{animation:none;background:var(--faint)}
+.voice-strip.tap-me:active{border-color:var(--acc);background:var(--acc-soft)}
 .voice-dot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--acc);
   animation:voicePulse 1.1s ease-in-out infinite}
 @keyframes voicePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
@@ -4406,7 +4403,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.1";
+const APP_VERSION = "14.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -19517,7 +19514,9 @@ function voiceSupported(){
    Speech engines also stop themselves after a few seconds of quiet, which is why this
    restarts rather than trusting one long session to stay open. */
 let VOICE_ON = false;                     // what you asked for
-let VOICE_REC = null;                     // what the engine is actually doing
+let VOICE_REC = null;                     // the recogniser object, if one exists
+let VOICE_LIVE = false;                   // whether it is REALLY open, per the engine
+let VOICE_TRIES = 0;                      // consecutive failed restarts
 function voicePaused(){
   const a = S.active;
   return !!(a && a.restTimer && !restServed());
@@ -19528,9 +19527,11 @@ function voiceEngineStop(){
     try{ VOICE_REC.stop(); }catch(e){}
     VOICE_REC = null;
   }
+  VOICE_LIVE = false;
 }
 function voiceStop(){
   VOICE_ON = false;
+  VOICE_TRIES = 0;
   voiceEngineStop();
   document.body.classList.remove("voice-live", "voice-rest");
   const b = $("#voiceBtn");
@@ -19548,21 +19549,36 @@ function voiceSync(){
   if(voicePaused()) voiceEngineStop(); else voiceEngineStart();
   voiceHint();
 }
-// What the strip says, which is the only way to tell which state it is in.
+/* WHAT THE STRIP SAYS, and the reason it reports the ENGINE rather than the intention.
+
+   Saying "listening" while the microphone is shut is the worst thing this feature can
+   do: you talk to a phone that is not there, and then you distrust it for the rest of
+   the session. So the wording follows VOICE_LIVE, which only the engine's own onstart
+   sets.
+
+   And when it is not open, the strip becomes the way to open it. Browsers — Safari in
+   particular — will only start a recogniser from something you touched, so a restart
+   after a rest can be refused with no error worth showing. Rather than pretend, it says
+   so and takes one tap. */
 function voiceHint(){
   const el = $("#voiceHeard");
+  const strip = document.querySelector(".voice-strip");
   if(!el) return;
+  const setOf = ()=>{
+    const at = nextOpenSet();
+    const en = at && S.active && S.active.entries[at.ei];
+    return en ? "set " + (at.si + 1) + " of <b>" + esc(en.name) + "</b>" : "the next set";
+  };
+  if(strip) strip.classList.remove("tap-me");
   if(!VOICE_ON){ el.innerHTML = "Off"; return; }
   if(voicePaused()){
     el.innerHTML = "Resting — it listens again when the clock is done ("
       + esc(fmtClock(restLeft())) + " to go)";
     return;
   }
-  const at = nextOpenSet();
-  const en = at && S.active.entries[at.ei];
-  el.innerHTML = en
-    ? "Listening for set " + (at.si + 1) + " of <b>" + esc(en.name) + "</b> — “one twenty for eight at eight”"
-    : "Listening… <b>weight</b> for <b>reps</b> at <b>effort</b>";
+  if(VOICE_LIVE){ el.innerHTML = "Listening for " + setOf(); return; }
+  if(strip) strip.classList.add("tap-me");
+  el.innerHTML = "Tap here to listen for " + setOf();
 }
 function voiceApply(said){
   const p = parseSetPhrase(said);
@@ -19625,39 +19641,20 @@ function voiceApply(said){
   toast(esc(en.name) + ": " + (p.weight != null ? fmtLoad(p.weight) + " × " : "")
         + (p.reps != null ? p.reps : "") + (p.rpe != null ? " @ RPE " + p.rpe : ""), "good");
 }
-/* HOW TO SAY IT, SAID BEFORE IT LISTENS.
+/* HOW TO SAY IT, IN FIVE LINES.
 
-   A microphone button with no instructions is a microphone button nobody uses twice:
-   the first attempt is a sentence the parser was never going to understand, it fails,
-   and the feature is written off. So the first few taps open this — the shape of the
-   phrase, six real examples, and the two rules that decide whether it works.
-
-   Shown automatically until three sets have actually been logged by voice, and reachable
-   after that from the "how to say it" link on the listening strip. */
+   The first version of this sheet was a page: a diagram, six examples and three rules.
+   All of it true, none of it read — somebody standing between sets wants to know what
+   to say, not how the parser works. So it is one line of instruction, two examples, and
+   the single rule that decides whether a phrase lands. Everything else the app can say
+   at the moment it matters, in a toast, when something does not work. */
 function voiceHelpCount(){ return parseInt(trainPrefs().voiceUsed, 10) || 0; }
 function openVoiceHelp(then){
-  const ex = (said, means)=> `<div class="vh-ex"><b>“${esc(said)}”</b><span>${esc(means)}</span></div>`;
   showModal(`<h3>Say the set</h3>
-    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Say it the way you
-      would say it to a training partner. Tap the microphone once and it stays on for the session,
-      listening between rests — it fills the next set you have not logged, and ticks it.</div>
-    <div class="vh-shape">
-      <span>weight</span><i>for</i><span>reps</span><i>at</i><span>effort</span>
-    </div>
-    <div class="k-lab" style="margin-top:14px">Like this</div>
-    ${ex("one twenty for eight", "120 " + unitWord() + " for 8 reps")}
-    ${ex("one twenty for eight at eight", "…and it felt like an RPE 8")}
-    ${ex("two twenty five by five", "“by” and “times” work as well as “for”")}
-    ${ex("eight reps at ninety five", "reps first, if that is how it comes out")}
-    ${ex("same as last time", "takes the greyed-out numbers already in the row")}
-    ${ex("nine and a half", "halves work for effort: RPE 9.5")}
-    <div class="k-lab" style="margin-top:14px">Three rules</div>
-    <div class="vh-rule"><b>Numbers, the way you say them out loud.</b> “One twenty” is 120, “a buck ten”
-      is 110, “a hundred and thirty five” is 135. You never have to say “one hundred and twenty”.</div>
-    <div class="vh-rule"><b>Say the weight as well as the reps.</b> While it is listening across a whole
-      session, a bare number could be anything it overheard, so a set needs both — or the word “reps”.</div>
-    <div class="vh-rule"><b>It goes deaf while you rest.</b> Nothing said during a rest is a set. The
-      moment the rest is done it listens again, for the set in front of you.</div>
+    <div class="vh-say">“one twenty for eight at eight”</div>
+    <div class="vh-note">Weight, reps, then how hard it felt. It fills the next set and ticks it.</div>
+    <div class="vh-note">Say numbers how you normally would — “one twenty” is 120.</div>
+    <div class="vh-note">It listens between sets and goes quiet while you rest.</div>
     <div class="btn-row" style="margin-top:16px"><button class="btn" id="vhGo" style="flex:1">Start listening</button></div>
     <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Not now</button></div>`);
   $("#modal").querySelector("#vhGo").onclick = ()=>{ hideModal(); if(then) then(); };
@@ -19692,20 +19689,38 @@ function voiceEngineStart(){
       setTimeout(voiceHint, 1500);        // then back to saying what it is waiting for
     }
   };
+  /* THE ENGINE'S OWN WORD FOR "I AM OPEN". Everything the strip says follows this rather
+     than the intention behind it, because a microphone that failed to open silently is
+     exactly the case that has to be visible. */
+  rec.onstart = ()=>{ VOICE_LIVE = true; VOICE_TRIES = 0; voiceHint(); };
+  rec.onaudiostart = ()=>{ VOICE_LIVE = true; voiceHint(); };
   rec.onerror = ev=>{
     if(ev && (ev.error === "not-allowed" || ev.error === "service-not-allowed")){
       toast("Microphone access is off for this app", "warn");
       voiceStop();
     }
-    // "no-speech" and "aborted" are ordinary in a gym; onend puts it back
+    // "no-speech", "aborted" and "network" are ordinary in a gym; onend decides what next
   };
   rec.onend = ()=>{
     VOICE_REC = null;
-    /* Engines stop themselves after a few seconds of quiet. While the button is on and
-       you are not resting, that is a hiccup rather than a decision. */
-    if(VOICE_ON && !voicePaused() && S.active) setTimeout(()=>{ if(VOICE_ON) voiceSync(); }, 250);
+    VOICE_LIVE = false;
+    if(!VOICE_ON || !S.active || voicePaused()){ voiceHint(); return; }
+    /* Engines stop themselves after a few seconds of quiet, and that is a hiccup rather
+       than a decision — but a restart can also be REFUSED, silently, when the browser
+       wants a gesture it has not had (Safari, after a rest). Three quiet attempts, then
+       it stops pretending and asks for the tap. */
+    if(VOICE_TRIES >= 3){ voiceHint(); return; }
+    VOICE_TRIES++;
+    setTimeout(()=>{ if(VOICE_ON && !voicePaused()) voiceEngineStart(); voiceHint(); }, 300 * VOICE_TRIES);
+    voiceHint();
   };
-  try{ rec.start(); }catch(e){ VOICE_REC = null; }
+  try{ rec.start(); }
+  catch(e){
+    /* InvalidStateError means one is already running somewhere; anything else means it
+       would not open. Either way this object is no use. */
+    VOICE_REC = null; VOICE_LIVE = false;
+    voiceHint();
+  }
 }
 function voiceStart(fromHelp){
   if(!voiceSupported()){ toast("This browser can't listen — type it in instead", "warn"); return; }
@@ -21333,7 +21348,15 @@ function bind(){
     voiceStop();                       // the session ended; stop listening to the room
   }
   const vH = $("#voiceHelpBtn");
-  if(vH) vH.onclick = ()=>{ voiceStop(); openVoiceHelp(()=> voiceStart(true)); };
+  if(vH) vH.onclick = (ev)=>{ ev.stopPropagation(); voiceStop(); openVoiceHelp(()=> voiceStart(true)); };
+  const vStrip = document.querySelector(".voice-strip");
+  if(vStrip) vStrip.onclick = ()=>{
+    // the tap the browser was waiting for, offered where the problem is visible
+    if(!VOICE_ON || voicePaused() || VOICE_LIVE) return;
+    VOICE_TRIES = 0;
+    voiceEngineStart();
+    voiceHint();
+  };
   const tbBtn = $("#timeBoxBtn");
   if(tbBtn) tbBtn.onclick = openTimeBox;
   const tbU = $("#tbUndo");
