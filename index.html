@@ -2418,6 +2418,7 @@ body.pfl-open{overflow:hidden}
   padding:14px;border-radius:12px;border:1px solid var(--acc-line);background:var(--acc-soft);
   margin:8px 0 14px;text-align:center}
 .vh-note{font-size:13.5px;line-height:1.5;color:var(--dim);margin-bottom:7px}
+.vh-note b{color:var(--text);font-weight:600}
 .voice-say{flex:1 1 auto;min-width:0}
 .voice-say b{color:var(--acc);font-weight:600}
 .voice-help{flex:0 0 auto;font-size:11.5px;white-space:nowrap}
@@ -4403,7 +4404,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.2";
+const APP_VERSION = "14.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -19446,43 +19447,59 @@ function voiceToDigits(text){
   }
   return out.join(" ");
 }
-/* One spoken set. Returns what it understood, and says which parts were missing. */
+/* ONE SPOKEN SET, IN WHATEVER ORDER IT COMES OUT.
+
+   Two grammars, because people use both. The short one is how it gets said between
+   sets — "one twenty for eight at eight" — and the long one spells out what each number
+   is: "ten pounds, five reps, five RPE". The second is easier to say correctly, easier
+   for the engine to hear, and impossible to misread, so LABELS WIN: any number wearing a
+   unit is taken first and removed, and only what is left goes through the shorthand.
+
+   "Bodyweight" is a first-class answer. A pull-up with nothing hanging off you is not a
+   set with a missing weight, it is a set with no weight, and the box should stay empty
+   rather than being filled with a zero that then gets multiplied into your volume. */
 function parseSetPhrase(text){
   const t = voiceToDigits(text);
   const num = "(\\d+(?:\\.\\d+)?)";
-  const grab = re=>{ const m = t.match(new RegExp(re)); return m ? parseFloat(m[1]) : null; };
-  const out = {weight:null, reps:null, rpe:null, tick:false, same:false, heard:String(text||"").trim()};
+  const out = {weight:null, reps:null, rpe:null, tick:false, same:false, bw:false,
+               heard:String(text||"").trim()};
   if(/\b(same|as last|repeat)\b/.test(t)) out.same = true;
   if(/\b(done|log it|logged|tick|check|banked)\b/.test(t)) out.tick = true;
-  /* EFFORT FIRST, so its number is never mistaken for a rep count — but "at" is only an
-     effort when the number after it could be one. "Eight reps at ninety five" is a
-     weight; "eight reps at nine" is an RPE, and 1-10 is the whole difference. */
+  if(/\b(body ?weight|bodyweight|no weight|just me|unloaded|nothing)\b/.test(t)) out.bw = true;
   let body = t;
-  const rpeWord = t.match(new RegExp("rpe\\s+" + num));
-  if(rpeWord){
-    out.rpe = parseFloat(rpeWord[1]);
-    body = body.replace(rpeWord[0], " ");
-  } else {
-    const at = t.match(new RegExp("\\bat\\s+" + num + "\\s*$"));
+  const take = re=>{
+    const m = body.match(new RegExp(re));
+    if(!m) return null;
+    body = body.replace(m[0], " ");
+    return parseFloat(m[1]);
+  };
+  // ---- the labelled grammar, taken first and taken out ----
+  out.rpe    = take("rpe\\s*" + num) ;
+  if(out.rpe == null) out.rpe = take(num + "\\s*rpe\\b");
+  out.reps   = take(num + "\\s*reps?\\b");
+  out.weight = take(num + "\\s*(?:pounds?|lbs?|lb|kilos?|kilograms?|kgs?|kg)\\b");
+  // ---- then the shorthand, on whatever is left ----
+  if(out.rpe == null){
+    const at = body.match(new RegExp("\\bat\\s+" + num + "\\s*$"));
     if(at && parseFloat(at[1]) >= 1 && parseFloat(at[1]) <= 10){
       out.rpe = parseFloat(at[1]);
       body = body.replace(at[0], " ");
     }
   }
-  const pair = body.match(new RegExp(num + "\\s*(?:for|by|times|x)\\s*" + num));
-  if(pair){ out.weight = parseFloat(pair[1]); out.reps = parseFloat(pair[2]); }
-  else {
-    const repsFirst = body.match(new RegExp(num + "\\s*reps?\\s*(?:at|with|on)?\\s*" + num + "?"));
-    if(repsFirst){
-      out.reps = parseFloat(repsFirst[1]);
-      if(repsFirst[2] != null) out.weight = parseFloat(repsFirst[2]);
-    } else {
+  if(out.weight == null || out.reps == null){
+    const pair = body.match(new RegExp(num + "\\s*(?:for|by|times|x)\\s*" + num));
+    if(pair){
+      if(out.weight == null) out.weight = parseFloat(pair[1]);
+      if(out.reps == null)   out.reps   = parseFloat(pair[2]);
+    } else if(out.reps == null){
       const only = body.match(new RegExp("\\b" + num + "\\b"));
-      if(only) out.reps = parseFloat(only[1]);      // a bare number is a rep count
+      if(only) out.reps = parseFloat(only[1]);     // a bare number is a rep count
     }
   }
-  // an RPE can only be 1-10; anything bigger was a rep count that ran into "at"
+  // an RPE can only be 1-10; anything bigger was something else that ran into "at"
   if(out.rpe != null && (out.rpe < 1 || out.rpe > 10)) out.rpe = null;
+  // said out loud, so it settles the question: no weight, rather than a missing one
+  if(out.bw) out.weight = null;
   return out;
 }
 /* THE SET THE VOICE MEANS: the first one not yet logged, in the order the session runs. */
@@ -19540,14 +19557,44 @@ function voiceStop(){
 }
 /* The one place that decides whether the microphone should be open right now. Safe to
    call from anywhere, as often as you like: it only acts on a difference. */
+/* WHY THE MICROPHONE NO LONGER CLOSES BETWEEN SETS.
+
+   Version one stopped the engine when a rest began and started it again when the rest
+   was served. It was the tidy design and it was the wrong one: starting a recogniser is
+   the fragile operation — browsers refuse it without a gesture, refuse it while one is
+   still shutting down, and refuse it silently. Doing that between every set is asking
+   the unreliable thing to happen thirty times a session.
+
+   So the engine now runs from the moment you switch it on until the session ends, and
+   the REST decides what is done with what it hears rather than whether it hears at all.
+   Nothing said during a rest is ever logged — voiceApply() refuses it, as before — and
+   the strip still says so. The difference is that when your rest ends there is nothing
+   to start, so there is nothing to fail. */
 function voiceSync(){
   const b = $("#voiceBtn");
   if(b) b.classList.toggle("on", VOICE_ON);
   document.body.classList.toggle("voice-live", VOICE_ON);
   document.body.classList.toggle("voice-rest", VOICE_ON && voicePaused());
-  if(!VOICE_ON || !S.active){ voiceEngineStop(); voiceHint(); return; }
-  if(voicePaused()) voiceEngineStop(); else voiceEngineStart();
+  if(!VOICE_ON || !S.active){ voiceEngineStop(); voiceHeartbeat(false); voiceHint(); return; }
+  voiceEngineStart();
+  voiceHeartbeat(true);
   voiceHint();
+}
+/* AND A HEARTBEAT, because "it stopped and never came back" is the whole complaint.
+
+   Engines end sessions on their own — after a minute, after silence, when the page is
+   backgrounded, when iOS decides. onend restarts it, but onend does not always arrive.
+   This checks twice a second that what is running matches what you asked for, and puts
+   it back if not. It is the cheapest possible loop: two booleans and, at most, one
+   start() call. */
+let VOICE_BEAT = null;
+function voiceHeartbeat(on){
+  if(!on){ if(VOICE_BEAT){ clearInterval(VOICE_BEAT); VOICE_BEAT = null; } return; }
+  if(VOICE_BEAT) return;
+  VOICE_BEAT = setInterval(()=>{
+    if(!VOICE_ON || !S.active){ voiceHeartbeat(false); return; }
+    if(!VOICE_REC || !VOICE_LIVE) voiceEngineStart();
+  }, 500);
 }
 /* WHAT THE STRIP SAYS, and the reason it reports the ENGINE rather than the intention.
 
@@ -19599,9 +19646,9 @@ function voiceApply(said){
      plate called across the room, your own "twelve" — is not a set. While the microphone
      is latched on, a phrase has to be SHAPED like a set: a weight and reps, an explicit
      "reps", or one of the words that mean something on their own. */
-  if(VOICE_ON && p.reps != null && p.weight == null && !p.same && !p.tick
+  if(VOICE_ON && p.reps != null && p.weight == null && !p.same && !p.tick && !p.bw
      && !/\breps?\b/i.test(said)){
-    toast("Heard “" + p.heard + "” — say the weight too, or tap the set in", "warn");
+    toast("Heard “" + p.heard + "” — say the weight too, or “bodyweight”", "warn");
     return;
   }
   const gotReps = p.reps != null || p.same;
@@ -19625,11 +19672,35 @@ function voiceApply(said){
     if(w && w.placeholder && w.placeholder !== unitWord()) put("weight", w.placeholder);
     if(r && r.placeholder && r.placeholder !== "reps") put("reps", r.placeholder);
   }
-  if(p.weight != null) put("weight", p.weight);
+  /* "BODYWEIGHT" EMPTIES THE BOX AND SETTLES IT. The set is marked as having no load on
+     purpose, so the tick stops asking for one and nothing multiplies a zero into your
+     volume. Saying a number later overwrites both. */
+  const st = en.sets[at.si];
+  if(p.bw){
+    put("weight", "");
+    if(st) st.noWeight = true;
+  } else if(p.weight != null){
+    if(st) delete st.noWeight;
+    put("weight", p.weight);
+  }
   if(p.reps != null) put("reps", p.reps);
+  /* THE DROPDOWN ONLY OFFERS 6 TO 10, because below 6 a set is a warm-up rather than a
+     working one. Somebody can still say "five RPE", and dropping it silently is the sort
+     of quiet failure this whole feature has been fixing — so it lands on the nearest
+     value the app actually holds, and the confirmation says which. */
+  let rpeSaid = p.rpe;
   if(p.rpe != null){
     const sel = row.parentElement.querySelector('[data-f="rpe"]');
-    if(sel){ sel.value = String(p.rpe); sel.dispatchEvent(new Event("change", {bubbles:true})); }
+    if(sel){
+      const opts = [...sel.options].map(o=> o.value).filter(Boolean).map(parseFloat);
+      const near = opts.reduce((best, v)=>
+        Math.abs(v - p.rpe) < Math.abs(best - p.rpe) ? v : best, opts[0]);
+      if(near != null){
+        rpeSaid = near;
+        sel.value = String(near);
+        sel.dispatchEvent(new Event("change", {bubbles:true}));
+      }
+    }
   }
   // three successful sets and the instructions stop appearing on their own
   const pr = trainPrefs();
@@ -19638,8 +19709,10 @@ function voiceApply(said){
   /* The real tick, not a shortcut past it: same handler, same rest gate, same PR check.
      If a rest is still running it refuses exactly as a thumb would, and says why. */
   row.click();
-  toast(esc(en.name) + ": " + (p.weight != null ? fmtLoad(p.weight) + " × " : "")
-        + (p.reps != null ? p.reps : "") + (p.rpe != null ? " @ RPE " + p.rpe : ""), "good");
+  toast(esc(en.name) + ": " + (p.bw ? "bodyweight × " : p.weight != null ? fmtLoad(p.weight) + " × " : "")
+        + (p.reps != null ? p.reps : "")
+        + (rpeSaid != null ? " @ RPE " + rpeSaid + (rpeSaid !== p.rpe ? " (nearest to " + p.rpe + ")" : "") : ""),
+        "good");
 }
 /* HOW TO SAY IT, IN FIVE LINES.
 
@@ -19654,6 +19727,8 @@ function openVoiceHelp(then){
     <div class="vh-say">“one twenty for eight at eight”</div>
     <div class="vh-note">Weight, reps, then how hard it felt. It fills the next set and ticks it.</div>
     <div class="vh-note">Say numbers how you normally would — “one twenty” is 120.</div>
+    <div class="vh-note">Or spell it out: <b>“ten pounds, five reps, five RPE”</b>.</div>
+    <div class="vh-note">Nothing on the bar? Say <b>“bodyweight”</b> and the weight stays empty.</div>
     <div class="vh-note">It listens between sets and goes quiet while you rest.</div>
     <div class="btn-row" style="margin-top:16px"><button class="btn" id="vhGo" style="flex:1">Start listening</button></div>
     <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Not now</button></div>`);
@@ -19683,11 +19758,26 @@ function voiceEngineStart(){
        ever-growing transcript. */
     const last = e.results[e.results.length - 1];
     if(last && last.isFinal){
+      clearTimeout(rec._settle);
       const phrase = said.trim();
       said = "";
       if(phrase) voiceApply(phrase);
       setTimeout(voiceHint, 1500);        // then back to saying what it is waiting for
+      return;
     }
+    /* SOME ENGINES NEVER SEND THE FINAL. iOS in particular will stream interim results
+       and then end the session without marking anything final, which is a set said out
+       loud and thrown away. So a pause in the talking counts: 1.2 seconds after the last
+       word, what it has is what you said. */
+    clearTimeout(rec._settle);
+    const pending = (said + " " + interim).trim();
+    if(!pending) return;
+    rec._settle = setTimeout(()=>{
+      if(!VOICE_ON) return;
+      said = "";
+      voiceApply(pending);
+      setTimeout(voiceHint, 1500);
+    }, 1200);
   };
   /* THE ENGINE'S OWN WORD FOR "I AM OPEN". Everything the strip says follows this rather
      than the intention behind it, because a microphone that failed to open silently is
@@ -19704,20 +19794,17 @@ function voiceEngineStart(){
   rec.onend = ()=>{
     VOICE_REC = null;
     VOICE_LIVE = false;
-    if(!VOICE_ON || !S.active || voicePaused()){ voiceHint(); return; }
-    /* Engines stop themselves after a few seconds of quiet, and that is a hiccup rather
-       than a decision — but a restart can also be REFUSED, silently, when the browser
-       wants a gesture it has not had (Safari, after a rest). Three quiet attempts, then
-       it stops pretending and asks for the tap. */
-    if(VOICE_TRIES >= 3){ voiceHint(); return; }
+    if(!VOICE_ON || !S.active){ voiceHint(); return; }
+    /* Straight back up. A session ending is almost always the engine's own timer, not a
+       decision — and the heartbeat is watching anyway, so this is just the fast path. */
     VOICE_TRIES++;
-    setTimeout(()=>{ if(VOICE_ON && !voicePaused()) voiceEngineStart(); voiceHint(); }, 300 * VOICE_TRIES);
+    setTimeout(()=>{ if(VOICE_ON) voiceEngineStart(); voiceHint(); }, 120);
     voiceHint();
   };
   try{ rec.start(); }
   catch(e){
     /* InvalidStateError means one is already running somewhere; anything else means it
-       would not open. Either way this object is no use. */
+       would not open. Either way this object is no use — the heartbeat tries again. */
     VOICE_REC = null; VOICE_LIVE = false;
     voiceHint();
   }
@@ -20924,7 +21011,7 @@ function bind(){
           if(rIn0) rIn0.focus();
           return;
         }
-        if(loadNeededFor(entry)){
+        if(loadNeededFor(entry) && !st.noWeight){
           const wNow = String((wIn0 && wIn0.value) || st.weight || "").trim()
             || String((wIn0 && wIn0.placeholder !== unitWord() && wIn0.placeholder) || "").trim();
           if(!wNow){
