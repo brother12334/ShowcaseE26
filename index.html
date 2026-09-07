@@ -2290,6 +2290,25 @@ nav .nav-ic{position:relative}
 nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px #141417}
 @keyframes navPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
 @media (prefers-reduced-motion: reduce){ .nav-live{animation:none} }
+/* "I'VE GOT FORTY MINUTES" — the ask, and the receipt afterwards. */
+.tb-chips{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 4px}
+.tb-chip{
+  min-width:46px;padding:9px 12px;border-radius:11px;border:1px solid var(--line);
+  background:var(--card2);color:var(--dim);cursor:pointer;font-family:var(--mono);font-size:15px;
+  transition:border-color .15s ease,background .15s ease,color .15s ease;
+}
+.tb-chip.on{background:var(--acc);border-color:var(--acc);color:var(--bg)}
+.tb-unit{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.tb-out{display:flex;flex-direction:column;gap:6px;margin-top:14px;padding:12px 13px;
+  border:1px solid var(--line);border-radius:12px;background:var(--card2)}
+.tb-row{display:flex;align-items:baseline;justify-content:space-between;font-size:13.5px;color:var(--dim)}
+.tb-row b{font-size:19px;color:var(--text)}
+.tb-now b{color:var(--acc)}
+.tb-cuts{display:flex;flex-direction:column;gap:6px}
+.tb-cut{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  padding:9px 11px;border-radius:10px;background:var(--card2);border:1px solid var(--line);font-size:13.5px}
+.tb-cut span{font:12px var(--mono);color:var(--faint);white-space:nowrap}
+.tb-card{border:1px solid var(--acc-line);background:linear-gradient(180deg,var(--acc-soft),transparent)}
 /* THE RECORD BOOK. One line per record: what it is, the number, and everything needed
    to trust it — the date, the gym, and what the bar weighed. */
 .rb-card{padding:14px 15px}
@@ -4230,7 +4249,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "13.2";
+const APP_VERSION = "13.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -16395,7 +16414,19 @@ function viewActiveSession(){
   let h = `<div class="card" style="padding:12px 13px">
     <div class="sub" style="margin:0">Fill sets as you go. Tapping ✓ on an empty row copies last
       time's numbers, and tapping <span class="rpe-help">RPE</span> anywhere says what it means.</div>
+    <div class="btn-row" style="margin-top:10px"><button class="btn ghost small" id="timeBoxBtn"
+      style="flex:1">${ICON.rest} Short on time?</button></div>
   </div>`;
+  if(a.timeBox){
+    h += `<div class="card tb-card">
+      <div class="lc-k"><i></i>Cut to ${a.timeBox.min} minutes</div>
+      <div class="sub" style="margin:0">${a.timeBox.cuts.length} change${a.timeBox.cuts.length===1?"":"s"} —
+        ${esc(a.timeBox.cuts.map(c=> c.kind === "removed" ? c.name + " dropped"
+          : c.name + " " + c.from + "→" + c.to).join(", "))}.
+        The grade reads this as a session you shortened on purpose.</div>
+      <div style="text-align:center;margin-top:10px"><button class="nb-link" id="tbUndo">Put it back as written</button></div>
+    </div>`;
+  }
 
   let finLab = false;
   const tips = focusTipsFor(a.workoutId), tipsSeen = new Set();
@@ -18746,6 +18777,180 @@ function openMuscleDetail(key){
 }
 /* ---------- HISTORY ---------- */
 /* =====================================================================
+   "I'VE GOT FORTY MINUTES"
+
+   The most common way a session goes wrong is not effort or programming, it is a
+   timetable: an hour's work and forty minutes to do it in. Left alone that becomes a
+   skipped workout, or a rushed one where the rests collapse and the last two exercises
+   quietly disappear — and neither of those tells the app what happened, so the grade
+   reads a short session as a bad one.
+
+   So it is asked for out loud and answered honestly. You say how long you have, the app
+   works out what fits, and it CUTS IN A PARTICULAR ORDER — accessories before compounds,
+   sets before exercises, the end of the day before the start of it — because the top
+   sets of the first movement are what the session is for and the third set of a lateral
+   raise is not.
+
+   Nothing is touched that you have already logged, and the whole thing is one undo away.
+
+   HOW LONG A SET TAKES is measured rather than assumed, from your own finished sessions:
+   total time divided by sets logged, over the last dozen. That figure already contains
+   your rests, your walk between machines and the time you spend on your phone, which is
+   why it beats any formula. Until there are enough sessions to take a median from, the
+   fallback is the rest target plus forty seconds of work. */
+function medianPerSetSeconds(){
+  const per = [];
+  (S.sessions || []).slice(-12).forEach(s=>{
+    if(!s.startedAt || !s.finishedAt || s.finishedAt <= s.startedAt) return;
+    const sets = (s.entries || []).reduce((n,e)=>
+      n + (e.sets || []).filter(st=> st.done || st.reps).length, 0);
+    if(sets < 4) return;
+    const v = (s.finishedAt - s.startedAt) / 1000 / sets;
+    if(v > 20 && v < 600) per.push(v);          // 20s and 10min bracket out the nonsense
+  });
+  return per.length >= 3 ? medianOf(per) : null;
+}
+function estimateRemainingSec(entries){
+  const per = medianPerSetSeconds();
+  let sec = 0;
+  sessionOrder(entries).forEach(o=>{
+    const en = entries[o.ei];
+    const st = (en.sets || [])[o.si];
+    if(!st || st.done) return;
+    if(per){ sec += per; return; }
+    const t = restTargetFor(en, st);
+    const rest = endsRound(entries, o.ei, o.si) ? ((t.ideal && t.ideal[0]) || 90) : 0;
+    sec += 40 + rest;
+  });
+  return Math.round(sec);
+}
+const fmtMins = sec=> Math.max(1, Math.round(sec / 60)) + " min";
+/* WHAT TO CUT, IN ORDER. Each step is applied to a copy and re-measured, so the session
+   loses the least it can rather than everything the first rule could reach. */
+function planTimeCut(minutes, entries){
+  const target = minutes * 60;
+  let cur = JSON.parse(JSON.stringify(entries || S.active.entries));
+  const cuts = [];
+  const est = ()=> estimateRemainingSec(cur);
+  const logged = e=> (e.sets || []).some(st=> st && (st.done || st.reps || st.weight));
+  const orderOf = {};
+  (entries || S.active.entries).forEach((e, i)=>{ if(e && e.name) orderOf[e.name] = i; });
+  const note = (name, kind, from, to)=>{
+    const hit = cuts.find(c=> c.name === name && c.kind === kind);
+    if(hit){ hit.to = to; return; }
+    cuts.push({name, kind, from, to, idx: orderOf[name] == null ? 99 : orderOf[name]});
+  };
+  /* An exercise that ends up dropped is not ALSO "3 sets → 2": the sets it lost on the
+     way past were never done, so the only true statement about it is that it is gone. */
+  const drop = (name)=>{
+    for(let i = cuts.length - 1; i >= 0; i--) if(cuts[i].name === name) cuts.splice(i, 1);
+    cuts.push({name, kind: "removed", idx: orderOf[name] == null ? 99 : orderOf[name]});
+  };
+  const before = est();
+  // 1. the last set off the accessories, from the end of the day backwards, floor of two
+  for(let guard = 0; guard < 12 && est() > target; guard++){
+    let moved = false;
+    for(let i = cur.length - 1; i >= 1 && est() > target; i--){
+      const e = cur[i];
+      if(isCompound(e.name)) continue;
+      if(e.sets.length <= 2) continue;
+      if(!e.sets[e.sets.length - 1] || e.sets[e.sets.length - 1].done) continue;
+      const from = e.sets.length;
+      e.sets.pop();
+      note(e.name, "sets", from, e.sets.length);
+      moved = true;
+    }
+    if(!moved) break;
+  }
+  // 2. whole accessories, last first, and only ones you have not started
+  for(let i = cur.length - 1; i >= 1 && est() > target; i--){
+    const e = cur[i];
+    if(isCompound(e.name) || logged(e)) continue;
+    drop(e.name);
+    cur.splice(i, 1);
+  }
+  // 3. only now, the last set off the compounds — never below two, never the opener's
+  for(let guard = 0; guard < 12 && est() > target; guard++){
+    let moved = false;
+    for(let i = cur.length - 1; i >= 1 && est() > target; i--){
+      const e = cur[i];
+      if(!isCompound(e.name) || e.sets.length <= 2) continue;
+      if(!e.sets[e.sets.length - 1] || e.sets[e.sets.length - 1].done) continue;
+      const from = e.sets.length;
+      e.sets.pop();
+      note(e.name, "sets", from, e.sets.length);
+      moved = true;
+    }
+    if(!moved) break;
+  }
+  cuts.sort((a, b)=> a.idx - b.idx);          // read in the order the day runs
+  return {entries: cur, cuts, before, after: est(), fits: est() <= target, minutes};
+}
+function openTimeBox(){
+  const a = S.active;
+  if(!a) return;
+  const now = estimateRemainingSec(a.entries);
+  const per = medianPerSetSeconds();
+  let mins = null, planned = null;
+  const draw = ()=>{
+    const body = planned ? `
+      <div class="tb-out">
+        <div class="tb-row"><span>As written</span><b class="num">${esc(fmtMins(planned.before))}</b></div>
+        <div class="tb-row tb-now"><span>Cut to</span><b class="num">${esc(fmtMins(planned.after))}</b></div>
+      </div>
+      ${planned.cuts.length ? `<div class="k-lab" style="margin-top:14px">What goes</div>
+        <div class="tb-cuts">${planned.cuts.map(c=> `<div class="tb-cut">${
+          c.kind === "removed"
+            ? `<b>${esc(c.name)}</b><span>dropped for today</span>`
+            : `<b>${esc(c.name)}</b><span>${c.from} sets → ${c.to}</span>`}</div>`).join("")}</div>`
+        : `<div class="sub" style="margin-top:12px">Nothing to cut — it already fits.</div>`}
+      ${!planned.fits ? `<div class="sync-warn" style="margin-top:12px">That is as far as it can go without
+        touching your compounds' opening sets or anything you have already logged. Finish what you can and
+        the grade will read it as a short session rather than a bad one.</div>` : ""}
+      <button class="btn" id="tbGo" style="margin-top:14px">${planned.cuts.length ? "Cut it" : "Close"}</button>`
+      : "";
+    showModal(`<h3>How long have you got?</h3>
+      <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">What is left of this
+        session runs about <b>${esc(fmtMins(now))}</b>${per ? ", measured from your own sessions" : ""}. Say
+        what you have and Element 26 will take the accessories down before the compounds, sets before whole
+        exercises, and the end of the day before the start of it. Anything you have already logged is left
+        alone.</div>
+      <div class="tb-chips">${[20,30,40,45,60,75].map(m=>
+        `<button type="button" class="tb-chip${mins===m?" on":""}" data-tbm="${m}">${m}</button>`).join("")}
+        <span class="tb-unit">min</span></div>
+      ${body}
+      <button class="btn ghost small" id="closeModal" style="margin-top:10px">Cancel</button>`);
+    const m = $("#modal");
+    m.querySelectorAll("[data-tbm]").forEach(b=> b.onclick = ()=>{
+      mins = parseInt(b.dataset.tbm, 10);
+      planned = planTimeCut(mins, a.entries);
+      draw();
+    });
+    const go = m.querySelector("#tbGo");
+    if(go) go.onclick = ()=>{
+      if(!planned || !planned.cuts.length){ hideModal(); return; }
+      /* The original is kept whole so the cut is one tap away from being undone — a
+         timetable changes, and a session that cannot be put back is a session nobody
+         will risk cutting. */
+      a.timeBoxBackup = JSON.parse(JSON.stringify(a.entries));
+      a.entries = planned.entries;
+      a.timeBox = {min: mins, at: Date.now(), cuts: planned.cuts, was: planned.before, now: planned.after};
+      if(a.focusIdx != null) a.focusIdx = Math.min(a.focusIdx, Math.max(0, a.entries.length - 1));
+      save(); hideModal(); render();
+      toast("Cut to about " + fmtMins(planned.after), "good");
+    };
+  };
+  draw();
+}
+function undoTimeBox(){
+  const a = S.active;
+  if(!a || !a.timeBoxBackup) return;
+  a.entries = a.timeBoxBackup;
+  delete a.timeBoxBackup; delete a.timeBox;
+  save(); render();
+  toast("Session put back as written", "good");
+}
+/* =====================================================================
    THE RECORD BOOK
 
    Every PR the app has ever detected already lives on the set that earned it, but only
@@ -20167,6 +20372,10 @@ function bind(){
   const disc2 = $("#liveDiscard");
   if(disc2) disc2.onclick = discard;
 
+  const tbBtn = $("#timeBoxBtn");
+  if(tbBtn) tbBtn.onclick = openTimeBox;
+  const tbU = $("#tbUndo");
+  if(tbU) tbU.onclick = undoTimeBox;
   const rbOpen = $("#recordsBtn");
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
@@ -21044,6 +21253,9 @@ function finishWorkout(){
   if(noteEl) a.note = noteEl.value.trim();
   const vol = a.entries.reduce((t,e)=>t+e.sets.reduce((u,st)=>u+((parseFloat(st.weight)||0)*(parseFloat(st.reps)||0)),0),0);
   const sessObj = {id:a.id, workoutId:a.workoutId, date:a.date, startedAt:a.startedAt, finishedAt:a.finishedAt, entries:a.entries, note:a.note||"", feel:a.feel||null};
+  /* A SHORTENED SESSION IS NOT A POOR ONE, and the only way anything downstream can know
+     the difference is if the fact travels with the session. */
+  if(a.timeBox) sessObj.timeBox = a.timeBox;
   // where it was done, when that is known — see checkGymAtStart()
   if(a.gymId){ sessObj.gymId = a.gymId; sessObj.gymName = a.gymName || ""; }
   const existing = S.sessions.findIndex(x=>x.id===a.id);
