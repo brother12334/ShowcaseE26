@@ -3932,7 +3932,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "12.1";
+const APP_VERSION = "12.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6343,6 +6343,36 @@ function libraryCueFor(name){
   const rec = (EX_LIBRARY[hit.key] || []).find(x=> swapSquash(x.name) === here);
   return (rec && rec.cue) || "";
 }
+// What the library says this movement is done with, "" when it has never heard of it.
+function libraryGearFor(name){
+  const hit = exSlotFor(name);
+  if(!hit) return "";
+  const here = swapSquash(name);
+  const rec = (EX_LIBRARY[hit.key] || []).find(x=> swapSquash(x.name) === here);
+  return (rec && rec.gear) || "";
+}
+/* IS A WEIGHT PART OF WHAT THIS SET IS?
+
+   For a barbell row the answer is obviously yes and a set logged without one is not a
+   record of anything. For a push-up, a pull-up, a dip, a plank or a hanging leg raise
+   it is obviously no — and those are exactly the movements people DO sometimes load,
+   with a belt or a dumbbell between the feet, which is why the box is still there and
+   still accepts a number. Optional is not the same as absent.
+
+   Three sources, in order of how much they know: what the plan itself prescribed for
+   this slot, what the library says the movement uses, and failing both, the name. */
+const BODYWEIGHT_RE = /\b(push[- ]?up|pull[- ]?up|chin[- ]?up|dip|plank|hanging|knee raise|leg raise|sit[- ]?up|crunch|bodyweight|inverted row|nordic|glute bridge|superman|mountain climber|burpee|muscle[- ]?up|handstand|pistol|hyperextension|back extension|calf raise \(bodyweight\))\b/i;
+function loadNeededFor(en){
+  if(!en || !en.name) return false;
+  // the plan wrote a starting load into this slot, so a load is what it expects
+  if(en.weight != null && en.weight !== "") return true;
+  // "Weighted Dip" says what it is in its own name, and the belt is the point of it
+  if(/\bweighted\b/i.test(en.name)) return true;
+  const gear = libraryGearFor(en.name);
+  if(gear === "bodyweight") return false;
+  if(gear) return true;                       // barbell, dumbbell, machine, cable, smith
+  return !BODYWEIGHT_RE.test(en.name);
+}
 /* THE SAME JOB, ANY EQUIPMENT — which is a different question from swapOptionsFor().
 
    That one answers "the pec deck is taken, what else is free", so it is gated on the
@@ -8010,6 +8040,13 @@ function showRestUI(min){
     const ui = document.getElementById("restUI");
     if(!ui || !S.active || !S.active.restTimer){ hideRestUI(); return; }
     const sec = restElapsed();
+    /* The moment the rest is served the boxes open, without a tap and without a
+       re-render taking the focus out of one somebody is already typing in. */
+    const served = restServed();
+    if(ui.dataset.served !== String(served)){
+      ui.dataset.served = String(served);
+      applyRestLocks();
+    }
     ui.querySelectorAll(".rest-time").forEach(t=> t.textContent = fmtClock(sec));
     const ring = ui.querySelector(".pf-ring");
     if(ring) ring.style.setProperty("--sw", ((sec%60)/60*100)+"%");
@@ -19087,13 +19124,52 @@ function bind(){
           return;
         }
       }
-      // About to log a set while a rest timer for a DIFFERENT set is barely started?
-      // That means the last rest was ~nothing, ask before it gets recorded, using the
-      // rest target for the set that's actually resting.
+      /* YOU CANNOT LOG THE NEXT SET OUT OF A REST YOU ARE STILL TAKING. Asking "are you
+         truly done resting?" put the decision in a dialog, and a dialog answered with
+         the wrong thumb records a rest of eleven seconds on a set that wanted three
+         minutes — which then teaches the rest-discipline grade something that never
+         happened. There is already one control that means "I am done": ■ Stop rest. So
+         the tick simply waits for it, and says how long is left.
+
+         Once the rest is served the tick works normally, with nothing to confirm. */
       if(!st.done && !entry.superset){
         const rt = S.active.restTimer;
-        if(rt && !(rt.e===ei && rt.s===si)){
-          if(!(await confirmShortRest(restElapsed(), "log this next set"))) return;
+        if(rt && !(rt.e===ei && rt.s===si) && !restServed()){
+          nudge("Still resting \u2014 " + fmtClock(restLeft()) + " to go, or tap \u25a0 to stop it");
+          showRestUI(false);            // and put the clock in front of them, not a toast alone
+          return;
+        }
+      }
+      /* WHAT THE TICK MEANS. It says this set happened, and a set that happened has a
+         number of reps. Ticking an empty row used to bank a set with nothing in it,
+         which counts as volume, reaches the Body tab and grades a session on a set
+         nobody can describe. Last time's numbers still fill an empty row — that is
+         what the placeholders are — so this only stops the case where there is nothing
+         to copy either.
+
+         THE WEIGHT IS A DIFFERENT QUESTION. A push-up, a pull-up, a dip and a plank are
+         real sets with no load to type, and plenty of people add a belt to them
+         sometimes and not others. So the weight is asked for only where the movement
+         cannot happen without one, and never on bodyweight work. */
+      if(!st.done){
+        const row0 = el.parentElement;
+        const wIn0 = row0.querySelector('[data-f="weight"]');
+        const rIn0 = row0.querySelector('[data-f="reps"]');
+        const repsNow = String((rIn0 && rIn0.value) || st.reps || "").trim()
+          || String((rIn0 && rIn0.placeholder !== "reps" && rIn0.placeholder) || "").trim();
+        if(!repsNow){
+          nudge("How many reps? Put the number in and the \u2713 will take it");
+          if(rIn0) rIn0.focus();
+          return;
+        }
+        if(loadNeededFor(entry)){
+          const wNow = String((wIn0 && wIn0.value) || st.weight || "").trim()
+            || String((wIn0 && wIn0.placeholder !== unitWord() && wIn0.placeholder) || "").trim();
+          if(!wNow){
+            nudge("What did you lift? " + esc(entry.name) + " needs a weight");
+            if(wIn0) wIn0.focus();
+            return;
+          }
         }
       }
       st.done = !st.done;
@@ -24539,15 +24615,34 @@ function insaneValue(f, raw, en, ei, si){
   return null;
 }
 const LOCK_WHY = "You're still resting \u2014 log this when the set is done";
-/* True while a rest timer is running and this set is the one you have not done yet.
-   Scoped to the exercise that owns the clock plus anything after it: a set you have
-   already logged stays editable, because correcting a typo is not logging a set. */
+/* HOW LONG THIS REST STILL HAS TO RUN, and whether it counts as served.
+
+   The clock is a stopwatch, not a countdown: it keeps running until the next set is
+   logged or it is stopped. The lock used to follow the clock rather than the rest, so
+   after three full minutes and a walk to the next machine the reps box was still shut
+   and still saying "you're still resting" — which is the app arguing with somebody who
+   has done exactly what it asked. The rest is SERVED once it passes the same threshold
+   that decides whether a rest was too short to be one, and everything opens up then,
+   with no tap needed. */
+function restServed(){
+  const info = restingSetInfo();
+  if(!info) return true;
+  return restElapsed() >= (info.target.warn || 60);
+}
+function restLeft(){
+  const info = restingSetInfo();
+  if(!info) return 0;
+  return Math.max(0, (info.target.warn || 60) - restElapsed());
+}
+/* True while a rest is still being served and this set is the one you have not done
+   yet. A set you have already logged stays editable, because correcting a typo is not
+   logging a set. */
 function restLocks(en, si){
   const a = S.active;
   if(!a || !a.restTimer) return false;
   const st = (en.sets || [])[si];
   if(!st || st.done) return false;
-  return true;
+  return !restServed();
 }
 /* Every exercise whose sets are all ticked is FINISHED, and finished does not come
    undone. Going back to look at one and catching the ✓ used to untick it, which threw
