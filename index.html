@@ -2106,7 +2106,8 @@ nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px #141417}
 /* THE PAIR. Today and Workout share one tray so they read as one place in two states
    rather than two unrelated destinations, and the tray only appears when there are two
    of them — on its own, Today is just a tab like the others. */
-.nav-pair{display:flex;flex:1 1 0;min-width:0;position:relative;align-items:stretch}
+.nav-pair{display:flex;flex:1 1 0;min-width:0;position:relative;align-items:stretch;
+  transition:flex-grow .32s cubic-bezier(.4,0,.2,1)}
 .nav-pair::before{
   content:"";position:absolute;top:-1px;bottom:-1px;left:3px;right:-3px;border-radius:15px;
   background:var(--card2);border:1px solid var(--line);
@@ -2123,9 +2124,30 @@ body.has-workout-tab #navWorkout{animation:navSprout .38s cubic-bezier(.2,.9,.28
   from{opacity:0;transform:translateX(-16px) scale(.82)}
   to{opacity:1;transform:translateX(0) scale(1)}
 }
+/* and it leaves the same way it arrived, sliding back under Today */
+/* Specificity, on purpose: the sprout rule is `body.has-workout-tab #navWorkout`, and
+   the tray class is still on the body while this plays — without matching its weight the
+   entrance would keep winning and the tab would never leave. */
+#navWorkout.tucking,
+body.has-workout-tab #navWorkout.tucking{animation:navTuck .42s cubic-bezier(.4,0,.2,1) both;pointer-events:none}
+@keyframes navTuck{
+  0%{opacity:1;transform:translateX(0) scale(1)}
+  55%{opacity:.5;transform:translateX(-11px) scale(.86)}
+  100%{opacity:0;transform:translateX(-28px) scale(.58)}
+}
+/* Today catches it: one soft flare on the icon it just went into */
+nav .nav-ic.catch{animation:navCatch .52s cubic-bezier(.34,1.32,.5,1) both}
+@keyframes navCatch{
+  0%{transform:scale(1);background:transparent}
+  40%{transform:scale(1.18);background:var(--acc-soft)}
+  100%{transform:scale(1);background:transparent}
+}
 @media (prefers-reduced-motion: reduce){
   body.has-workout-tab #navWorkout{animation:none}
   .nav-pair::before{transition:none}
+  #navWorkout.tucking,
+  body.has-workout-tab #navWorkout.tucking{animation:none}
+  nav .nav-ic.catch{animation:none}
 }
 /* Six tabs on a 320px phone. The labels are what runs out of room first, so they lose a
    little size and their letter-spacing rather than the icons losing their target area —
@@ -4004,7 +4026,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "12.6";
+const APP_VERSION = "12.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10176,11 +10198,73 @@ function weakPoints(A){
 let TAB = "today";
 /* Shows or hides the Workout tab, and moves off it when there is nothing to show. Safe
    to call before the nav exists, since render() runs on screens that have no tab bar. */
+/* THE TAB GOES BACK WHERE IT CAME FROM.
+
+   It grew out of Today when the session started, so vanishing between two frames when
+   the session ends is the wrong ending: a tab that disappears with no transit reads as
+   a glitch, and the person is left wondering whether they lost something. It slides
+   back under Today instead, the tray closes behind it, and Today's icon takes the catch.
+
+   Deferred while a full-screen celebration is up. Finishing a workout throws confetti
+   over the whole screen for five seconds, and an animation nobody can see is an
+   animation that did not happen — so the tuck waits for the overlay to clear and plays
+   on the screen the person is actually looking at. */
+function endWorkoutTuck(btn){
+  if(btn._tuck){ clearTimeout(btn._tuck); btn._tuck = null; }
+  btn.classList.remove("tucking");
+  btn.hidden = true;
+  /* The pair narrows back to one tab's width HERE, not when the slide starts. Collapsing
+     it first snapped both labels into half the room while the tab was still visible on
+     top of them; doing it after the slide means the layout moves once, with nothing left
+     to overlap. */
+  document.body.classList.remove("has-workout-tab");
+  const ic = document.querySelector('nav [data-tab="today"] .nav-ic');
+  if(ic) ic.classList.remove("catch");
+}
+function startWorkoutTuck(btn){
+  const finish = ()=>{
+    if(reducedMotion()){ endWorkoutTuck(btn); return; }
+    btn.classList.add("tucking");
+    const ic = document.querySelector('nav [data-tab="today"] .nav-ic');
+    if(ic){ ic.classList.remove("catch"); void ic.offsetWidth; ic.classList.add("catch"); }
+    btn._tuck = setTimeout(()=> endWorkoutTuck(btn), 430);
+  };
+  /* What counts as "nobody can see the tab bar": the confetti, the Wrapped story, and
+     the score card that follows a finished session — the nav sits behind all three. */
+  const covered = ()=>{
+    if(document.getElementById("celebrate") || document.getElementById("wrapped")) return true;
+    const mb = document.getElementById("modalBg");
+    return !!(mb && mb.classList.contains("show"));
+  };
+  /* The first check is deliberately late. finishWorkout() re-renders BEFORE it throws
+     the confetti, so an immediate look sees a clear screen and plays the animation into
+     one that is about to be covered. */
+  let waited = 0;
+  btn._tuck = setInterval(function poll(){
+    waited += 200;
+    if(waited < 600) return;
+    if(covered() && waited < 40000) return;
+    clearInterval(btn._tuck); btn._tuck = null;
+    finish();
+  }, 200);
+}
 function syncWorkoutTab(){
   const live = !!(typeof S !== "undefined" && S && S.active);
   const btn = document.getElementById("navWorkout");
-  if(btn) btn.hidden = !live;
-  document.body.classList.toggle("has-workout-tab", live);
+  if(btn){
+    if(live){
+      if(btn._tuck){ clearTimeout(btn._tuck); clearInterval(btn._tuck); btn._tuck = null; }
+      btn.classList.remove("tucking");
+      btn.hidden = false;
+      document.body.classList.add("has-workout-tab");
+    } else if(!btn.hidden && !btn._tuck){
+      startWorkoutTuck(btn);
+    } else if(btn.hidden){
+      document.body.classList.remove("has-workout-tab");
+    }
+  } else {
+    document.body.classList.toggle("has-workout-tab", live);
+  }
   if(!live && TAB === "workout") TAB = "today";
   if(btn) document.querySelectorAll("nav button").forEach(x=>
     x.classList.toggle("on", x.dataset.tab === TAB));
