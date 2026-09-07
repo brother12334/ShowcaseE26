@@ -3932,7 +3932,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "12.3";
+const APP_VERSION = "12.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10159,18 +10159,51 @@ let refreshNavBounds = ()=>{};
     hidden = v;
     nav.style.setProperty("--navY", v ? "calc(100% + 2px)" : "0px");
   };
-  refreshNavBounds = ()=>{ docH = document.documentElement.scrollHeight; };
+  /* THE CACHED HEIGHT WAS THE BUG. docH was read on render and on resize and trusted in
+     between, and a page changes height without either: a card expands, an image or a
+     web font lands, the rest clock appears, a notice stacks. Whenever the cache was
+     SHORTER than the real page, `y + innerHeight >= docH` came true somewhere in the
+     middle of the document — so the bar slid back up halfway down the Today tab, which
+     is exactly where it should have stayed gone. Whenever it was LONGER, the bottom was
+     never reached and the bar could not come back at all.
+
+     Two fixes, and neither puts a layout read in the scroll path:
+       • a ResizeObserver refreshes the figure whenever the page actually changes size,
+         which is the event that was missing;
+       • and the one moment being wrong matters — the instant we are about to call it
+         the bottom — the height is re-read to confirm. That is one measurement per
+         gesture, not one per frame. */
+  refreshNavBounds = ()=>{
+    docH = document.documentElement.scrollHeight;
+    // a page that cannot scroll can never scroll the bar back into view
+    if(docH <= window.innerHeight + 4) setHidden(false);
+  };
   refreshNavBounds();
+  const atBottomNow = y=>{
+    if(y + window.innerHeight < docH - 4) return false;
+    docH = document.documentElement.scrollHeight;      // confirm before acting on it
+    return y + window.innerHeight >= docH - 4;
+  };
   window.addEventListener("scroll", ()=>{
     const y = Math.max(0, window.pageYOffset || 0);
     const dy = y - lastY;
     if(Math.abs(dy) <= DEADZONE) return;
-    const atBottom = y + window.innerHeight >= docH - 4;
-    if(y < HIDE_AFTER || atBottom) setHidden(false);
+    if(y < HIDE_AFTER || atBottomNow(y)) setHidden(false);
     else setHidden(dy > 0);
     lastY = y;
   }, {passive:true});
   window.addEventListener("resize", refreshNavBounds, {passive:true});
+  window.addEventListener("orientationchange", refreshNavBounds, {passive:true});
+  window.addEventListener("load", refreshNavBounds, {passive:true});
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(refreshNavBounds).catch(()=>{});
+  if(typeof ResizeObserver === "function"){
+    /* Observing the element that actually grows and shrinks. documentElement's box does
+       not change with content on every engine, body's does. */
+    const ro = new ResizeObserver(()=> refreshNavBounds());
+    ro.observe(document.body);
+    const app = document.getElementById("app");
+    if(app) ro.observe(app);
+  }
   showNav = ()=>{ lastY = Math.max(0, window.pageYOffset || 0); setHidden(false); refreshNavBounds(); };
 })();
 
