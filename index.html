@@ -2448,10 +2448,6 @@ body.voice-live .voice-strip{display:flex}
   border-radius:11px;border:1px solid var(--line);background:var(--card2)}
 .mi-sides-l{font-size:13.5px;line-height:1.4;color:var(--text);margin-top:3px}
 .mi-sides .linklike{margin-left:auto;white-space:nowrap}
-.rb-proj{padding:15px;border:1px solid var(--acc-line);background:linear-gradient(180deg,var(--acc-soft),transparent)}
-.rb-proj-row{padding:10px 0;border-top:1px solid var(--line)}
-.rb-proj-row:first-of-type{border-top:0;padding-top:2px}
-.rb-proj-c{font-size:14px;line-height:1.5;color:var(--text);margin-top:3px}
 /* THE RECORD BOOK. One line per record: what it is, the number, and everything needed
    to trust it — the date, the gym, and what the bar weighed. */
 .rb-card{padding:14px 15px}
@@ -4392,7 +4388,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "13.8";
+const APP_VERSION = "13.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -19753,93 +19749,6 @@ function undoTimeBox(){
    never be beaten by a change of equipment. */
 let RECORDS_OPEN = false;
 let RECORDS_Q = "";
-/* WHAT YOU COULD PROBABLY LIFT TODAY, on the lifts where the question is worth asking.
-
-   A record book only knows what you have DONE. On the main barbell lifts the more useful
-   number is what your recent work implies you could do — because those are the lifts
-   people test, and the gap between "my best single is 185" and "your sets of ten say
-   about 230" is the difference between adding weight and staying where you are for
-   another six weeks.
-
-   ONLY THE BIG ONES. On a lateral raise an estimated one-rep max is a number with no
-   meaning attached: nobody tests it, the estimate is unreliable in the rep ranges it is
-   trained in, and the record book already says what the heaviest set was. So this is
-   restricted to the compound slots — press, row, pull, squat, hinge — and to lifts with
-   enough recent evidence to be worth a sentence.
-
-   AND IT HEDGES, in the wording as well as the arithmetic. An estimate from a set of ten
-   is not a max; it is what the arithmetic says, and it is offered as something to test
-   rather than something achieved. */
-const PROJ_SLOTS = {press_horizontal:1, press_incline:1, press_overhead:1,
-                    pull_vertical:1, pull_horizontal:1, squat:1, hinge:1};
-const PROJ_WINDOW = 45 * DAY_MS;      // "recent" is a training block, not a year
-function isMainLift(name){
-  if(!isCompound(name)) return false;
-  /* Not one limb at a time, and not a dumbbell: a "one-rep max" on a split squat or an
-     incline dumbbell press is a number nobody tests and everybody misreads — per hand,
-     per leg, and limited by balance rather than by strength. The estimate belongs to the
-     lifts that get loaded on a bar and taken to a single. */
-  if(isSingleArm({name}) || /\b(dumbbell|db|split squat|lunge|step[- ]?up|pistol)\b/i.test(name)) return false;
-  const slot = exSlotFor(name);
-  if(slot && PROJ_SLOTS[slot.key]) return true;
-  // the names people actually test, in case the library has never met this one
-  return /\b(bench|squat|deadlift|press|row|pull[- ]?up|chin[- ]?up)\b/i.test(name);
-}
-function liftProjections(){
-  const now = Date.now();
-  const by = {};
-  (S.sessions || []).forEach(sess=>{
-    (sess.entries || []).forEach(en=>{
-      if(!en || !en.name || !isMainLift(en.name)) return;
-      const add = entryBarAdd(en);
-      const rec = by[nrm(en.name)] || (by[nrm(en.name)] = {name: en.name, all: [], recent: []});
-      rec.name = en.name;
-      (en.sets || []).forEach(st=>{
-        const reps = parseFloat(st && st.reps) || 0;
-        const w = setLoad(st, add);
-        if(!(reps > 0) || !(w > 0) || reps > 15) return;   // past 15 the estimate is fiction
-        const row = {w, reps, e1: est1RM(w, reps), at: sess.startedAt, date: sess.date};
-        rec.all.push(row);
-        if(now - sess.startedAt <= PROJ_WINDOW) rec.recent.push(row);
-      });
-    });
-  });
-  const out = [];
-  Object.keys(by).forEach(k=>{
-    const r = by[k];
-    if(r.recent.length < 3) return;                       // not enough recent work to speak
-    const recentBest = r.recent.slice().sort((a, b)=> b.e1 - a.e1)[0];
-    const heaviest = r.all.slice().sort((a, b)=> b.w - a.w || b.reps - a.reps)[0];
-    const older = r.all.filter(x=> now - x.at > PROJ_WINDOW);
-    const olderBest = older.length ? older.slice().sort((a, b)=> b.e1 - a.e1)[0] : null;
-    const proj = Math.round(recentBest.e1);
-    const overLifted = proj - heaviest.w;
-    const gain = olderBest ? Math.round(recentBest.e1 - olderBest.e1) : null;
-    /* Rounded to something you can actually load: the nearest 5 lb or 2.5 kg. */
-    const step = inKg() ? 2.5 : 5;
-    const round = v=> Math.round(v / step) * step;
-    const claims = [];
-    if(overLifted >= step && proj > heaviest.w * 1.02){
-      claims.push({kind: "untested",
-        line: "Your recent sets estimate about " + fmtLoad(round(proj)) + " for one — roughly "
-              + fmtLoad(round(overLifted)) + " more than the heaviest you have actually put on it ("
-              + fmtLoad(heaviest.w) + " × " + heaviest.reps + ").",
-        from: recentBest});
-    }
-    if(gain != null && gain >= step){
-      claims.push({kind: "up",
-        line: "Up about " + fmtLoad(round(gain)) + " on where you were before "
-              + fmtDate(dateStrOf(now - PROJ_WINDOW)) + " — " + fmtLoad(round(olderBest.e1))
-              + " estimated then, " + fmtLoad(round(proj)) + " now.",
-        from: recentBest});
-    }
-    if(!claims.length) return;
-    out.push({name: r.name, proj: round(proj), claims,
-      basis: fmtLoad(recentBest.w) + " × " + recentBest.reps + " on " + fmtDate(recentBest.date),
-      n: r.recent.length});
-  });
-  return out.sort((a, b)=> b.proj - a.proj);
-}
 function buildRecordBook(){
   const by = {};
   (S.sessions || []).forEach(s=>{
@@ -19896,22 +19805,6 @@ function viewRecords(){
       <p>Finish a session and every lift in it gets a page here — your heaviest set, your best
       estimated one-rep max, and the most reps you have ever done, each with the date, the gym
       and what the bar weighed.</p></div>`;
-  }
-  const proj = liftProjections();
-  if(proj.length){
-    h += `<div class="card rb-proj">
-      <div class="ex-head" style="margin-bottom:6px"><b style="font-family:var(--disp);font-size:16px;
-        text-transform:uppercase;letter-spacing:.04em">You may have moved up</b>
-        <span class="sub num">${proj.length} lift${proj.length===1?"":"s"}</span></div>
-      <div class="sub" style="margin:0 0 12px">On the lifts people actually test. An estimate from a set
-        of ten is not a max — it is what the arithmetic says, and it is worth testing rather than
-        assuming. Nothing here is counted as a record until you lift it.</div>
-      ${proj.map(x=> `<div class="rb-proj-row">
-        <div class="rb-k">${esc(x.name)}</div>
-        ${x.claims.map(c=> `<div class="rb-proj-c">${esc(c.line)}</div>`).join("")}
-        <div class="rb-w num">From ${esc(x.basis)} · ${x.n} sets in the last six weeks</div>
-      </div>`).join("")}
-    </div>`;
   }
   h += `<div class="sub" style="margin:0 2px 12px;font-size:12.5px;color:var(--faint)">Lifetime bests from
     every finished session. Each one says where and when it happened, and what the implement weighed —
