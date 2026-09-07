@@ -4110,7 +4110,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "12.9";
+const APP_VERSION = "13.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7095,10 +7095,17 @@ function migrate(){
   if(S.active && (!Array.isArray(S.active.entries) || !S.active.entries.length)){
     S.active = null; saveQuiet();          // nothing in it to log into, so it is not a session
   }
-  if(S.active && S.active.date && S.active.date !== todayStr()){
+  if(S.active){
     const logged = (S.active.entries || []).some(e=>
       (e.sets || []).some(st=> st && (st.done || st.reps || st.weight)));
-    if(!logged){ S.active = null; saveQuiet(); }
+    const age = Date.now() - (S.active.startedAt || 0);
+    const otherDay = S.active.date && S.active.date !== todayStr();
+    /* Empty and from another day, or empty and eight hours old: nobody is still in that
+       session. Eight hours rather than eight minutes because a session legitimately sits
+       open through the drive, the warm-up and a long wait for a rack — but not overnight,
+       and not through a working day. Anything with a single number in it is left alone
+       whatever its age: that is data, and the card on Today offers to discard it. */
+    if(!logged && (otherDay || age > 8*3600*1000)){ S.active = null; saveQuiet(); }
   }
   if(S.sync && S.sync.repo===undefined){ S.sync.repo=""; S.sync.branch="main"; S.sync.lastRepo=null; saveQuiet(); }
   if(!Array.isArray(S.cycleDone)) S.cycleDone = [];
@@ -10317,6 +10324,7 @@ function endWorkoutTuck(btn){
   if(btn._tuck){ clearTimeout(btn._tuck); btn._tuck = null; }
   btn.classList.remove("tucking");
   btn.hidden = true;
+  btn.style.display = "none";
   /* The pair narrows back to one tab's width HERE, not when the slide starts. Collapsing
      it first snapped both labels into half the room while the tab was still visible on
      top of them; doing it after the slide means the layout moves once, with nothing left
@@ -10376,10 +10384,17 @@ function syncWorkoutTab(){
       if(btn._tuck){ clearTimeout(btn._tuck); clearInterval(btn._tuck); btn._tuck = null; }
       btn.classList.remove("tucking");
       btn.hidden = false;
+      btn.style.display = "";                  // see below
       document.body.classList.add("has-workout-tab");
     } else if(!btn.hidden && !btn._tuck){
       startWorkoutTuck(btn);
     } else if(btn.hidden){
+      /* BELT AND BRACES, AND THE BRACES ARE THE INLINE STYLE. `hidden` is an attribute a
+         single author rule can beat — `nav button{display:flex}` did exactly that, and
+         the tab was painted on every screen while this code read the property back and
+         believed it was gone. The CSS now says `nav button[hidden]{display:none}`, and
+         this says it a second time in the one place no stylesheet can outrank. */
+      btn.style.display = "none";
       document.body.classList.remove("has-workout-tab");
     }
   } else {
