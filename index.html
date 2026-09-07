@@ -2290,6 +2290,18 @@ nav .nav-ic{position:relative}
 nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px #141417}
 @keyframes navPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
 @media (prefers-reduced-motion: reduce){ .nav-live{animation:none} }
+/* WHAT MOVES YOUR NUMBERS. A claim, then the arithmetic behind it, then the things it
+   is honest enough not to claim. */
+.pat-card{padding:15px}
+.pat-find{padding:11px 0;border-top:1px solid var(--line)}
+.pat-find:first-of-type{border-top:0;padding-top:2px}
+.pat-k{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--acc);margin-bottom:4px}
+.pat-c{font-size:14.5px;line-height:1.45;color:var(--text)}
+.pat-d{font-size:11.5px;color:var(--faint);margin-top:4px}
+.pat-quiets{display:flex;flex-direction:column;gap:7px}
+.pat-quiet{font-size:12.5px;line-height:1.45;color:var(--dim);
+  padding:10px 11px;border-radius:10px;background:var(--card2);border:1px solid var(--line)}
+.pat-quiet b{color:var(--text)}
 /* What a gym has learned, listed where it can be unlearned. */
 .gym-swaps{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
 .gym-swap{display:inline-flex;align-items:center;gap:6px;font:11px var(--mono);
@@ -4268,7 +4280,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "13.5";
+const APP_VERSION = "13.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -18584,6 +18596,11 @@ function viewBody(){
   }
   h += `</div>`;
 
+  /* WHAT THE NUMBERS ABOVE ARE WORTH. The tiles say what your training looks like; this
+     says which of the things you have been recording actually separates a good session
+     from a bad one — and, just as often, that nothing does yet. */
+  h += patternsCardHTML();
+
   h += `<div class="bm-credit">Anatomy from <a href="https://github.com/melihcolpan/MuscleMap" target="_blank" rel="noopener">MuscleMap</a> by Melih Colpan, MIT licence</div>`;
   h += `</div>`;
   return h;
@@ -18821,6 +18838,169 @@ function openMuscleDetail(key){
   document.querySelectorAll("#modal [data-gopen]").forEach(b=> b.onclick=()=> openGroupDetail(g));
 }
 /* ---------- HISTORY ---------- */
+/* =====================================================================
+   WHAT ACTUALLY MOVES YOUR NUMBERS
+
+   Every logging app can tell you what you did. This says what it is worth: which of the
+   things you have been recording — sleep the night before, energy walking in, how long
+   you rested, how many days since the last session, the time of day, the gym — actually
+   line up with your better sessions, and which ones there is not yet enough evidence
+   about to say anything at all.
+
+   THE HONESTY IS THE FEATURE. Three rules keep it from becoming a horoscope:
+
+     1. It counts. Every claim carries the number of sessions behind it — "9 of 11" —
+        because a difference across four sessions is not a difference.
+     2. It refuses. A factor with too little data gets a line saying what to log to
+        unlock it, rather than a confident sentence built on three numbers.
+     3. It never says "because". These are associations in your own log, and the app
+        says so in as many words. You are one person, not a study.
+
+   The outcome being compared is the session score the app already computes, which is
+   the closest thing to "how did that go" it has. */
+const PAT_MIN_SESSIONS = 8;       // below this there is nothing worth saying at all
+const PAT_MIN_GROUP = 3;          // and nothing worth saying about a group this small
+const PAT_MIN_GAP = 4;            // points of score; anything less is noise
+function patSessionRows(){
+  const rows = [];
+  (S.sessions || []).forEach((s, i)=>{
+    if(!s || !s.quality || typeof s.quality.pct !== "number") return;
+    const ci = (S.checkins || {})[s.date] || {};
+    const prev = i > 0 ? S.sessions[i - 1] : null;
+    const gapDays = prev && prev.startedAt && s.startedAt
+      ? Math.round((s.startedAt - prev.startedAt) / DAY_MS) : null;
+    const restSec = (s.quality.sections || []).find(x=> x.key === "rest");
+    rows.push({
+      score: Math.round(s.quality.pct * 100),
+      sleep: parseFloat(ci.sleep) || null,
+      energy: parseFloat(ci.energy) || null,
+      hour: s.startedAt ? new Date(s.startedAt).getHours() : null,
+      gap: gapDays,
+      rest: restSec && restSec.pct != null ? Math.round(restSec.pct * 100) : null,
+      gym: s.gymName || null,
+      date: s.date
+    });
+  });
+  return rows;
+}
+const patMean = a=> a.reduce((t, v)=> t + v, 0) / a.length;
+/* One factor, split in two and compared. `pick` returns a value or null; `split` decides
+   which side of the line a value falls, and is given the median so a threshold can be
+   the person's own habits rather than a number from a textbook. */
+function patCompare(rows, pick, split, words){
+  const have = rows.filter(r=> pick(r) != null);
+  if(have.length < PAT_MIN_SESSIONS){
+    return {n: have.length, short: true, need: PAT_MIN_SESSIONS - have.length, words};
+  }
+  const vals = have.map(pick).sort((a, b)=> a - b);
+  const mid = vals[Math.floor(vals.length / 2)];
+  const hi = [], lo = [];
+  have.forEach(r=> (split(pick(r), mid) ? hi : lo).push(r.score));
+  if(hi.length < PAT_MIN_GROUP || lo.length < PAT_MIN_GROUP){
+    return {n: have.length, short: true, need: 0, words, uneven: true};
+  }
+  const gap = Math.round(patMean(hi) - patMean(lo));
+  return {n: have.length, gap, hi: hi.length, lo: lo.length, mid, words,
+          hiMean: Math.round(patMean(hi)), loMean: Math.round(patMean(lo))};
+}
+function trainingPatterns(){
+  const rows = patSessionRows();
+  const out = {n: rows.length, findings: [], quiet: [], enough: rows.length >= PAT_MIN_SESSIONS};
+  if(!rows.length) return out;
+  const tests = [
+    patCompare(rows, r=> r.sleep, (v, mid)=> v >= Math.max(7, mid),
+      {hi: n=> "after " + n + " hours of sleep or more", lo: "on less",
+       name: "Sleep", unlock: "Log your sleep in the morning sheet"}),
+    patCompare(rows, r=> r.energy, (v, mid)=> v >= mid,
+      {hi: n=> "when you walked in at " + n + "/10 energy or better", lo: "when you were flatter",
+       name: "Energy", unlock: "Answer the energy question as a session starts"}),
+    patCompare(rows, r=> r.rest, (v, mid)=> v >= mid,
+      {hi: n=> "when you took the rests your plan asks for", lo: "when you cut them short",
+       name: "Rest", unlock: "Use the rest timer"}),
+    patCompare(rows, r=> r.gap, (v, mid)=> v <= Math.max(1, mid),
+      {hi: n=> "when the last session was " + n + " day" + (n === 1 ? "" : "s") + " ago or less",
+       lo: "after a longer break", name: "Spacing", unlock: "Keep logging"}),
+    patCompare(rows, r=> r.hour, (v, mid)=> v >= 15,
+      {hi: ()=> "in the afternoon and evening", lo: "in the morning",
+       name: "Time of day", unlock: "Keep logging"})
+  ];
+  tests.forEach(t=>{
+    if(t.short || t.uneven){
+      out.quiet.push({name: t.words.name, n: t.n, uneven: !!t.uneven,
+        line: t.uneven
+          ? "Every session you have logged sits on the same side of this one, so there is nothing to compare it with yet."
+          : "Not enough yet — " + t.n + " session" + (t.n === 1 ? "" : "s") + " with this recorded, "
+            + PAT_MIN_SESSIONS + " needed.",
+        unlock: t.words.unlock});
+      return;
+    }
+    if(Math.abs(t.gap) < PAT_MIN_GAP){
+      out.quiet.push({name: t.words.name, n: t.n,
+        line: "No difference worth reporting across " + t.n + " sessions — your scores are much the same either way."});
+      return;
+    }
+    const better = t.gap > 0;
+    const hiTxt = typeof t.words.hi === "function" ? t.words.hi(Math.round(t.mid * 10) / 10) : t.words.hi;
+    out.findings.push({
+      name: t.words.name,
+      strength: Math.abs(t.gap),
+      claim: "Your sessions score " + Math.abs(t.gap) + " points " + (better ? "higher " : "lower ")
+             + hiTxt + ".",
+      detail: (better ? t.hiMean : t.loMean) + " against " + (better ? t.loMean : t.hiMean)
+              + ", across " + t.n + " sessions " + (better ? "(" + t.hi + " of them " + hiTxt + ")"
+                                                          : "(" + t.lo + " of them " + t.words.lo + ")") + "."
+    });
+  });
+  // the gyms, when there are two with enough sessions each to be worth comparing
+  const byGym = {};
+  rows.forEach(r=>{ if(r.gym){ (byGym[r.gym] = byGym[r.gym] || []).push(r.score); } });
+  const gyms = Object.keys(byGym).filter(g=> byGym[g].length >= PAT_MIN_GROUP);
+  if(gyms.length >= 2){
+    const ranked = gyms.map(g=> ({g, m: Math.round(patMean(byGym[g])), n: byGym[g].length}))
+      .sort((a, b)=> b.m - a.m);
+    const gap = ranked[0].m - ranked[ranked.length - 1].m;
+    if(gap >= PAT_MIN_GAP){
+      out.findings.push({name: "Where you train", strength: gap,
+        claim: "You score " + gap + " points higher at " + ranked[0].g + " than at "
+               + ranked[ranked.length - 1].g + ".",
+        detail: ranked.map(x=> x.g + " " + x.m + " (" + x.n + ")").join(" · ") + "."});
+    }
+  }
+  out.findings.sort((a, b)=> b.strength - a.strength);
+  return out;
+}
+function patternsCardHTML(){
+  const p = trainingPatterns();
+  if(!p.n) return "";
+  let h = `<div class="card pat-card">
+    <div class="ex-head" style="margin-bottom:6px"><b style="font-family:var(--disp);font-size:16px;
+      text-transform:uppercase;letter-spacing:.04em">What moves your numbers</b>
+      <span class="sub num">${p.n} scored session${p.n === 1 ? "" : "s"}</span></div>
+    <div class="sub" style="margin:0 0 12px">Associations in your own log, not causes — you are one
+      person, not a study. Anything with too little behind it says so rather than guessing.</div>`;
+  if(!p.enough){
+    h += `<div class="pat-quiet">Nothing to say yet. It takes ${PAT_MIN_SESSIONS} scored sessions
+      before a comparison means anything, and you have ${p.n}.</div></div>`;
+    return h;
+  }
+  if(p.findings.length){
+    h += p.findings.map(f=> `<div class="pat-find">
+      <div class="pat-k">${esc(f.name)}</div>
+      <div class="pat-c">${esc(f.claim)}</div>
+      <div class="pat-d num">${esc(f.detail)}</div>
+    </div>`).join("");
+  } else {
+    h += `<div class="pat-quiet">Nothing stands out yet. Across ${p.n} sessions, none of what you
+      have been logging separates your better days from your worse ones by enough to report.</div>`;
+  }
+  if(p.quiet.length){
+    h += `<div class="k-lab" style="margin-top:14px">Can't say yet</div>
+      <div class="pat-quiets">${p.quiet.map(q=> `<div class="pat-quiet">
+        <b>${esc(q.name)}</b> — ${esc(q.line)}${q.unlock && q.n < PAT_MIN_SESSIONS
+          ? " " + esc(q.unlock) + "." : ""}</div>`).join("")}</div>`;
+  }
+  return h + `</div>`;
+}
 /* =====================================================================
    SAYING THE SET OUT LOUD
 
