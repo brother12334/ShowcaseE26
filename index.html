@@ -1467,14 +1467,52 @@ body.onboarding #app{padding:0}
 }
 .ex-note-set{padding-left:2px}
 .ex-note-set b{color:var(--text);font-weight:600;margin-right:2px}
-/* what the note is about: the movement, or one set of it */
-.note-scope{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 14px}
-.note-scope button{
-  padding:7px 12px;border-radius:999px;border:1px solid var(--line);
-  background:var(--card2);color:var(--dim);font-size:13px;cursor:pointer;
-  transition:border-color .15s ease,color .15s ease;
+/* WHAT THE NOTE IS ABOUT: the movement, or one numbered set of it. One bar, so the
+   choice reads as a scale rather than as five separate buttons, and it scrolls
+   sideways rather than wrapping when a drop set has nine of them. */
+.ns-bar{
+  display:flex;align-items:center;gap:5px;margin:0 0 16px;padding:5px;
+  border-radius:999px;background:var(--card2);border:1px solid var(--line);
+  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
 }
-.note-scope button.on{border-color:var(--acc);color:var(--text)}
+.ns-bar::-webkit-scrollbar{display:none}
+.ns-all,.ns-set{
+  flex:0 0 auto;border:1px solid transparent;background:transparent;color:var(--dim);
+  cursor:pointer;transition:background .18s ease,color .18s ease,border-color .18s ease;
+}
+.ns-all{
+  height:34px;padding:0 15px;border-radius:999px;
+  font:10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+}
+.ns-set{
+  position:relative;width:34px;height:34px;border-radius:50%;
+  font-family:var(--mono);font-size:14px;display:flex;align-items:center;justify-content:center;
+}
+.ns-all.on,.ns-set.on{background:var(--acc);border-color:var(--acc);color:var(--bg)}
+.ns-all:active,.ns-set:active{border-color:var(--acc-line)}
+.ns-div{flex:0 0 auto;width:1px;height:18px;background:var(--line);margin:0 3px}
+/* a set that already carries a note says so, without a word */
+.ns-dot{position:absolute;top:5px;right:6px;width:5px;height:5px;border-radius:50%;background:var(--acc)}
+.ns-set.on .ns-dot{background:var(--bg)}
+/* THE EXAMPLES. Seven full-width slabs of uppercase mono read as a wall of shouting and
+   took a scroll to get past. Two columns of small cards, each with the icon the app
+   already uses for that idea elsewhere, and sentence case — they are things somebody
+   might say, so they are set like speech rather than like headings. */
+.nk-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.nk{
+  display:flex;flex-direction:column;align-items:flex-start;gap:8px;
+  padding:12px 12px 13px;border-radius:13px;border:1px solid var(--line);
+  background:var(--card2);color:var(--dim);cursor:pointer;text-align:left;
+  font:13.5px/1.3 var(--sans);min-height:84px;
+  transition:border-color .15s ease,background .15s ease,color .15s ease,transform .1s ease;
+}
+.nk-ic{display:flex;color:var(--faint);transition:color .15s ease}
+.nk-ic .ico{width:19px;height:19px}
+.nk-l{align-self:stretch}
+.nk:active{transform:scale(.985)}
+.nk.on{border-color:var(--acc-line);background:var(--acc-soft);color:var(--text)}
+.nk.on .nk-ic{color:var(--acc)}
+@media (max-width:340px){ .nk-grid{grid-template-columns:1fr} .nk{min-height:0;flex-direction:row;align-items:center} }
 @media (prefers-reduced-motion: reduce){
   .modal.from-btn,.note-pop,.note-saved{animation:none}
 }
@@ -3966,7 +4004,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "12.5";
+const APP_VERSION = "12.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7806,19 +7844,19 @@ const REASON_EXEMPT = {deliberate:1, pain:1};
    typed on the Workout Grade screen go. One history, so the Body tab has something to
    show and the grader has one place to look. */
 const EX_NOTE_KINDS = [
-  {code:"learning",  weight:"hold",  label:"Still getting the hang of it",
+  {code:"learning",  weight:"hold",  label:"Still getting the hang of it", icon:ICON.repeat,
    grade:"you were still learning the movement"},
-  {code:"form",      weight:"hold",  label:"Form felt off",
+  {code:"form",      weight:"hold",  label:"Form felt off", icon:ICON.form,
    grade:"you said the form felt off"},
-  {code:"strong",    weight:"watch", label:"Felt unusually strong",
+  {code:"strong",    weight:"watch", label:"Felt unusually strong", icon:ICON.spark,
    grade:"you said it felt unusually strong"},
-  {code:"equipment", weight:"hold",  label:"Equipment felt different",
+  {code:"equipment", weight:"hold",  label:"Equipment felt different", icon:ICON.barbell,
    grade:"the equipment was not the usual"},
-  {code:"tired",     weight:"hold",  label:"Tired before I started",
+  {code:"tired",     weight:"hold",  label:"Tired before I started", icon:ICON.fatigue,
    grade:"you started the session already tired"},
-  {code:"niggle",    weight:"hold",  label:"Something felt tweaky",
+  {code:"niggle",    weight:"hold",  label:"Something felt tweaky", icon:ICON.warn,
    grade:"you flagged something feeling tweaky"},
-  {code:"good",      weight:"note",  label:"Felt good, nothing to report",
+  {code:"good",      weight:"note",  label:"Felt good, nothing to report", icon:ICON.fine,
    grade:"you said it felt good"}
 ];
 const EX_NOTE_BY_CODE = EX_NOTE_KINDS.reduce((o,k)=>{ o[k.code]=k; return o; }, {});
@@ -16539,10 +16577,18 @@ function openExNote(ei, si){
   let scope = (si == null) ? null : si;
   const target = ()=> scope == null ? en : (en.sets[scope] || en);
   const t0 = target();
-  const scopeChips = `<div class="note-scope" role="group" aria-label="What this note is about">
-      <button data-exns="all" class="${scope==null?"on":""}">Whole exercise</button>
-      ${en.sets.map((st,i)=>`<button data-exns="${i}" class="${scope===i?"on":""}">Set ${i+1}${
-        (st.noteCode||st.unote)?" \u00b7":""}</button>`).join("")}
+  /* ONE DIAL RATHER THAN A PILE OF CHIPS. Five word-chips wrapped onto two lines and
+     read as five unrelated buttons; the choice is really one thing with a scale — the
+     whole movement, or a numbered set of it. So it is a single bar: the exercise on the
+     left, the sets as numbers after a divider, and a dot on any set that already carries
+     a note, which is the thing the old "Set 2 ·" was trying to say. */
+  const scopeChips = `<div class="k-lab" style="margin:0 2px 7px">This note is about</div>
+    <div class="ns-bar" role="group" aria-label="What this note is about">
+      <button data-exns="all" class="ns-all${scope==null?" on":""}">Exercise</button>
+      <span class="ns-div" aria-hidden="true"></span>
+      ${en.sets.map((st,i)=>`<button data-exns="${i}" class="ns-set${scope===i?" on":""}"
+        aria-label="Set ${i+1}${(st.noteCode||st.unote)?", has a note":""}">${i+1}${
+        (st.noteCode||st.unote)?`<i class="ns-dot"></i>`:""}</button>`).join("")}
     </div>`;
   showModal(`<h3>${esc(en.name)}</h3>
     <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Anything worth
@@ -16556,14 +16602,17 @@ function openExNote(ei, si){
   const drawBody = ()=>{
     const t = target();
     m.querySelector("#exNoteBody").innerHTML =
-      EX_NOTE_KINDS.map(k=>`<button class="btn ghost swap-opt${picked===k.code?" on":""}"
-        data-exnk="${k.code}" style="text-align:left;width:100%;margin-bottom:8px;padding:12px 14px">${esc(k.label)}</button>`).join("") +
-      `<div class="field" style="margin:2px 0 10px">
-        <input id="exNoteText" placeholder="or say it in your own words" autocomplete="off"
+      `<div class="nk-grid">` + EX_NOTE_KINDS.map(k=>`
+        <button class="nk${picked===k.code?" on":""}" data-exnk="${k.code}">
+          <span class="nk-ic">${k.icon || ICON.note}</span>
+          <span class="nk-l">${esc(k.label)}</span>
+        </button>`).join("") + `</div>
+      <div class="field" style="margin:14px 0 10px"><label>In your own words</label>
+        <input id="exNoteText" placeholder="e.g. bar felt slippery, switched grips" autocomplete="off"
           value="${esc(txtVal)}"></div>
-      <button class="btn small" id="exNoteSave">Save note</button>
-      ${(t.noteCode||t.unote)?`<button class="nb-link" id="exNoteClear" style="margin-top:10px">Remove this note</button>`:""}
-      <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`;
+      <div class="btn-row" style="margin-top:2px"><button class="btn small" id="exNoteSave" style="flex:1">Save note</button></div>
+      <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>
+      ${(t.noteCode||t.unote)?`<div style="text-align:center;margin-top:12px"><button class="nb-link" id="exNoteClear">Remove this note</button></div>`:""}`;
     const c = m.querySelector("#closeModal");
     if(c) c.onclick = hideModal;
     m.querySelectorAll("[data-exnk]").forEach(b=> b.onclick = ()=>{
