@@ -2290,6 +2290,14 @@ nav .nav-ic{position:relative}
 nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px #141417}
 @keyframes navPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
 @media (prefers-reduced-motion: reduce){ .nav-live{animation:none} }
+/* What a gym has learned, listed where it can be unlearned. */
+.gym-swaps{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.gym-swap{display:inline-flex;align-items:center;gap:6px;font:11px var(--mono);
+  color:var(--dim);background:var(--card2);border:1px solid var(--line);
+  border-radius:999px;padding:3px 5px 3px 10px}
+.gym-swap button{background:none;border:0;color:var(--faint);cursor:pointer;
+  font-size:12px;line-height:1;padding:2px 4px}
+.gym-swap button:active{color:var(--bad)}
 /* SAYING THE SET. The strip only exists while it is listening, so the screen is not
    carrying an explanation of a feature nobody is using. */
 #voiceBtn.on{border-color:var(--acc);color:var(--acc)}
@@ -4260,7 +4268,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "13.4";
+const APP_VERSION = "13.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -16434,6 +16442,16 @@ function viewActiveSession(){
     ${voiceSupported() ? `<div class="voice-strip"><span class="voice-dot"></span>
       <span id="voiceHeard">Listening — say “one twenty for eight at eight”</span></div>` : ""}
   </div>`;
+  if(a.gymPlan && a.gymPlan.swaps.length){
+    h += `<div class="card tb-card">
+      <div class="lc-k"><i></i>Rebuilt for ${esc(a.gymPlan.gymName)}</div>
+      <div class="sub" style="margin:0">${a.gymPlan.swaps.map(sw=>
+        `<b>${esc(sw.from)}</b> → ${esc(sw.to)}`).join("<br>")}<br>
+        Your plan is untouched — this is what this room has, remembered from the last time
+        you said so.</div>
+      <div style="text-align:center;margin-top:10px"><button class="nb-link" id="gymPlanUndo">Put these back</button></div>
+    </div>`;
+  }
   if(a.timeBox){
     h += `<div class="card tb-card">
       <div class="lc-k"><i></i>Cut to ${a.timeBox.min} minutes</div>
@@ -17376,9 +17394,19 @@ function askSwapWhy(ei, name, cue, back){
   const a = S.active;
   if(!a || !a.entries[ei]) return;
   const commit = why=>{
+    const was = (a.entries[ei] && (a.entries[ei].swapFrom || a.entries[ei].name)) || "";
     if(applySwap(ei, name, cue, why)){
+      /* "THIS GYM DOESN'T HAVE IT" IS A FACT ABOUT THE BUILDING, and it was being thrown
+         away the moment the session ended. Said once, at a gym the app knows, it is now
+         remembered: the same swap happens on its own next time you train here, and your
+         actual plan is never touched. */
+      if(why && why.code === "nogym" && a.gymId && was){
+        rememberGymSwap(a.gymId, was, name);
+        toast("Noted \u2014 " + esc(a.gymName || "this gym") + " swaps that automatically now", "good");
+      } else {
+        toast(back ? "Back to " + name : "Switched to " + name);
+      }
       hideModal(); save(); render();
-      toast(back ? "Back to " + name : "Switched to " + name);
     } else {
       hideModal();
     }
@@ -20500,6 +20528,15 @@ function bind(){
                         : word + ": " + fmtLoad(now) + " " + unitWord());
     };
   };
+  document.querySelectorAll("#app [data-gymunswap]").forEach(b=> b.onclick = ()=>{
+    const parts = String(b.dataset.gymunswap).split("|");
+    const g = gymById(parts[0]);
+    if(!g) return;
+    delete gymMap(g, "swaps")[parts[1]];
+    delete gymMap(g, "absent")[parts[1]];
+    save(); queueSync(); render();
+    toast("Forgotten — that one runs as written here now", "good");
+  });
   document.querySelectorAll("#app [data-gymren]").forEach(b=> b.onclick = ()=>{
     const g = gymById(b.dataset.gymren);
     if(!g) return;
@@ -20608,6 +20645,8 @@ function bind(){
   if(tbBtn) tbBtn.onclick = openTimeBox;
   const tbU = $("#tbUndo");
   if(tbU) tbU.onclick = undoTimeBox;
+  const gpU = $("#gymPlanUndo");
+  if(gpU) gpU.onclick = undoGymPlan;
   const rbOpen = $("#recordsBtn");
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
@@ -21184,6 +21223,114 @@ function gymRemember(g, pos){
   if(gymDistance(g, pos) == null || gymDistance(g, pos) > 60) g.spots.push(gymSpot(pos));
   if(g.spots.length > 8) g.spots = g.spots.slice(-8);
 }
+/* =====================================================================
+   A GYM REMEMBERS WHAT IT HAS
+
+   A plan is written for one room. Take it to a hotel, a second branch or a friend's gym
+   and two or three movements simply are not there — and the app's answer was to make you
+   swap them again, from scratch, every visit.
+
+   Three facts are kept per gym, and all three are LEARNED rather than set up:
+
+     seen   every movement you have logged there. Nobody ticks a list; training there is
+            the survey, which is why this costs nothing to start using.
+     absent the movements you have said this gym does not have — recorded when you swap
+            one with the reason that already exists for it, "this gym doesn't have it".
+     swaps  what you did instead, remembered per gym: at the hotel, leg press becomes a
+            split squat, and it does that on its own every time you train there.
+
+   A NEW GYM IS ASSUMED TO BE A FULL GYM. Nothing is flagged as missing until you say so,
+   because interrogating somebody about the equipment on their first session somewhere new
+   is worse than the problem it solves — and the plan itself is never touched. The swap
+   lives on the session, exactly like a swap you made by hand. */
+function gymMap(g, key){
+  if(!g) return {};
+  if(!g[key] || typeof g[key] !== "object") g[key] = {};
+  return g[key];
+}
+function gymKeyOf(name){ return tableKey(name || ""); }
+// Everything logged at this gym is on file as available there.
+function learnGymKit(sess){
+  if(!sess || !sess.gymId) return;
+  const g = gymById(sess.gymId);
+  if(!g) return;
+  const seen = gymMap(g, "seen");
+  (sess.entries || []).forEach(e=>{
+    if(!e || !e.name) return;
+    const k = gymKeyOf(e.name);
+    if(!k) return;
+    seen[k] = 1;
+    // logging it here settles the argument: it is not absent after all
+    const absent = gymMap(g, "absent");
+    if(absent[k]) delete absent[k];
+  });
+}
+/* Said once, when you swap something out because the room does not have it. */
+function rememberGymSwap(gymId, fromName, toName){
+  const g = gymById(gymId);
+  if(!g || !fromName || !toName) return;
+  const k = gymKeyOf(fromName);
+  if(!k) return;
+  gymMap(g, "absent")[k] = 1;
+  gymMap(g, "swaps")[k] = String(toName);
+  save(); queueSync();
+}
+function forgetGymSwap(gymId, fromName){
+  const g = gymById(gymId);
+  if(!g) return;
+  const k = gymKeyOf(fromName);
+  delete gymMap(g, "swaps")[k];
+  delete gymMap(g, "absent")[k];
+  save(); queueSync();
+}
+/* THE REBUILD, at the moment the gym is known. Only movements this gym has been told it
+   does not have are touched, and only where nothing has been logged on them yet. */
+function applyGymPlan(g){
+  const a = S.active;
+  if(!a || !g) return [];
+  const swaps = gymMap(g, "swaps");
+  const done = [];
+  a.entries.forEach((en, i)=>{
+    if(!en || !en.name) return;
+    const k = gymKeyOf(en.name);
+    const to = swaps[k];
+    if(!to || swapSquash(to) === swapSquash(en.name)) return;
+    if((en.sets || []).some(st=> st.done || st.reps || st.weight)) return;
+    const from = en.name;
+    en.swapFrom = from;
+    en.swapWhy = {code: "nogym", text: null};
+    en.name = to;
+    en.note = libraryCueFor(to) || undefined;
+    en.planWeight = undefined; en.warmups = undefined; en.warm = undefined; en.warmupNote = undefined;
+    delete en.rpes; delete en.rebuild;
+    applySwapSides(en);
+    done.push({i, from, to});
+  });
+  if(done.length){
+    a.gymPlan = {gymId: g.id, gymName: g.name, at: Date.now(), swaps: done};
+    save();
+  }
+  return done;
+}
+// Put the session back the way the plan wrote it, swap by swap.
+function undoGymPlan(){
+  const a = S.active;
+  if(!a || !a.gymPlan) return;
+  a.gymPlan.swaps.forEach(sw=>{
+    const en = a.entries[sw.i];
+    if(!en || swapSquash(en.name) !== swapSquash(sw.to)) return;
+    if((en.sets || []).some(st=> st.done || st.reps || st.weight)) return;
+    en.name = sw.from;
+    delete en.swapFrom; delete en.swapWhy;
+    en.note = libraryCueFor(sw.from) || undefined;
+    applySwapSides(en);
+    // and stop it happening again unasked
+    forgetGymSwap(a.gymPlan.gymId, sw.from);
+  });
+  delete a.gymPlan;
+  save(); render();
+  toast("Put back as written, and it won't swap those here again", "good");
+}
 function setSessionGym(g){
   if(!S.active || !g) return;
   S.active.gymId = g.id;
@@ -21360,6 +21507,15 @@ async function checkGymAtStart(){
     setSessionGym(near.gym);
     const said = applyGymGear(near.gym);
     if(said) toast(near.gym.name + " \u2014 " + said);
+    /* And the plan, rebuilt from what this room actually has. Announced rather than
+       silent: a session that quietly differs from the plan is how somebody ends up
+       thinking the app changed their programme. */
+    const swapped = applyGymPlan(near.gym);
+    if(swapped.length){
+      render();
+      toast(swapped.length + (swapped.length === 1 ? " swap" : " swaps") + " for " + near.gym.name,
+            "good");
+    }
     return;
   }
   if(MODAL_LIVE()) return;
@@ -21488,6 +21644,8 @@ function finishWorkout(){
   /* A SHORTENED SESSION IS NOT A POOR ONE, and the only way anything downstream can know
      the difference is if the fact travels with the session. */
   if(a.timeBox) sessObj.timeBox = a.timeBox;
+  // every movement logged here is on file as something this gym has
+  learnGymKit(sessObj);
   // where it was done, when that is known — see checkGymAtStart()
   if(a.gymId){ sessObj.gymId = a.gymId; sessObj.gymName = a.gymName || ""; }
   const existing = S.sessions.findIndex(x=>x.id===a.id);
