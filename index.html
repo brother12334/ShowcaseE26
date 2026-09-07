@@ -2435,6 +2435,9 @@ body.pfl-open{overflow:hidden}
   border-radius:11px;border:1px solid var(--acc-line);background:var(--acc-soft);
   font-size:13px;color:var(--text);line-height:1.35}
 body.voice-live .voice-strip{display:flex}
+/* resting: the same strip, gone quiet — no pulse, no accent, because nothing is open */
+body.voice-rest .voice-strip{border-color:var(--line);background:var(--card2);color:var(--dim)}
+body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .voice-dot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:var(--acc);
   animation:voicePulse 1.1s ease-in-out infinite}
 @keyframes voicePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
@@ -4403,7 +4406,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.0";
+const APP_VERSION = "14.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8130,6 +8133,7 @@ function startRest(e, s){
   save();
   showRestUI(true);
   applyRestLocks();
+  voiceSync();                 // nothing said during a rest is a set
 }
 /* The clock going on or off changes which fields are open, and a full re-render mid-set
    would take the focus out of the box somebody is typing in. So the two attributes that
@@ -8552,7 +8556,9 @@ function showRestUI(min){
     if(ui.dataset.served !== String(served)){
       ui.dataset.served = String(served);
       applyRestLocks();
+      voiceSync();               // the rest is done, so it starts listening again
     }
+    if(VOICE_ON && voicePaused()) voiceHint();   // count the wait down on the strip
     ui.querySelectorAll(".rest-time").forEach(t=> t.textContent = fmtClock(sec));
     const ring = ui.querySelector(".pf-ring");
     if(ring) ring.style.setProperty("--sw", ((sec%60)/60*100)+"%");
@@ -8575,6 +8581,7 @@ function hideRestUI(){
   if(el) el.remove();
   if(restTick){ clearInterval(restTick); restTick = null; }
   applyRestLocks();                    // the clock stopped, so the next set opens up
+  voiceSync();                         // and so does the microphone, if it was on
 }
 function rpeTxt(v){ return v ? "RPE "+v : ""; }
 
@@ -19495,20 +19502,100 @@ function nextOpenSet(){
 function voiceSupported(){
   return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 }
-let VOICE_REC = null;
+/* ON FOR THE SESSION, DEAF WHILE YOU REST.
+
+   Pressing the button once per set defeats the point of not having to touch the phone,
+   so it latches: tap it on and it stays on until the session ends or you tap it off.
+
+   Which raises the obvious problem — anything listening for an hour will eventually hear
+   somebody else's set, or your own commentary, and write it down. The answer is the clock
+   that is already running. Between sets you are resting, and nothing said during a rest is
+   a set; the moment the rest is served it listens again, for the set in front of you. So
+   the microphone is only ever open for the minute you are actually about to lift, and the
+   strip says which of the two states it is in.
+
+   Speech engines also stop themselves after a few seconds of quiet, which is why this
+   restarts rather than trusting one long session to stay open. */
+let VOICE_ON = false;                     // what you asked for
+let VOICE_REC = null;                     // what the engine is actually doing
+function voicePaused(){
+  const a = S.active;
+  return !!(a && a.restTimer && !restServed());
+}
+function voiceEngineStop(){
+  if(VOICE_REC){
+    VOICE_REC.onend = null;               // a deliberate stop must not restart itself
+    try{ VOICE_REC.stop(); }catch(e){}
+    VOICE_REC = null;
+  }
+}
 function voiceStop(){
-  if(VOICE_REC){ try{ VOICE_REC.stop(); }catch(e){} VOICE_REC = null; }
-  document.body.classList.remove("voice-live");
+  VOICE_ON = false;
+  voiceEngineStop();
+  document.body.classList.remove("voice-live", "voice-rest");
   const b = $("#voiceBtn");
   if(b) b.classList.remove("on");
+  voiceHint();
+}
+/* The one place that decides whether the microphone should be open right now. Safe to
+   call from anywhere, as often as you like: it only acts on a difference. */
+function voiceSync(){
+  const b = $("#voiceBtn");
+  if(b) b.classList.toggle("on", VOICE_ON);
+  document.body.classList.toggle("voice-live", VOICE_ON);
+  document.body.classList.toggle("voice-rest", VOICE_ON && voicePaused());
+  if(!VOICE_ON || !S.active){ voiceEngineStop(); voiceHint(); return; }
+  if(voicePaused()) voiceEngineStop(); else voiceEngineStart();
+  voiceHint();
+}
+// What the strip says, which is the only way to tell which state it is in.
+function voiceHint(){
+  const el = $("#voiceHeard");
+  if(!el) return;
+  if(!VOICE_ON){ el.innerHTML = "Off"; return; }
+  if(voicePaused()){
+    el.innerHTML = "Resting — it listens again when the clock is done ("
+      + esc(fmtClock(restLeft())) + " to go)";
+    return;
+  }
+  const at = nextOpenSet();
+  const en = at && S.active.entries[at.ei];
+  el.innerHTML = en
+    ? "Listening for set " + (at.si + 1) + " of <b>" + esc(en.name) + "</b> — “one twenty for eight at eight”"
+    : "Listening… <b>weight</b> for <b>reps</b> at <b>effort</b>";
 }
 function voiceApply(said){
   const p = parseSetPhrase(said);
+  /* EVERY REASON TO REFUSE IS CHECKED BEFORE ANYTHING IS WRITTEN. Filling the boxes and
+     then declining to tick leaves numbers in a row nobody said out loud, which is worse
+     than doing nothing: the next tap banks them. */
+  if(voicePaused()){
+    toast("Still resting — it'll listen again when the clock is done", "warn");
+    return;
+  }
   const at = nextOpenSet();
   if(!at){ toast("Nothing left to log in this session"); return; }
   const en = S.active.entries[at.ei];
   const row = document.querySelector(`.set .chk[data-e="${at.ei}"][data-s="${at.si}"]`);
-  const box = f=> row && row.parentElement.querySelector(`[data-f="${f}"]`);
+  if(!row) return;
+  const box = f=> row.parentElement.querySelector(`[data-f="${f}"]`);
+  /* LISTENING FOR AN HOUR MEANS OVERHEARING THINGS. A bare number — somebody counting, a
+     plate called across the room, your own "twelve" — is not a set. While the microphone
+     is latched on, a phrase has to be SHAPED like a set: a weight and reps, an explicit
+     "reps", or one of the words that mean something on their own. */
+  if(VOICE_ON && p.reps != null && p.weight == null && !p.same && !p.tick
+     && !/\breps?\b/i.test(said)){
+    toast("Heard “" + p.heard + "” — say the weight too, or tap the set in", "warn");
+    return;
+  }
+  const gotReps = p.reps != null || p.same;
+  if(!gotReps && !p.tick){
+    /* What it heard, what it needed, and the shape that works — a failure that does not
+       teach you the format is a feature you use once. */
+    toast("Heard “" + p.heard + "” — it needs a rep count: “one twenty for eight”", "warn");
+    return;
+  }
+  // ---- past every guard: now it writes ----
   const put = (f, v)=>{
     const el = box(f);
     if(!el || v == null) return;
@@ -19525,15 +19612,8 @@ function voiceApply(said){
   if(p.weight != null) put("weight", p.weight);
   if(p.reps != null) put("reps", p.reps);
   if(p.rpe != null){
-    const sel = row && row.parentElement.querySelector('[data-f="rpe"]');
+    const sel = row.parentElement.querySelector('[data-f="rpe"]');
     if(sel){ sel.value = String(p.rpe); sel.dispatchEvent(new Event("change", {bubbles:true})); }
-  }
-  const gotReps = p.reps != null || p.same;
-  if(!gotReps && !p.tick){
-    /* What it heard, what it needed, and the shape that works — a failure that does not
-       teach you the format is a feature you use once. */
-    toast("Heard “" + p.heard + "” — it needs a rep count: “one twenty for eight”", "warn");
-    return;
   }
   // three successful sets and the instructions stop appearing on their own
   const pr = trainPrefs();
@@ -19541,7 +19621,7 @@ function voiceApply(said){
   save();
   /* The real tick, not a shortcut past it: same handler, same rest gate, same PR check.
      If a rest is still running it refuses exactly as a thumb would, and says why. */
-  if(row) row.click();
+  row.click();
   toast(esc(en.name) + ": " + (p.weight != null ? fmtLoad(p.weight) + " × " : "")
         + (p.reps != null ? p.reps : "") + (p.rpe != null ? " @ RPE " + p.rpe : ""), "good");
 }
@@ -19559,7 +19639,8 @@ function openVoiceHelp(then){
   const ex = (said, means)=> `<div class="vh-ex"><b>“${esc(said)}”</b><span>${esc(means)}</span></div>`;
   showModal(`<h3>Say the set</h3>
     <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Say it the way you
-      would say it to a training partner. It fills the next set you have not logged, and ticks it.</div>
+      would say it to a training partner. Tap the microphone once and it stays on for the session,
+      listening between rests — it fills the next set you have not logged, and ticks it.</div>
     <div class="vh-shape">
       <span>weight</span><i>for</i><span>reps</span><i>at</i><span>effort</span>
     </div>
@@ -19570,56 +19651,74 @@ function openVoiceHelp(then){
     ${ex("eight reps at ninety five", "reps first, if that is how it comes out")}
     ${ex("same as last time", "takes the greyed-out numbers already in the row")}
     ${ex("nine and a half", "halves work for effort: RPE 9.5")}
-    <div class="k-lab" style="margin-top:14px">Two rules</div>
+    <div class="k-lab" style="margin-top:14px">Three rules</div>
     <div class="vh-rule"><b>Numbers, the way you say them out loud.</b> “One twenty” is 120, “a buck ten”
       is 110, “a hundred and thirty five” is 135. You never have to say “one hundred and twenty”.</div>
-    <div class="vh-rule"><b>Reps are the one thing it needs.</b> Without a rep count it will not log
-      anything — it tells you what it heard instead. The weight is optional on push-ups, pull-ups and
-      anything else you do without loading it.</div>
+    <div class="vh-rule"><b>Say the weight as well as the reps.</b> While it is listening across a whole
+      session, a bare number could be anything it overheard, so a set needs both — or the word “reps”.</div>
+    <div class="vh-rule"><b>It goes deaf while you rest.</b> Nothing said during a rest is a set. The
+      moment the rest is done it listens again, for the set in front of you.</div>
     <div class="btn-row" style="margin-top:16px"><button class="btn" id="vhGo" style="flex:1">Start listening</button></div>
     <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Not now</button></div>`);
   $("#modal").querySelector("#vhGo").onclick = ()=>{ hideModal(); if(then) then(); };
 }
-function voiceStart(fromHelp){
-  if(!voiceSupported()){ toast("This browser can't listen — type it in instead", "warn"); return; }
-  if(VOICE_REC){ voiceStop(); return; }
-  /* The first three times, the instructions come first. After that the button is what it
-     looks like — one tap, straight to listening. */
-  if(!fromHelp && voiceHelpCount() < 3){ openVoiceHelp(()=> voiceStart(true)); return; }
+function voiceEngineStart(){
+  if(VOICE_REC || !voiceSupported()) return;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const rec = new SR();
   rec.lang = navigator.language || "en-US";
   rec.interimResults = true;
   rec.maxAlternatives = 1;
-  rec.continuous = false;                 // one set per tap: predictable, and cheap on battery
+  rec.continuous = true;
   VOICE_REC = rec;
-  document.body.classList.add("voice-live");
-  const b = $("#voiceBtn");
-  if(b) b.classList.add("on");
   let said = "";
   rec.onresult = e=>{
     let interim = "";
     for(let i = e.resultIndex; i < e.results.length; i++){
       const r = e.results[i];
-      if(r.isFinal) said += r[0].transcript; else interim += r[0].transcript;
+      if(r.isFinal) said += " " + r[0].transcript; else interim += r[0].transcript;
     }
     const live = $("#voiceHeard");
-    if(live) live.textContent = (said + " " + interim).trim();
+    if(live && (said.trim() || interim.trim())) live.textContent = (said + " " + interim).trim();
+    /* A FINAL RESULT IS A SENTENCE THAT HAS ENDED, and that is the moment to act on it —
+       not when the engine eventually gives up on the whole session. Each one is taken on
+       its own and the buffer cleared, so an hour is a series of sets rather than one
+       ever-growing transcript. */
+    const last = e.results[e.results.length - 1];
+    if(last && last.isFinal){
+      const phrase = said.trim();
+      said = "";
+      if(phrase) voiceApply(phrase);
+      setTimeout(voiceHint, 1500);        // then back to saying what it is waiting for
+    }
   };
   rec.onerror = ev=>{
-    voiceStop();
-    if(ev && ev.error === "not-allowed") toast("Microphone access is off for this app", "warn");
-    else if(ev && ev.error !== "aborted") toast("Didn't catch that", "warn");
+    if(ev && (ev.error === "not-allowed" || ev.error === "service-not-allowed")){
+      toast("Microphone access is off for this app", "warn");
+      voiceStop();
+    }
+    // "no-speech" and "aborted" are ordinary in a gym; onend puts it back
   };
   rec.onend = ()=>{
     VOICE_REC = null;
-    document.body.classList.remove("voice-live");
-    if(b) b.classList.remove("on");
-    const heard = said.trim();
-    if(heard) voiceApply(heard);
+    /* Engines stop themselves after a few seconds of quiet. While the button is on and
+       you are not resting, that is a hiccup rather than a decision. */
+    if(VOICE_ON && !voicePaused() && S.active) setTimeout(()=>{ if(VOICE_ON) voiceSync(); }, 250);
   };
-  try{ rec.start(); }catch(e){ voiceStop(); }
+  try{ rec.start(); }catch(e){ VOICE_REC = null; }
 }
+function voiceStart(fromHelp){
+  if(!voiceSupported()){ toast("This browser can't listen — type it in instead", "warn"); return; }
+  if(VOICE_ON){ voiceStop(); toast("Voice off"); return; }
+  /* The first three times, the instructions come first. After that the button is what it
+     looks like — one tap, and it stays on for the session. */
+  if(!fromHelp && voiceHelpCount() < 3){ openVoiceHelp(()=> voiceStart(true)); return; }
+  VOICE_ON = true;
+  voiceSync();
+  toast(voicePaused() ? "Voice on — it starts listening when your rest is done"
+                      : "Voice on — say each set as you finish it", "good");
+}
+
 /* =====================================================================
    "I'VE GOT FORTY MINUTES"
 
@@ -21226,7 +21325,13 @@ function bind(){
   if(disc2) disc2.onclick = discard;
 
   const vB = $("#voiceBtn");
-  if(vB) vB.onclick = ()=> voiceStart();
+  if(vB){
+    vB.onclick = ()=> voiceStart();
+    // the strip and the button are rebuilt by every render, so put them back in step
+    voiceSync();
+  } else if(VOICE_ON && !S.active){
+    voiceStop();                       // the session ended; stop listening to the room
+  }
   const vH = $("#voiceHelpBtn");
   if(vH) vH.onclick = ()=>{ voiceStop(); openVoiceHelp(()=> voiceStart(true)); };
   const tbBtn = $("#timeBoxBtn");
@@ -22233,6 +22338,7 @@ function finishWorkout(){
   /* A SHORTENED SESSION IS NOT A POOR ONE, and the only way anything downstream can know
      the difference is if the fact travels with the session. */
   if(a.timeBox) sessObj.timeBox = a.timeBox;
+  voiceStop();                          // the workout is over; close the microphone
   // every movement logged here is on file as something this gym has
   learnGymKit(sessObj);
   // where it was done, when that is known — see checkGymAtStart()
