@@ -927,6 +927,18 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .plan-mark.plan-temp{border-color:var(--acc);color:var(--acc);background:var(--acc-soft)}
 /* The same fact on the card you are logging into, where it reads as a sentence rather
    than a tag, and the hint in the weight box that carries the plan's own number. */
+/* THE LOAD-CHANGED CHIP. Green for up, the app's own copper for down — and copper
+   rather than red on purpose: a load coming down is the app correcting a weight the
+   prescription could not reach, which is it working, not a warning. The green is lifted
+   off --ok, which is tuned for small ticks and goes muddy at chip size on this ground. */
+.chg-row{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 5px}
+.chg-chip{
+  display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;
+  font:11.5px var(--mono);letter-spacing:.04em;border:1px solid;white-space:nowrap;
+}
+.chg-chip.up{color:#7fbf7a;border-color:rgba(127,191,122,.5);background:rgba(127,191,122,.12)}
+.chg-chip.dn{color:var(--acc);border-color:var(--acc-line);background:var(--acc-soft)}
+.chg-sub{font:11.5px var(--mono);color:var(--faint);margin:0 0 9px;line-height:1.45}
 .plan-line{
   font:12px var(--mono);color:var(--acc);background:var(--acc-soft);
   border-left:2px solid var(--acc);border-radius:0 6px 6px 0;
@@ -4435,7 +4447,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.6";
+const APP_VERSION = "14.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7696,6 +7708,9 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<"
 function todayStr(){ return new Date().toLocaleDateString("en-CA"); }
 // The same shape as todayStr(), for any moment — so fmtDate() can be given a timestamp.
 function dayStr(ts){ return new Date(ts).toLocaleDateString("en-CA"); }
+/* fmtDate() without the weekday, for the lines that are tight. "Tue, Sep 8" wrapped the
+   load-change caption onto a second row for three characters nobody reads there. */
+const fmtDateShort = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
 const fmtDate = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
 /* ONE FUNCTION, STILL CALLED THE SAME WAY. Every one of the app's notices goes through
    toast(msg) and none of them had to change: the kind is worked out from the message
@@ -27284,26 +27299,51 @@ function pctLineHTML(en){
   return `<div class="plan-line pct-line">${esc(pctWords(p))}
     <button class="linklike" data-setmax="${esc(nm)}">${p.src === "estimated" ? "set it properly" : "change"}</button></div>`;
 }
+/* HOW A CHANGE THE APP MADE IS SAID, and why it is a chip rather than a sentence.
+
+   Version one printed one line in the accent colour, worded the same whether the load had
+   gone UP or DOWN. Two things were wrong with it. The accent is the app's one saturated
+   colour and it already means "the thing to press", so a notice wearing it reads as
+   furniture within a session. And direction — the single most important fact about a load
+   change, the one you act on before you read a word — was carried only by the verb, four
+   words in.
+
+   So the fact leads and the prose follows: a chip with the arrow and the SIZE of the
+   change, green up and copper down, with the explanation underneath in the quiet type
+   everything else on the card uses. It is the smallest of the six shapes drawn for this,
+   deliberately: it appears on every exercise the app has touched, and a banner you meet
+   six times in a session is a banner you stop seeing. */
 function planChangeLineHTML(en){
   const p = findProgramEntry(en && en.name);
-  const bits = [];
-  const cut = p && p.setsCut && p.setsCut.until && Date.now() < p.setsCut.until;
-  const b = p && p.byApp;
-  // the set cut says all of this in its own line below; two of them is the app repeating itself
+  if(!p) return "";
+  const chips = [], subs = [];
+  const cut = p.setsCut && p.setsCut.until && Date.now() < p.setsCut.until;
+  const b = p.byApp;
+  // the set cut says all of this in its own chip below; two of them is the app repeating itself
   if(b && !(cut && /^cut to /.test(b.what || ""))
      && b.at && Date.now() - b.at < PLAN_CHANGE_SHOW_DAYS * DAY_MS
      && (b.to == null || (p.weight != null && parseFloat(p.weight) === parseFloat(b.to)))){
-    bits.push("Element 26 " + b.what
-      + (b.from != null && b.from !== "" ? " \u2014 was " + fmtLoad(b.from) : "")
-      + ", from your " + fmtDate(dayStr(b.at)) + " grade");
+    const from = b.from == null || b.from === "" ? null : parseFloat(b.from);
+    const to   = b.to   == null || b.to   === "" ? null : parseFloat(b.to);
+    const d    = (from != null && to != null && isFinite(from) && isFinite(to)) ? to - from : null;
+    const up   = d != null ? d > 0 : !/\bcut\b|\blower/i.test(b.what || "");
+    chips.push({up, text: d != null
+      ? (up ? "\u25b2 +" : "\u25bc \u2212") + fmtLoad(Math.abs(d))
+      : (up ? "\u25b2 " : "\u25bc ") + esc(b.what)});
+    subs.push((up ? "raised" : "cut") + " to " + fmtLoad(p.weight)
+      + " by Element 26 \u00b7 " + fmtDateShort(dayStr(b.at)) + " grade");
   }
-  const c = p && p.setsCut;
+  const c = p.setsCut;
   if(cut){
-    bits.push("Element 26 cut this to " + c.to + " set" + (c.to === 1 ? "" : "s") + " until "
-      + fmtDate(dayStr(c.until)) + ", then back to " + c.from);
+    chips.push({up: false, text: "\u25bc \u2212" + Math.max(0, c.from - c.to) + " set"
+                                 + (c.from - c.to === 1 ? "" : "s")});
+    subs.push("cut to " + c.to + " set" + (c.to === 1 ? "" : "s")
+      + " until " + fmtDateShort(dayStr(c.until)) + ", back to " + c.from);
   }
-  if(!bits.length) return "";
-  return `<div class="plan-line">${bits.map(x=> esc(x)).join(" \u00b7 ")}</div>`;
+  if(!chips.length) return "";
+  return `<div class="chg-row">${chips.map(x=>
+      `<span class="chg-chip ${x.up ? "up" : "dn"}">${x.text}</span>`).join("")}</div>
+    <div class="chg-sub">${subs.map(x=> esc(x)).join(" \u00b7 ")}</div>`;
 }
 /* The strip that sits ON the set, naming what kind of set it is. A technique the plan
    asked for is useless if you have to infer it from a cue three rows down — if this is a
