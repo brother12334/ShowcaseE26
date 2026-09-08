@@ -916,6 +916,23 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   display:inline-block;font:11.5px var(--mono);color:var(--bg);background:var(--dim);
   border-radius:6px;padding:2px 7px;margin-left:6px;vertical-align:middle;
 }
+/* The two things a plan line can say about its own authorship. Quiet by default — they
+   are footnotes on a prescription, not part of it — with the temporary one warmer,
+   because it is the one with a date attached that you want to notice. */
+.plan-mark{
+  display:inline-block;font:11px var(--mono);letter-spacing:.02em;
+  border-radius:5px;padding:2px 6px;margin:4px 6px 0 0;vertical-align:middle;
+  border:1px solid var(--line);color:var(--dim);background:var(--card2);
+}
+.plan-mark.plan-temp{border-color:var(--acc);color:var(--acc);background:var(--acc-soft)}
+/* The same fact on the card you are logging into, where it reads as a sentence rather
+   than a tag, and the hint in the weight box that carries the plan's own number. */
+.plan-line{
+  font:12px var(--mono);color:var(--acc);background:var(--acc-soft);
+  border-left:2px solid var(--acc);border-radius:0 6px 6px 0;
+  padding:6px 9px;margin:0 0 8px;line-height:1.4;
+}
+input.ph-plan::placeholder{color:var(--acc);opacity:.75}
 .set{display:grid;grid-template-columns:44px 1fr 1fr 86px 48px;gap:7px;align-items:center;margin-bottom:8px}
 .set .idx{color:var(--faint);font:14px var(--mono);text-align:center;display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.1}
 .side-chip{
@@ -4404,7 +4421,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.4";
+const APP_VERSION = "14.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6845,6 +6862,8 @@ const BODYWEIGHT_RE = /\b(push[- ]?up|pull[- ]?up|chin[- ]?up|dip|plank|hanging|
 function loadNeededFor(en){
   if(!en || !en.name) return false;
   // the plan wrote a starting load into this slot, so a load is what it expects
+  // (planWeight on a live session entry, weight on a programme one — see planLoadFor)
+  if(en.planWeight != null && en.planWeight !== "") return true;
   if(en.weight != null && en.weight !== "") return true;
   // "Weighted Dip" says what it is in its own name, and the belt is the point of it
   if(/\bweighted\b/i.test(en.name)) return true;
@@ -7657,6 +7676,8 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<"
    to write a dated entry to the change log calls through here. As a `const` it sat in
    its temporal dead zone at that moment and took the whole script down. */
 function todayStr(){ return new Date().toLocaleDateString("en-CA"); }
+// The same shape as todayStr(), for any moment — so fmtDate() can be given a timestamp.
+function dayStr(ts){ return new Date(ts).toLocaleDateString("en-CA"); }
 const fmtDate = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
 /* ONE FUNCTION, STILL CALLED THE SAME WAY. Every one of the app's notices goes through
    toast(msg) and none of them had to change: the kind is worked out from the message
@@ -16884,6 +16905,7 @@ function viewActiveSession(){
         </span>
       </div>`;
     h += swapNoteHTML(en);
+    h += planChangeLineHTML(en);
     h += exNoteLineHTML(en);
     h += supersetNoteHTML(supersetInfo(a.entries, ei));
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
@@ -20258,7 +20280,30 @@ function viewHistory(){
 function hasAltExercises(){
   return DAYS.some(d=>(S.program[d]||[]).some(e=>e && e.alt));
 }
+/* WHAT THE PLAN SAYS ABOUT ITSELF: which lines the app wrote, and which of them lapse.
+
+   A programme that shows a number you chose and a number Element 26 chose in exactly the
+   same type is asking you to take both on the same trust, and a temporary cut that looks
+   permanent is worse than one — the volume goes missing and the plan gives no reason. So
+   an app-authored line says so, and a line with an expiry says when it goes back. */
+function planMarkHTML(e){
+  if(!e) return "";
+  let h = "";
+  const c = e.setsCut;
+  if(c && c.until && Date.now() < c.until){
+    h += `<span class="plan-mark plan-temp" title="${attrSafe(
+      "Cut from " + c.from + " to " + c.to + " sets. It goes back on its own.")}">only until ${
+      esc(fmtDate(dayStr(c.until)))} \u00b7 then back to ${c.from} sets</span>`;
+  }
+  if(e.byApp && e.byApp.what){
+    h += `<span class="plan-mark plan-app" title="${attrSafe(
+      "Element 26 made this change from a workout grade \u2014 " + e.byApp.what
+      + ". You can edit it like anything else.")}">changed by Element 26</span>`;
+  }
+  return h;
+}
 function viewProgram(){
+  restoreSetCuts();
   if(DAY_EDIT && (S.program[DAY_EDIT] || DAY_EDIT === "finisher")) return viewDayEdit(DAY_EDIT);
   let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>
   <div class="sub" style="margin:-8px 2px 14px">Your rotation: ${esc(ROTATION.map(w=>dayName(w)).join(" → "))}.${
@@ -20305,6 +20350,8 @@ function viewProgram(){
       let meta = `${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}`;
       /* "next Push day: X" is a promise, and for a slot you choose it is one the app
          cannot keep. It says what it is instead: either, your call. */
+      const mark = planMarkHTML(e) + (e.alt ? planMarkHTML(e.alt) : "");
+      if(mark) meta += "<br>" + mark;
       if(e.alt) meta += isPick
         ? `<br>either one \u2014 you pick on the day${nextUp ? ", currently " + esc(nextUp) : ""}`
         : `<br>next ${m.name.toLowerCase()} day: ${esc(nextUp)}`;
@@ -20332,7 +20379,8 @@ function viewProgram(){
       <div class="sub" style="margin-bottom:6px">Runs at the end of every workout, in this order.</div>`;
     fin.forEach((e,i)=>{
       h += `<div class="prog-ex">
-        <div><b>${esc(e.name)}</b><div class="meta">${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}</div></div>
+        <div><b>${esc(e.name)}</b><div class="meta">${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}${
+          (()=>{ const m = planMarkHTML(e); return m ? "<br>" + m : ""; })()}</div></div>
       </div>`;
     });
     h += `<button class="btn ghost small" data-dayedit="finisher" style="margin-top:10px">Edit the finisher</button></div>`;
@@ -21023,8 +21071,22 @@ function bind(){
     b.classList.remove("side-flip"); void b.offsetWidth; b.classList.add("side-flip");
     toast(sideFull(en.altStyle || "side", side, en.name));
   });
-  document.querySelectorAll(".set input.is-locked, .rpe-cell.is-locked").forEach(el=>{
-    el.addEventListener("pointerdown", e=>{ e.preventDefault(); toast(LOCK_WHY); });
+  /* WHY THIS ASKS THE QUESTION IN THE HANDLER RATHER THAN AT BIND TIME.
+
+     applyRestLocks() takes the lock off IN PLACE — no re-render, so the box somebody is
+     typing in keeps its focus — and it does that by toggling a class. Binding only the
+     rows that happened to be locked when the card was drawn left this listener attached
+     to them afterwards: you stop the rest, the class comes off, and every tap on the reps
+     box is still swallowed by a handler insisting you are still resting. It stayed that
+     way for the rest of the session, because nothing forced a re-render.
+
+     So every row gets the listener and the lock is read at the moment of the tap. */
+  document.querySelectorAll('.set input[data-f], .set .rpe-cell').forEach(el=>{
+    el.addEventListener("pointerdown", e=>{
+      if(!el.classList.contains("is-locked")) return;
+      e.preventDefault();
+      toast(LOCK_WHY);
+    });
   });
   document.querySelectorAll(".set .chk").forEach(el=>{
     el.onclick = async ()=>{
@@ -22438,6 +22500,10 @@ function startWorkout(wid){
     toast("Finish or discard the workout you're in first");
     return;
   }
+  /* Before the plan is copied into the session, not after: a set cut whose fortnight is
+     up has to be back on the programme by the time this reads it, or the session runs a
+     day short and the restore only shows up next week. */
+  restoreSetCuts();
   // lock in this session's starting arm now, so it can't shift if the session count
   // changes later (e.g. resuming from history splices a session out of the list).
   const side = startSideFor(wid);
@@ -24676,7 +24742,9 @@ function openScoreCard(sess, onDone){
      opened from History. See progressionApplied(). */
   const markApplied = name=>{
     const k = nrm(name);
-    (sess.progression || []).forEach(p=>{ if(p.kind === "up" && nrm(p.name) === k) p.applied = true; });
+    (sess.progression || []).forEach(p=>{
+      if((p.kind === "up" || p.kind === "toohard") && nrm(p.name) === k) p.applied = true;
+    });
     save(); queueSync();
   };
   /* THE SUGGESTION IS A SUGGESTION. The app works the next load out from a rule and the
@@ -24963,11 +25031,25 @@ function progressionFor(sess, entry){
   };
 }
 // The plan's own copy of an exercise, which is what a load change has to be written to.
+/* WHERE AN EXERCISE ACTUALLY LIVES.
+
+   This looked in S.program[day] only, which is most of the programme and not all of it.
+   Two real slots were invisible to it: the finisher, which runs at the end of every
+   session, and the ⇄ partner of an alternating pair, whose sets, reps and load live on
+   e.alt rather than on e. Anything that goes through here to CHANGE a plan — the stall
+   cut, every load change the grade card and the Body tab apply — silently did nothing
+   for an exercise in either place, and the button that did nothing said nothing either.
+
+   The alt partner is returned as itself, because that object carries the prescription
+   the caller means to edit. */
 function findProgramEntry(name){
   const k = nrm(name);
-  for(const d of DAYS){
-    const list = S.program[d] || [];
+  const lists = DAYS.map(d=> S.program[d] || []).concat([S.program.finisher || []]);
+  for(const list of lists){
     for(const e of list){ if(nrm(e.name) === k) return e; }
+  }
+  for(const list of lists){
+    for(const e of list){ if(e && e.alt && nrm(e.alt.name) === k) return e.alt; }
   }
   return null;
 }
@@ -25257,22 +25339,67 @@ function applyFlag(id, choice){
       : "Applied from the Body tab: the last set cleared the top of the range at target RPE.");
   } else if(f.kind === "stall"){
     /* The stall protocol, which is a set cut and not a load cut: dropping the weight is
-       what costs you the strength you built getting there. */
+       what costs you the strength you built getting there.
+
+       AND IT IS TEMPORARY, which the app said and did not do. The advice has always read
+       "cut this by one set FOR TWO WEEKS, then rebuild at the same load" — but the cut
+       was written into the plan permanently, with nothing recording that it was meant to
+       lapse and nothing on the Program tab saying it would. Two weeks later the volume
+       was simply gone and the only trace was a line in the change log.
+
+       So the cut carries its own expiry. The plan shows what it was, what it is, and the
+       date it goes back, and it restores itself on that date with no tap needed. */
     const e = findProgramEntry(f.ex);
-    if(e && e.sets > 1){
-      const from = e.sets;
-      e.sets = Math.max(1, e.sets - 1);
-      logPlanChange("programme", null, e.name, [from + " → " + e.sets + " sets"],
-        {note: "Stall protocol, applied from the Body tab. Rebuild the sets once the reps move again."});
+    const cur = parseInt(e && e.sets, 10);
+    if(e && cur > 1){
+      const to = Math.max(1, cur - 1);
+      e.sets = to;
+      e.setsCut = {from: cur, to, at: Date.now(), until: Date.now() + SET_CUT_DAYS * DAY_MS,
+                   why: "stall"};
+      e.byApp = {at: Date.now(), what: "cut to " + to + " set" + (to === 1 ? "" : "s")};
+      logPlanChange("programme", null, e.name, [cur + " → " + to + " sets"],
+        {note: "Stall protocol, applied from the Body tab. Temporary: back to " + cur
+             + " sets on " + fmtDate(dayStr(Date.now() + SET_CUT_DAYS * DAY_MS)) + "."});
       save(); queueSync();
       ok = true;
     } else if(e){
       toast("Already down to one set \u2014 change the load or the movement instead");
       return false;
+    } else {
+      toast("Couldn't find " + esc(f.ex) + " in your programme to change", "warn");
+      return false;
     }
   }
   if(ok){ f.applied = true; f.appliedAt = Date.now(); save(); queueSync(); }
   return ok;
+}
+/* Two weeks, which is what the advice says, and long enough for the protocol to be the
+   thing being tested rather than a single session's noise. */
+const SET_CUT_DAYS = 14;
+/* PUTTING THE SETS BACK, without anybody having to remember. Run on load and at the top
+   of every session: any cut whose fortnight is up is undone at the number it was cut
+   from, unless the plan has since been edited to something else on purpose — in which
+   case the person's own edit wins and the cut just lapses. */
+function restoreSetCuts(){
+  let n = 0;
+  const lists = DAYS.map(d=> S.program[d] || []).concat([S.program.finisher || []]);
+  const all = [];
+  lists.forEach(l=> l.forEach(e=>{ all.push(e); if(e && e.alt) all.push(e.alt); }));
+  all.forEach(e=>{
+    const c = e && e.setsCut;
+    if(!c || !c.until || Date.now() < c.until) return;
+    if(parseInt(e.sets, 10) === c.to){
+      e.sets = c.from;
+      logPlanChange("programme", null, e.name, [c.to + " → " + c.from + " sets"],
+        {note: "The two-week set cut is up, so the volume goes back on its own."});
+      n++;
+    }
+    delete e.setsCut;
+    if(e.byApp && /^cut to /.test(e.byApp.what || "")) delete e.byApp;
+  });
+  if(n){ save(); queueSync(); toast(n === 1 ? "A set cut has run its two weeks \u2014 the volume is back"
+                                           : n + " set cuts have run their two weeks \u2014 the volume is back"); }
+  return n;
 }
 function dismissFlag(id){
   const f = flagLog().find(x=> x && x.id === id);
@@ -25329,13 +25456,16 @@ function buildProgression(sess){
    >= would have silently swallowed every Smith increase this card ever offered. An
    exact match can only be produced by applyProgression() having written it. */
 function progressionApplied(p){
-  if(!p || p.kind !== "up") return false;
+  if(!p) return false;
+  // a cut is applied the same way an increase is, and is checked the same way
+  const to = p.kind === "toohard" ? (p.detail && p.detail.to) : p.to;
+  if(p.kind !== "up" && p.kind !== "toohard") return false;
   if(p.applied) return true;
-  if(p.to == null) return false;
+  if(to == null) return false;
   const e = findProgramEntry(p.name);
   if(!e || e.weight == null) return false;
-  const now = parseFloat(e.weight), to = parseFloat(p.to);
-  return !isNaN(now) && !isNaN(to) && now === to;
+  const now = parseFloat(e.weight), t = parseFloat(to);
+  return !isNaN(now) && !isNaN(t) && now === t;
 }
 /* How sure the card is about one line, in words a person uses. Shown only where it
    changes what you should do with the line — never on a load increase, which is
@@ -25353,12 +25483,19 @@ function progressionHTML(list){
   if(!list || !list.length) return "";
   const done = list.filter(p=>p.kind === "up" && progressionApplied(p));
   const ups = list.filter(p=>p.kind === "up" && !progressionApplied(p));
-  const hard = list.filter(p=>p.kind === "toohard");
+  const hard = list.filter(p=>p.kind === "toohard" && !progressionApplied(p));
+  const hardDone = list.filter(p=>p.kind === "toohard" && progressionApplied(p));
   const stalls = list.filter(p=>p.stall);
   let h = "";
   if(hard.length){
+    /* THE ONE FINDING WITH NOTHING TO PRESS. This block said the prescription could not
+       be met at the load in the plan, worked out the load that CAN meet it, printed it
+       in the sentence — and then left you to go to the Program tab and type it in
+       yourself, on the one card where the app is most certain it is right. Every other
+       finding here has an editable number and an Apply. Now so does this. */
     h += `<div class="rev-head">The load is wrong here</div>`;
     hard.forEach(p=>{
+      const to = p.detail.to;
       h += `<div class="wp sev3" style="cursor:default">
         <span class="wp-rank">!</span>
         <span class="wp-body">
@@ -25366,6 +25503,27 @@ function progressionHTML(list){
           <span class="wp-why">${esc(p.detail.msg)}</span>
           <span class="wp-why" style="color:var(--text)">${esc(p.detail.fix)}</span>
         </span></div>`;
+      if(to != null){
+        h += `<div class="pg-row">
+          <div class="pg-main"><b>${esc(p.name)}</b>
+            <div class="pg-sub">Write ${esc(fmtLoad(to))} into your programme${
+              p.detail.from != null ? ", down from " + esc(fmtLoad(p.detail.from)) : ""}.</div>
+          </div>
+          <span class="pg-to">
+            <input inputmode="decimal" data-progtoin="${esc(p.name)}" value="${to}"
+              aria-label="Weight to write into your plan for ${esc(p.name)}">
+            <i>${esc(unitWord())}</i>
+          </span>
+          <button class="pg-apply" data-progapply="${esc(p.name)}" data-progto="${to}">Apply</button>
+        </div>`;
+      }
+    });
+  }
+  if(hardDone.length){
+    h += `<div class="rev-head">Load already brought down, ${hardDone.length}</div>`;
+    hardDone.forEach(p=>{
+      h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">${
+        p.detail.to == null ? "applied" : "now " + esc(fmtLoad(p.detail.to))} \u2713</span></div>`;
     });
   }
   /* "I'll manage the loads myself" means exactly that: the grade still tells you how the
@@ -25463,13 +25621,18 @@ function addRestToExercise(name, seconds){
   return true;
 }
 function applyProgression(name, to, why){
-  // Adding weight during the week you took off to shed fatigue defeats the deload.
-  if(deloadActive()){ toast("Load increases are blocked during a deload"); return false; }
   const e = findProgramEntry(name);
-  if(!e){ toast("That exercise is not in the current programme"); return false; }
+  if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
   const from = e.weight;
   const v = parseFloat(to);
   if(isNaN(v)) return false;
+  /* Adding weight during the week you took off to shed fatigue defeats the deload. Taking
+     it OFF does not: a load the prescription cannot reach is wrong in a deload week too,
+     and refusing the correction leaves you deloading against a number you cannot lift. */
+  if(deloadActive() && !(from != null && v < parseFloat(from))){
+    toast("Load increases are blocked during a deload");
+    return false;
+  }
   e.weight = v;
   /* THE FLAG HAS TO SURVIVE THE GRADE SCREEN. "Rebuild from 6 reps at the new load" is
      an instruction about the NEXT session, and said once on a card you close it may as
@@ -25487,6 +25650,12 @@ function applyProgression(name, to, why){
      one makes the history unreadable the moment anybody goes looking for why a weight
      went down. */
   const down = from != null && v < from;
+  /* WHO CHANGED THIS. A load that moves on its own is the app doing its job, and a plan
+     that shows no difference between a number you chose and a number it chose is asking
+     you to take both on trust. Stamped here, shown on the Program tab and on the set row
+     you are about to log against. */
+  e.byApp = {at: Date.now(), what: (down ? "load cut to " : "load raised to ") + fmtLoad(v),
+             from: from, to: v};
   logPlanChange("weight", null, e.name,
     [fmtLoad(from) + " → " + fmtLoad(v)],
     {note: why ? why
@@ -26675,6 +26844,40 @@ function techSummary(e){
 
 /* One set row. Extracted so the flat view and the round view cannot drift apart:
    there is exactly one definition of what a loggable set looks like. */
+/* THE NUMBER THE PLAN IS ASKING FOR, IN THE BOX YOU TYPE IT INTO.
+
+   The weight box hinted at LAST SESSION'S load and nothing else, which meant a load the
+   app had just raised — from a grade card, from the Body tab — was invisible at the only
+   moment it matters. You went to the bar and the app suggested the weight you were
+   moving up FROM. The plan's own figure comes first now, and last time's is the fallback
+   for a slot the plan gives no load for.
+
+   Bar-inclusive entries are converted on the way out: the programme records a Smith at
+   115 and the sets you log record the 40 you put on it, so handing the plan's number
+   straight to the box would ask for seventy-five pounds that are already there. */
+function planLoadFor(en){
+  if(!en || !en.name) return "";
+  /* THREE PLACES THE PRESCRIBED LOAD CAN BE, and the reason it appeared in none of them.
+     A session entry does not carry `weight` — that field holds the per-SET loads you
+     type — it carries planWeight, frozen at Start for the warm-up ramp. Reading `weight`
+     off a live entry therefore always found nothing, which is why the plan's number
+     never reached the box. Programme entries do use `weight`, and a load changed after
+     Start is only on the programme, so that is the third place to look. */
+  const raw = (en.planWeight != null && en.planWeight !== "") ? en.planWeight
+            : (en.weight != null && en.weight !== "") ? en.weight
+            : (findProgramEntry(en.name) || {}).weight;
+  if(raw == null || raw === "") return "";
+  const w = parseFloat(raw);
+  if(!isFinite(w)) return "";
+  const net = w - entryBarAdd(en);
+  return net > 0 ? String(r1(net)) : "";
+}
+function planLoadPh(en, last, si){
+  const plan = planLoadFor(en);
+  if(plan !== "") return plan;
+  const l = last && last[si];
+  return (l && l.weight != null && l.weight !== "") ? l.weight : unitWord();
+}
 function setRowHTML(en, ei, si, last, idxLabel){
   const st = en.sets[si];
   if(!st) return "";
@@ -26707,12 +26910,46 @@ function setRowHTML(en, ei, si, last, idxLabel){
       return `<button type="button" class="idx-btn${has ? " has-note" : ""}" data-setnote="${ei2}:${si}"
         aria-label="Note on set ${idx}" title="${has ? "Edit this set's note" : "Add a note to this set"}">${idx}</button>`;
     })()}${sideChip(en, si)}</span>
-    <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(last&&last[si]&&last[si].weight!=null&&last[si].weight!==""?last[si].weight:unitWord())}">
+    <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(String(planLoadPh(en, last, si)))}"${
+      planLoadPh(en, last, si) === planLoadFor(en) && planLoadFor(en) !== "" ? ` class="ph-plan"` : ""}>
     <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}"${
       lock ? ` readonly class="is-locked" title="${esc(LOCK_WHY)}"` : ""}>
     ${rpeOn ? `<span class="rpe-cell${lock?" is-locked":""}"${lock?` title="${esc(LOCK_WHY)}"`:""}>${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-f="rpe"${lock?" disabled":""}>${rpeOptions(st.rpe)}</select></span>` : ""}
     <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-f="done">✓</button>
   </div>${setNoteHTML(st, en, si)}${prBadgeRow(st, ei, si)}${techRowHTML(en, ei, si)}`;
+}
+/* WHAT THE APP CHANGED, SAID WHERE YOU WOULD ACT ON IT.
+
+   A load raised from a grade card or the Body tab was written into the programme and
+   then never mentioned again: the next session you stood at the bar with a plan you had
+   agreed to and no reminder of what it now said, which is the same as it not having
+   happened. The hint in the weight box carries the number; this carries the fact that
+   something moved it, and the number it moved from.
+
+   Read off the PROGRAMME rather than the session copy, so a change applied after Start
+   still shows on the card you are logging into. It lapses on its own: once the plan's
+   load is no longer the one the app wrote, this is history and says nothing. */
+const PLAN_CHANGE_SHOW_DAYS = 30;
+function planChangeLineHTML(en){
+  const p = findProgramEntry(en && en.name);
+  const bits = [];
+  const cut = p && p.setsCut && p.setsCut.until && Date.now() < p.setsCut.until;
+  const b = p && p.byApp;
+  // the set cut says all of this in its own line below; two of them is the app repeating itself
+  if(b && !(cut && /^cut to /.test(b.what || ""))
+     && b.at && Date.now() - b.at < PLAN_CHANGE_SHOW_DAYS * DAY_MS
+     && (b.to == null || (p.weight != null && parseFloat(p.weight) === parseFloat(b.to)))){
+    bits.push("Element 26 " + b.what
+      + (b.from != null && b.from !== "" ? " \u2014 was " + fmtLoad(b.from) : "")
+      + ", from your " + fmtDate(dayStr(b.at)) + " grade");
+  }
+  const c = p && p.setsCut;
+  if(cut){
+    bits.push("Element 26 cut this to " + c.to + " set" + (c.to === 1 ? "" : "s") + " until "
+      + fmtDate(dayStr(c.until)) + ", then back to " + c.from);
+  }
+  if(!bits.length) return "";
+  return `<div class="plan-line">${bits.map(x=> esc(x)).join(" \u00b7 ")}</div>`;
 }
 /* The strip that sits ON the set, naming what kind of set it is. A technique the plan
    asked for is useless if you have to infer it from a cue three rows down — if this is a
@@ -28583,6 +28820,7 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
 if(!hasAccount()) startAccountFlow("signup");
 else if(needsOnboarding()) startOnboarding();
 else render();
+try{ restoreSetCuts(); }catch(e){}   // a lapsed cut goes back on the plan at launch too
 if(S.active && S.active.restTimer) showRestUI(S.active.restTimer.min);
 /* A signed-in account on a device that has been away: pull once, and only repaint if
    the server actually had something newer than what is on this device. */
