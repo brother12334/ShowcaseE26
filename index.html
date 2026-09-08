@@ -2515,6 +2515,11 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .rb-k{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
 .rb-v{font-size:19px;color:var(--text)}
 .rb-w{font-size:12px;color:var(--dim)}
+/* The tested max is the one figure here you supplied rather than the app inferred, and
+   it sits above the estimate it outranks — accented so the difference is visible before
+   the labels are read. Empty, it is an invitation rather than a gap. */
+.rb-tested .rb-v{color:var(--acc)}
+.rb-tested .rb-w .linklike{margin-left:6px}
 .rb-tot{margin-top:10px;padding-top:9px;border-top:1px dashed var(--line);
   font-size:11.5px;color:var(--faint)}
 /* THE PAIR. Today and Workout share one tray so they read as one place in two states
@@ -4447,7 +4452,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.7";
+const APP_VERSION = "14.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7914,6 +7919,34 @@ function est1RM(w, reps){
   // Epley, only meaningful in the low-rep range; clamp so 20-rep sets don't inflate
   if(!(w>0) || !(reps>0)) return 0;
   return w * (1 + Math.min(reps, 12)/30);
+}
+/* WHAT EPLEY ASSUMES, AND WHY THE ESTIMATE READ LOW.
+
+   Every rep-max formula — Epley, Brzycki, all of them — assumes the set you feed it was
+   taken to FAILURE. Eight reps means eight reps and there was no ninth. The app has
+   never fed it that: it fed it eight reps at RPE 7, which is a set with three more in
+   the tank, and then reported the answer as your best estimate. Eight hard reps and
+   eight easy ones are not the same evidence about a one-rep max, and treating them as
+   the same understates everybody who logs honestly and rates their sets honestly.
+
+   RPE is exactly the missing number. RPE 10 is failure, and every point below it is one
+   more rep you had left — so the set is converted to the set it would have been, and the
+   formula is given what it actually wants. Eight at RPE 7 becomes eleven to failure.
+
+   With no RPE on the set nothing changes: the reps are taken at face value, which is the
+   old behaviour and the only available reading. */
+function repsToFailure(st){
+  const reps = parseFloat(st && st.reps) || 0;
+  if(!(reps > 0)) return 0;
+  const rpe = parseFloat(st && st.rpe);
+  if(!isFinite(rpe) || rpe <= 0 || rpe > 10) return reps;
+  return reps + Math.max(0, Math.min(4, 10 - rpe));   // past 4 in reserve it is a warm-up
+}
+// One set's estimated one-rep max, as a TRUE load and against reps taken to failure.
+function e1rmOfSet(st, add){
+  const w = setLoad(st, add);
+  if(!(w > 0)) return 0;
+  return est1RM(w, repsToFailure(st));
 }
 /* RECORDS ARE TRUE LOADS. Every figure here is the logged number plus whatever implement
    that session was performed with, so a record set on a heavier Smith is recognised as
@@ -20285,8 +20318,10 @@ function buildRecordBook(){
         if(!(reps > 0) && !(w > 0)) return;
         usedInSession = true;
         rec.sets++; rec.reps += reps; rec.vol += w * reps;
+        const rpe = parseFloat(st && st.rpe);
         const when = {date: s.date, at: s.startedAt, gym: s.gymName || "", add: add,
-                      w: w, reps: reps, e1: est1RM(w, reps)};
+                      w: w, reps: reps, rpe: isFinite(rpe) && rpe > 0 ? rpe : null,
+                      toFail: repsToFailure(st), e1: e1rmOfSet(st, add)};
         if(!rec.top || w > rec.top.w || (w === rec.top.w && reps > rec.top.reps)) rec.top = when;
         if(!rec.best1 || when.e1 > rec.best1.e1) rec.best1 = when;
         if(!rec.mostReps || reps > rec.mostReps.reps) rec.mostReps = when;
@@ -20312,6 +20347,29 @@ function recLineHTML(label, rec, main){
     <span class="rb-w">${esc(fmtDate(rec.date))}${gym}${implement}</span>
   </div>`;
 }
+/* A MAX YOU HAVE ACTUALLY TESTED OUTRANKS ONE THE APP INFERRED, and until now there was
+   nowhere to say so. An estimate can only ever be as good as the heaviest set in the log:
+   if the top set on record is a moderate one, no formula reaches the single you know you
+   have, and the app repeating a low number back at you is the app being confidently
+   wrong. So the record book takes yours — the same figure the percentage plans use, so
+   saying it once serves both — and shows the estimate underneath it as what it is. */
+function recTestedHTML(r){
+  const rec = maxStore()[nrm(r.name)];
+  const w = rec && parseFloat(rec.w);
+  const has = isFinite(w) && w > 0;
+  const est = r.best1 ? Math.round(r.best1.e1) : 0;
+  const gap = has && est > 0 ? Math.round(((w - est) / est) * 100) : null;
+  return `<div class="rb-line rb-tested">
+    <span class="rb-k">Tested 1RM</span>
+    <span class="rb-v num">${has ? esc(fmtLoad(w)) : "\u2014"}</span>
+    <span class="rb-w">${has
+      ? esc("you set this" + (rec.at ? " \u00b7 " + fmtDateShort(dayStr(rec.at)) : "")
+            + (gap != null && Math.abs(gap) >= 5
+               ? " \u00b7 " + Math.abs(gap) + "% " + (gap > 0 ? "above" : "below") + " the estimate" : ""))
+      : "the estimate below is only as good as your heaviest logged set"}
+      <button class="linklike" data-setmax="${esc(r.name)}">${has ? "change" : "add yours"}</button></span>
+  </div>`;
+}
 function viewRecords(){
   const all = buildRecordBook();
   const q = nrm(RECORDS_Q || "");
@@ -20327,7 +20385,11 @@ function viewRecords(){
   h += `<div class="sub" style="margin:0 2px 12px;font-size:12.5px;color:var(--faint)">Lifetime bests from
     every finished session. Each one says where and when it happened, and what the implement weighed —
     a record set on a 45 lb bar and one set on a Smith carriage are not the same number, and the app
-    keeps them apart.</div>
+    keeps them apart.<br><br>
+    The estimated 1RM reads your RPE as well as your reps: a set of eight at RPE 7 had three left in
+    it, so it is worked out as the eleven it would have been. It can still only see sets you have
+    logged — if you have a heavier single than anything in here, put it in as your tested max and it
+    takes the top line.</div>
     <div class="field" style="margin:0 0 14px"><input id="rbSearch" placeholder="Find a movement"
       autocomplete="off" value="${esc(RECORDS_Q)}"></div>`;
   if(!list.length) h += `<div class="sub" style="margin:6px 2px">Nothing matching “${esc(RECORDS_Q)}”.</div>`;
@@ -20338,8 +20400,10 @@ function viewRecords(){
         <span class="sub num">${r.sessions} session${r.sessions===1?"":"s"}</span></div>
       ${bw ? recLineHTML("Most reps", r.mostReps, r.mostReps ? r.mostReps.reps + " reps" : "")
            : recLineHTML("Heaviest", r.top, r.top ? fmtLoad(r.top.w) + " × " + r.top.reps : "") +
+             recTestedHTML(r) +
              recLineHTML("Best estimated 1RM", r.best1, r.best1
-               ? fmtLoad(Math.round(r.best1.e1)) + "  (" + fmtLoad(r.best1.w) + " × " + r.best1.reps + ")" : "") +
+               ? fmtLoad(Math.round(r.best1.e1)) + "  (" + fmtLoad(r.best1.w) + " × " + r.best1.reps
+                 + (r.best1.rpe ? " @ RPE " + r.best1.rpe : "") + ")" : "") +
              recLineHTML("Most reps", r.mostReps, r.mostReps
                ? r.mostReps.reps + " × " + fmtLoad(r.mostReps.w) : "")}
       <div class="rb-tot num">${r.sets} sets · ${Math.round(r.reps)} reps${
