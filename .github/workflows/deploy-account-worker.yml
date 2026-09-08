@@ -1,0 +1,95 @@
+name: Deploy the account Worker
+
+# The account service is the one Worker in this repo that is NOT wired to
+# Cloudflare's git integration — it has its own config because it needs a KV
+# binding the plan reader must never have. Deploying it has therefore meant a
+# terminal and `wrangler deploy`, which is a poor fit for a fix that needs to go
+# out from a phone.
+#
+# Needs two repository secrets, under
+# Settings -> Secrets and variables -> Actions:
+#
+#   CLOUDFLARE_API_TOKEN    a token with Workers Scripts: Edit
+#   CLOUDFLARE_ACCOUNT_ID   the 32 characters from your dashboard URL
+#
+# It does NOT touch the Worker's own secrets. VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY
+# and VAPID_SUBJECT are stored on Cloudflare and survive a deploy untouched, so
+# push keeps working across releases.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Stop before touching production if the deploy could only half work.
+      - name: Check the secrets are set
+        id: secrets
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -n "$CF_TOKEN" ]   || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CF_ACCOUNT" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            exit 1
+          fi
+          echo "All required secrets are present."
+
+      - name: Deploy
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@4 deploy proxy/accountworker.js \
+            --name element26-accounts \
+            --config wrangler.accounts.toml 2>&1 | tee deploy.log
+
+      # Runs whatever happened, so the summary always says something true.
+      - name: Summarise the outcome
+        if: always()
+        env:
+          MISSING: ${{ steps.secrets.outputs.missing }}
+        run: |
+          {
+            echo "### Element 26 account Worker"
+            echo
+
+            if [ -n "$MISSING" ]; then
+              echo "**Nothing was deployed.** These repository secrets are not set:"
+              echo
+              for name in $MISSING; do echo "- \`$name\`"; done
+              echo
+              echo "Add them under **Settings → Secrets and variables → Actions**, then run this again."
+              exit 0
+            fi
+
+            url=$(grep -Eo 'https://[a-z0-9.-]*workers\.dev' deploy.log 2>/dev/null | head -1)
+            if [ -n "$url" ]; then
+              echo "Deployed to **$url**"
+            else
+              echo "The deploy step did not print a URL. Open it above for the reason."
+            fi
+            echo
+            if grep -q "E26_ACCOUNTS" deploy.log 2>/dev/null; then
+              echo "The KV binding came up:"
+              echo
+              echo '```'
+              grep -A 4 "bindings" deploy.log | head -8
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

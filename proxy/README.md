@@ -149,6 +149,12 @@ The repo already has `wrangler.accounts.toml` at its root with a placeholder for
 wrangler deploy proxy/accountworker.js --name element26-accounts --config wrangler.accounts.toml
 ```
 
+Or from a browser, with no terminal at all: **Actions → Deploy the account Worker → Run
+workflow**. That runs the same command on a GitHub runner, and needs two repository
+secrets — `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit) and `CLOUDFLARE_ACCOUNT_ID`.
+It does not touch the Worker's own secrets: the VAPID keys live on Cloudflare and
+survive a deploy.
+
 Add the origin you serve the app from to `ALLOWED_ORIGINS` at the top of
 `accountworker.js`, then set `E26_API` near the top of `index.html` to the Worker's
 URL. **No secret goes in the page** — the whole design is that the page holds an
