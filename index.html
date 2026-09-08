@@ -4404,7 +4404,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.3";
+const APP_VERSION = "14.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -16819,6 +16819,7 @@ function viewActiveSession(){
     ${voiceSupported() ? `<div class="voice-strip"><span class="voice-dot"></span>
       <span class="voice-say"><span id="voiceHeard">Listening… <b>weight</b> for <b>reps</b> at <b>effort</b>
         — “one twenty for eight at eight”</span></span>
+      <button class="linklike voice-help" id="voiceModeBtn"></button>
       <button class="linklike voice-help" id="voiceHelpBtn">how to say it</button></div>` : ""}
   </div>`;
   if(a.gymPlan && a.gymPlan.swaps.length){
@@ -19439,6 +19440,13 @@ function voiceToDigits(text){
     const fold = foldNumberRun(run);
     let v = fold.value;
     let next = k + fold.used;
+    /* "EIGHT POINT FIVE" IS ONE NUMBER. Effort gets said in halves more than anything
+       else does, and an engine that writes it out in words rather than as 8.5 was
+       leaving the 8 as a weight and the 5 as an RPE. */
+    if((words[next] === "point" || words[next] === "decimal") && Number.isInteger(v)){
+      const d = numOf(words[next + 1]);
+      if(d != null && d >= 0 && d <= 9){ v = v + d / 10; next += 2; }
+    }
     // halves, for effort: "eight and a half" survives the `and` strip as "eight a half"
     const rest2 = words.slice(next, next + 2).join(" ");
     if(/^(a )?half\b/.test(rest2)){ v += 0.5; next += /^a /.test(rest2) ? 2 : 1; }
@@ -19459,13 +19467,20 @@ function voiceToDigits(text){
    set with a missing weight, it is a set with no weight, and the box should stay empty
    rather than being filled with a zero that then gets multiplied into your volume. */
 function parseSetPhrase(text){
-  const t = voiceToDigits(text);
+  /* WHAT THE ENGINE MAKES OF "RPE". Almost never those three letters: it comes back as
+     "r p e", "are p e", "arpee", "rp", or the word people mean by it. All of them are
+     the same instruction, so they are spelled the same way before anything is read. */
+  const t = voiceToDigits(text)
+    .replace(/\br\s*p\s*e\b/g, "rpe")
+    .replace(/\b(?:are|our|hour|a)\s+p\s*e\b/g, "rpe")
+    .replace(/\b(?:arpee|arpy|arpi|rpg|rpi|rps|rp)\b/g, "rpe")
+    .replace(/\b(?:effort|difficulty)\b/g, "rpe");
   const num = "(\\d+(?:\\.\\d+)?)";
   const out = {weight:null, reps:null, rpe:null, tick:false, same:false, bw:false,
                heard:String(text||"").trim()};
   if(/\b(same|as last|repeat)\b/.test(t)) out.same = true;
   if(/\b(done|log it|logged|tick|check|banked)\b/.test(t)) out.tick = true;
-  if(/\b(body ?weight|bodyweight|no weight|just me|unloaded|nothing)\b/.test(t)) out.bw = true;
+  if(/\b(body ?weight|bodyweight|body only|no weight|no added weight|nothing added|just me|unloaded|unweighted|bw)\b/.test(t)) out.bw = true;
   let body = t;
   const take = re=>{
     const m = body.match(new RegExp(re));
@@ -19498,6 +19513,19 @@ function parseSetPhrase(text){
   }
   // an RPE can only be 1-10; anything bigger was something else that ran into "at"
   if(out.rpe != null && (out.rpe < 1 || out.rpe > 10)) out.rpe = null;
+  /* AND WHATEVER IS STILL LYING THERE. People do not speak the grammar — "bodyweight for
+     seven reps, eight and a half" has no word attached to the effort at all, and losing
+     it silently is how a set gets banked with a number missing that was said out loud.
+     So a number left over once the weight and the reps are accounted for is read as the
+     effort, and a half — 8.5, 9.5 — is taken as one even on its own, because nothing
+     else in a set is ever said in halves. */
+  if(out.rpe == null){
+    const spare = (body.match(/\d+(?:\.\d+)?/g) || []).map(parseFloat)
+      .filter(v=> v !== out.weight && v !== out.reps && v >= 1 && v <= 10);
+    const half = spare.find(v=> !Number.isInteger(v));
+    if(half != null) out.rpe = half;
+    else if(spare.length === 1 && (out.reps != null || out.same)) out.rpe = spare[0];
+  }
   // said out loud, so it settles the question: no weight, rather than a missing one
   if(out.bw) out.weight = null;
   return out;
@@ -19538,6 +19566,40 @@ function voicePaused(){
   const a = S.active;
   return !!(a && a.restTimer && !restServed());
 }
+/* THE MICROPHONE AND THE MUSIC CANNOT BOTH HAVE THE PHONE.
+
+   There is no web setting for this and there is no trick around it: on a phone, opening
+   a recogniser takes the audio session, and whatever was playing stops or ducks until it
+   is closed again. Hands-free listening holds the microphone for the whole workout, so
+   it holds the music for the whole workout too — which is fine if you train in silence
+   and useless if you do not.
+
+   So it is a choice rather than a default. Tap-to-talk opens the microphone when you tap
+   the strip, takes one phrase, and closes it again: the music stops for about as long as
+   it takes to say "one twenty for eight" and then comes back on its own. It costs a tap
+   per set and it is the only honest way to have both. */
+function voiceMode(){ return trainPrefs().voiceMode === "talk" ? "talk" : "open"; }
+function setVoiceMode(m){
+  trainPrefs().voiceMode = (m === "talk" ? "talk" : "open");
+  save();
+  if(VOICE_ON){
+    voiceEngineStop();
+    voiceSync();
+    toast(m === "talk" ? "Tap to talk — your music keeps playing between sets"
+                       : "Hands-free — the mic stays open, so music will stay paused", "good");
+  }
+  voiceHint();
+}
+/* ONE PHRASE, THEN GIVE THE AUDIO BACK. Only in tap-to-talk: it closes the engine as soon
+   as it has something, and after twelve silent seconds if it never does, so a forgotten
+   tap does not sit on the music for the rest of the session. */
+let VOICE_HOLD = null;
+function voiceHoldTimer(on){
+  clearTimeout(VOICE_HOLD);
+  VOICE_HOLD = on ? setTimeout(()=>{
+    if(voiceMode() === "talk" && VOICE_ON){ voiceEngineStop(); voiceHint(); }
+  }, 12000) : null;
+}
 function voiceEngineStop(){
   if(VOICE_REC){
     VOICE_REC.onend = null;               // a deliberate stop must not restart itself
@@ -19576,6 +19638,12 @@ function voiceSync(){
   document.body.classList.toggle("voice-live", VOICE_ON);
   document.body.classList.toggle("voice-rest", VOICE_ON && voicePaused());
   if(!VOICE_ON || !S.active){ voiceEngineStop(); voiceHeartbeat(false); voiceHint(); return; }
+  if(voiceMode() === "talk"){
+    // the microphone opens on your tap and closes after the phrase; nothing to keep alive
+    voiceHeartbeat(false);
+    voiceHint();
+    return;
+  }
   voiceEngineStart();
   voiceHeartbeat(true);
   voiceHint();
@@ -19623,9 +19691,15 @@ function voiceHint(){
       + esc(fmtClock(restLeft())) + " to go)";
     return;
   }
-  if(VOICE_LIVE){ el.innerHTML = "Listening for " + setOf(); return; }
+  if(VOICE_LIVE){
+    el.innerHTML = "Listening for " + setOf()
+      + (voiceMode() === "talk" ? " \u2014 it closes once you've said it" : "");
+    return;
+  }
   if(strip) strip.classList.add("tap-me");
-  el.innerHTML = "Tap here to listen for " + setOf();
+  el.innerHTML = voiceMode() === "talk"
+    ? "Tap to talk \u2014 " + setOf() + ", music keeps playing"
+    : "Tap here to listen for " + setOf();
 }
 function voiceApply(said){
   const p = parseSetPhrase(said);
@@ -19679,8 +19753,10 @@ function voiceApply(said){
   if(p.bw){
     put("weight", "");
     if(st) st.noWeight = true;
+    en.noWeight = true;            // said once, true for the rest of the exercise
   } else if(p.weight != null){
     if(st) delete st.noWeight;
+    delete en.noWeight;            // a belt went on: it wants a number again
     put("weight", p.weight);
   }
   if(p.reps != null) put("reps", p.reps);
@@ -19730,6 +19806,8 @@ function openVoiceHelp(then){
     <div class="vh-note">Or spell it out: <b>“ten pounds, five reps, five RPE”</b>.</div>
     <div class="vh-note">Nothing on the bar? Say <b>“bodyweight”</b> and the weight stays empty.</div>
     <div class="vh-note">It listens between sets and goes quiet while you rest.</div>
+    <div class="vh-note">Playing music? The mic pauses it while it's open — tap
+      <b>tap to talk</b> on the strip and it only opens for the second you're speaking.</div>
     <div class="btn-row" style="margin-top:16px"><button class="btn" id="vhGo" style="flex:1">Start listening</button></div>
     <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Not now</button></div>`);
   $("#modal").querySelector("#vhGo").onclick = ()=>{ hideModal(); if(then) then(); };
@@ -19762,6 +19840,7 @@ function voiceEngineStart(){
       const phrase = said.trim();
       said = "";
       if(phrase) voiceApply(phrase);
+      if(voiceMode() === "talk" && phrase){ voiceEngineStop(); voiceHoldTimer(false); }
       setTimeout(voiceHint, 1500);        // then back to saying what it is waiting for
       return;
     }
@@ -19776,13 +19855,14 @@ function voiceEngineStart(){
       if(!VOICE_ON) return;
       said = "";
       voiceApply(pending);
+      if(voiceMode() === "talk"){ voiceEngineStop(); voiceHoldTimer(false); }
       setTimeout(voiceHint, 1500);
     }, 1200);
   };
   /* THE ENGINE'S OWN WORD FOR "I AM OPEN". Everything the strip says follows this rather
      than the intention behind it, because a microphone that failed to open silently is
      exactly the case that has to be visible. */
-  rec.onstart = ()=>{ VOICE_LIVE = true; VOICE_TRIES = 0; voiceHint(); };
+  rec.onstart = ()=>{ VOICE_LIVE = true; VOICE_TRIES = 0; voiceHoldTimer(voiceMode() === "talk"); voiceHint(); };
   rec.onaudiostart = ()=>{ VOICE_LIVE = true; voiceHint(); };
   rec.onerror = ev=>{
     if(ev && (ev.error === "not-allowed" || ev.error === "service-not-allowed")){
@@ -19795,6 +19875,7 @@ function voiceEngineStart(){
     VOICE_REC = null;
     VOICE_LIVE = false;
     if(!VOICE_ON || !S.active){ voiceHint(); return; }
+    if(voiceMode() === "talk"){ voiceHint(); return; }   // it closed because it was done
     /* Straight back up. A session ending is almost always the engine's own timer, not a
        decision — and the heartbeat is watching anyway, so this is just the fast path. */
     VOICE_TRIES++;
@@ -21011,13 +21092,29 @@ function bind(){
           if(rIn0) rIn0.focus();
           return;
         }
-        if(loadNeededFor(entry) && !st.noWeight){
+        if(loadNeededFor(entry) && !st.noWeight && !entry.noWeight){
           const wNow = String((wIn0 && wIn0.value) || st.weight || "").trim()
             || String((wIn0 && wIn0.placeholder !== unitWord() && wIn0.placeholder) || "").trim();
           if(!wNow){
-            nudge("What did you lift? " + esc(entry.name) + " needs a weight");
-            if(wIn0) wIn0.focus();
-            return;
+            /* A PULL-UP CAN BE DONE WITH NOTHING ON. loadNeededFor() says a Weighted
+               Pull-Up wants a number because that is what the name promises — but on the
+               day you do it unloaded there has to be a way past, or the set cannot be
+               banked at all. So the first tap asks and the second one accepts, and the
+               answer is remembered for the rest of the exercise rather than asked again
+               on set three. Movements that genuinely cannot happen without a load — a
+               bench press, a leg press — never match, and keep asking. */
+            const canBW = BODYWEIGHT_RE.test(entry.name);
+            if(canBW && st._askedW){
+              st.noWeight = true;
+              entry.noWeight = true;
+              toast("Logging " + esc(entry.name) + " as bodyweight from here");
+            } else {
+              st._askedW = canBW;
+              nudge("What did you lift? " + esc(entry.name) + " needs a weight"
+                    + (canBW ? " \u2014 or tap \u2713 again to log it as bodyweight" : ""));
+              if(wIn0) wIn0.focus();
+              return;
+            }
           }
         }
       }
@@ -21433,6 +21530,14 @@ function bind(){
     voiceSync();
   } else if(VOICE_ON && !S.active){
     voiceStop();                       // the session ended; stop listening to the room
+  }
+  const vM = $("#voiceModeBtn");
+  if(vM){
+    vM.textContent = voiceMode() === "talk" ? "hands-free" : "tap to talk";
+    vM.title = voiceMode() === "talk"
+      ? "Hold the mic open all session (music will stay paused)"
+      : "Open the mic only when you tap (your music keeps playing)";
+    vM.onclick = (ev)=>{ ev.stopPropagation(); setVoiceMode(voiceMode() === "talk" ? "open" : "talk"); };
   }
   const vH = $("#voiceHelpBtn");
   if(vH) vH.onclick = (ev)=>{ ev.stopPropagation(); voiceStop(); openVoiceHelp(()=> voiceStart(true)); };
