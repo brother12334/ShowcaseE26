@@ -933,6 +933,20 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   padding:6px 9px;margin:0 0 8px;line-height:1.4;
 }
 input.ph-plan::placeholder{color:var(--acc);opacity:.75}
+.pw-deload{
+  margin-top:9px;padding:9px 11px;border-radius:9px;
+  border:1px solid var(--acc);background:var(--acc-soft);color:var(--text);
+  font-size:13.5px;line-height:1.45;
+}
+.pw-strip{
+  display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;
+  margin:0 0 12px;padding:9px 12px;border-radius:10px;
+  border:1px solid var(--line);background:var(--card2);
+  font-size:13px;line-height:1.4;color:var(--dim);
+}
+.pw-strip b{font:11.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--acc)}
+.pct-line{border-left-color:var(--dim)}
+.pct-line .linklike{margin-left:6px}
 .set{display:grid;grid-template-columns:44px 1fr 1fr 86px 48px;gap:7px;align-items:center;margin-bottom:8px}
 .set .idx{color:var(--faint);font:14px var(--mono);text-align:center;display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.1}
 .side-chip{
@@ -4421,7 +4435,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.5";
+const APP_VERSION = "14.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6861,6 +6875,8 @@ function libraryGearFor(name){
 const BODYWEIGHT_RE = /\b(push[- ]?up|pull[- ]?up|chin[- ]?up|dip|plank|hanging|knee raise|leg raise|sit[- ]?up|crunch|bodyweight|inverted row|nordic|glute bridge|superman|mountain climber|burpee|muscle[- ]?up|handstand|pistol|hyperextension|back extension|calf raise \(bodyweight\))\b/i;
 function loadNeededFor(en){
   if(!en || !en.name) return false;
+  // a load written as a percentage is still a load the plan expects on the bar
+  if(pctSpecFor(en)) return true;
   // the plan wrote a starting load into this slot, so a load is what it expects
   // (planWeight on a live session entry, weight on a programme one — see planLoadFor)
   if(en.planWeight != null && en.planWeight !== "") return true;
@@ -7456,6 +7472,8 @@ function migrate(){
     if(filled) saveQuiet();
   }
   if(S.importMeta === undefined) S.importMeta = null;
+  // one-rep maxes, for the plans that write their loads as percentages of one
+  if(!S.maxes || typeof S.maxes !== "object") S.maxes = {};
   /* EVERYBODY WHO ALREADY HAS A PLAN GETS ITS CLASSIFICATION, without re-reading a
      document and without a Gemini request. Written down rather than only computed on
      screen because the admin console reads the synced blob, not this function — an
@@ -12952,7 +12970,8 @@ function aiSystemPrompt(){
 "7. 'rpe' or 'rir' ONLY if the document gives them, one per set in order. Never invent effort targets and never convert one into a guess. If the document says 'last set to failure' or 'leave 2 in the tank on the top set', put that in effortNote and leave the numeric arrays empty.",
 "8. REST. Fill 'restSeconds' on EVERY exercise the document prescribes a rest for, including when it is prescribed once for all of them. Plans very often state rest ONCE, at the top or under a day heading — 'Rest 2-3 min between sets', 'rest 90s', '2 min compounds / 60s isolation', 'Rest as needed on the main lifts' — and that is a rest for every exercise it covers, not an absence of one. Read it, and write the number onto each exercise it applies to. Where a rule names categories, apply it per category: 'compounds' means the multi-joint lifts of that session, 'isolation' or 'accessories' the single-joint ones. Where a rest is stated for the whole plan or a whole day AS WELL as on individual rows, the row wins for that row. Give a range as its LOW number ('2-3 min' is restSeconds 120) and put the words in restNote. Also set 'defaultRestSeconds' at the top level, and 'restSeconds' on a day, whenever the document states a blanket rest at that level — even after you have already copied it onto the exercises. Only omit all of it if the document genuinely never mentions rest.",
 "9. 'tempo' exactly as written ('3-1-1', '4s eccentric').",
-"10. 'weight' only when an actual load is stated. Give the number as written and set the document's unit in 'unit' at the top level; put percentages of 1RM, band colours or 'moderate' in weightNote instead, with weight null.",
+"10. 'weight' only when an actual load is stated. Give the number as written and set the document's unit in 'unit' at the top level. Band colours, 'moderate', 'heavy' and anything else that is not a number go in weightNote with weight null.",
+"10b. PERCENTAGES ARE NOT NOTES. Where the load is prescribed as a percentage \u2014 '75%', '@85% 1RM', '70% of your training max', a percentage column, or a top-level unit of percent \u2014 put the figure in 'percent' as a FRACTION (75% is 0.75) and leave 'weight' null. Set 'percentOf' to '1rm' or 'tm' when the document says which, and 'unstated' when it does not. The app multiplies these by the lifter's own max, so a percentage left in prose is a load the plan loses. Where the sets of one exercise are prescribed at different percentages, use the first working set's and put the full progression in weightNote.",
 "11. 'warmupSets' are the warm-up sets THIS DOCUMENT prescribes for this exercise: label them as written ('bar', '50%', '95 lb'), with percent as a fraction (0.5) where it is a percentage, and reps if given. 'warmupNote' is any warm-up instruction in words. If the document prescribes no warm-ups, leave the array empty and set stated.warmups false. The app has its own warm-up behaviour and it must not be applied to a plan that specifies its own.",
 "12. Techniques, each only when the document says so: 'supersetGroup' and 'circuitGroup' are a shared label for movements performed together (use the same label on each member, in the order performed); 'progression' is any progression instruction attached to this exercise, in the document's own words.",
 "12b. 'techniques' is the list of intensity techniques this exercise prescribes. Use ONLY these keys: 'lengthened' (lengthened or stretch partials, partials in the stretched position), 'dropset' (drop sets, strip sets, running the rack), 'myoreps' (myo-reps, myo rep match), 'restpause' (rest-pause, DC-style rest pause), 'cluster' (cluster sets, intra-set rest), 'amrap' (as many reps as possible, reps to technical limit, '8+' or 'AMRAP' in the rep column), 'failure' (taken to failure, to complete failure). For each, 'detail' is the document's own words about how to run it — the number of drops, the mini-set reps, the percentage dropped — verbatim and short, or an empty string if it just names the technique. Do not add a technique because the exercise looks like it would suit one, and do not use 'failure' for an RPE 10 or RIR 0 target that is already captured in the rpe or rir arrays.",
@@ -13088,6 +13107,12 @@ const AI_PLAN_SCHEMA = {
                 restNote:       {type:"STRING"},
                 tempo:          {type:"STRING"},
                 weight:         {type:"NUMBER", nullable:true},
+                /* A LOAD WRITTEN AS A PERCENTAGE IS STILL A LOAD. Kept as a number the app
+                   can multiply a max by, rather than only as words in a note. */
+                percent:        {type:"NUMBER", nullable:true,
+                                 description:"the percentage this set is prescribed at, as a fraction (0.75 for 75%), when the document gives one"},
+                percentOf:      {type:"STRING", enum:["1rm","tm","unstated"],
+                                 description:"what the percentage is OF: a true one-rep max, or a training max, if the document says"},
                 weightNote:     {type:"STRING"},
                 warmupSets:{type:"ARRAY", items:{type:"OBJECT",
                   properties:{label:{type:"STRING"}, percent:{type:"NUMBER", nullable:true}, reps:{type:"STRING"}},
@@ -13112,7 +13137,7 @@ const AI_PLAN_SCHEMA = {
               },
               required:["name","sets","reps","kind"],
               propertyOrdering:["name","sets","setsArePerSide","reps","rpe","rir","effortNote","kind",
-                                "restSeconds","restNote","tempo","weight","weightNote","warmupSets",
+                                "restSeconds","restNote","tempo","weight","percent","percentOf","weightNote","warmupSets",
                                 "warmupNote","unilateral","alternating","sideInstruction","supersetGroup",
                                 "circuitGroup","techniques","progression","note"]
             }
@@ -13416,6 +13441,21 @@ function aiExercise(x, ctx){
     }
   }
 
+  /* THE PERCENTAGE, FROM WHEREVER THE DOCUMENT PUT IT. In the field made for it; or as a
+     'weight' of 75 on a plan whose unit is percent, which is how a percentage table reads
+     when it is transcribed column-for-column; or, failing both, out of the words. */
+  let pctSpec = null;
+  const pctNum = Number(x.percent);
+  if(isFinite(pctNum) && pctNum > 0){
+    const f = pctNum > 1.2 ? pctNum / 100 : pctNum;         // 75 and 0.75 both mean 75%
+    if(f >= 0.3 && f <= 1.2) pctSpec = {pct: Math.round(f * 1000) / 1000,
+                                        of: x.percentOf === "tm" ? "tm" : "1rm"};
+  }
+  if(!pctSpec && ctx.unit === "percent" && isFinite(w) && w >= 30 && w <= 120){
+    pctSpec = {pct: Math.round(w) / 100, of: x.percentOf === "tm" ? "tm" : "1rm"};
+  }
+  if(!pctSpec) pctSpec = parsePctSpec(x.weightNote || "") || parsePctSpec(x.note || "", true);
+
   const warmups = (Array.isArray(x.warmupSets) ? x.warmupSets : [])
     .map(ws=>{
       if(!ws) return null;
@@ -13456,6 +13496,7 @@ function aiExercise(x, ctx){
   ]);
 
   const extra = {slotKind: kind, imported: true};
+  if(pctSpec){ extra.pct = pctSpec.pct; extra.pctOf = pctSpec.of; }
   if(tech.length) extra.tech = tech.slice(0, 4);
   if(rest) extra.rest = rest;
   if(warmups.length) extra.warmups = warmups.slice(0, 6);
@@ -15105,6 +15146,101 @@ function planKindCardHTML(){
     }</div>
   </div>`;
 }
+/* =====================================================================
+   PLANS THAT CHANGE WEEK BY WEEK
+
+   The importer has always captured phases, deload weeks, testing weeks and the
+   week-to-week changes — it is told to, in as many words — and the app did nothing with
+   any of it beyond printing the list. That is the whole difference between running a
+   twelve-week block and running its first week twelve times: a periodised programme is a
+   sequence, and an app that cannot say which week you are in cannot run one.
+
+   It cannot execute free-text instructions and does not pretend to — "add a set to the
+   main lifts" is a sentence, not a schema. What it CAN do is know which week you are in
+   and put that week's own words in front of you, on the day, instead of in a list you
+   read once at import. That turns the instructions the plan already gave into something
+   that arrives at the right time.
+
+   The week is counted from when the plan started, which the app already tracks for other
+   reasons. A plan that names its length wraps at the end rather than running off it — a
+   twelve-week block repeated is what people actually do — and one that names no length
+   just keeps counting. */
+function planWeekNow(){
+  const m = S.importMeta;
+  const wk = Math.floor(weeksSince(planStartAt())) + 1;
+  if(!(wk > 0)) return null;
+  const total = m && m.weeks ? m.weeks : null;
+  return {week: total ? ((wk - 1) % total) + 1 : wk, of: total, raw: wk,
+          cycle: total ? Math.floor((wk - 1) / total) + 1 : 1};
+}
+/* Does a week label from the document — "3", "week 3", "4-6", "every 4th" — cover this
+   week? Written to be conservative: anything it cannot read matches nothing rather than
+   matching everything, because a deload announced in the wrong week is worse than one
+   that has to be read off the list. */
+function weekLabelCovers(label, wk){
+  const t = String(label || "").toLowerCase();
+  if(!t || !(wk > 0)) return false;
+  const every = t.match(/every\s*(\d+)(?:st|nd|rd|th)?/);
+  if(every){ const n = parseInt(every[1], 10); return n > 0 && wk % n === 0; }
+  const range = t.match(/(\d+)\s*(?:-|–|to|through)\s*(\d+)/);
+  if(range) return wk >= parseInt(range[1], 10) && wk <= parseInt(range[2], 10);
+  const list = t.match(/\d+/g);
+  return !!list && list.some(n=> parseInt(n, 10) === wk);
+}
+/* Everything the document says about the week you are actually in. */
+function planWeekNotes(){
+  const m = S.importMeta, w = planWeekNow();
+  if(!m || !w) return null;
+  const wk = w.week;
+  const out = {week: w, phase: null, deload: null, testing: null, changes: []};
+  (m.phases || []).forEach(p=>{ if(!out.phase && weekLabelCovers(p.weeks, wk)) out.phase = p; });
+  (m.deloadWeeks || []).forEach(p=>{ if(!out.deload && weekLabelCovers(p.week, wk)) out.deload = p; });
+  (m.testingWeeks || []).forEach(p=>{ if(!out.testing && weekLabelCovers(p.week, wk)) out.testing = p; });
+  (m.weeklyChanges || []).forEach(p=>{ if(weekLabelCovers(p.week, wk)) out.changes.push(p); });
+  if(!out.phase && !out.deload && !out.testing && !out.changes.length && !w.of) return null;
+  return out;
+}
+/* THE SAME THING IN ONE LINE, ON THE SCREEN YOU START FROM. The card belongs in Program,
+   where you read the plan; the instruction belongs on Today, where you act on it. A week
+   with nothing particular to say about it shows nothing at all rather than a counter for
+   its own sake. */
+function planWeekStripHTML(){
+  const n = planWeekNotes();
+  if(!n) return "";
+  const said = [];
+  if(n.deload)  said.push("your plan calls this a deload");
+  if(n.testing) said.push("testing week");
+  n.changes.forEach(c=> said.push(c.change));
+  if(!said.length && n.phase) said.push(n.phase.name);
+  if(!said.length) return "";
+  const w = n.week;
+  return `<div class="pw-strip"><b>Week ${w.week}${w.of ? " of " + w.of : ""}</b>
+    <span>${esc(said.join(" \u00b7 "))}</span></div>`;
+}
+function planWeekCardHTML(){
+  const n = planWeekNotes();
+  if(!n) return "";
+  const w = n.week;
+  const head = "Week " + w.week + (w.of ? " of " + w.of : "")
+             + (w.of && w.cycle > 1 ? " \u00b7 time through " + w.cycle : "");
+  let body = "";
+  if(n.phase) body += `<div class="sub" style="margin:5px 0 0"><b>${esc(n.phase.name)}</b>${
+    n.phase.focus ? " \u2014 " + esc(n.phase.focus) : ""}</div>`;
+  n.changes.forEach(c=>{ body += `<div class="sub" style="margin:5px 0 0">${esc(c.change)}</div>`; });
+  if(n.testing) body += `<div class="sub" style="margin:5px 0 0"><b>Testing week.</b>${
+    n.testing.instruction ? " " + esc(n.testing.instruction) : ""}</div>`;
+  if(n.deload) body += `<div class="pw-deload"><b>Your plan calls this a deload week.</b>${
+    n.deload.instruction ? " " + esc(n.deload.instruction) : ""}
+    ${deloadActive() ? `<div class="sub" style="margin:6px 0 0">A deload is running.</div>`
+      : `<button class="btn ghost small" id="pwDeload" style="margin-top:8px">Start the deload</button>`}</div>`;
+  if(!body) return "";
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>${esc(head)}</h3>
+    </div>
+    <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">What your plan says about this week, in its own words.</div>
+    ${body}</div>`;
+}
 function importMetaCardHTML(){
   const m = S.importMeta;
   if(!m) return "";
@@ -16604,6 +16740,7 @@ function viewToday(){
   let h = `<div class="hdr"><h1>${brandMark()}</h1><span class="hdr-r">${moonBtn}<span class="date num">${fmtDate(todayStr())}</span></span></div>`;
 
   h += plateStrip();
+  h += planWeekStripHTML();
 
   /* THE SESSION LIVES IN ITS OWN TAB NOW. What Today has to say while one is running is
      one thing — it is over there, carry on — and saying it in one card rather than
@@ -16905,6 +17042,7 @@ function viewActiveSession(){
         </span>
       </div>`;
     h += swapNoteHTML(en);
+    h += pctLineHTML(en);
     h += planChangeLineHTML(en);
     h += exNoteLineHTML(en);
     h += supersetNoteHTML(supersetInfo(a.entries, ei));
@@ -20319,6 +20457,7 @@ function viewProgram(){
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
   h += planKindCardHTML();
+  h += planWeekCardHTML();
   h += importMetaCardHTML();
   DAYS.forEach(wid=>{
     const m = dayMeta(wid);
@@ -20347,7 +20486,11 @@ function viewProgram(){
         + (asty === "side"  ? ' <span class="uni-badge">L / R</span>' : '')
         + (asty === "cross" ? ' <span class="uni-badge">crossover</span>' : '')
         + (e.alt ? ' <span class="alt-badge">⇄ '+esc(e.alt.name)+'</span>' : '');
-      let meta = `${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}`;
+      const pct = pctLoadFor(e);
+      let meta = `${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${
+        pct ? " · " + esc(Math.round(pct.pct*100)) + "%"
+              + (pct.load != null ? " \u00b7 " + esc(fmtLoad(pct.load)) : " \u00b7 set your max")
+            : e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}`;
       /* "next Push day: X" is a promise, and for a slot you choose it is one the app
          cannot keep. It says what it is instead: either, your call. */
       const mark = planMarkHTML(e) + (e.alt ? planMarkHTML(e.alt) : "");
@@ -21740,6 +21883,10 @@ function bind(){
       if(b.dataset.fadepick !== "rest") toast("Applied to your programme");
     }
   });
+  document.querySelectorAll("[data-setmax]").forEach(b=> b.onclick = (ev)=>{
+    ev.stopPropagation();
+    openMaxSheet(b.dataset.setmax);
+  });
   document.querySelectorAll("#app [data-flagno]").forEach(b=> b.onclick=()=>{
     dismissFlag(b.dataset.flagno); render(); toast("Dismissed");
   });
@@ -21973,6 +22120,13 @@ function bind(){
     S.wakeTime = null;
     save(); queueSync(); render();
     toast("Wake time cleared, using your sleep target only");
+  };
+  const pwd = $("#pwDeload");
+  if(pwd) pwd.onclick = ()=>{
+    startDeload();
+    if(S.deload) S.deload.reason = "plan";   // the document asked for it, not the app
+    save(); render();
+    toast("Deload week started, as your plan asks");
   };
   const dls2 = $("#startDeloadBtn2");
   if(dls2) dls2.onclick = ()=>{ startDeload(); render(); toast("Deload week started"); };
@@ -22546,7 +22700,18 @@ function planEntry(e, isFinisher, wi, chosenList, side){
       sideMode: e.sideMode || undefined,
       // the prescribed load, carried so the warm-up ramp has something to take a
       // percentage of. Distinct from the per-set weights on entry.sets.
-      planWeight: (e.weight == null ? undefined : e.weight),
+      /* A PERCENTAGE PLAN HAS A PRESCRIBED LOAD TOO — it is just written as an instruction
+         rather than a number, and it is resolved here, once, at Start. Frozen like every
+         other prescription: entering a max mid-session must not retarget the sets you
+         have already done, and the warm-up ramp needs something to take its percentage of
+         or a 5/3/1 session opens with no warm-up at all. */
+      pct:   e.pct   || undefined,
+      pctOf: e.pctOf || undefined,
+      planWeight: (()=>{
+        if(e.weight != null) return e.weight;
+        const p = pctLoadFor(e);
+        return (p && p.load != null) ? p.load : undefined;
+      })(),
       rest: Array.isArray(e.rest) ? e.rest.slice() : undefined,
       superset: e.superset||undefined, supersetEnd: e.supersetEnd||undefined,
       // the techniques the plan attached to this movement, frozen into the session so
@@ -22783,7 +22948,11 @@ const PLAN_FIELDS = [
 const PLAN_PRESCRIPTION_FIELDS = {name:1, sets:1, reps:1, weight:1};
 function planFieldVal(e, k){
   if(!e) return "";
-  if(k === "weight") return (e.weight==null || e.weight==="") ? "bodyweight" : String(e.weight)+" "+unitWord();
+  if(k === "weight"){
+    const p = pctSpecFor(e);
+    if(p) return Math.round(p.pct*100) + "% of " + (p.of === "tm" ? "training max" : "1RM");
+    return (e.weight==null || e.weight==="") ? "bodyweight" : String(e.weight)+" "+unitWord();
+  }
   return String(e[k]==null ? "" : e[k]).trim();
 }
 /* One flat list of what actually differs between two versions of an exercise, including
@@ -23431,8 +23600,13 @@ function openExEditor(wid, idx){
   </div></div>
   <div class="field"><label>Target RPE / starting weight (${unitWord()})</label><div class="duo">
     <input id="f_rpe" value="${esc(e.rpe)}" placeholder="8-9">
-    <input id="f_weight" inputmode="decimal" value="${esc(e.weight??"")}" placeholder="optional">
+    <input id="f_weight" value="${(()=>{ const p = pctSpecFor(e);
+      return p ? esc(Math.round(p.pct*100) + "%" + (p.of === "tm" ? " TM" : "")) : esc(e.weight??""); })()}"
+      placeholder="optional">
   </div></div>
+  <div class="sub" style="margin:-6px 0 12px">A number, or a percentage the way your plan
+    writes it \u2014 <b>75%</b>, or <b>85% TM</b> for a training max. Percentages are worked
+    out against your max for that lift, which the workout card asks for once.</div>
   ${rampBlockHTML("f", Math.max(1, parseInt(e.sets,10) || 3), e.rpes,
       suggestRpeRamp(wid, e.name, e.sets, isNew ? null : idx, e),
       {noSuggest: rpeSugSkipped(e.name)})}
@@ -23528,9 +23702,18 @@ function openExEditor(wid, idx){
       sets: Math.max(1, parseInt($("#f_sets").value,10)||3),
       reps: $("#f_reps").value.trim(),
       rpe: $("#f_rpe").value.trim(),
-      weight: $("#f_weight").value===""?null:parseFloat($("#f_weight").value),
+      weight: null,
       note: $("#f_note").value.trim()
     };
+    /* A PERCENTAGE IS A LOAD, TYPED. "75%" in the weight box is what a written plan says,
+       and refusing it — parseFloat would have quietly stored 75 lb — turns a percentage
+       programme into a very light one. */
+    {
+      const raw = $("#f_weight").value.trim();
+      const p = parsePctSpec(raw);
+      if(p){ ne.pct = p.pct; ne.pctOf = p.of; }
+      else if(raw !== "" && isFinite(parseFloat(raw))) ne.weight = parseFloat(raw);
+    }
     if(!ne.name){ toast("Name it first"); return; }
     /* Rest, the technique and the superset flag are read straight off the form, so what
        the boxes say IS what the plan says. Blank rest means "you decide", which is a real
@@ -25401,6 +25584,49 @@ function restoreSetCuts(){
                                            : n + " set cuts have run their two weeks \u2014 the volume is back"); }
   return n;
 }
+/* ASKING FOR A MAX, once, where the percentage is. Three ways to answer it, because
+   people know their max in three different forms: the number itself, a set they have
+   done (which is arithmetic, not a guess), or the log's own best, offered when there is
+   one. Clearing the box goes back to the estimate rather than to nothing. */
+function openMaxSheet(name){
+  const cur = maxStore()[nrm(name)];
+  const est = (()=>{ const b = bestEverFor(name); return b && b.max1RM > 0 ? Math.round(b.max1RM*2)/2 : null; })();
+  showModal(`<h3>Your ${esc(name)} max</h3>
+    <div class="sub" style="margin:0 0 12px">Your plan writes this lift in percentages, so it
+      needs one number to take them from. A true one-rep max if you know it; otherwise the
+      heaviest set you are sure of and how many reps it was.</div>
+    <div class="field" style="margin:0 0 12px"><label>One-rep max</label>
+      <input id="mxW" inputmode="decimal" value="${cur && cur.w != null ? esc(String(cur.w)) : ""}"
+        placeholder="${est != null ? esc(String(est)) : esc(unitWord())}"></div>
+    <div class="sub" style="margin:10px 0 4px">Or work it out from a set you have done:</div>
+    <div class="btn-row">
+      <div class="field" style="flex:1;margin:0"><label>weight</label><input id="mxSw" inputmode="decimal"></div>
+      <div class="field" style="flex:1;margin:0"><label>reps</label><input id="mxSr" inputmode="numeric"></div>
+      <button class="btn ghost small" id="mxCalc" style="flex:0 0 auto">Work it out</button>
+    </div>
+    ${est != null ? `<div class="sub" style="margin:10px 0 0">Your log's best estimate is
+      <b>${esc(fmtLoad(est))}</b>. Leave the box empty to keep using that.</div>` : ""}
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn" id="mxSave" style="flex:1">Save</button></div>
+    <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`);
+  const m = $("#modal");
+  m.querySelector("#mxCalc").onclick = ()=>{
+    const w = parseFloat(m.querySelector("#mxSw").value);
+    const r = parseFloat(m.querySelector("#mxSr").value);
+    const e1 = est1RM(w, r);
+    if(!(e1 > 0)){ toast("A weight and a rep count, and it'll do the rest", "warn"); return; }
+    m.querySelector("#mxW").value = String(Math.round(e1 * 2) / 2);
+    toast(fmtLoad(w) + " \u00d7 " + r + " works out at about " + fmtLoad(Math.round(e1*2)/2));
+  };
+  m.querySelector("#mxSave").onclick = ()=>{
+    const v = m.querySelector("#mxW").value.trim();
+    setMaxFor(name, v === "" ? 0 : v);
+    hideModal();
+    render();
+    toast(v === "" ? "Back to the estimate from your log"
+                   : esc(name) + " max set to " + fmtLoad(parseFloat(v)));
+  };
+}
 function dismissFlag(id){
   const f = flagLog().find(x=> x && x.id === id);
   if(!f) return;
@@ -26855,6 +27081,112 @@ function techSummary(e){
    Bar-inclusive entries are converted on the way out: the programme records a Smith at
    115 and the sets you log record the 40 you put on it, so handing the plan's number
    straight to the box would ask for seventy-five pounds that are already there. */
+/* =====================================================================
+   PLANS WRITTEN IN PERCENTAGES
+
+   A large family of real programmes does not write loads at all. 5/3/1, nSuns, GZCLP,
+   Sheiko, Candito, Texas Method, most powerlifting templates and half the strength
+   blocks in circulation prescribe "75% x 5" and expect you to know your max. Every one
+   of those imported into a plan with EMPTY weight fields and the percentage stranded in
+   a note, because the importer is a transcriber and there was nothing on the other side
+   to receive a percentage. So the app ran them as if the plan had said nothing about
+   load — which, for this whole class of programme, is most of the plan.
+
+   Three pieces make it work, and none of them guess:
+
+     the percentage   read from the document, or from the words it left behind, so plans
+                      already imported start working without being re-imported;
+     the max          yours, entered once per lift — and where you have never said, the
+                      best estimated 1RM in your own log, clearly labelled as an estimate;
+     the load         the two multiplied, rounded to something you can actually put on a
+                      bar, and shown WITH ITS ARITHMETIC so you can see it is right.
+
+   Where there is no max and no history, it says so and asks, rather than inventing a
+   number. A blank is honest; a made-up 225 is not. */
+const TM_DEFAULT = 0.9;            // a training max is conventionally 90% of a true max
+/* Percentages as documents write them: "75%", "75% 1RM", "@85% of your training max",
+   "70 % TM". The reference matters — a percentage of a TRAINING max is a different load
+   from the same percentage of a true one, and plans that use training maxes say so. */
+function parsePctSpec(text, strict){
+  const t = String(text || "").toLowerCase();
+  const m = t.match(/(\d{2,3}(?:\.\d+)?)\s*%/);
+  if(!m) return null;
+  const pct = parseFloat(m[1]) / 100;
+  if(!(pct >= 0.3 && pct <= 1.2)) return null;      // outside this it is not a working load
+  const after = t.slice(m.index);
+  /* STRICT IS FOR PROSE. A general note is full of percentages that are not loads — "80%
+     range of motion", "come down 50% of the way" — and reading one of those as a working
+     weight would put a number on the bar nobody asked for. In a note the percentage has
+     to name what it is a percentage OF; in a field that exists to hold the load, it does
+     not have to. */
+  if(strict && !/^\s*%?\s*(?:of\s*)?(?:your\s*|the\s*)?(?:1\s*rm|one\s*rep\s*max|e?1rm|rm|t\.?m\.?|training\s*max|max)\b/
+       .test(after.replace(/^\d+(?:\.\d+)?\s*%/, ""))) return null;
+  const of = /\b(t\.?m\.?|training\s*max)\b/.test(after) ? "tm" : "1rm";
+  return {pct, of};
+}
+/* The percentage governing one slot, from the plan itself or from the words it kept. The
+   note is read as a fallback so a plan imported before any of this existed starts working
+   the moment this ships, with nothing to migrate and nothing for the person to redo. */
+function pctSpecFor(en){
+  if(!en) return null;
+  const p = Number(en.pct);
+  if(isFinite(p) && p >= 0.3 && p <= 1.2) return {pct: p, of: en.pctOf === "tm" ? "tm" : "1rm"};
+  if(en.weight != null && en.weight !== "") return null;   // a real load wins over words
+  return parsePctSpec(en.weightNote || "") || parsePctSpec(en.note || "", true);
+}
+function maxStore(){
+  if(!S.maxes || typeof S.maxes !== "object") S.maxes = {};
+  return S.maxes;
+}
+/* YOUR MAX FOR ONE LIFT, and where the figure came from — which is the part that must
+   never be hidden. An entered max is a fact you gave the app; an estimate off a set of
+   five is arithmetic on your own log and can be twenty pounds out either way. The card
+   says which one it is using every time it uses it. */
+function maxFor(name){
+  const rec = maxStore()[nrm(name)];
+  const w = rec && parseFloat(rec.w);
+  if(isFinite(w) && w > 0) return {w, src: "entered", at: rec.at || null};
+  const b = bestEverFor(name);
+  if(b && b.max1RM > 0) return {w: Math.round(b.max1RM * 2) / 2, src: "estimated"};
+  return null;
+}
+function setMaxFor(name, w){
+  const v = parseFloat(w);
+  if(!isFinite(v) || v <= 0){ delete maxStore()[nrm(name)]; }
+  else maxStore()[nrm(name)] = {w: Math.round(v * 2) / 2, at: Date.now(), name: String(name || "")};
+  save(); queueSync();
+}
+/* The load a percentage slot is actually asking for, with everything needed to explain
+   it. Returns null when no max is known, which is a real answer and reads as one. */
+function pctLoadFor(en){
+  const spec = pctSpecFor(en);
+  if(!spec) return null;
+  const mx = maxFor(en.name);
+  const out = {pct: spec.pct, of: spec.of, max: mx ? mx.w : null, src: mx ? mx.src : null,
+               ref: null, load: null};
+  if(!mx) return out;
+  out.ref = spec.of === "tm" ? Math.round(mx.w * TM_DEFAULT * 2) / 2 : mx.w;
+  /* ROUNDED TWICE, and the second one matters. roundLoadable() deliberately does nothing
+     until somebody has said what plates their gym owns — a guess about a plate collection
+     is worth less than no guess. That is right for a load somebody typed and wrong for
+     one the app just multiplied into existence: "236.3 lb" is not a prescription anybody
+     can follow. So a computed load falls back to the smallest jump the unit has. */
+  const raw = out.ref * spec.pct;
+  const rl = roundLoadable(raw, en.name);
+  const stepU = stepInUnits(5);
+  out.load = (rl !== raw) ? rl : Math.max(stepU, Math.round(raw / stepU) * stepU);
+  return out;
+}
+function pctWords(p){
+  if(!p) return "";
+  const head = Math.round(p.pct * 100) + "% of your "
+             + (p.of === "tm" ? "training max" : "one-rep max");
+  if(p.load == null) return head + " \u2014 no max on file yet";
+  return head + " \u2014 " + fmtLoad(p.load) + ", off "
+       + (p.of === "tm" ? fmtLoad(p.ref) + " (" + Math.round(TM_DEFAULT * 100) + "% of "
+                          + fmtLoad(p.max) + ")" : fmtLoad(p.max))
+       + (p.src === "estimated" ? ", estimated from your log" : "");
+}
 function planLoadFor(en){
   if(!en || !en.name) return "";
   /* THREE PLACES THE PRESCRIBED LOAD CAN BE, and the reason it appeared in none of them.
@@ -26863,6 +27195,12 @@ function planLoadFor(en){
      off a live entry therefore always found nothing, which is why the plan's number
      never reached the box. Programme entries do use `weight`, and a load changed after
      Start is only on the programme, so that is the third place to look. */
+  // a percentage plan has no number to copy; it has one to work out
+  const pl = pctLoadFor(en) || pctLoadFor(findProgramEntry(en.name) || {name: en.name});
+  if(pl && pl.load != null){
+    const net = pl.load - entryBarAdd(en);
+    return net > 0 ? String(r1(net)) : "";
+  }
   const raw = (en.planWeight != null && en.planWeight !== "") ? en.planWeight
             : (en.weight != null && en.weight !== "") ? en.weight
             : (findProgramEntry(en.name) || {}).weight;
@@ -26930,6 +27268,22 @@ function setRowHTML(en, ei, si, last, idxLabel){
    still shows on the card you are logging into. It lapses on its own: once the plan's
    load is no longer the one the app wrote, this is history and says nothing. */
 const PLAN_CHANGE_SHOW_DAYS = 30;
+/* A PERCENTAGE, TURNED BACK INTO A WEIGHT, WHERE YOU LOAD THE BAR. The percentage is the
+   plan's instruction and the pounds are what you do about it, so the card carries both
+   and the arithmetic between them — a load you cannot check is a load you have to trust.
+   With no max on file it asks for one instead of inventing it. */
+function pctLineHTML(en){
+  const p = pctLoadFor(en) || pctLoadFor(findProgramEntry(en && en.name) || {name: en && en.name});
+  if(!p) return "";
+  const nm = (en && en.name) || "";
+  if(p.load == null){
+    return `<div class="plan-line pct-line">${esc(Math.round(p.pct*100))}% of your ${
+      p.of === "tm" ? "training max" : "max"} \u2014 nothing on file to work that out from.
+      <button class="linklike" data-setmax="${esc(nm)}">Set your ${esc(nm)} max</button></div>`;
+  }
+  return `<div class="plan-line pct-line">${esc(pctWords(p))}
+    <button class="linklike" data-setmax="${esc(nm)}">${p.src === "estimated" ? "set it properly" : "change"}</button></div>`;
+}
 function planChangeLineHTML(en){
   const p = findProgramEntry(en && en.name);
   const bits = [];
@@ -27555,7 +27909,7 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
-  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","sessions","savedAt"
+  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
@@ -28566,7 +28920,7 @@ function mergeBackup(into, d){
   ["restDays","restLog","skipLog","restDeleted","restAuto","deleted","planLog"].forEach(k=>{
     if(d[k]) into[k] = uniqDates(into[k], d[k]);
   });
-  ["checkins","exAliases","stalls","asymRetired","prefs","exMuscles","rpeSugSkip"].forEach(k=>{
+  ["checkins","exAliases","stalls","asymRetired","prefs","exMuscles","rpeSugSkip","maxes"].forEach(k=>{
     if(d[k] && typeof d[k] === "object") into[k] = Object.assign({}, into[k]||{}, d[k]);
   });
   /* The plan and everything that describes it comes across whole or not at all: half of
