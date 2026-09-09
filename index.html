@@ -4465,7 +4465,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.9";
+const APP_VERSION = "15.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -25200,12 +25200,21 @@ function openScoreCard(sess, onDone){
     return r;
   };
   document.querySelectorAll("#modal [data-progapply]").forEach(btn=> btn.onclick = ()=>{
-    const to = typedTo(btn.dataset.progapply, btn.dataset.progto);
-    if(applyProgression(btn.dataset.progapply, to)){
-      markApplied(btn.dataset.progapply);
+    const name = btn.dataset.progapply;
+    const to = typedTo(name, btn.dataset.progto);
+    /* A BUTTON THAT DOES NOTHING AND SAYS NOTHING IS THE WORST OUTCOME HERE. The apply
+       can legitimately refuse — a deload is running, the movement is not in the current
+       programme — and it used to refuse in silence on this screen, leaving somebody
+       certain they had pressed it and no way to tell that they had. */
+    if(applyProgression(name, to)){
+      markApplied(name);
       btn.textContent = "Applied";
       btn.disabled = true;
       btn.classList.add("done");
+      toast(esc(name) + " set to " + fmtLoad(to) + " in your programme", "good");
+    } else {
+      btn.classList.remove("done");
+      btn.disabled = false;
     }
   });
   const all = $("#progApplyAll");
@@ -25765,6 +25774,16 @@ function applyFlag(id, choice){
     return ok;
   }
   if((f.kind === "up" || f.kind === "load") && f.to != null){
+    /* ALREADY THERE IS NOT A FAILURE, IT IS THE JOB BEING DONE. If the plan is already
+       standing at this figure the increase happened — on the grade card, or here on an
+       earlier tap — and running it again would write the same number while the change
+       log gained a second entry claiming the load moved twice. */
+    const cur = findProgramEntry(f.ex);
+    if(cur && cur.weight != null && parseFloat(cur.weight) === parseFloat(f.to)){
+      f.applied = true; f.appliedAt = Date.now(); save(); queueSync();
+      toast(esc(f.ex) + " is already at " + fmtLoad(f.to));
+      return true;
+    }
     ok = applyProgression(f.ex, f.to, f.kind === "load"
       ? "Applied from the Body tab: the prescribed range was not reachable at the old load."
       : "Applied from the Body tab: the last set cleared the top of the range at target RPE.");
@@ -26136,8 +26155,38 @@ function applyProgression(name, to, why){
       : down ? "Load reduced to a reachable one for the prescribed rep range."
       : "Double progression: last set cleared the top of the rep range at target RPE."
         + (rr ? " Rebuild from " + rr[0] + " reps at the new load." : "")});
+  /* AND THE RECOMMENDATION THAT ASKED FOR THIS IS NOW ANSWERED.
+
+     There were two ledgers and they did not speak. The grade card wrote the plan and
+     ticked the SESSION's progression list; the Body tab's flag log was only ever ticked
+     by applyFlag(). So "Apply" on the grade card did the work and left the flag standing
+     — the same recommendation turned up in the Body tab afterwards looking untouched,
+     which reads exactly like the apply having failed. Worse, pressing it there ran the
+     increase a SECOND time, stacking a jump onto a load that had already moved.
+
+     Every path that changes a plan load comes through here, so this is the one place
+     that can close the loop. An open load recommendation for this movement is answered
+     the moment the load is written, whichever screen wrote it. */
+  closeLoadFlagsFor(e.name, v);
   save(); queueSync();
   return true;
+}
+/* Load recommendations for one movement, marked as answered. Deliberately not fade
+   flags: a collapse offers a longer rest as well as a lighter opener, and taking the
+   load half of it does not settle the rest half. */
+function closeLoadFlagsFor(name, to){
+  const k = nrm(name);
+  let n = 0;
+  flagLog().forEach(f=>{
+    if(!f || f.applied || f.dismissed) return;
+    if(nrm(f.ex || "") !== k) return;
+    if(f.kind !== "up" && f.kind !== "load") return;
+    f.applied = true;
+    f.appliedAt = Date.now();
+    f.appliedTo = to;
+    n++;
+  });
+  return n;
 }
 /* ---------- rebuilding after a load increase ----------
    Reads the flag applyProgression() wrote, and decides whether it still applies. It
