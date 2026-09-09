@@ -820,7 +820,7 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
    the row squares off its top ones, and they share an accent edge. There is no reading
    of that which attaches the instruction to the wrong set. */
 .set-tag.is-cap{
-  margin:14px 0 0 0;padding:7px 11px;
+  margin:14px -10px 0;padding:7px 11px;
   border-radius:10px 10px 0 0;
   background:var(--acc-soft);border:1px solid var(--acc-line);border-bottom:0;
   font-size:12.5px;white-space:normal;flex-wrap:wrap;align-items:baseline;
@@ -836,9 +836,17 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .set-tag.is-cap .set-tag-match{color:var(--text);white-space:normal}
 /* A matched set is the stronger limb doing the weaker limb's number, so the row is
    marked as taking its instruction from somewhere other than the plan. */
+/* THE HIGHLIGHT MUST NOT MOVE THE COLUMNS. A border and padding on a grid row shrink the
+   track widths inside it, so a capped set had its number and weight pushed 10px right and
+   its RPE and ✓ pulled 10px left — every cell out of line with the rows above and below
+   it and with the column headings, on the one row the eye is being sent to. The frame is
+   pulled back out by exactly what it adds, so the grid inside it lands where every other
+   row's does and only the background moves. */
 .set.is-matched{
   background:var(--acc-soft);border:1px solid var(--acc-line);border-top:0;
   border-radius:0 0 10px 10px;padding:6px 9px;
+  margin-left:-10px;margin-right:-10px;                 /* 9px padding + 1px border */
+  width:calc(100% + 20px);
 }
 .set.is-matched .idx{color:var(--acc);font-weight:700}
 /* The number you are stopping on, shown as a target rather than as a hint you can type
@@ -1026,6 +1034,11 @@ button.side-chip.sc-set::after{
   flex-shrink:0;font-family:var(--disp);font-size:11px;font-weight:700;text-transform:uppercase;
   letter-spacing:.09em;color:var(--acc);min-width:74px;padding-top:1px;
 }
+/* Three nights, one row each: what it was, a box, and where the number came from. */
+.sl-catch{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.sl-catch-k{font:11.5px var(--mono);color:var(--dim);flex:0 0 84px}
+.sl-catch input{flex:0 0 84px;text-align:center}
+.sl-catch-w{font:11px var(--mono);color:var(--faint);flex:1 1 auto}
 .sleep-ok{
   font:12px var(--mono);color:var(--faint);text-align:center;
   margin:-4px 2px 12px;line-height:1.5;
@@ -4452,7 +4465,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "14.8";
+const APP_VERSION = "14.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8373,9 +8386,22 @@ const EX_NOTE_KINDS = [
    grade:"you started the session already tired"},
   {code:"niggle",    weight:"hold",  label:"Something felt tweaky", icon:ICON.warn,
    grade:"you flagged something feeling tweaky"},
+  /* A DIFFERENT WAY OF DOING THE MOVEMENT IS A DIFFERENT MOVEMENT, for grading purposes.
+     Wider grip, paused reps, feet up, a slower eccentric — the name on the card is the
+     same and the numbers are not comparable, so a drop against last week is not a drop.
+     It holds, like the other "this session is not evidence" notes, rather than merely
+     being recorded. */
+  {code:"variation", weight:"hold",  label:"Different form or technique", icon:ICON.swap,
+   grade:"you ran it with a different form or technique"},
+  /* RETIRED, NOT DELETED. "Felt good, nothing to report" was a button for saying nothing,
+     which is what closing the sheet already does — and it took a slot in a six-item grid
+     from notes that change how a session reads. It stays resolvable so notes already
+     written under it still render; it is simply no longer offered. */
   {code:"good",      weight:"note",  label:"Felt good, nothing to report", icon:ICON.fine,
-   grade:"you said it felt good"}
+   grade:"you said it felt good", retired:true}
 ];
+// what the picker offers, which is not the same as what it can read back
+const EX_NOTE_PICKABLE = EX_NOTE_KINDS.filter(k=> !k.retired);
 const EX_NOTE_BY_CODE = EX_NOTE_KINDS.reduce((o,k)=>{ o[k.code]=k; return o; }, {});
 function exNotes(){
   if(!Array.isArray(S.exNotes)) S.exNotes = [];
@@ -10855,6 +10881,22 @@ let refreshNavBounds = ()=>{};
     docH = document.documentElement.scrollHeight;
     // a page that cannot scroll can never scroll the bar back into view
     if(docH <= window.innerHeight + 4) setHidden(false);
+    /* AND NEITHER CAN A PAGE YOU ARE ALREADY AT THE TOP OF. The bar hides on the way
+       down and comes back on the way up, which needs a scroll to happen — so a view that
+       replaces the page and jumps to the top while the bar is retracted left it retracted
+       with nothing left to scroll back up through. goTab() knew to call showNav(); the
+       half-dozen in-page destinations that re-render and scrollTo(0,0) themselves did not
+       — the record book, the day editor, the set page, going back out of any of them.
+
+       Rather than finding every one of those call sites and hoping the next one remembers,
+       the rule is stated where the bounds are taken: at the top of a page the bar is up.
+       This already runs on every content change through the ResizeObserver below, which
+       is precisely when a view has been replaced. */
+    const y = Math.max(0, window.pageYOffset || 0);
+    if(y < HIDE_AFTER){
+      lastY = y;                  // and no stale delta from wherever the last page was
+      setHidden(false);
+    }
   };
   refreshNavBounds();
   const atBottomNow = y=>{
@@ -10905,6 +10947,15 @@ let refreshNavBounds = ()=>{};
     vv.addEventListener("scroll", anchorNav, {passive:true});
     anchorNav();
   }
+  /* COMING BACK TO THE APP IS THE OTHER MOMENT THE CORRECTION GOES STALE. The gap is
+     recomputed when the visual viewport changes, and a phone that was locked, switched
+     away from, or restored from the back/forward cache changes it while no listener is
+     running — so the bar returns anchored to where the browser chrome USED to be, which
+     is the strip of screen you cannot see. Both events are cheap and both re-measure. */
+  document.addEventListener("visibilitychange", ()=>{
+    if(document.visibilityState === "visible"){ anchorNav(); refreshNavBounds(); }
+  });
+  window.addEventListener("pageshow", ()=>{ anchorNav(); refreshNavBounds(); }, {passive:true});
   showNav = ()=>{ lastY = Math.max(0, window.pageYOffset || 0); setHidden(false); refreshNavBounds(); anchorNav(); };
 })();
 
@@ -17604,7 +17655,7 @@ function openExNote(ei, si){
   const drawBody = ()=>{
     const t = target();
     m.querySelector("#exNoteBody").innerHTML =
-      `<div class="nk-grid">` + EX_NOTE_KINDS.map(k=>`
+      `<div class="nk-grid">` + EX_NOTE_PICKABLE.map(k=>`
         <button class="nk${picked===k.code?" on":""}" data-exnk="${k.code}">
           <span class="nk-ic">${k.icon || ICON.note}</span>
           <span class="nk-l">${esc(k.label)}</span>
@@ -20909,6 +20960,35 @@ function settingsDayHTML(){
       [{v:"on", t:"Track my sleep"}, {v:"off", t:"Don't"}]) +
     (p.sleepPrompt === false ? "" : `<div class="field" style="margin:10px 0 0"><label>My night starts at</label>
       <input type="time" id="prefSleepT" class="timein" value="${esc(p.sleepTime || "22:30")}" aria-label="Sleep time"></div>`));
+  /* THE NIGHT YOU FORGOT TO LOG. Sleep is measured here rather than remembered, which is
+     the right default and leaves one hole: open the app at noon and last night is simply
+     gone. Every rule that reads sleep — the stall protocol refusing to cut volume when
+     recovery is the real problem, the patterns card, the Body charts — then reads it as
+     no data rather than as a short night.
+
+     So a number can be put in by hand, for last night or the night before, and it is
+     stamped `approx` so nothing downstream mistakes it for a measured one. It sits under
+     the tracking switch rather than on Today on purpose: catching up is a thing you do
+     occasionally and deliberately, not a prompt to meet every morning. */
+  if(p.sleepPrompt !== false){
+    const ci = d=> (S.checkins || {})[d] || {};
+    const nightRow = (d, label)=>{
+      const rec = ci(d), have = parseFloat(rec.sleep);
+      return `<div class="sl-catch">
+        <span class="sl-catch-k">${esc(label)}</span>
+        <input class="timein" inputmode="decimal" data-sleepfix="${esc(d)}"
+          value="${have > 0 ? esc(String(have)) : ""}" placeholder="hours"
+          aria-label="Hours slept, ${esc(label)}">
+        <span class="sl-catch-w">${have > 0
+          ? (rec.approx ? "approximate" : "measured")
+          : "nothing logged"}</span>
+      </div>`;
+    };
+    const y = dayStr(Date.now() - DAY_MS), y2 = dayStr(Date.now() - 2*DAY_MS);
+    h += setBlock("Forgot to log a night?",
+      "Put in roughly what you got and it counts, marked as an estimate so it is never mistaken for a measured night. Clear the box to remove it.",
+      nightRow(todayStr(), "Last night") + nightRow(y, fmtDateShort(y)) + nightRow(y2, fmtDateShort(y2)));
+  }
   h += setBlock("Hours of sleep you want",
     "Optional, and off until you fill it in. Late sessions cost sleep, and sleep is what recovery is made of.",
     `<div class="field" style="margin:0"><input class="timein" inputmode="decimal" id="sleepTargetIn"
@@ -21194,6 +21274,30 @@ function bind(){
     save(); queueSync(); render();
     toast(trainPrefs().sleepPrompt ? "Tracking your sleep" : "Won't ask about sleep or mornings");
   });
+  document.querySelectorAll("[data-sleepfix]").forEach(el=> el.onchange = ()=>{
+    const d = el.dataset.sleepfix;
+    const raw = (el.value || "").trim();
+    if(!S.checkins) S.checkins = {};
+    const rec = (S.checkins[d] = S.checkins[d] || {});
+    if(raw === ""){
+      delete rec.sleep; delete rec.approx;
+      // a check-in holding nothing is not a check-in
+      if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt) delete S.checkins[d];
+      save(); queueSync(); render();
+      toast("Removed");
+      return;
+    }
+    const v = parseFloat(raw);
+    if(!isFinite(v) || v <= 0 || v > 24){
+      el.value = rec.sleep || "";
+      toast("Hours, somewhere between 0 and 24", "warn");
+      return;
+    }
+    rec.sleep = String(Math.round(v * 10) / 10);
+    rec.approx = true;              // never let an estimate pass as a measured night
+    save(); queueSync(); render();
+    toast("Logged " + fmtHours(v) + ", as an estimate");
+  });
   const slT = $("#prefSleepT");
   if(slT) slT.onchange = ()=>{
     if(/^\d{1,2}:\d{2}$/.test(slT.value)){ trainPrefs().sleepTime = slT.value; save(); queueSync(); pushSyncSchedule();
@@ -21242,10 +21346,13 @@ function bind(){
         }
       }
       save();
-      /* The rep count landing is the trigger, not the ✓. Plenty of sessions get logged
-         by typing the numbers straight in and never tapping the tick at all, and those
-         are exactly the sessions where a collapsed set would otherwise go unexplained. */
-      if(f === "reps") await maybeAskWhy(ei, si);
+      /* IT ASKS AFTER THE ✓, AND ONLY AFTER IT. This used to fire on the rep count
+         landing, on the theory that sessions get logged by typing straight into the boxes
+         without ever tapping the tick. The theory is true and the timing was still wrong:
+         a number in a box is a number being typed, not a set that has happened. You put
+         a 6 in on the way to 16 and the app interrupts to ask what went wrong; you correct
+         a typo on a set from ten minutes ago and it asks again. The ✓ is the moment you
+         say the set is finished, and a question about how it went belongs after it. */
     };
   });
   document.querySelectorAll("#app [data-setopen]").forEach(b=> b.onclick = ()=>{
@@ -21331,6 +21438,22 @@ function bind(){
          can be taken back; the ones before it are done, and un-ticking one of those
          deleted the rest it had recorded and killed the clock that was running for the
          set you are actually resting from. An undo is for the tap you just made. */
+      /* A COMPLETED SUPERSET ROUND DOES NOT COME BACK APART.
+
+         "Only the set you just finished can be undone" is the right rule and it left a
+         hole on a pair, because the undo chain crosses exercises: tick A1 then B1, undo
+         B1, and now A1 is the last one done and undoable in turn. One set at a time you
+         could unravel the whole superset, reopening rows for an exercise you walked away
+         from two rounds ago — and every one of those unticks throws away the round's
+         recorded rest.
+
+         The round is the unit of a superset, so the round is what gets fixed: once both
+         halves of round N are logged, neither half is editable as a fact again. The round
+         you are actually in is untouched, and the numbers stay editable in both. */
+      if(st.done && supersetRoundClosed(S.active.entries, ei, si)){
+        nudge("That superset round is done \u2014 the numbers are still editable");
+        return;
+      }
       if(st.done){
         const last = lastDoneInOrder(S.active.entries);
         if(!last || last.ei !== ei || last.si !== si){
@@ -22946,6 +23069,40 @@ function finishWorkout(){
   requestAnimationFrame(()=> requestAnimationFrame(_startCele));
   setTimeout(_startCele, 140);
 }
+/* IS THE CYCLE'S LAST REST STILL OWED?
+
+   A layout that ends in `rest` puts one more day between the last training day and the
+   next cycle. The bookkeeping for it is already right — restSchedule() wraps that rest to
+   the front of the next cycle, because a rest sitting past the end would never come round
+   — but the CELEBRATION was not: log the last training day and the app threw the cycle
+   confetti, opened the review, and offered you the first day of the next cycle, on an
+   evening when the plan still had a rest day left in it.
+
+   The state was right and the timing was wrong, which is the same shape of bug as
+   restDueNotToday() further up. So the wrap is held: the bookkeeping rolls over exactly
+   as before, and the announcement waits for the day the plan actually asks for. */
+function wrappedRestOwed(){
+  if(restsFloat()) return false;
+  /* `due` rather than "not satisfied": due is the app's own word for the rest you owe
+     RIGHT NOW, and it already resolves the two ways a rest stops being owed without
+     being taken — the rotation moving past it (you trained instead) and a slot the cycle
+     has not reached. Reading unsatisfied directly would hold the wrap for ever on a rest
+     nobody was ever going to take. */
+  return restStatus().some(x=> x.wrapped && x.due);
+}
+/* The held announcement, fired the moment that rest lands. Called from recomputeCycle(),
+   which every boot and every finished session already runs. */
+function flushHeldCycleReview(){
+  if(!S.reviewPending) return false;
+  if(wrappedRestOwed()) return false;
+  delete S.reviewPending;
+  save();
+  setTimeout(()=>{
+    toast("Cycle complete \u2014 rest day done, the next one starts now");
+    if(S.lastReview) openCycleReview(S.lastReview);
+  }, 400);
+  return true;
+}
 function recomputeCycle(announce){
   // the cycle's checkmarks are always derived from actual logged sessions since cycleStart
   const done = [];
@@ -22973,12 +23130,24 @@ function recomputeCycle(announce){
        pointer at the end would have opened a fresh cycle with everything before it
        already looking spent. */
     S.pointer = 0;
-    if(announce) toast("Cycle complete, starting a fresh one");
+    /* The rest the plan still has in it. Asked AFTER the roll-over, because that trailing
+       rest is now this new cycle's wrapped one — which is exactly where restSchedule()
+       has always put it. */
+    const owed = wrappedRestOwed();
+    if(owed){
+      S.reviewPending = true;                 // the review is written, just not shown yet
+      if(announce) toast("Last session of the cycle done \u2014 rest day next");
+    } else if(announce){
+      toast("Cycle complete, starting a fresh one");
+    }
     save();   // real transition, mark as a change worth syncing
-    return true;
+    return !owed;
   } else {
     S.cycleDone = done;
   }
+  /* Judged on the state this call has just produced, not the one it started with: the
+     rest day that releases the held review is usually recorded in the same breath. */
+  flushHeldCycleReview();
   // if the suggested day is already done, move to the next unchecked one
   if(S.cycleDone.includes(S.pointer)){
     for(let k=1;k<=ROTATION.length;k++){
@@ -27047,6 +27216,26 @@ function supersetInfo(list, i){
   if(prev && prev.superset) return {role:"second", partner: prev.name};
   return null;
 }
+/* The two entries of a superset pair, as indices, or null when this is not one. */
+function supersetPair(list, i){
+  const info = supersetInfo(list, i);
+  if(!info) return null;
+  const a = info.role === "first" ? i : i - 1;
+  const b = a + 1;
+  return (list[a] && list[b]) ? {a, b} : null;
+}
+/* Is round `si` of this pair complete on BOTH sides? A round the partner has no set for
+   — uneven pairs are normal — counts as complete on the side that has run out, so the
+   last round of a 4-against-3 pair still closes. */
+function supersetRoundClosed(list, i, si){
+  const pr = supersetPair(list, i);
+  if(!pr) return false;
+  const doneOrAbsent = ei=>{
+    const st = ((list[ei] || {}).sets || [])[si];
+    return !st || !!st.done;
+  };
+  return doneOrAbsent(pr.a) && doneOrAbsent(pr.b);
+}
 function supersetBadge(info){
   if(!info) return "";
   return ` <span class="ss-badge${info.role==="second"?" ss-b":""}">superset ${
@@ -28010,7 +28199,7 @@ async function gistFetch(path, opts={}){
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
-  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
+  "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt"
@@ -29031,7 +29220,7 @@ function mergeBackup(into, d){
      one programme and half of another is not a programme. */
   if(d.program && typeof d.program === "object"){
     ["program","splitId","customSplit","importMeta","pointer","cycleStart","cycleDone",
-     "lastCycle","deload","blockStart","planStart"].forEach(k=>{
+     "lastCycle","reviewPending","deload","blockStart","planStart"].forEach(k=>{
       if(d[k] !== undefined) into[k] = d[k];
     });
   }
