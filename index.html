@@ -4465,7 +4465,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.0";
+const APP_VERSION = "15.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11508,6 +11508,72 @@ function urlB64ToBytes(b64){
   return out;
 }
 
+/* =====================================================================
+   WHAT A REMINDER IS FOR
+
+   "Upper A — 5 exercises, 18 sets. Ready when you are." is true, and it is the same
+   sentence every Tuesday for ever. A notification you have read once you have read for
+   good: it says a session exists, which you knew, and gives you nothing you did not
+   already have. The ones people actually open say something that is only true TODAY.
+
+   The app knows plenty of those and was spending none of them. It knows the movement
+   this session opens on and the load it is asking for. It knows when that load went up
+   and why. It knows when a session is the last of a cycle. It knows what you did last
+   time and what the top of the range is. So the title carries the fact that makes today
+   different, and the body says what the session is and where the fact came from.
+
+   The hook is picked in the order of what most changes the session — the end of a cycle
+   over a load change, a load change over a rebuild, a rebuild over the plain shape of
+   the day. Every branch falls back cleanly, because this composes while Setup is on
+   screen and a throw here would cost the page rather than a sentence. */
+/* Just the name of the session, for the sentences that mention it in passing. The
+   training reminder's own title is a hook — "Bench Press is up to 105" — and reads as
+   nonsense when another notification borrows it as a noun. */
+function sessionNameFor(forTomorrow){
+  try{
+    const rest = forTomorrow ? restDueNotToday() : isRestToday();
+    if(rest) return null;
+    const wid = forTomorrow ? ROTATION[S.pointer] : todaysWorkoutId();
+    const meta = wid ? dayMeta(wid) : null;
+    return (meta && meta.name) || null;
+  }catch(e){ return null; }
+}
+function reminderHook(wid, ex){
+  const first = ex && ex[0];
+  if(!first || !first.name) return null;
+  const nm = first.name;
+  const load = (()=>{ try{ const l = planLoadFor(first); return l === "" ? null : l; }catch(e){ return null; } })();
+  const withLoad = load != null ? nm + " at " + fmtLoad(load) : nm;
+  /* The last training day of the cycle: the one session where finishing it does
+     something beyond itself. */
+  try{
+    if(Array.isArray(S.cycleDone) && ROTATION.length
+       && S.cycleDone.length === ROTATION.length - 1){
+      return {title: "Last session of the cycle", why: "Finish this one and the cycle closes. Opens with " + withLoad + "."};
+    }
+  }catch(e){}
+  // a load this app moved, on the first day you meet it
+  try{
+    const p = findProgramEntry(nm);
+    const b = p && p.byApp;
+    if(b && b.at && Date.now() - b.at < 30*DAY_MS && b.from != null && b.to != null
+       && p.weight != null && parseFloat(p.weight) === parseFloat(b.to)){
+      const up = parseFloat(b.to) > parseFloat(b.from);
+      return {title: nm + " is " + (up ? "up to " : "down to ") + fmtLoad(b.to),
+              why: (up ? "Raised from " : "Cut from ") + fmtLoad(b.from) + " after your "
+                 + fmtDateShort(dayStr(b.at)) + " grade. First session at the new weight."};
+    }
+  }catch(e){}
+  // mid-rebuild: the number to beat is a real, specific target
+  try{
+    const rb = rebuildFor(first);
+    if(rb && rb.from != null && rb.top != null){
+      return {title: withLoad + ", rebuilding",
+              why: "Working back up from " + rb.from + " reps to " + rb.top + " at the new load."};
+    }
+  }catch(e){}
+  return {title: "Opens with " + withLoad, why: null};
+}
 /* The training sentence. Written to be true whenever it is READ rather than whenever it
    was composed — it is stored now and shown hours later, so it never says "tomorrow". */
 function reminderText(forTomorrow){
@@ -11515,17 +11581,24 @@ function reminderText(forTomorrow){
   const wid = forTomorrow ? ROTATION[S.pointer] : todaysWorkoutId();
   const meta = wid ? dayMeta(wid) : null;
   const name = (meta && meta.name) || "Your next session";
-  if(rest) return {title:"Rest day", body:"Nothing to log today. " + name + " is next."};
+  if(rest){
+    /* A rest day still has a reason to open the app: the rest only counts once it is on
+       the record, and the cycle is waiting on it. */
+    return {title: "Rest day \u2014 nothing to log",
+            body: name + " is next. Tap to mark the rest and keep the cycle straight."};
+  }
   /* No plan yet — this renders inside Setup, so a throw here would take the whole page
      with it rather than costing a sentence. */
   if(!wid) return {title:"Time to train", body:"Ready when you are."};
   const ex = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher).map(x=> x.chosen);
   const sets = ex.reduce((n, e)=> n + (e.sets || 0), 0);
-  return {
-    title: name,
-    body: ex.length ? (ex.length + " exercises, " + sets + " sets. Ready when you are.")
-                    : "Ready when you are."
-  };
+  // no exercises resolved: the title is already the day's name, so repeating it is noise
+  const shape = ex.length ? name + " \u00b7 " + ex.length + " exercises, " + sets + " sets." : "";
+  let hook = null;
+  try{ hook = reminderHook(wid, ex); }catch(e){ hook = null; }
+  if(!hook) return {title: name, body: (shape ? shape + " " : "") + "Ready when you are."};
+  const why = hook.why ? (shape ? shape + " " : "") + hook.why : shape;
+  return {title: hook.title, body: why || "Ready when you are."};
 }
 
 /* =====================================================================
@@ -11642,8 +11715,23 @@ function plannedReminders(){
       if(settled && new Date(at).toDateString() === new Date().toDateString()){
         const d = new Date(at); d.setDate(d.getDate() + 1); at = d.getTime();
       }
-      out.push({kind:"bed", at, title:"Turning in?",
-        body:"Start the clock and Element 26 measures your sleep instead of asking you to remember it."});
+      /* WHY THIS ARRIVED NOW, WHICH IS THE ONE THING IT NEVER SAID. It fires at the hour
+         you nominated as the start of your night, so it can name that hour — and where
+         there is a target and a wake time it can do better and name the number: the time
+         to be asleep by for the sleep you asked for. A reminder that does the arithmetic
+         is worth opening; one that says "turning in?" is worth swiping away. */
+      const need = (()=>{ try{ return sleepNeedH(); }catch(e){ return null; } })();
+      const wake = (()=>{ try{ return predictedWake(); }catch(e){ return null; } })();
+      let title = "Turning in? It's " + fmtMinOfDay(min);
+      if(need > 0 && wake){
+        const by = ((wake.min - Math.round(need*60)) % 1440 + 1440) % 1440;
+        title = "Asleep by " + fmtMinOfDay(by) + " for your " + r1(need) + " h";
+      }
+      const tmrName = sessionNameFor(true);
+      const tmr = tmrName ? " Tomorrow is " + tmrName + "." : "";
+      out.push({kind:"bed", at, title,
+        body:"Tap to start the clock \u2014 it measures the night instead of asking you to "
+           + "remember it in the morning." + tmr});
     }
   }
 
@@ -11660,10 +11748,21 @@ function plannedReminders(){
         const fromBed = started + typicalSleepH()*3600e3;
         if(fromBed > at && fromBed < at + 6*3600e3) at = fromBed;
       }
-      out.push({kind:"wake", at, title:"Just woken up?",
+      /* THE NUMBER IS ALREADY THERE, so it goes in the title. A clock that has been
+         running since half eleven can say how long that is, and "you are seven hours and
+         forty minutes in" is a thing worth tapping to confirm. Composed at scheduling
+         time against the hour it is scheduled FOR, not against now, or it would say the
+         length of the night at the moment you went to bed. */
+      const slept = started ? Math.max(0, (at - started) / 3600e3) : null;
+      const todayName = sessionNameFor(false);
+      const today = todayName ? " " + todayName + " today." : " Nothing to log today.";
+      out.push({kind:"wake", at,
+        title: slept != null ? "Looks like " + fmtHours(slept) + " last night" : "Just woken up?",
         body: started
-          ? "You put the phone down at " + fmtClockShort(started) + ". Open Element 26 and it'll work out the rest."
-          : "Open Element 26 and it'll take now as the time you got up."});
+          ? "Phone down at " + fmtClockShort(started) + ". Tap to confirm you're up and the "
+            + "night goes on the record." + today
+          : "Tap and it takes now as the time you got up, so tonight has something to "
+            + "compare against." + today});
     }
   }
   return out;
