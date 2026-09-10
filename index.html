@@ -976,6 +976,71 @@ input.ph-plan::placeholder{color:var(--acc);opacity:.75}
 button.warm-set{cursor:pointer;font:inherit;border:inherit}
 /* THE WAY BACK INTO A RUNNING SESSION. A button rather than a banner, because its whole
    purpose is to be pressed, and pinned to the top of every tab that is not the workout. */
+/* PINNED, AND ABOVE EVERYTHING IT SCROLLS OVER. The blurred backdrop is what keeps set
+   rows from showing through it on a dark ground without making it a solid slab. */
+/* THE SWIPE ROW. The drawer sits underneath and the face slides off it, which is why the
+   card clips its own overflow and the actions are painted first. */
+.de-swipe{position:relative;overflow:hidden;padding:0}
+.de-swipe .de-slide{
+  position:relative;z-index:2;display:flex;align-items:stretch;
+  background:var(--card);border-radius:inherit;
+  transition:transform .22s cubic-bezier(.18,.9,.28,1);
+}
+.de-swipe.is-open .de-slide{transform:translateX(-168px)}
+/* THE FACE RECEDES RATHER THAN BREAKING. Slid under its own left edge, a two-line
+   exercise name reads as garbled text — "ess · 8 · 8 · 9" — which looks like a rendering
+   fault rather than a row that has moved. Dimming it says "this is behind the thing you
+   opened", which is what has actually happened. */
+.de-swipe.is-open .de-main{opacity:.3}
+.de-main{transition:opacity .22s ease}
+.de-main{
+  flex:1 1 auto;min-width:0;text-align:left;background:transparent;border:0;
+  color:var(--text);font:inherit;padding:12px 4px 12px 13px;cursor:pointer;
+}
+.de-main .de-head{display:flex;align-items:flex-start;gap:10px}
+.de-main .meta{display:block;margin-top:3px}
+.de-main .de-note{display:block;margin-top:6px}
+/* The handle. Always visible, does what the swipe does, and turns to point back once the
+   drawer is open. */
+.de-pull{
+  flex:0 0 auto;width:34px;background:transparent;border:0;border-left:1px solid var(--line);
+  color:var(--faint);font-size:15px;cursor:pointer;
+  transition:transform .22s ease, color .22s ease;
+}
+.de-swipe.is-open .de-pull{transform:rotate(180deg);color:var(--acc)}
+.de-acts{
+  position:absolute;top:0;right:0;bottom:0;z-index:1;width:168px;
+  display:flex;align-items:stretch;
+}
+.de-acts button{
+  flex:1 1 0;min-width:0;background:var(--card2);border:0;border-left:1px solid var(--line);
+  color:var(--dim);font-size:13px;cursor:pointer;padding:0;
+}
+.de-acts button:first-child{border-left:0}
+.de-acts button[disabled]{opacity:.3}
+.de-acts button.danger{color:var(--bad)}
+.de-acts button:active{background:var(--card)}
+.de-acts svg{width:15px;height:15px}
+.sess-bar{
+  position:sticky;top:0;z-index:6;
+  display:flex;align-items:center;gap:10px;
+  margin:0 0 11px;padding:9px 12px;border-radius:11px;
+  border:1px solid var(--acc-line);background:var(--card2);
+  -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);
+  box-shadow:0 6px 18px rgba(0,0,0,.34);
+}
+.sb-n{font:12px var(--mono);color:var(--text);white-space:nowrap}
+.sb-t{font:11.5px var(--mono);color:var(--dim);white-space:nowrap}
+.sb-p{flex:1 1 auto;min-width:24px;height:4px;border-radius:2px;background:var(--line);
+  position:relative;overflow:hidden}
+.sb-p i{position:absolute;left:0;top:0;bottom:0;background:var(--acc);
+  transition:width .28s cubic-bezier(.18,.9,.28,1)}
+.sb-fin{
+  flex:0 0 auto;font:11.5px var(--mono);letter-spacing:.06em;
+  color:var(--acc);background:transparent;border:1px solid var(--acc-line);
+  border-radius:8px;padding:5px 11px;cursor:pointer;
+}
+.sb-fin:active{background:var(--acc-soft)}
 .live-strip{
   display:flex;align-items:center;gap:10px;width:100%;
   margin:0 0 13px;padding:10px 12px;border-radius:11px;
@@ -4547,7 +4612,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "16.0";
+const APP_VERSION = "16.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -17538,6 +17603,62 @@ function bestSet(sets){
    it has been running, then the session itself. Everything Today puts around it — the
    plate strip, the rest-day card, tomorrow's preview — is a question about the plan,
    and none of those are questions you have while you are under a bar. */
+/* =====================================================================
+   THE ONE LINE THAT NEVER SCROLLS AWAY
+
+   A session runs six screens deep and, until now, all six of them looked the same: no
+   count, no clock, and a Finish button 4865px down. You could not tell how far in you
+   were without scrolling, and you could not stop without scrolling either.
+
+   So one bar is pinned to the top of the workout: how many exercises are behind you, a
+   line that moves with every SET rather than every exercise (four times the resolution,
+   and it is the set you just did that you want to see land), how long you have been
+   there, and the way out. The card underneath is untouched — this adds a fixed point,
+   it does not redesign what logging looks like. */
+function sessionBarHTML(){
+  const a = S.active;
+  if(!a) return "";
+  const order = sessionOrder(a.entries || []);
+  const setsDone = order.filter(o=>{
+    const st = ((a.entries[o.ei] || {}).sets || [])[o.si];
+    return st && st.done;
+  }).length;
+  const exDone = (a.entries || []).filter(e=> entryDone(e)).length;
+  const pct = order.length ? Math.round((setsDone / order.length) * 100) : 0;
+  const mins = Math.max(0, Math.round((Date.now() - (a.startedAt || Date.now())) / 60000));
+  return `<div class="sess-bar" id="sessBar">
+    <span class="sb-n num" id="sbCount">${exDone} / ${(a.entries || []).length}</span>
+    <span class="sb-p"><i id="sbFill" style="width:${pct}%"></i></span>
+    <span class="sb-t num" id="sbMins">${mins} min</span>
+    <button class="sb-fin" id="sessBarFinish">Finish</button>
+  </div>`;
+}
+/* THE CLOCK HAS TO MOVE WITHOUT A RE-RENDER. Re-rendering the workout once a minute
+   would take the keyboard out of a box somebody is typing a weight into, so the three
+   things that change are written in place — the same trick applyRestLocks() uses. */
+let SESS_BAR_TICK = null;
+function sessionBarTick(){
+  if(SESS_BAR_TICK){ clearInterval(SESS_BAR_TICK); SESS_BAR_TICK = null; }
+  const draw = ()=>{
+    const bar = document.getElementById("sessBar");
+    const a = S.active;
+    if(!bar || !a){ if(SESS_BAR_TICK){ clearInterval(SESS_BAR_TICK); SESS_BAR_TICK = null; } return; }
+    const order = sessionOrder(a.entries || []);
+    const done = order.filter(o=>{
+      const st = ((a.entries[o.ei] || {}).sets || [])[o.si];
+      return st && st.done;
+    }).length;
+    const fill = document.getElementById("sbFill");
+    const cnt  = document.getElementById("sbCount");
+    const mins = document.getElementById("sbMins");
+    if(fill) fill.style.width = (order.length ? Math.round((done / order.length) * 100) : 0) + "%";
+    if(cnt)  cnt.textContent = (a.entries || []).filter(e=> entryDone(e)).length + " / " + (a.entries || []).length;
+    if(mins) mins.textContent = Math.max(0, Math.round((Date.now() - (a.startedAt || Date.now())) / 60000)) + " min";
+  };
+  draw();
+  SESS_BAR_TICK = setInterval(draw, 20000);
+  return draw;
+}
 function viewWorkoutTab(){
   const a = S.active;
   if(!a) return viewToday();                  // finished in another tab; nothing to show
@@ -17546,7 +17667,7 @@ function viewWorkoutTab(){
   const h = `<div class="hdr"><h1><span class="dot" style="background:${m.color};width:13px;height:13px;
       display:inline-block;margin-right:9px;vertical-align:middle"></span>${esc(m.name.toUpperCase())}</h1>
     <span class="hdr-r"><span class="date num">from ${esc(started)}</span></span></div>`;
-  return h + viewActiveSession();
+  return h + sessionBarHTML() + viewActiveSession();
 }
 function viewActiveSession(){
   if(S.viewMode === "focus") return viewFocusSession();
@@ -22321,6 +22442,7 @@ function bind(){
         delete st.why;              // no longer a completed set, so its reason is stale
       }
       el.classList.toggle("on", st.done);
+      sessionBarTick();                     // the set just landed; the bar says so now
       refreshPRs(ei);
       drawPRBadges(ei);
       save();
@@ -22397,6 +22519,9 @@ function bind(){
 
   const fin = $("#finishBtn");
   if(fin) fin.onclick = finishWorkout;
+  const sbFin = $("#sessBarFinish");
+  if(sbFin) sbFin.onclick = finishWorkout;
+  sessionBarTick();
   function harvestActive(){
     if(!S.active) return;
     document.querySelectorAll(".set input[data-e], .set select[data-e]").forEach(el=>{
@@ -22426,6 +22551,70 @@ function bind(){
     save(); render();
     return true;
   };
+  /* THE SWIPE, AND THE BUTTON THAT DOES THE SAME THING.
+
+     Pointer events rather than touch events, so a mouse, a finger and a stylus all take
+     the same path. The gesture only claims the drag once it is clearly HORIZONTAL —
+     otherwise a list you are scrolling with your thumb catches on every row it passes,
+     which is the failure that makes swipe lists feel broken. Vertical intent wins by
+     default; the row has to earn the drag. */
+  (function wireSwipeRows(){
+    const rows = [...document.querySelectorAll(".de-swipe")];
+    if(!rows.length) return;
+    const OPEN_AT = 168;                        // width of the action drawer
+    const closeAll = except=> rows.forEach(r=>{ if(r !== except) r.classList.remove("is-open"); });
+    rows.forEach(row=>{
+      const slide = row.querySelector(".de-slide");
+      let x0 = 0, y0 = 0, dx = 0, dragging = false, decided = false;
+      const setX = v=> slide.style.transform = v ? `translateX(${v}px)` : "";
+      row.addEventListener("pointerdown", ev=>{
+        if(ev.pointerType === "mouse" && ev.button !== 0) return;
+        x0 = ev.clientX; y0 = ev.clientY; dx = 0; dragging = true; decided = false;
+        slide.style.transition = "none";
+      });
+      row.addEventListener("pointermove", ev=>{
+        if(!dragging) return;
+        const mx = ev.clientX - x0, my = ev.clientY - y0;
+        if(!decided){
+          if(Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+          // a mostly-vertical move is a scroll, and this row gives it up
+          if(Math.abs(my) > Math.abs(mx)){ dragging = false; slide.style.transition = ""; return; }
+          decided = true;
+          closeAll(row);
+        }
+        const base = row.classList.contains("is-open") ? -OPEN_AT : 0;
+        dx = Math.max(-OPEN_AT, Math.min(0, base + mx));
+        setX(dx);
+        ev.preventDefault();
+      });
+      const end = ()=>{
+        if(!dragging) return;
+        dragging = false;
+        slide.style.transition = "";
+        setX(0);                                 // the class carries the resting position
+        if(decided) row.classList.toggle("is-open", dx < -OPEN_AT / 2);
+      };
+      row.addEventListener("pointerup", end);
+      row.addEventListener("pointercancel", end);
+      row.addEventListener("pointerleave", end);
+      /* Tapping the body of a row that is open closes it rather than opening the editor:
+         the first tap after a swipe is nearly always "put that back". */
+      row.querySelector(".de-main").addEventListener("click", ev=>{
+        if(row.classList.contains("is-open")){
+          ev.preventDefault(); ev.stopPropagation();
+          row.classList.remove("is-open");
+        }
+      }, true);
+    });
+    // the visible handle, for anybody not swiping
+    document.querySelectorAll("[data-depull]").forEach(b=> b.onclick = ev=>{
+      ev.preventDefault(); ev.stopPropagation();
+      const row = b.closest(".de-swipe");
+      const was = row.classList.contains("is-open");
+      closeAll(row);
+      row.classList.toggle("is-open", !was);
+    });
+  })();
   document.querySelectorAll("[data-exup]").forEach(b=> b.onclick=()=>{
     const i = parseInt(b.dataset.exup,10);
     if(i<=0) return;
@@ -24104,23 +24293,37 @@ function viewDayEdit(wid){
         : "Nothing on this day yet."} Everything here saves as you change it.</div>`;
   list.forEach((e, i)=>{
     const ss = supersetInfo(list, i);
-    h += `<div class="card de-ex${ss ? " de-ss" : ""}">
-      <div class="de-head">
-        <span class="de-n num">${i + 1}</span>
-        <div style="flex:1 1 auto;min-width:0">
-          <b>${esc(e.name)}</b>${supersetBadge(ss)}${techBadges(e)}${
-            altStyle(e) === "side" ? ' <span class="uni-badge">L / R</span>' : ''}${
-            altStyle(e) === "cross" ? ' <span class="uni-badge">crossover</span>' : ''}${
-            e.alt ? ' <span class="alt-badge">⇄ ' + esc(e.alt.name) + '</span>' : ''}
-          <div class="meta num">${exLineHTML(e)}</div>
-        </div>
+    /* SIX BUTTONS PER EXERCISE, AT EQUAL WEIGHT, meant three exercises fitted on screen
+       out of eight and that deleting one looked exactly like nudging it up a place. The
+       row is now the button — tapping it opens the editor, which is what people reach for
+       — and the other five live behind a swipe.
+
+       A HIDDEN GESTURE NEEDS A VISIBLE HANDLE, which is the part swipe UIs usually get
+       wrong. The chevron on the right edge is always there, does the same thing as the
+       swipe, and is a real button: nobody has to discover anything, and the row still
+       works with a keyboard, on a desktop, and for anybody who does not swipe. */
+    h += `<div class="card de-ex de-swipe${ss ? " de-ss" : ""}" data-derow="${wid}:${i}">
+      <div class="de-slide">
+        <button class="de-main" data-deedit="${wid}:${i}" aria-label="Edit ${esc(e.name)}">
+          <span class="de-head">
+            <span class="de-n num">${i + 1}</span>
+            <span style="flex:1 1 auto;min-width:0">
+              <b>${esc(e.name)}</b>${supersetBadge(ss)}${techBadges(e)}${
+                altStyle(e) === "side" ? ' <span class="uni-badge">L / R</span>' : ''}${
+                altStyle(e) === "cross" ? ' <span class="uni-badge">crossover</span>' : ''}${
+                e.alt ? ' <span class="alt-badge">⇄ ' + esc(e.alt.name) + '</span>' : ''}
+              <span class="meta num">${exLineHTML(e)}</span>
+            </span>
+          </span>
+          ${e.note ? `<span class="de-note">${esc(e.note)}</span>` : ""}
+          ${exMuscleLineHTML(e)}
+        </button>
+        <button class="de-pull" data-depull="${wid}:${i}"
+          aria-label="More for ${esc(e.name)}" title="More">\u2039</button>
       </div>
-      ${e.note ? `<div class="de-note">${esc(e.note)}</div>` : ""}
-      ${exMuscleLineHTML(e)}
-      <div class="de-btns">
+      <div class="de-acts" aria-hidden="true">
         <button data-deup="${wid}:${i}" aria-label="Move earlier"${i === 0 ? " disabled" : ""}>↑</button>
         <button data-dedown="${wid}:${i}" aria-label="Move later"${i === list.length - 1 ? " disabled" : ""}>↓</button>
-        <button data-deedit="${wid}:${i}" aria-label="Edit ${esc(e.name)}">${ICON.note}</button>
         <button data-deswap="${wid}:${i}" aria-label="Switch ${esc(e.name)} for something else">${ICON.swap}</button>
         <button data-dedup="${wid}:${i}" aria-label="Duplicate ${esc(e.name)}">${ICON.plus}</button>
         <button data-dedel="${wid}:${i}" aria-label="Remove ${esc(e.name)}" class="danger">${ICON.trash}</button>
