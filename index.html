@@ -1064,7 +1064,6 @@ button.side-chip.sc-set::after{
 /* The confirm. Full width under the pair, because it belongs to both boxes rather than
    to either one, and visibly dead until there is something to confirm. */
 .sl-night-go{width:100%;margin-top:9px}
-.sl-night-go[disabled]{opacity:.38;pointer-events:none}
 .sl-closed{font:11px var(--mono);color:var(--faint);margin-top:2px}
 .sl-closed .linklike{margin-left:6px}
 .sleep-ok{
@@ -4493,7 +4492,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.3";
+const APP_VERSION = "15.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7532,6 +7531,8 @@ function migrate(){
   if(S.importMeta === undefined) S.importMeta = null;
   // one-rep maxes, for the plans that write their loads as percentages of one
   if(!S.maxes || typeof S.maxes !== "object") S.maxes = {};
+  // closed nights that have fallen out of the three-night window leave nothing behind
+  if(pruneSleepSkips()) saveQuiet();
   /* EVERYBODY WHO ALREADY HAS A PLAN GETS ITS CLASSIFICATION, without re-reading a
      document and without a Gemini request. Written down rather than only computed on
      screen because the admin console reads the synced blob, not this function — an
@@ -7752,6 +7753,39 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<"
    to write a dated entry to the change log calls through here. As a `const` it sat in
    its temporal dead zone at that moment and took the whole script down. */
 function todayStr(){ return new Date().toLocaleDateString("en-CA"); }
+/* A CLOSED NIGHT ONLY HAS TO STAY CLOSED WHILE IT IS STILL BEING OFFERED.
+
+   Closing a night leaves one flag behind, for one job: keeping the row off a list that
+   only ever shows the last three nights. Once the night has fallen out of that window the
+   flag has no job left, and a permanent marker for a night nobody will ever be asked
+   about again is litter — it syncs, it lands in every backup, and it accumulates one
+   entry per night for as long as the app is used.
+
+   So it is swept the day it stops mattering. A check-in that held nothing but the flag
+   goes with it; one that also carries a bodyweight or an energy rating keeps those,
+   because the flag was never a statement about the day. */
+/* THE WINDOW AND THE DAY ARE LOCAL, AND THAT IS NOT A STYLE CHOICE. This runs from
+   migrate(), which runs while the module is still initialising — so every module-level
+   `const` declared BELOW this point is in its temporal dead zone and reading one throws,
+   taking the whole script down before the app paints. It is the trap this codebase has
+   been caught by before. Written as locals, it cannot be caught by it again, and it is
+   also the reason nothing here reaches for DAY_MS. */
+function pruneSleepSkips(){
+  const ci = S.checkins;
+  if(!ci || typeof ci !== "object") return 0;
+  const WINDOW_DAYS = 3, ONE_DAY = 86400000;
+  const cutoff = dayStr(Date.now() - WINDOW_DAYS * ONE_DAY);
+  let n = 0;
+  Object.keys(ci).forEach(d=>{
+    const rec = ci[d];
+    if(!rec || !rec.sleepSkip) return;
+    if(d >= cutoff) return;                       // still inside the window it guards
+    delete rec.sleepSkip;
+    n++;
+    if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt && !rec.bedAt) delete ci[d];
+  });
+  return n;
+}
 // The same shape as todayStr(), for any moment — so fmtDate() can be given a timestamp.
 function dayStr(ts){ return new Date(ts).toLocaleDateString("en-CA"); }
 /* fmtDate() without the weekday, for the lines that are tight. "Tue, Sep 8" wrapped the
@@ -21147,7 +21181,7 @@ function settingsDayHTML(){
           <label><span>Woke</span><input type="time" class="timein" data-sleepwake="${esc(d)}"
             value="${esc(hhmm(rec.wokeAt))}" aria-label="Time you woke up, ${esc(label)}"></label>
         </div>
-        <button class="btn ghost small sl-night-go" data-sleepsave="${esc(d)}" disabled>Save this night</button>
+        <button class="btn ghost small sl-night-go" data-sleepsave="${esc(d)}">Save this night</button>
       </div>`;
     };
     const y = dayStr(Date.now() - DAY_MS), y2 = dayStr(Date.now() - 2*DAY_MS);
@@ -21470,13 +21504,20 @@ function bind(){
   };
   const writeNight = (d)=>{
     if(!S.checkins) S.checkins = {};
-    const rec = (S.checkins[d] = S.checkins[d] || {});
+    /* Read before creating. Pressing Save on two empty boxes should leave the day exactly
+       as it found it, not stamp an empty check-in onto it. */
+    const rec = S.checkins[d] || {};
     const bedEl  = [...document.querySelectorAll("[data-sleepbed]")].find(x=> x.dataset.sleepbed === d);
     const wakeEl = [...document.querySelectorAll("[data-sleepwake]")].find(x=> x.dataset.sleepwake === d);
     const bedRaw  = bedEl  ? bedEl.value  : "";
     const wakeRaw = wakeEl ? wakeEl.value : "";
     let bed  = sleepStamp(d, bedRaw, true);
     let wake = sleepStamp(d, wakeRaw, false);
+    if(bed == null && wake == null && !rec.sleep && !rec.bedAt && !rec.wokeAt){
+      toast("Put in one of the two times first", "warn");
+      return;
+    }
+    S.checkins[d] = rec;
     if(bed != null && wake != null && bed >= wake) bed -= DAY_MS;   // it was the night before
     /* A night that is one clock time and nothing else is still worth keeping — half an
        answer beats none, and the other half can arrive later. There is simply no
@@ -21509,19 +21550,18 @@ function bind(){
     }
     save(); queueSync(); render();
   };
-  /* TYPING IS NOT AGREEING. Every keystroke used to be the commit, which meant a time
-     picker halfway through being scrolled had already been written and announced — and on
-     a native time control there is no moment that reliably means "done". So the boxes
-     only arm the button, and the button is the answer. */
-  const armNight = d=>{
-    const btn = [...document.querySelectorAll("[data-sleepsave]")].find(x=> x.dataset.sleepsave === d);
-    if(btn) btn.disabled = false;
-  };
-  document.querySelectorAll("[data-sleepbed],[data-sleepwake]").forEach(el=>{
-    const d = el.dataset.sleepbed || el.dataset.sleepwake;
-    el.oninput = ()=> armNight(d);
-    el.onchange = ()=> armNight(d);
-  });
+  /* TYPING IS NOT AGREEING — but the button must not need permission to work either.
+
+     Version one greyed it out until an input event proved something had changed. On a
+     desktop that is fine and on a phone it is a dead button: iOS renders a time field as
+     a wheel in a tray, and the value it commits arrives on `change` when the tray is
+     DISMISSED. Set both times, reach for Save without dismissing, and the arming event
+     has not happened yet — so the control you are pressing is disabled and nothing at all
+     occurs, which is indistinguishable from the feature being broken.
+
+     So it is always live. It reads whatever the two boxes hold at the moment it is
+     pressed, which is the only state that matters, and says so when they hold nothing.
+     The dirty-tracking was solving a problem nobody had. */
   document.querySelectorAll("[data-sleepsave]").forEach(b=> b.onclick = ()=> writeNight(b.dataset.sleepsave));
   /* CLOSING A NIGHT ERASES IT. Whatever had been guessed at for that night goes — the
      times, the duration, the estimate stamp — and the row leaves the list. What survives
