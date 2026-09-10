@@ -965,6 +965,8 @@ input.ph-plan::placeholder{color:var(--acc);opacity:.75}
   font-size:13px;line-height:1.4;color:var(--dim);
 }
 .pw-strip b{font:11.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--acc)}
+.lp-line{border-left-color:var(--acc)}
+.lp-line b{color:var(--acc)}
 .pct-line{border-left-color:var(--dim)}
 .pct-line .linklike{margin-left:6px}
 .set{display:grid;grid-template-columns:44px 1fr 1fr 86px 48px;gap:7px;align-items:center;margin-bottom:8px}
@@ -4492,7 +4494,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.5";
+const APP_VERSION = "15.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6044,6 +6046,47 @@ const TECHNIQUES = {
     gloss:"failure"}
 };
 const TECH_KEYS = Object.keys(TECHNIQUES);
+/* =====================================================================
+   WHERE THE STRETCH IS, FOR ANY MOVEMENT
+
+   "Finish in the stretched position" is the correct instruction and it is useless on its
+   own: the stretched position is a different place in every exercise, and it is the one
+   thing you have to know to run the set. It is the bottom of a squat and the bottom of a
+   curl, but it is the TOP of a pulldown and the top of a pullover, and on a leg curl —
+   where the target is the hamstring — it is the end where the knee is straight, which is
+   the start of the rep rather than the finish of it.
+
+   So it is derived from the movement rather than left to the reader. The table is read
+   most-specific first, because "leg extension" and "extension" must not collide, and
+   anything unrecognised falls back to the honest general statement rather than to a
+   confident wrong one. */
+const LENGTHENED_WHERE = [
+  [/\b(lat pulldown|pulldown|pull[- ]?up|chin[- ]?up|pullover)\b/i, "at the top, arms fully extended overhead"],
+  [/\b(leg curl|hamstring curl|nordic)\b/i, "at the bottom, legs almost straight"],
+  [/\b(leg extension|quad extension)\b/i, "at the bottom, knees fully bent"],
+  [/\b(calf raise|calf press)\b/i, "at the bottom, heels dropped below the platform"],
+  [/\b(lateral raise|rear delt|reverse fly|face pull)\b/i, "at the bottom, arms hanging across the body"],
+  [/\b(pec deck|chest fly|cable fly|fly)\b/i, "at the outside, arms wide and the chest open"],
+  [/\b(row|shrug)\b/i, "at the bottom, arms fully extended and the weight pulling away"],
+  [/\b(curl)\b/i, "at the bottom, arms almost straight"],
+  [/\b(tricep|pushdown|skull ?crusher|overhead extension|dip)\b/i, "at the bottom, elbow fully bent behind you"],
+  [/\b(squat|leg press|hack squat|lunge|split squat|step[- ]?up)\b/i, "in the bottom half, out of the hole"],
+  [/\b(romanian deadlift|rdl|good morning|hip hinge|stiff[- ]?leg)\b/i, "at the bottom, the hamstrings loaded and the bar near the shins"],
+  [/\b(bench|chest press|push[- ]?up|shoulder press|overhead press)\b/i, "at the bottom, the weight down at the chest"],
+  [/\b(deadlift)\b/i, "off the floor, the bottom third of the pull"],
+  [/\b(crunch|sit[- ]?up|ab)\b/i, "at the bottom, the torso stretched back"]
+];
+function lengthenedWhere(name){
+  const n = String(name || "");
+  for(const [re, where] of LENGTHENED_WHERE) if(re.test(n)) return where;
+  return "at the stretched end of the movement";
+}
+/* Is this exercise being run AS lengthened partials, every set of it, rather than
+   finishing one set with them? The flag rides on the technique entry so nothing else in
+   the model has to learn a new field. */
+function lpWholeExercise(e){
+  return techList(e).some(t=> t.k === "lengthened" && t.all);
+}
 /* Normalised accessor. `e.tech` is a list of {k, detail} and every reader goes through
    here, so a save written before techniques existed, or one carrying a key this build has
    never heard of, reads as "no technique" instead of throwing halfway down a render. */
@@ -6060,6 +6103,8 @@ function hasTech(e, k){ return techList(e).some(t=> t.k === k); }
 function techFor(e, idx, total){
   return techList(e).filter(t=>{
     const T = TECHNIQUES[t.k];
+    // a technique the plan applies to the WHOLE exercise beats its own default scope
+    if(t.all) return true;
     if(T.applies === "all") return true;
     return !total || idx === total - 1;
   });
@@ -17308,6 +17353,7 @@ function viewActiveSession(){
         </span>
       </div>`;
     h += swapNoteHTML(en);
+    h += lpLineHTML(en);
     h += pctLineHTML(en);
     h += planChangeLineHTML(en);
     h += exNoteLineHTML(en);
@@ -17534,6 +17580,12 @@ function weakerSideRepsThisSession(exName, weakSide){
    the bottom of the range. Returns null on an ordinary set, which is nearly all of them. */
 function setGovernor(entry, si){
   if(!entry) return null;
+  /* PARTIAL REPS ARE NOT THE SAME REPS. Run the whole exercise through the bottom half
+     and the count goes up while the work per rep goes down, so grading those reps against
+     a rep range written for full ones marks you up for doing less. Stamped like every
+     other rule that deliberately changes what a set is, so the session it happened in
+     keeps the reading it was performed under. */
+  if(lpWholeExercise(entry)) return "lp";
   const rx = setPrescription(entry, si);
   if(rx && rx.match != null) return "weaker";
   if(deloadActive()) return "deload";
@@ -17544,6 +17596,7 @@ function setGovernor(entry, si){
 }
 /* What each one means on the grade card, in the section that had to leave it out. */
 const GOV_WHY = {
+  lp:     "run as lengthened partials",
   weaker: "held to your weaker side",
   deload: "on a deload",
   rebuild: "rebuilding at a new load",
@@ -17566,10 +17619,19 @@ function setPrescription(entry, si){
   const shown = on[0];
   if(shown){
     out.techLabel = TECHNIQUES[shown.k].label;
+    /* NAMED FOR THIS MOVEMENT. A partials set on a pulldown and a partials set on a squat
+       happen at opposite ends of the rep, and the row is where that has to be said —
+       unless the WHOLE exercise is partials, in which case it is a fact about the
+       exercise and belongs on the exercise once. Repeating it above all four sets was
+       four identical banners saying the same thing about a decision made once. */
+    if(shown.k === "lengthened"){
+      out.lpWhere = lengthenedWhere(entry.name);
+      if(shown.all){ out.techLabel = ""; out.lpWhere = ""; }
+    }
     /* The plan's own words about running it, which used to sit in the cue block under the
        set. Carried here so deleting that block cost nothing — it is the one part of the
        cue the badge's tooltip and the glossary could not already tell you. */
-    out.techDetail = shown.detail || "";
+    out.techDetail = shown.detail || (out.lpWhere || "");
   }
 
   /* A load that just went up asks for the BOTTOM of the range, not the top. Written
@@ -18143,12 +18205,37 @@ function openSwapModal(ei){
       filled
         ? "The "+filled+" set"+(filled===1?"":"s")+" you've already logged stay on "+esc(en.name)+". The rest move to whatever you pick."
         : "Just for today. Your plan still asks for "+esc(en.swapFrom || en.name)+" next time."}</div>
+    ${(()=>{
+      /* THE SAME MOVEMENT, RUN A DIFFERENT WAY, which is not a swap in the usual sense —
+         the bar does not change, the range does. It belongs on this sheet because this is
+         where somebody stands when they decide a movement is not going to happen as
+         written: the rack is fine, the shoulder is not, and the bottom half is what is
+         left. One tap, no searching, and it names where the stretch is on THIS lift. */
+      const on = lpWholeExercise(en);
+      return `<button class="btn ghost swap-opt" id="lpSwitch"
+          style="text-align:left;width:100%;margin-bottom:8px;padding:12px 14px">
+        <b style="display:block">${on ? "\u21a9 Back to full reps" : "Run it as lengthened partials"}</b>
+        <span class="sub" style="display:block;margin-top:3px;text-transform:none;letter-spacing:0">${
+          on ? "every set back to the full range"
+             : "same weight, every set " + esc(lengthenedWhere(en.name))}</span>
+      </button>`;
+    })()}
     ${rows ? rows + `<div class="swap-or">or pick anything else</div>` : ""}
     <div class="field" style="margin:0 0 10px">
       <input id="swapSearch" placeholder="Search every exercise\u2026" autocomplete="off"></div>
     <div id="swapResults" class="swap-results"></div>
     <button class="btn ghost small" id="closeModal" style="margin-top:10px">Never mind</button>`);
 
+  const lpBtn = $("#modal").querySelector("#lpSwitch");
+  if(lpBtn) lpBtn.onclick = ()=>{
+    const on = lpWholeExercise(en);
+    const rest = techList(en).filter(t=> t.k !== "lengthened");
+    en.tech = on ? rest : rest.concat([{k:"lengthened", all:true}]);
+    if(!en.tech.length) delete en.tech;
+    save(); hideModal(); render();
+    toast(on ? esc(en.name) + " is back to full reps"
+             : esc(en.name) + " \u2014 partials " + lengthenedWhere(en.name), "good");
+  };
   const pick = (name, cue)=> askSwapWhy(ei, name, cue, null);
   $("#modal").querySelectorAll("[data-swappick]").forEach(b=> b.onclick = ()=>{
     const o = opts[parseInt(b.dataset.swappick, 10)];
@@ -24188,6 +24275,17 @@ function openExEditor(wid, idx){
   <div class="sub" style="margin:-6px 0 12px">${esc(((techList(e)[0]||{}).k && TECHNIQUES[techList(e)[0].k])
       ? TECHNIQUES[techList(e)[0].k].cue
       : "How the sets are taken. Most exercises are straight sets — the technique ones apply to the last set unless the plan says otherwise.")}</div>
+  <div id="lpScopeWrap" style="display:${(techList(e)[0]||{}).k === "lengthened" ? "block" : "none"};margin:-4px 0 12px">
+    <div class="seg">
+      <button class="${lpWholeExercise(e) ? "" : "on"}" data-lpscope="last">Last set only</button>
+      <button class="${lpWholeExercise(e) ? "on" : ""}" data-lpscope="all">The whole exercise</button>
+    </div>
+    <div class="sub" style="margin:7px 0 0;text-transform:none;letter-spacing:0;color:var(--faint);font-size:12.5px">
+      ${lpWholeExercise(e)
+        ? esc("Every working set is partials, " + lengthenedWhere(e.name) + ". A different exercise from the full-range version and graded as one \u2014 the reps are not compared against your full-range history.")
+        : esc("Full reps until they run out, then partials to finish the last set.")}
+    </div>
+  </div>
   <div class="togglerow"><input type="checkbox" id="f_ss" ${e.superset?"checked":""}><label for="f_ss" style="margin:0;font:inherit;color:var(--text);text-transform:none;letter-spacing:0">Superset with the exercise after this one</label></div>
   <div class="sub" style="margin:6px 0 12px">A set of each back to back, and the rest clock only runs after the pair. The exercise below this one in the day becomes the second half.</div>
   <div class="field"><label>Note</label><input id="f_note" value="${esc(e.note)}" placeholder="per dumbbell, tempo, etc."></div>
@@ -24232,6 +24330,22 @@ function openExEditor(wid, idx){
   </div>`;
   showModal(h);
   let altPickMode = !!e.altPick;
+  /* THE SCOPE ONLY EXISTS FOR THIS ONE TECHNIQUE. A drop set on every set is not a thing
+     anybody prescribes; lengthened partials on every set is a named way of running a
+     movement, and it is what somebody means by "lengthened partial squats". */
+  let lpScope = lpWholeExercise(e) ? "all" : "last";
+  const syncLpScope = ()=>{
+    const wrap = $("#lpScopeWrap");
+    if(wrap) wrap.style.display = $("#f_tech").value === "lengthened" ? "block" : "none";
+    document.querySelectorAll("[data-lpscope]").forEach(b=>
+      b.classList.toggle("on", b.dataset.lpscope === lpScope));
+  };
+  document.querySelectorAll("[data-lpscope]").forEach(b=> b.onclick = ()=>{
+    lpScope = b.dataset.lpscope;
+    syncLpScope();
+  });
+  $("#f_tech").addEventListener("change", syncLpScope);
+  syncLpScope();
   $("#f_hasAlt").onchange = ev=>{
     const on = ev.target.checked;
     $("#altFields").style.display = on ? "block" : "none";
@@ -24279,7 +24393,11 @@ function openExEditor(wid, idx){
     const rLo = parseInt($("#f_rest_lo").value, 10), rHi = parseInt($("#f_rest_hi").value, 10);
     if(rLo > 0 && rHi > 0) ne.rest = [Math.min(rLo, rHi), Math.max(rLo, rHi)];
     const tk = $("#f_tech").value;
-    if(tk && TECHNIQUES[tk]) ne.tech = [{k: tk}];
+    if(tk && TECHNIQUES[tk]){
+      ne.tech = [{k: tk}];
+      // "the whole exercise" is a property of the prescription, so it is saved with it
+      if(tk === "lengthened" && lpScope === "all") ne.tech[0].all = true;
+    }
     if($("#f_ss").checked) ne.superset = true;
     /* Everything this form does not show is carried across rather than dropped. The
        fields are real prescriptions — the rest window, the superset pairing, the warm-up
@@ -27894,6 +28012,13 @@ function setRowHTML(en, ei, si, last, idxLabel){
    Read off the PROGRAMME rather than the session copy, so a change applied after Start
    still shows on the card you are logging into. It lapses on its own: once the plan's
    load is no longer the one the app wrote, this is history and says nothing. */
+/* The whole-exercise partials banner: said once, where the exercise is named, with the
+   place on THIS movement that the set happens in. */
+function lpLineHTML(en){
+  if(!lpWholeExercise(en)) return "";
+  return `<div class="plan-line lp-line"><b>Lengthened partials</b> \u2014 every set ${
+    esc(lengthenedWhere(en && en.name))}. Same weight, shorter range.</div>`;
+}
 const PLAN_CHANGE_SHOW_DAYS = 30;
 /* A PERCENTAGE, TURNED BACK INTO A WEIGHT, WHERE YOU LOAD THE BAR. The percentage is the
    plan's instruction and the pounds are what you do about it, so the card carries both
