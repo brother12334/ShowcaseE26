@@ -4509,7 +4509,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.7";
+const APP_VERSION = "15.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14017,10 +14017,24 @@ function aiPlanToProgram(doc, answers){
     effortFromPlan = withRir ? "RIR targets" : "RPE targets";
   }
 
+  /* A STARTING LOAD FOR EVERY SLOT THE DOCUMENT LEFT EMPTY. Last, so it sees the finished
+     programme, and only where there is an answer to work from. Anything the plan itself
+     stated is already in place and is never touched. */
+  const startBw = aiQNum(ans.bodyweight, 0);
+  let estimated = 0;
+  if(startBw > 0){
+    estimated = fillStartingLoads(program, {
+      bodyweight: startBw,
+      level: ans.level || (S.setup && S.setup.level) || "intermediate",
+      sex: ans.sex === "m" ? "m" : "f"      // "skip" and unanswered both take the lower
+    });
+  }
+
   /* The source travels with the result, so whatever adopts it can keep the document as
      well as what was made of it. See S.importSrc. */
   return {program, customSplit: split, splitId: null, warnings, attention, matches, meta,
-          prefs, stated, barbellLifts: barbell, effortFromPlan, doc, answers: ans};
+          prefs, stated, barbellLifts: barbell, effortFromPlan, doc, answers: ans,
+          estimated, startBw};
 }
 
 /* ---------- stage 3: the questions this document actually leaves open ----------
@@ -14042,6 +14056,98 @@ function aiQNum(v, fallback){
   const n = parseFloat(v);
   return isFinite(n) ? n : fallback;
 }
+/* =====================================================================
+   A PLAN WITH NO NUMBERS IN IT
+
+   Most written programmes prescribe sets, reps and effort and leave the load to you,
+   which is correct of them and leaves the app with a plan it cannot start: every weight
+   box empty, every warm-up ramp with nothing to take a percentage of, and a first session
+   spent guessing in a gym rather than training in one.
+
+   Strength tracks bodyweight closely enough to open on. These are typical WORKING loads
+   — a set of about eight with a couple of reps left — as a fraction of bodyweight for an
+   intermediate lifter. Not maxes and not targets: a first estimate that the app's own
+   progression corrects within two or three sessions, which is what that machinery is for.
+
+   Upper-body ratios differ enough between men and women that one table would undershoot
+   half of everybody and overshoot the other half, so it is asked and it is skippable —
+   and skipping takes the lower figure, because a first set that is too light costs one
+   session and one that is too heavy can cost a great deal more.
+
+   The fourth column marks a ratio that ALREADY describes one hand. Everything else
+   describes a barbell, and the app records a dumbbell lift as the weight of ONE
+   dumbbell — so a barbell figure handed to a dumbbell row would prescribe twice the load
+   and then some. Movements done with no load at all are absent on purpose: their answer
+   is no number, which loadNeededFor() already understands. */
+const START_RATIOS = [
+  [/\b(hip thrust|glute bridge)\b/i,                          1.20, 1.00],
+  [/\b(leg press)\b/i,                                        2.00, 1.50],
+  [/\b(hack squat)\b/i,                                       1.20, 0.90],
+  [/\b(front squat)\b/i,                                      0.80, 0.60],
+  [/\b(squat|lunge|split squat|step[- ]?up)\b/i,              1.00, 0.75],
+  [/\b(romanian deadlift|rdl|stiff[- ]?leg|good morning)\b/i,  0.90, 0.70],
+  [/\b(deadlift)\b/i,                                         1.25, 1.00],
+  [/\b(leg extension)\b/i,                                    0.55, 0.40],
+  [/\b(leg curl|hamstring curl)\b/i,                           0.45, 0.35],
+  [/\b(calf raise|calf press)\b/i,                            1.00, 0.75],
+  [/\b(abduction|adduction)\b/i,                              0.50, 0.45],
+  [/\b(incline (?:bench|press))\b/i,                           0.70, 0.42],
+  [/\b(bench press|chest press)\b/i,                           0.85, 0.50],
+  [/\b(pec deck|chest fly|cable fly|fly)\b/i,                  0.35, 0.22, true],
+  [/\b(overhead press|shoulder press|military press)\b/i,       0.55, 0.35],
+  [/\b(lat pulldown|pulldown)\b/i,                             0.70, 0.50],
+  [/\b(pullover)\b/i,                                          0.30, 0.20],
+  [/\b(shrug)\b/i,                                             0.90, 0.60],
+  [/\b(row)\b/i,                                               0.70, 0.50],
+  [/\b(face pull)\b/i,                                         0.30, 0.22, true],
+  [/\b(lateral raise|rear delt|reverse fly)\b/i,               0.09, 0.06, true],
+  [/\b(preacher|barbell curl|ez curl)\b/i,                     0.35, 0.22],
+  [/\b(curl)\b/i,                                              0.16, 0.10, true],
+  [/\b(skull ?crusher|overhead extension)\b/i,                 0.30, 0.18, true],
+  [/\b(tricep|pushdown)\b/i,                                   0.35, 0.22],
+  [/\b(crunch|ab )\b/i,                                         0.40, 0.30]
+];
+const START_LEVEL_MULT = {beginner: 0.70, intermediate: 1.00, advanced: 1.30};
+/* A first working load for one movement, or null when there is no honest number to give:
+   no bodyweight to scale from, or a movement carrying no external load at all. */
+function startingLoadFor(name, opts){
+  const o = opts || {};
+  const bw = parseFloat(o.bodyweight);
+  if(!(bw > 0)) return null;
+  const n = String(name || "");
+  if(BODYWEIGHT_RE.test(n) && !/\bweighted\b/i.test(n)) return null;
+  const row = START_RATIOS.find(r=> r[0].test(n));
+  if(!row) return null;
+  const ratio = o.sex === "m" ? row[1] : row[2];   // unanswered takes the lower, on purpose
+  const mult = START_LEVEL_MULT[o.level] || START_LEVEL_MULT.intermediate;
+  let w = bw * ratio * mult;
+  /* A pair of dumbbells totals about eighty per cent of the barbell version, which is
+     forty per cent in each hand — and one hand is what the app stores. */
+  if(!row[3] && /\b(dumbbell|db|d\.b\.)\b/i.test(n)) w *= 0.40;
+  const load = roundLoadable(w, n);
+  const step = stepInUnits(5);
+  const out = load !== w ? load : Math.max(step, Math.round(w / step) * step);
+  return out > 0 ? out : null;
+}
+/* Every slot the plan left empty, filled. Slots the DOCUMENT gave a load for are never
+   touched: what it states is what it states, and an estimate must not overwrite it. */
+function fillStartingLoads(program, opts){
+  let n = 0;
+  const lists = Object.keys(program || {}).map(k=> program[k]).filter(Array.isArray);
+  lists.forEach(list=> list.forEach(e=>{
+    [e, e && e.alt].forEach(t=>{
+      if(!t || !t.name) return;
+      if(t.weight != null && t.weight !== "") return;   // the plan spoke; it wins
+      if(t.pct != null) return;                          // a percentage IS its load
+      const w = startingLoadFor(t.name, opts);
+      if(w == null) return;
+      t.weight = w;
+      t.startEst = true;            // recorded, so the review can say how many
+      n++;
+    });
+  }));
+  return n;
+}
 function aiBuildQuestions(doc, result){
   const qs = [];
   const stated = doc.stated || {};
@@ -14062,6 +14168,51 @@ function aiBuildQuestions(doc, result){
         {v:"strength", t:"Get stronger", s:"Heavier weights, fewer reps, longer rests. Judged on what you lift."},
         {v:"lean",     t:"Lose fat, keep muscle", s:"Train the same, rest a little less, and expect weights to hold steady rather than climb."},
         {v:"health",   t:"Just stay fit", s:"Turn up, train, feel good. No pressure to push numbers."}
+      ]
+    });
+  }
+
+  /* STARTING LOADS. Asked only when this document actually leaves them open — a plan
+     that writes a weight on every line settles the question and is never asked. Three
+     pages, and the last two are what turn the answer into numbers. */
+  const noLoad = ex.filter(x=> x && x.name
+    && (x.weight == null || !(aiQNum(x.weight, 0) > 0))
+    && !(aiQNum(x.percent, 0) > 0)
+    && !BODYWEIGHT_RE.test(String(x.name)));
+  if(noLoad.length >= 2){
+    const known = (S.setup && S.setup.level) || null;
+    qs.push({
+      id:"level", title:"How long have you been training?",
+      sub:"Your plan says what to do and not what to load, so the app can work out a starting weight for each exercise — this is the first half of that. It only sets where you START; what you actually lift is whatever you log.",
+      detected: noLoad.length + " exercises with no weight given",
+      def:null,
+      rec: (()=>{
+        if(known) return {v: known, why: "it is what you told the app when you set it up"};
+        const fromDoc = doc.planKind && doc.planKind.level;
+        return ["beginner","intermediate","advanced"].indexOf(fromDoc) > -1
+          ? {v: fromDoc, why: "your plan is written for that level"} : null;
+      })(),
+      options:[
+        {v:"beginner",     t:"Under a year", s:"Or starting again after a long break. Estimates come in well under, and climb fast."},
+        {v:"intermediate", t:"A year or two", s:"You know the main lifts and roughly what you can handle."},
+        {v:"advanced",     t:"Several years", s:"You know how your body responds. Estimates start correspondingly higher."}
+      ]
+    });
+    qs.push({
+      id:"bodyweight", type:"number", title:"Roughly what do you weigh?",
+      sub:"Strength tracks bodyweight closely enough to open on. This is only used to work out where to start — and it goes in your log as today's weigh-in, which the Body tab charts.",
+      unit: unitWord(), min: 60, max: 500, def: null,
+      picks: inKg() ? [55, 65, 75, 85, 95] : [120, 150, 175, 200, 230]
+    });
+    qs.push({
+      id:"sex", title:"One more, and it is genuinely optional",
+      sub:"Upper-body strength differs enough between men and women that a single table would be wrong for nearly everybody. It changes the opening estimate and nothing else in the app. Skip it and the lower figure is used, which is the safer way to be wrong.",
+      detected:"only affects the starting estimate",
+      def:null, rec:null,
+      options:[
+        {v:"m",    t:"Man", s:"Uses the higher of the two upper-body figures."},
+        {v:"f",    t:"Woman", s:"Uses the lower of the two upper-body figures."},
+        {v:"skip", t:"Rather not say", s:"The lower figure is used. A first set that is too light costs one session; too heavy can cost more."}
       ]
     });
   }
@@ -14788,6 +14939,13 @@ function aiReviewHTML(){
   if(p.deloads && !(m.deloadWeeks||[]).length) push("deloads", "Deloads", p.deloads === "auto" ? "Element 26 tells you when one's due" : "Not prompted");
   if(ans.restDays) push("restDays", "Rest days", r.customSplit.layout.filter(x=>x==="rest").length + " a cycle");
   if(ans.units) push("units", "Units", ans.units === "convert" ? "Converted from kg to lb" : "Loads left out");
+  /* SAID PLAINLY, BEFORE ANYTHING IS SAVED. A weight that appeared in a plan without
+     having been in the document is the one thing on this screen somebody could otherwise
+     mistake for their programme's own instruction. */
+  if(r.estimated > 0) push("level", "Starting weights",
+    r.estimated + " exercise" + (r.estimated === 1 ? "" : "s") + " opened at an estimate from "
+    + fmtLoad(r.startBw) + " bodyweight, " + (ans.level || "intermediate")
+    + " \u2014 your plan's own weights are untouched, and the app corrects these as you log");
   if(mine.length){
     h += `<div class="ai-card"><div class="ai-card-h">Your settings<span class="ai-tag mine">Your choice</span></div>` +
       mine.map(x=>`<button class="ai-kv tap" data-aiedit="${esc(x.qid)}"><b>${esc(x.k)}</b><span>${esc(x.v)}</span><i>change</i></button>`).join("") +
@@ -15319,6 +15477,23 @@ async function aiUsePlan(){
      person's profile, and it never rewrites the imported plan's rep ranges. */
   if(goal){
     S.setup = Object.assign({name:"Me", level:S.experience||"beginner", gear:"full"}, S.setup || {}, {goal});
+  }
+  /* WHAT THE STARTING-LOAD ANSWERS ARE WORTH KEEPING. The level is a fact about the
+     person and belongs on the profile, where the volume landmarks and set counts already
+     read it. The bodyweight is a measurement taken today, so it goes where every other
+     weigh-in goes and the Body tab charts it like any other. Neither is invented: both
+     are written only when they were actually answered. */
+  const sAns = r.answers || {};
+  if(sAns.level){
+    S.setup = Object.assign({name:"Me", goal:"muscle", gear:"full"}, S.setup || {}, {level: sAns.level});
+    S.experience = sAns.level;
+  }
+  if(sAns.sex === "m" || sAns.sex === "f") S.sex = sAns.sex;
+  const sBw = parseFloat(sAns.bodyweight);
+  if(sBw > 0){
+    if(!S.checkins) S.checkins = {};
+    const rec0 = (S.checkins[todayStr()] = S.checkins[todayStr()] || {});
+    if(!rec0.weight) rec0.weight = String(Math.round(sBw * 10) / 10);
   }
   S.importMeta = r.meta || null;
   /* THE DOCUMENT ITSELF, KEPT. Everything above is what the importer MADE of the plan;
@@ -28733,7 +28908,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience",
+  "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience","sex",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
@@ -29757,7 +29932,7 @@ function mergeBackup(into, d){
     });
   }
   ["setup","lastReview","wakeTime","sleepTarget","remindAt","remindBed","remindWake","asymRetest","volWindow","askWhy",
-   "experience","viewMode"].forEach(k=>{ if(d[k] !== undefined && d[k] !== null) into[k] = d[k]; });
+   "experience","sex","viewMode"].forEach(k=>{ if(d[k] !== undefined && d[k] !== null) into[k] = d[k]; });
   return stats;
 }
 
