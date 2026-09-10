@@ -965,8 +965,23 @@ input.ph-plan::placeholder{color:var(--acc);opacity:.75}
   font-size:13px;line-height:1.4;color:var(--dim);
 }
 .pw-strip b{font:11.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--acc)}
-.lp-line{border-left-color:var(--acc)}
-.lp-line b{color:var(--acc)}
+/* THE RANGE, DRAWN. The bar is the whole rep; the fill is the part being worked. It is
+   26px wide because it is a diagram rather than a chart — big enough to read the end it
+   sits at, small enough that it never competes with the set rows underneath it. */
+.lp-rom{display:flex;align-items:center;gap:11px;margin:9px 0 10px}
+.lp-bar{
+  flex:0 0 auto;width:26px;height:46px;border-radius:6px;
+  border:1px solid var(--line);background:var(--card2);position:relative;overflow:hidden;
+}
+.lp-bar i{position:absolute;left:0;right:0;background:var(--acc);opacity:.85}
+.lp-bar.lp-bottom i{bottom:0;height:45%}
+.lp-bar.lp-top    i{top:0;height:45%}
+/* Neither end, or an end nobody can name: an empty range, said as one. */
+.lp-bar.lp-none{border-style:dashed}
+.lp-bar.lp-none i{display:none}
+.lp-txt{font:11.5px var(--mono);color:var(--dim);line-height:1.45;min-width:0}
+.lp-txt b{display:block;color:var(--acc);letter-spacing:.06em;text-transform:uppercase;
+  font-size:10.5px;margin-bottom:3px}
 .pct-line{border-left-color:var(--dim)}
 .pct-line .linklike{margin-left:6px}
 .set{display:grid;grid-template-columns:44px 1fr 1fr 86px 48px;gap:7px;align-items:center;margin-bottom:8px}
@@ -4494,7 +4509,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.6";
+const APP_VERSION = "15.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6060,26 +6075,40 @@ const TECH_KEYS = Object.keys(TECHNIQUES);
    most-specific first, because "leg extension" and "extension" must not collide, and
    anything unrecognised falls back to the honest general statement rather than to a
    confident wrong one. */
+/* Each row carries the words AND which end of the range they describe, because the
+   marker draws the range rather than describing it. Three ends, and the third is the
+   honest one: a fly's stretch is at the OUTSIDE of an arc, which is neither the top nor
+   the bottom of anything, and a movement the table does not recognise has no end at all.
+   Both draw an empty range rather than a confidently wrong filled one. */
 const LENGTHENED_WHERE = [
-  [/\b(lat pulldown|pulldown|pull[- ]?up|chin[- ]?up|pullover)\b/i, "at the top, arms fully extended overhead"],
-  [/\b(leg curl|hamstring curl|nordic)\b/i, "at the bottom, legs almost straight"],
-  [/\b(leg extension|quad extension)\b/i, "at the bottom, knees fully bent"],
-  [/\b(calf raise|calf press)\b/i, "at the bottom, heels dropped below the platform"],
-  [/\b(lateral raise|rear delt|reverse fly|face pull)\b/i, "at the bottom, arms hanging across the body"],
-  [/\b(pec deck|chest fly|cable fly|fly)\b/i, "at the outside, arms wide and the chest open"],
-  [/\b(row|shrug)\b/i, "at the bottom, arms fully extended and the weight pulling away"],
-  [/\b(curl)\b/i, "at the bottom, arms almost straight"],
-  [/\b(tricep|pushdown|skull ?crusher|overhead extension|dip)\b/i, "at the bottom, elbow fully bent behind you"],
-  [/\b(squat|leg press|hack squat|lunge|split squat|step[- ]?up)\b/i, "in the bottom half, out of the hole"],
-  [/\b(romanian deadlift|rdl|good morning|hip hinge|stiff[- ]?leg)\b/i, "at the bottom, the hamstrings loaded and the bar near the shins"],
-  [/\b(bench|chest press|push[- ]?up|shoulder press|overhead press)\b/i, "at the bottom, the weight down at the chest"],
-  [/\b(deadlift)\b/i, "off the floor, the bottom third of the pull"],
-  [/\b(crunch|sit[- ]?up|ab)\b/i, "at the bottom, the torso stretched back"]
+  [/\b(lat pulldown|pulldown|pull[- ]?up|chin[- ]?up|pullover)\b/i, "at the top, arms fully extended overhead", "top"],
+  [/\b(leg curl|hamstring curl|nordic)\b/i, "at the bottom, legs almost straight", "bottom"],
+  [/\b(leg extension|quad extension)\b/i, "at the bottom, knees fully bent", "bottom"],
+  [/\b(calf raise|calf press)\b/i, "at the bottom, heels dropped below the platform", "bottom"],
+  [/\b(lateral raise|rear delt|reverse fly|face pull)\b/i, "at the bottom, arms hanging across the body", "bottom"],
+  [/\b(pec deck|chest fly|cable fly|fly)\b/i, "at the outside, arms wide and the chest open", ""],
+  [/\b(row|shrug)\b/i, "at the bottom, arms fully extended and the weight pulling away", "bottom"],
+  [/\b(curl)\b/i, "at the bottom, arms almost straight", "bottom"],
+  [/\b(tricep|pushdown|skull ?crusher|overhead extension|dip)\b/i, "at the bottom, elbow fully bent behind you", "bottom"],
+  [/\b(squat|leg press|hack squat|lunge|split squat|step[- ]?up)\b/i, "in the bottom half, out of the hole", "bottom"],
+  [/\b(romanian deadlift|rdl|good morning|hip hinge|stiff[- ]?leg)\b/i, "at the bottom, the hamstrings loaded and the bar near the shins", "bottom"],
+  [/\b(bench|chest press|push[- ]?up|shoulder press|overhead press)\b/i, "at the bottom, the weight down at the chest", "bottom"],
+  [/\b(deadlift)\b/i, "off the floor, the bottom third of the pull", "bottom"],
+  [/\b(crunch|sit[- ]?up|ab)\b/i, "at the bottom, the torso stretched back", "bottom"]
 ];
-function lengthenedWhere(name){
+function lengthenedRow(name){
   const n = String(name || "");
-  for(const [re, where] of LENGTHENED_WHERE) if(re.test(n)) return where;
-  return "at the stretched end of the movement";
+  for(const row of LENGTHENED_WHERE) if(row[0].test(n)) return row;
+  return null;
+}
+// which end of the range the work happens at: "bottom", "top", or "" when it is neither
+function lengthenedEnd(name){
+  const row = lengthenedRow(name);
+  return row ? row[2] : "";
+}
+function lengthenedWhere(name){
+  const row = lengthenedRow(name);
+  return row ? row[1] : "at the stretched end of the movement";
 }
 /* Is this exercise being run AS lengthened partials, every set of it, rather than
    finishing one set with them? The flag rides on the technique entry so nothing else in
@@ -17330,7 +17359,7 @@ function viewActiveSession(){
     const last = lastSetsFor(a.workoutId, en.name, anyDay, occ, en.startSide);
     const ll = lastBox(a.workoutId, en.name, anyDay, occ);
     h += `<div class="card ex${supersetInfo(a.entries, ei)?' ss-card':''}">
-      <div class="ex-head"><b>${exNameHTML(en, ei)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en)}</b></div>
+      <div class="ex-head"><b>${exNameHTML(en, ei)}${supersetBadge(supersetInfo(a.entries, ei))}${techBadges(en, {skipLpAll:true})}</b></div>
       <div class="ex-bar">
         <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}${easeTagHTML(en)}</span>
         <span class="icon-btns ex-ctl">
@@ -27774,8 +27803,12 @@ function subSetsFor(e, si){
     .filter(r=> r && (r.reps !== "" && r.reps != null || r.weight !== "" && r.weight != null))
     .map((r, i)=> ({label: label + " " + (i + 1), weight: r.weight, reps: r.reps}));
 }
-function techBadges(e){
-  return techList(e).map(t=>{
+/* `skipLpAll` is for the one screen that draws the range underneath the name: the badge
+   and the diagram would be the same fact twice, six inches apart. Everywhere else — the
+   Program tab, the day preview — there is no diagram, so the badge is all there is. */
+function techBadges(e, opts){
+  const skip = opts && opts.skipLpAll;
+  return techList(e).filter(t=> !(skip && t.k === "lengthened" && t.all)).map(t=>{
     const T = TECHNIQUES[t.k];
     return ` <span class="tech-badge term" data-term="${T.gloss}" role="button" tabindex="0"${
       t.detail ? ` title="${attrSafe(t.detail)}"` : ` title="${attrSafe(T.cue)}"`
@@ -28012,12 +28045,27 @@ function setRowHTML(en, ei, si, last, idxLabel){
    Read off the PROGRAMME rather than the session copy, so a change applied after Start
    still shows on the card you are logging into. It lapses on its own: once the plan's
    load is no longer the one the app wrote, this is history and says nothing. */
-/* The whole-exercise partials banner: said once, where the exercise is named, with the
-   place on THIS movement that the set happens in. */
+/* THE MARKER DRAWS THE RANGE RATHER THAN DESCRIBING IT.
+
+   Partials are a statement about range of motion, and a filled block of prose is the one
+   shape that cannot say so. A short bar standing for the whole rep, with the worked
+   portion filled, says it before a word is read — and because the filled end follows the
+   movement, a pulldown and a squat are visibly different at a glance: the squat's work is
+   at the bottom of the rep, the pulldown's at the top, and that is the single fact
+   somebody needs to run the set.
+
+   An unrecognised movement, and a fly — whose stretch is at the OUTSIDE of an arc and so
+   is neither end of anything — draw the bar empty and dashed. Nothing is claimed that
+   cannot be known, and the words still say what to do. */
 function lpLineHTML(en){
   if(!lpWholeExercise(en)) return "";
-  return `<div class="plan-line lp-line"><b>Lengthened partials</b> \u2014 every set ${
-    esc(lengthenedWhere(en && en.name))}. Same weight, shorter range.</div>`;
+  const name = (en && en.name) || "";
+  const end = lengthenedEnd(name);
+  const where = lengthenedWhere(name);
+  return `<div class="lp-rom">
+    <span class="lp-bar lp-${end || "none"}" aria-hidden="true"><i></i></span>
+    <span class="lp-txt"><b>Lengthened partials</b>Every set ${esc(where)}. Same weight, shorter range.</span>
+  </div>`;
 }
 const PLAN_CHANGE_SHOW_DAYS = 30;
 /* A PERCENTAGE, TURNED BACK INTO A WEIGHT, WHERE YOU LOAD THE BAR. The percentage is the
