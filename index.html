@@ -1021,6 +1021,19 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
 .de-acts button.danger{color:var(--bad)}
 .de-acts button:active{background:var(--card)}
 .de-acts svg{width:15px;height:15px}
+/* The repair sheet: what it found, and a sample of what each becomes. */
+.lf-n{font:12.5px var(--mono);color:var(--dim);margin:2px 0 8px}
+.lf-n b{color:var(--text)}
+.lf-list{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.lf-row{display:flex;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid var(--line)}
+.lf-row:last-child{border-bottom:0}
+.lf-nm{flex:1 1 auto;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lf-w{font:12px var(--mono);color:var(--dim);white-space:nowrap}
+.lf-w s{color:var(--faint)}
+.lf-w b{color:var(--acc);font-weight:400}
+.lf-more{padding:7px 11px;font:11.5px var(--mono);color:var(--faint);background:var(--card2)}
+.lf-undo{font:11.5px var(--mono);color:var(--faint);margin-top:9px}
+.lf-undo .linklike{margin-left:6px}
 .sess-bar{
   position:sticky;top:0;z-index:6;
   display:flex;align-items:center;gap:10px;
@@ -4643,7 +4656,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "16.2";
+const APP_VERSION = "16.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14505,7 +14518,14 @@ function aiBuildQuestions(doc, result){
   if(bars.length && doc.unit !== "percent"){
     qs.push({
       id:"barMode", title:"When you write down a barbell weight, is the bar included?",
-      sub:`Your plan uses a barbell for ${esc(bars.slice(0,3).join(", "))}. Both ways of counting are fine — the app just needs to know which one you use.`,
+      /* THE THIRD ANSWER NOBODY IS OFFERED. People say "forty-five a side" constantly, and
+         it is not one of these two — it is a description of the bar rather than a weight.
+         Somebody who reads this quickly, thinks "a side" and types 45 logs half of what
+         they lifted for as long as they use the app, and nothing downstream ever looks
+         wrong enough to catch it. So it is ruled out in the question itself. */
+      sub:`Your plan uses a barbell for ${esc(bars.slice(0,3).join(", "))}. Both ways of counting are fine — the app just needs to know which one you use.<br><br><b>Either way it is the WHOLE load, never one side.</b> ${
+        inKg() ? "A 20 kg bar with a 20 on each end is 60, or 40 — never 20."
+               : "A 45 lb bar with a 45 on each end is 135, or 90 — never 45."} The same goes for a Smith machine.`,
       detected:"not in your plan",
       def:null, rec:{v:"total", why:"it's how most people and most plans write it"},
       options:[
@@ -15979,7 +15999,7 @@ function prefsGymHTML(){
   let h = setBlock("Pounds or kilos", "What your gym labels its plates in. Nothing you have already logged is converted \u2014 the numbers stay as you typed them.",
     prefSeg("data-prefunits", p.units === "kg" ? "kg" : "lb", [{v:"lb", t:"Pounds"}, {v:"kg", t:"Kilos"}]));
   h += setBlock("The number you write down for a barbell",
-    "Do you log the bar plus the plates, or just the plates? Warm-ups are worked out from this.",
+    "Do you log the bar plus the plates, or just the plates? Warm-ups are worked out from this. <b>Either way it is the whole load, never one side</b> — a 45 lb bar with a 45 on each end is 135, or 90, never 45. Same for a Smith machine.",
     prefSeg("data-prefbar", p.barMode, [{v:"total", t:"Bar + plates"}, {v:"plates", t:"Plates only"}]) +
     (p.barMode === "total" ? `<div class="field" style="margin:10px 0 0"><label>Your bar weighs</label>
       <input id="prefBarW" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
@@ -21861,8 +21881,178 @@ function settingsPlanHTML(){
 }
 /* Everything that moves your log around or destroys it, in one place, so the two
    destructive buttons in the app are never a scroll away from something routine. */
+/* =====================================================================
+   THE NUMBER MEANT SOMETHING ELSE ALL ALONG
+
+   There are two ways to write a barbell load down and the app asks which one you use.
+   There is a THIRD way people actually talk — "forty-five a side" — and it is not one of
+   them, because it is a description of the bar rather than a weight. Somebody who types
+   45 meaning one side has been logging roughly half of what they lifted, for as long as
+   they have been logging.
+
+   It is not a small error and it does not announce itself. Every number stays internally
+   consistent, so the trends look right, the PRs look right, and the only symptom is that
+   the estimated maxes read low — which is easy to blame on the formula. Real case: eight
+   reps at "45" a side on a 25 lb carriage was reported as an 89 lb one-rep max when the
+   true figure was around 150.
+
+   So this repairs it rather than explaining it. It finds every affected set, shows what
+   each one becomes BEFORE anything is written, converts them to whichever convention is
+   actually set, and keeps an exact record of what it changed so it can be put straight
+   back. */
+function logFixScopeMatch(name, scope){
+  const eq = equipmentOf(name);
+  if(scope === "smith")   return eq === "smith";
+  if(scope === "barbell") return eq === "barbell";
+  return eq === "smith" || eq === "barbell";
+}
+/* What one logged number becomes. Doubling is the whole correction under "plates only" —
+   the stamped carriage weight is still right and is added on top exactly as before. Under
+   "bar + plates" the bar has to join it, because that convention expects it inside the
+   number. */
+function logFixConvert(w, name){
+  const v = parseFloat(w);
+  if(!(v > 0)) return null;
+  const both = v * 2;
+  return trainPrefs().barMode === "total" ? both + implementWeight(name) : both;
+}
+/* Every set the fix would touch, and what it would become. Nothing is written here. */
+function logFixCandidates(scope){
+  const out = [];
+  (S.sessions || []).forEach(sess=>{
+    (sess.entries || []).forEach((en, ei)=>{
+      if(!en || !en.name || !logFixScopeMatch(en.name, scope)) return;
+      (en.sets || []).forEach((st, si)=>{
+        const to = logFixConvert(st && st.weight, en.name);
+        if(to == null) return;
+        out.push({id: sess.id, date: sess.date, ei, si, name: en.name,
+                  from: parseFloat(st.weight), to});
+      });
+    });
+  });
+  return out;
+}
+// The same question of the programme's own prescribed loads.
+function logFixPlanCandidates(scope){
+  const out = [];
+  const lists = Object.keys(S.program || {}).map(k=> S.program[k]).filter(Array.isArray);
+  lists.forEach((list, li)=> list.forEach((e, i)=>{
+    [[e, null], [e && e.alt, "alt"]].forEach(([t, which])=>{
+      if(!t || !t.name || !logFixScopeMatch(t.name, scope)) return;
+      const to = logFixConvert(t.weight, t.name);
+      if(to == null) return;
+      out.push({ref: t, name: t.name, from: parseFloat(t.weight), to, which});
+    });
+  }));
+  return out;
+}
+/* APPLYING IT, AND KEEPING THE WAY BACK. The undo record is the OLD value of each thing
+   touched — smaller than a backup and exact, so putting it back cannot drift. */
+function logFixApply(scope){
+  const sets = logFixCandidates(scope);
+  const plan = logFixPlanCandidates(scope);
+  if(!sets.length && !plan.length) return 0;
+  const undo = {at: Date.now(), scope, sets: [], plan: []};
+  sets.forEach(c=>{
+    const sess = (S.sessions || []).find(x=> x.id === c.id);
+    const st = sess && sess.entries[c.ei] && sess.entries[c.ei].sets[c.si];
+    if(!st) return;
+    undo.sets.push({id: c.id, ei: c.ei, si: c.si, was: st.weight});
+    st.weight = String(c.to);
+  });
+  plan.forEach(c=>{
+    undo.plan.push({name: c.name, which: c.which, was: c.ref.weight});
+    c.ref.weight = c.to;
+  });
+  /* The stamped estimates are downstream of the numbers and have to go: a PR badge and a
+     grade worked out from half the weight are not opinions to keep, they are arithmetic
+     on a figure that has just been corrected. They are recomputed on the next look. */
+  (S.sessions || []).forEach(sess=>{
+    (sess.entries || []).forEach(en=>{
+      if(!en || !logFixScopeMatch(en.name || "", scope)) return;
+      (en.sets || []).forEach(st=>{ if(st) delete st.pr; });
+    });
+  });
+  S.logFixUndo = undo;
+  save(); queueSync();
+  return undo.sets.length;
+}
+function logFixUndoNow(){
+  const u = S.logFixUndo;
+  if(!u) return 0;
+  let n = 0;
+  (u.sets || []).forEach(c=>{
+    const sess = (S.sessions || []).find(x=> x.id === c.id);
+    const st = sess && sess.entries[c.ei] && sess.entries[c.ei].sets[c.si];
+    if(!st) return;
+    st.weight = c.was; n++;
+  });
+  (u.plan || []).forEach(c=>{
+    const e = findProgramEntry(c.name);
+    const t = c.which === "alt" ? (e && e.alt) : e;
+    if(t) t.weight = c.was;
+  });
+  delete S.logFixUndo;
+  save(); queueSync();
+  return n;
+}
+/* THE SHEET. It shows the damage before it touches anything, because a tool that rewrites
+   every weight you have ever logged has to be answerable in advance rather than
+   explained afterwards. */
+function openLogFix(){
+  let scope = "smith";
+  const draw = ()=>{
+    const cands = logFixCandidates(scope);
+    const planN = logFixPlanCandidates(scope).length;
+    const sample = cands.slice(0, 4);
+    const sessions = new Set(cands.map(c=> c.id)).size;
+    const mode = trainPrefs().barMode === "total" ? "bar and plates together" : "plates only";
+    showModal(`<h3>Been logging one side?</h3>
+      <div class="sub" style="margin:6px 0 12px">A barbell or Smith load is written as the whole thing
+        \u2014 never as one end of it. If you have been typing what is on ONE side, every one of those
+        sets is about half of what you actually lifted, and your estimated maxes have been reading low
+        ever since. This finds them and puts them right.</div>
+      <div class="seg" style="margin-bottom:10px">
+        <button class="${scope==="smith"?"on":""}" data-lfscope="smith">Smith machine</button>
+        <button class="${scope==="barbell"?"on":""}" data-lfscope="barbell">Barbells</button>
+        <button class="${scope==="both"?"on":""}" data-lfscope="both">Both</button>
+      </div>
+      ${cands.length ? `
+        <div class="lf-n"><b>${cands.length}</b> set${cands.length===1?"":"s"} across
+          <b>${sessions}</b> session${sessions===1?"":"s"}${planN?`, and ${planN} weight${planN===1?"":"s"} in your plan`:""}</div>
+        <div class="lf-list">${sample.map(c=>
+          `<div class="lf-row"><span class="lf-nm">${esc(c.name)}</span>
+             <span class="lf-w"><s>${esc(fmtLoad(c.from))}</s> \u2192 <b>${esc(fmtLoad(c.to))}</b></span></div>`).join("")}
+          ${cands.length > sample.length ? `<div class="lf-more">and ${cands.length - sample.length} more</div>` : ""}
+        </div>
+        <div class="sub" style="margin:10px 0 0;font-size:12px;color:var(--faint)">You log
+          <b>${esc(mode)}</b>, so each one is doubled${trainPrefs().barMode === "total"
+            ? " and the bar added on top" : ""}. Change that under <b>In the gym</b> first if it is wrong.</div>
+        <div class="btn-row" style="margin-top:14px"><button class="btn" id="lfGo" style="flex:1">Fix ${cands.length} set${cands.length===1?"":"s"}</button></div>`
+      : `<div class="sub" style="margin:2px 0 0">Nothing logged on that equipment yet, so there is nothing to change.</div>`}
+      <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`);
+    const m = $("#modal");
+    m.querySelectorAll("[data-lfscope]").forEach(b=> b.onclick = ()=>{ scope = b.dataset.lfscope; draw(); });
+    const go = m.querySelector("#lfGo");
+    if(go) go.onclick = ()=>{
+      const n = logFixApply(scope);
+      hideModal(); render();
+      toast(n ? n + " set" + (n===1?"":"s") + " corrected \u2014 undo it under Your data" : "Nothing to change", "good");
+    };
+  };
+  draw();
+}
 function settingsDataHTML(){
-  return setBlock("Backup and transfer",
+  const u = S.logFixUndo;
+  return setBlock("Been logging wrong?",
+    "A barbell or Smith weight is written as the whole load \u2014 never as one end of it. If you have been typing what is on one side, those sets are about half of what you really lifted, and your estimated maxes have been reading low ever since. This finds them, shows you what each one becomes, and fixes them.",
+    `<div class="btn-row" style="margin-top:0">
+      <button class="btn ghost small" id="logFixBtn" style="flex:1">Check my logged weights</button>
+    </div>` +
+    (u ? `<div class="lf-undo">${u.sets.length} set${u.sets.length===1?"":"s"} corrected
+        ${esc(fmtDateShort(dayStr(u.at)))}
+        <button class="linklike" id="logFixUndoBtn">undo that</button></div>` : ""))
+  + setBlock("Backup and transfer",
     "One file with your whole log in it: every workout, your plan, your split and your settings. It's also how you move an older copy of Element 26 into this one — export there, import here, and it merges into what's already on this account. No passwords or keys are ever written into the file.",
     `<div class="btn-row" style="margin-top:0">
       <button class="btn ghost small" id="exportBtn">Export my data</button>
@@ -23230,6 +23420,14 @@ function bind(){
   if(syn) syn.onclick = ()=> syncNow(true);
   const pull = $("#pullBtn");
   if(pull) pull.onclick = pullFromGist;
+  const lfB = $("#logFixBtn");
+  if(lfB) lfB.onclick = openLogFix;
+  const lfU = $("#logFixUndoBtn");
+  if(lfU) lfU.onclick = ()=>{
+    const n = logFixUndoNow();
+    render();
+    toast(n ? "Put back to what it was" : "Nothing to undo");
+  };
   const exp = $("#exportBtn");
   if(exp) exp.onclick = exportJSON;
   const imp = $("#importBtn");
@@ -29405,7 +29603,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc","coachOff",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience","sex",
+  "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
