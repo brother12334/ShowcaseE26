@@ -4669,7 +4669,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "16.6";
+const APP_VERSION = "16.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -26977,7 +26977,7 @@ function recordFlags(sess, list){
     const kinds = [];
     if(p.kind === "toohard" && p.detail) kinds.push({
       kind:"load", title:"The load is wrong here", msg:p.detail.msg, fix:p.detail.fix,
-      to: p.detail.to, sev:3});
+      to: toohardTarget(p), sev:3});
     if(p.stall) kinds.push({
       kind:"stall", title: p.stall.kind === "recovery" ? "Stalled, and it looks like recovery" : "What stalled",
       msg:p.stall.msg, fix:p.stall.sub, sev: p.stall.kind === "recovery" ? 2 : 3,
@@ -27218,10 +27218,36 @@ function buildProgression(sess){
    programme records them bar-inclusive (115) while the sets you log do not (40), so
    >= would have silently swallowed every Smith increase this card ever offered. An
    exact match can only be produced by applyProgression() having written it. */
+/* THE LOAD THIS FINDING IS ASKING FOR, recovered rather than merely read.
+
+   A grade is computed once and STORED on the session, so a card opened from History is
+   whatever the build of the day wrote — and a card written before this finding carried a
+   target has the sentence ("drop to about 30 lb") and no number to act on. The result is
+   the worst kind of dead end: the app tells you exactly what to do and gives you no way
+   to do it, for ever, because that grade will never be recomputed.
+
+   So the figure is found three ways, in descending order of trust: the one stored with
+   the finding; the same arithmetic re-run against the set the finding CITES, which is
+   also stored; and failing both, the number in the app's own sentence. */
+function toohardTarget(p){
+  const d = p && p.detail;
+  if(!d) return null;
+  if(d.to != null && isFinite(parseFloat(d.to))) return parseFloat(d.to);
+  const cited = d.at && parseFloat(d.at.w);
+  if(isFinite(cited) && cited > 0){
+    const step = progressionStep(findProgramEntry(p.name) || {name: p.name});
+    let suggest = roundLoadable(cited - step.amount * 2, p.name);
+    if(!(suggest < cited)) suggest = roundLoadable(cited - step.amount, p.name);
+    if(!(suggest < cited)) suggest = Math.max(0, Math.round((cited * 0.9) * 2) / 2);
+    if(suggest > 0) return suggest;
+  }
+  const m = String(d.fix || "").match(/(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : null;
+}
 function progressionApplied(p){
   if(!p) return false;
   // a cut is applied the same way an increase is, and is checked the same way
-  const to = p.kind === "toohard" ? (p.detail && p.detail.to) : p.to;
+  const to = p.kind === "toohard" ? toohardTarget(p) : p.to;
   if(p.kind !== "up" && p.kind !== "toohard") return false;
   if(p.applied) return true;
   if(to == null) return false;
@@ -27258,7 +27284,7 @@ function progressionHTML(list){
        finding here has an editable number and an Apply. Now so does this. */
     h += `<div class="rev-head">The load is wrong here</div>`;
     hard.forEach(p=>{
-      const to = p.detail.to;
+      const to = toohardTarget(p);
       h += `<div class="wp sev3" style="cursor:default">
         <span class="wp-rank">!</span>
         <span class="wp-body">
@@ -27286,7 +27312,7 @@ function progressionHTML(list){
     h += `<div class="rev-head">Load already brought down, ${hardDone.length}</div>`;
     hardDone.forEach(p=>{
       h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">${
-        p.detail.to == null ? "applied" : "now " + esc(fmtLoad(p.detail.to))} \u2713</span></div>`;
+        toohardTarget(p) == null ? "applied" : "now " + esc(fmtLoad(toohardTarget(p)))} \u2713</span></div>`;
     });
   }
   /* "I'll manage the loads myself" means exactly that: the grade still tells you how the
