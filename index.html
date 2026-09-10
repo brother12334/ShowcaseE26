@@ -968,6 +968,30 @@ input.ph-plan::placeholder{color:var(--acc);opacity:.75}
 /* THE RANGE, DRAWN. The bar is the whole rep; the fill is the part being worked. It is
    26px wide because it is a diagram rather than a chart — big enough to read the end it
    sits at, small enough that it never competes with the set rows underneath it. */
+/* WHAT TO PUT ON THE BAR. Mono, because it is arithmetic, and quiet because it is an
+   answer rather than an instruction — you look at it once on the way to the rack. */
+/* A ticked warm-up rung. Struck through and dimmed rather than removed: the ramp is
+   still the ramp, you just know where you are in it. */
+.warm-set.warm-on{opacity:.45;text-decoration:line-through}
+button.warm-set{cursor:pointer;font:inherit;border:inherit}
+/* THE WAY BACK INTO A RUNNING SESSION. A button rather than a banner, because its whole
+   purpose is to be pressed, and pinned to the top of every tab that is not the workout. */
+.live-strip{
+  display:flex;align-items:center;gap:10px;width:100%;
+  margin:0 0 13px;padding:10px 12px;border-radius:11px;
+  border:1px solid var(--acc-line);background:var(--acc-soft);
+  color:var(--text);text-align:left;cursor:pointer;font:inherit;
+}
+.live-k{font:11.5px var(--mono);letter-spacing:.04em;color:var(--acc);white-space:nowrap}
+.live-n{font:11.5px var(--mono);color:var(--dim);flex:1 1 auto;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live-go{color:var(--acc);font-size:17px;line-height:1;flex:0 0 auto}
+.plate-line{
+  font:12px var(--mono);color:var(--dim);line-height:1.45;
+  border:1px dashed var(--line);border-radius:9px;
+  padding:7px 10px;margin:0 0 10px;
+}
+.plate-line b{color:var(--text);font-weight:400}
 .lp-rom{display:flex;align-items:center;gap:11px;margin:9px 0 10px}
 .lp-bar{
   flex:0 0 auto;width:26px;height:46px;border-radius:6px;
@@ -2981,6 +3005,20 @@ a{color:var(--text)}
 .btn:active{transform:scale(.96)}
 @keyframes btnGlow{0%,100%{box-shadow:0 0 0 0 rgba(232,230,225,0)}50%{box-shadow:0 0 26px 3px rgba(232,230,225,.4)}}
 #startBtn{animation:btnGlow 2.6s ease-in-out infinite}
+/* THE DAY CARD IS THE DOOR. Name, what it costs you, and the way in — in that order and
+   inside one card, so the first screenful contains the decision and the action. */
+.day-open-n{font:12.5px var(--mono);color:var(--dim);margin:2px 0 13px}
+.day-open-go{width:100%}
+.day-open-sub{margin:11px 0 0}
+/* A retired explanation, and the way back to it. Small, quiet, and in the corner it
+   would have occupied anyway. */
+.explain-q{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;margin-top:9px;padding:0;
+  border:1px solid var(--line);border-radius:50%;background:transparent;
+  color:var(--faint);font:11px var(--mono);cursor:pointer;
+}
+.explain-q:active{border-color:var(--acc);color:var(--acc)}
 
 @keyframes dotPulse{50%{transform:scale(1.6);opacity:.55}}
 .syncdot.pulse{animation:dotPulse .9s ease-in-out infinite}
@@ -4509,7 +4547,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.8";
+const APP_VERSION = "16.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7827,6 +7865,30 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<"
    to write a dated entry to the change log calls through here. As a `const` it sat in
    its temporal dead zone at that moment and took the whole script down. */
 function todayStr(){ return new Date().toLocaleDateString("en-CA"); }
+/* =====================================================================
+   THE SENTENCES THAT SHOULD STOP TALKING
+
+   "Next up in your rotation. Your plan sets the order, so this is the day that comes
+   next" is exactly right the first time and furniture by the fifth. Standing explanations
+   on a screen somebody opens every day are the main reason a careful app starts to read
+   as a cluttered one — and cutting them costs the beginner the very thing they were
+   written for.
+
+   So they retire instead. Shown while the app is new, and after that folded behind a
+   question mark that puts them straight back. The measure is SESSIONS LOGGED rather than
+   days installed, because somebody who has finished six workouts has read the sentence
+   six times whenever that happened. */
+const EXPLAIN_AFTER = 6;
+function stillNew(){ return (S.sessions || []).length < EXPLAIN_AFTER; }
+/* One standing explanation. `id` is what remembers a deliberate re-open. */
+function explainHTML(id, text, cls){
+  const open = stillNew() || (EXPLAIN_OPEN && EXPLAIN_OPEN[id]);
+  if(open) return `<div class="sub ${cls || ""}">${text}${stillNew() ? "" :
+    ` <button class="linklike" data-explainoff="${esc(id)}">hide</button>`}</div>`;
+  return `<button class="explain-q" data-explainon="${esc(id)}"
+    aria-label="What is this?" title="What is this?">?</button>`;
+}
+let EXPLAIN_OPEN = {};
 /* A CLOSED NIGHT ONLY HAS TO STAY CLOSED WHILE IT IS STILL BEING OFFERED.
 
    Closing a night leaves one flag behind, for one job: keeping the row off a list that
@@ -17374,14 +17436,24 @@ function viewToday(){
       : `<button id="clearRestBtn" class="linklike">free one up</button>`}</div>`;
   }
 
-  h += `<div class="card">
+  /* THE ACTION COMES FIRST. The button used to sit under the whole exercise preview —
+     2216px down a 2364px page, which is two and a half screens of scrolling to reach the
+     one thing this screen exists for. The preview is worth having and it is not worth
+     putting in front of the door, so the day card carries the start and the list becomes
+     what you scroll TO rather than through. */
+  const exCount = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher).length;
+  const setCount = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher)
+    .reduce((n, x)=> n + ((x.chosen.sets) || 0), 0);
+  h += `<div class="card day-open">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span class="dot" style="background:${m.color};width:17px;height:17px"></span>
       <h3 style="font-size:26px">${esc(m.name)} day</h3>
     </div>
-    <div class="sub">${daysFree()
-      ? "Next up in your rotation. Your plan lets the days be done in any order, so you can tap any day the cycle still has left — just not one it has already spent."
-      : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them."}</div>
+    <div class="day-open-n">${exCount} exercise${exCount === 1 ? "" : "s"} \u00b7 ${setCount} sets</div>
+    <button class="btn day-open-go" id="startBtn">Start ${esc(m.name)} workout</button>
+    ${explainHTML("rotation", daysFree()
+      ? "Next up in your rotation. Your plan lets the days be done in any order, so you can tap any day the cycle still has left \u2014 just not one it has already spent."
+      : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them.", "day-open-sub")}
   </div>`;
   h += deloadBannerHTML();
   h += sleepWindowHTML(wid);
@@ -17420,7 +17492,8 @@ function viewToday(){
   });
   h += `</div>`;
 
-  h += `<button class="btn" id="startBtn">Start ${esc(m.name)} workout</button>`;
+  // Still here at the foot of the list, for somebody who has just read it all the way down
+  h += `<button class="btn ghost" id="startBtn2">Start ${esc(m.name)} workout</button>`;
   /* No "do a different workout" button. The rotation is an order, and an always-there
      escape hatch turns it into a menu: the day you skip is the day that stops getting
      trained. If you genuinely need to jump, tapping a plate above still moves the
@@ -17557,6 +17630,7 @@ function viewActiveSession(){
         </span>
       </div>`;
     h += swapNoteHTML(en);
+    h += plateLineHTML(en);
     h += lpLineHTML(en);
     h += pctLineHTML(en);
     h += planChangeLineHTML(en);
@@ -19341,8 +19415,9 @@ function nbMapPickHTML(A, metric, advanced){
    targets are set" moved to Settings, where the rest of the configuration lives.
    ===================================================================== */
 function viewBody(){
+  const LIVE = liveStripHTML();
   const metric = BODY_METRIC;
-  let h = `<div class="hdr"><h1>Body</h1>${hdrRight()}</div>`;
+  let h = `<div class="hdr"><h1>Body</h1>${hdrRight()}</div>` + LIVE;
   if(!S.sessions.length){
     return h + `<div class="empty nb-empty">
       <div class="nb-empty-t">Nothing to show yet</div>
@@ -20927,36 +21002,88 @@ function dateStrOf(ms){
   if(!ms) return todayStr();
   return new Date(ms).toLocaleDateString("en-CA");
 }
+/* =====================================================================
+   A SESSION IS RUNNING AND YOU ARE SOMEWHERE ELSE
+
+   The workout lives in its own tab, which is right, and it meant that wandering to Body
+   or Program mid-session showed no sign that one was open at all — no clock, no count,
+   no way back except remembering which tab it was. A session is the app's one modal
+   state and it was the one state nothing outside it mentioned.
+
+   One line, on every tab that is not the workout: what you are on, how far in, and the
+   way back. It says nothing at all when nothing is running. */
+function liveStripHTML(){
+  const a = S.active;
+  if(!a || TAB === "workout") return "";
+  const order = sessionOrder(a.entries || []);
+  const done = order.filter(o=>{
+    const st = ((a.entries[o.ei] || {}).sets || [])[o.si];
+    return st && st.done;
+  }).length;
+  const mins = Math.max(0, Math.round((Date.now() - (a.startedAt || Date.now())) / 60000));
+  const m = dayMeta(a.workoutId);
+  return `<button class="live-strip" data-goto="workout">
+    <span class="dot" style="background:${(m && m.color) || "var(--acc)"}"></span>
+    <span class="live-k">${esc((m && m.name) || "Workout")} in progress</span>
+    <span class="live-n">${done} of ${order.length} sets \u00b7 ${mins} min</span>
+    <span class="live-go">\u203a</span>
+  </button>`;
+}
 function viewHistory(){
   let h = `<div class="hdr"><h1>History</h1>${hdrRight(`<span class="date num">${S.sessions.length} sessions</span>`)}</div>`;
+  h += liveStripHTML();
   if(!S.sessions.length) return h + `<div class="empty nb-empty">
       <div class="nb-empty-t">No workouts yet</div>
       <p>Every session you finish lands here \u2014 what you lifted, how it went, and how it compares to last time.</p>
       <p class="nb-empty-w">That history is what lets Element 26 tell you when to add weight.</p>
       <button class="btn" data-goto="today">Start your first workout</button>
     </div>`;
-  h += `<div class="btn-row" style="margin-bottom:8px">
+  h += `<div class="btn-row" style="margin-bottom:10px">
     <button class="btn ghost small" id="recordsBtn" style="flex:1">${ICON.pr} Record book</button>
-  </div>
-  <div class="btn-row" style="margin-bottom:14px">
-    <button class="btn ghost small" id="reportBtn">Print / PDF report</button>
-    <button class="btn ghost small" id="docBtn">Download Word doc</button>
   </div>`;
+  /* SEARCH, ONCE THERE IS ENOUGH TO SEARCH. Twelve sessions is a list; two hundred is an
+     archive, and scrolling was the only way through it. Matches on the day's name, the
+     date as it reads on screen, and any exercise in the session — which is the question
+     people actually have ("when did I last squat"). Hidden until the list is long enough
+     to need it, because a search box over eight rows is furniture. */
+  if(S.sessions.length >= 10){
+    h += `<div class="field" style="margin:0 0 12px"><input id="histSearch" autocomplete="off"
+      placeholder="Find a session \u2014 day, date or exercise" value="${esc(HIST_Q)}"></div>`;
+  }
+  /* The exports moved to the foot of the screen. A screen called History should open with
+     history: two export buttons and a rest-day archive stood between you and your own
+     sessions, which is the wrong order on the tab you open to look something up. */
   const rl = (S.restLog||[]).slice().sort();
-  h += `<div class="card">
+  let tail = "";
+  tail += `<div class="card">
     <div class="ex-head" style="margin-bottom:8px"><b style="font-family:var(--disp);font-size:16px;text-transform:uppercase;letter-spacing:.04em">Rest days</b><span class="sub num">${rl.length} total</span></div>
     <div class="sub" style="margin:-2px 0 10px">Every day you've rested, across all cycles. Add or remove rest days in <b>Settings</b>.</div>
     ${rl.length ? `<div class="rl-list">${rl.map(d=>`<span class="rl-chip" style="padding:5px 12px">${fmtDate(d)}</span>`).join("")}</div>` : `<div class="sub" style="margin-bottom:2px">None logged yet.</div>`}
   </div>`;
   const sk = (S.skipLog||[]).slice().sort();
   if(sk.length){
-    h += `<div class="card">
+    tail += `<div class="card">
       <div class="ex-head" style="margin-bottom:8px"><b style="font-family:var(--disp);font-size:16px;text-transform:uppercase;letter-spacing:.04em">Skipped days</b><span class="sub num">${sk.length} total</span></div>
       <div class="sub" style="margin:-2px 0 10px">Days the rotation had a session on that went unlogged. They cost you no rest day and hold no place in the cycle \u2014 the workout is still waiting.</div>
       <div class="rl-list">${sk.map(d=>`<span class="rl-chip skip-chip" style="padding:5px 12px">${fmtDate(d)}</span>`).join("")}</div>
     </div>`;
   }
-  [...S.sessions].reverse().forEach(s=>{
+  /* MATCHED ON WHAT SOMEBODY WOULD ACTUALLY TYPE: the day's name, the date as it reads on
+     screen, or any exercise the session contains. */
+  const hq = nrm(HIST_Q || "");
+  const shown = [...S.sessions].reverse().filter(s=>{
+    if(!hq) return true;
+    const m2 = dayMeta(s.workoutId);
+    if(nrm((m2 && m2.name) || "").indexOf(hq) > -1) return true;
+    if(nrm(fmtDate(s.date)).indexOf(hq) > -1) return true;
+    return (s.entries || []).some(e=> nrm(e.name || "").indexOf(hq) > -1);
+  });
+  if(hq && !shown.length){
+    h += `<div class="sub" style="margin:2px 2px 14px">Nothing matching \u201c${esc(HIST_Q)}\u201d.</div>`;
+  } else if(hq){
+    h += `<div class="sub" style="margin:-4px 2px 12px">${shown.length} of ${S.sessions.length} sessions</div>`;
+  }
+  shown.forEach(s=>{
     const m = dayMeta(s.workoutId);
     const vol = s.entries.reduce((t,e)=>t+e.sets.reduce((u,st)=>u+((parseFloat(st.weight)||0)*(parseFloat(st.reps)||0)),0),0);
     const q = s.quality;
@@ -20996,6 +21123,12 @@ function viewHistory(){
       </div></div>
     </div>`;
   });
+  /* The archive and the exports, after the thing the screen is named for. */
+  h += tail;
+  h += `<div class="btn-row" style="margin-top:6px">
+    <button class="btn ghost small" id="reportBtn">Print / PDF report</button>
+    <button class="btn ghost small" id="docBtn">Download Word doc</button>
+  </div>`;
   return h;
 }
 
@@ -21031,7 +21164,7 @@ function planMarkHTML(e){
 function viewProgram(){
   restoreSetCuts();
   if(DAY_EDIT && (S.program[DAY_EDIT] || DAY_EDIT === "finisher")) return viewDayEdit(DAY_EDIT);
-  let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>
+  let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>` + liveStripHTML() + `
   <div class="sub" style="margin:-8px 2px 14px">Your rotation: ${esc(ROTATION.map(w=>dayName(w)).join(" → "))}.${
     hasAltExercises() ? " Exercises marked ⇄ alternate automatically every other session of that day." : ""
   } Targets show <span class="rpe-help">RPE</span>, tap to see what it means.</div>
@@ -21249,6 +21382,7 @@ function syncCardHTML(){
    Everything below is the same set of controls, in the same groups, with the same ids —
    the change is what the screen looks like before you touch it. */
 let SET_PAGE = null;                 // which group is open, or null for the grid
+let HIST_Q = "";                     // what History is filtered by, if anything
 /* The catch-up list is a list of nights that still WANT something, so a night that has
    been settled leaves it. This is the way back in when one was settled wrongly. */
 let SLEEP_ALL = false;
@@ -21349,6 +21483,7 @@ function setTileHTML(g){
   </button>`;
 }
 function viewSync(){
+  const LIVE = liveStripHTML();
   const groups = setGroups();
   const open = SET_PAGE ? groups.find(g=> g.k === SET_PAGE) : null;
   if(open){
@@ -21357,7 +21492,7 @@ function viewSync(){
       <div class="sub" style="margin:0 2px 14px;font-size:12.5px;color:var(--faint)">${esc(open.sub)}</div>
       <div class="card">${open.body()}</div>`;
   }
-  let h = `<div class="hdr"><h1>SETTINGS</h1>${hdrRight(`<span class="date num">v${APP_VERSION}</span>`)}</div>
+  let h = `<div class="hdr"><h1>SETTINGS</h1>${hdrRight(`<span class="date num">v${APP_VERSION}</span>`)}</div>` + LIVE + `
   <div class="sub" style="margin:-8px 2px 14px;font-size:12.5px;color:var(--faint)">What Element 26 is set to,
     and what each one is doing. Tap one to change it.</div>
   <div class="set-grid">`;
@@ -21777,6 +21912,15 @@ function bind(){
 
   const start = $("#startBtn");
   if(start) start.onclick = ()=> startWorkout(todaysWorkoutId());
+  const start2 = $("#startBtn2");
+  if(start2) start2.onclick = ()=> startWorkout(todaysWorkoutId());
+  // a standing explanation, put away or asked for again
+  document.querySelectorAll("[data-explainoff]").forEach(b=> b.onclick = ()=>{
+    EXPLAIN_OPEN[b.dataset.explainoff] = false; render();
+  });
+  document.querySelectorAll("[data-explainon]").forEach(b=> b.onclick = ()=>{
+    EXPLAIN_OPEN[b.dataset.explainon] = true; render();
+  });
 
   const goR = $("#goRestore");
   if(goR) goR.onclick = ()=>{
@@ -22567,6 +22711,24 @@ function bind(){
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
   if(rbBack) rbBack.onclick = ()=>{ RECORDS_OPEN = false; RECORDS_Q = ""; render(); window.scrollTo(0,0); };
+  const hs = $("#histSearch");
+  if(hs) hs.oninput = ()=>{
+    /* Filtered in place, like the record book's own search: a re-render would take the
+       keyboard focus out of the box on the second character. */
+    HIST_Q = hs.value;
+    const q = nrm(HIST_Q || "");
+    let n = 0;
+    document.querySelectorAll("#app .card.sess").forEach(card=>{
+      const s2 = S.sessions.find(x=> x.id === card.dataset.sess);
+      const m2 = s2 ? dayMeta(s2.workoutId) : null;
+      const hit = !q || (s2 && (
+        nrm((m2 && m2.name) || "").indexOf(q) > -1 ||
+        nrm(fmtDate(s2.date)).indexOf(q) > -1 ||
+        (s2.entries || []).some(e=> nrm(e.name || "").indexOf(q) > -1)));
+      card.style.display = hit ? "" : "none";
+      if(hit) n++;
+    });
+  };
   const rbS = $("#rbSearch");
   if(rbS) rbS.oninput = ()=>{
     /* Filtered in place rather than through render(): a re-render would take the
@@ -22685,6 +22847,18 @@ function bind(){
       // addRestToExercise() says its own piece; a second toast would talk over it
       if(b.dataset.fadepick !== "rest") toast("Applied to your programme");
     }
+  });
+  /* A warm-up rung, ticked off. Stored on the session entry so it survives a re-render
+     and is thrown away with the session; nothing downstream reads it, by design. */
+  document.querySelectorAll("[data-warmtick]").forEach(b=> b.onclick = ()=>{
+    const [ei, wi] = b.dataset.warmtick.split(":").map(n=> parseInt(n, 10));
+    const en = S.active && S.active.entries[ei];
+    if(!en) return;
+    if(!Array.isArray(en.warmDone)) en.warmDone = [];
+    en.warmDone[wi] = !en.warmDone[wi];
+    b.classList.toggle("warm-on", !!en.warmDone[wi]);
+    b.setAttribute("aria-pressed", en.warmDone[wi] ? "true" : "false");
+    save();
   });
   document.querySelectorAll("[data-setmax]").forEach(b=> b.onclick = (ev)=>{
     ev.stopPropagation();
@@ -27422,6 +27596,66 @@ function roundLoadable(w, name){
   if(plates <= 0) return w;
   return bar + Math.max(st, Math.round(plates / st) * st);
 }
+/* =====================================================================
+   WHAT TO ACTUALLY PUT ON THE BAR
+
+   The app has always known the bar, the plates in the building and the load it is asking
+   for, and it has never once done the one piece of arithmetic a beginner cannot do in
+   their head at the rack. "95 lb" is an instruction you can follow only if you already
+   know that it means a 45 bar and a 25 on each end.
+
+   Greedy from the heaviest plate down, which is how anybody loads a bar and also happens
+   to be optimal for the plate sets gyms actually own. Per SIDE, because that is how you
+   load it — the arithmetic of halving is the other half of the problem.
+
+   It answers nothing it cannot answer honestly. No bar weight set, no plate collection
+   named, a dumbbell, a machine, a load that is not reachable with the plates on hand:
+   all of those return null and the row simply does not appear. A wrong plate list is
+   worse than none, because you would have to check it. */
+const PLATE_SETS_LB = [45, 35, 25, 10, 5, 2.5, 1.25];
+const PLATE_SETS_KG = [25, 20, 15, 10, 5, 2.5, 1.25];
+function plateBreakdown(total, name){
+  const p = trainPrefs();
+  const eq = equipmentOf(name);
+  if(eq !== "barbell" && eq !== "smith") return null;
+  const w = parseFloat(total);
+  if(!(w > 0)) return null;
+  /* THE TWO CONVENTIONS NEED DIFFERENT ARITHMETIC, and one of them needs none at all.
+     Logging PLATES ONLY, the number in the box already IS the plate weight — half of it
+     goes on each end and the bar never enters the sum, which also means this works for
+     somebody who has never told the app what their bar weighs. Logging the TOTAL, the bar
+     has to come off the top first, and without a bar weight there is nothing to subtract
+     and no honest answer to give. */
+  const platesOnly = p.barMode !== "total";
+  const barW = platesOnly ? 0 : implementWeight(name);
+  if(!platesOnly && !(barW > 0)) return null;   // nobody has said what the bar weighs
+  let perSide = (w - barW) / 2;
+  if(perSide < 0) return null;                  // lighter than the empty bar
+  if(perSide === 0) return {bar: barW, plates: [], perSide: 0, exact: true};
+  const step = p.plateStep > 0 ? p.plateStep : 0;
+  if(!step) return null;                        // no plate collection named
+  const avail = (inKg() ? PLATE_SETS_KG : PLATE_SETS_LB).filter(x=> x >= step);
+  const plates = [];
+  let left = perSide;
+  avail.forEach(pl=>{
+    while(left >= pl - 0.001){ plates.push(pl); left -= pl; }
+  });
+  return {bar: barW, plates, perSide: perSide - left, exact: left < 0.001, short: left,
+          platesOnly};
+}
+/* The same thing as a sentence, or "" when there is nothing honest to say. */
+function plateLine(total, name){
+  const b = plateBreakdown(total, name);
+  if(!b || !b.plates.length) return "";
+  const counts = [];
+  b.plates.forEach(pl=>{
+    const last = counts[counts.length - 1];
+    if(last && last.w === pl) last.n++; else counts.push({w: pl, n: 1});
+  });
+  const list = counts.map(c=> (c.n > 1 ? c.n + "\u00d7" : "") + r1(c.w)).join(" + ");
+  return (b.platesOnly ? "" : fmtLoad(b.bar) + " bar + ") + list + " a side"
+       + (b.exact ? "" : " (" + fmtLoad(b.short) + " a side short)");
+}
 /* What a logged set actually weighed. Blank and bodyweight sets stay at zero rather than
    becoming an empty carriage: "0 reps at 25 lb" is not a thing that happened. */
 function setLoad(st, add){
@@ -27562,8 +27796,22 @@ function warmupHTML(e, kind, ctx){
   if(!plan.length) return "";
   return `<div class="warm">
     <span class="warm-tag">Warm-up${kind === "plan" ? " · from your plan" : ""}</span>
-    <span class="warm-sets">${plan.map(x=>
-      `<span class="warm-set${x.placeholder?" warm-ph":""}">${esc(x.label)}${x.reps?` <i>&times;${esc(x.reps)}</i>`:""}</span>`).join("")}</span>
+    <span class="warm-sets">${plan.map((x, wi)=>{
+      /* TICKABLE, BECAUSE A RAMP IS A LIST YOU WORK THROUGH. They were text you read, so
+         on a heavy day with four rungs you lose your place in your own warm-up — the one
+         moment you are counting plates rather than looking at a screen. Tapping one marks
+         it done and nothing else: warm-ups are still not counted anywhere, they earn no
+         volume, they start no rest clock and they never reach the grade. This is a
+         checklist, not a log. */
+      const ei2 = entryIndexOf(e);
+      const on = !!(e && e.warmDone && e.warmDone[wi]);
+      return ei2 < 0
+        ? `<span class="warm-set${x.placeholder?" warm-ph":""}">${esc(x.label)}${x.reps?` <i>&times;${esc(x.reps)}</i>`:""}</span>`
+        : `<button type="button" class="warm-set${x.placeholder?" warm-ph":""}${on?" warm-on":""}"
+             data-warmtick="${ei2}:${wi}" aria-pressed="${on ? "true" : "false"}"
+             title="${on ? "Done" : "Mark this rung done"}">${esc(x.label)}${
+             x.reps?` <i>&times;${esc(x.reps)}</i>`:""}</button>`;
+    }).join("")}</span>
     <span class="warm-note">${
       kind === "plan"
         ? (e && e.warmupNote ? esc(e.warmupNote) + ". Not counted."
@@ -28232,6 +28480,19 @@ function setRowHTML(en, ei, si, last, idxLabel){
    An unrecognised movement, and a fly — whose stretch is at the OUTSIDE of an arc and so
    is neither end of anything — draw the bar empty and dashed. Nothing is claimed that
    cannot be known, and the words still say what to do. */
+/* WHAT TO LOAD, ON THE CARD YOU LOAD IT FOR. It reads the weight this exercise is
+   actually asking for — the number already typed, else the one the plan prescribes — so
+   it answers the question in front of you rather than a general one, and it disappears
+   the moment there is nothing honest to say. */
+function plateLineHTML(en){
+  if(!en || !en.name) return "";
+  const typed = (en.sets || []).map(st=> parseFloat(st && st.weight)).find(v=> v > 0);
+  const want = typed != null ? typed : parseFloat(planLoadFor(en));
+  if(!(want > 0)) return "";
+  const line = plateLine(want, en.name);
+  if(!line) return "";
+  return `<div class="plate-line"><b>${esc(fmtLoad(want))}</b> = ${esc(line)}</div>`;
+}
 function lpLineHTML(en){
   if(!lpWholeExercise(en)) return "";
   const name = (en && en.name) || "";
