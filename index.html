@@ -1034,11 +1034,37 @@ button.side-chip.sc-set::after{
   flex-shrink:0;font-family:var(--disp);font-size:11px;font-weight:700;text-transform:uppercase;
   letter-spacing:.09em;color:var(--acc);min-width:74px;padding-top:1px;
 }
-/* Three nights, one row each: what it was, a box, and where the number came from. */
-.sl-catch{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.sl-catch-k{font:11.5px var(--mono);color:var(--dim);flex:0 0 84px}
-.sl-catch input{flex:0 0 84px;text-align:center}
-.sl-catch-w{font:11px var(--mono);color:var(--faint);flex:1 1 auto}
+/* Three nights, one card each: which night it was, what is known about it, and the two
+   clock times that settle it. The state line sits on the header rather than beside the
+   boxes so the two inputs can be equal halves of the row — they are the same kind of
+   answer and neither is the primary one. */
+.sl-night{
+  border:1px solid var(--line);border-radius:11px;background:var(--card2);
+  padding:9px 11px 11px;margin-bottom:8px;
+}
+.sl-night-h{display:flex;align-items:baseline;gap:9px;margin-bottom:8px}
+/* The label never wraps: "Last night" folding onto two lines took the height of the row
+   and the width of the status beside it at the same time. */
+.sl-night-k{font:11.5px var(--mono);letter-spacing:.04em;color:var(--text);white-space:nowrap;flex:0 0 auto}
+.sl-night-w{font:11px var(--mono);color:var(--faint);flex:1 1 auto;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sl-night-x{
+  flex:0 0 auto;width:24px;height:24px;border-radius:7px;border:1px solid var(--line);
+  background:transparent;color:var(--faint);font-size:15px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;
+}
+.sl-night-x:active{border-color:var(--acc);color:var(--acc);background:var(--acc-soft)}
+.sl-night-t{display:flex;gap:8px}
+.sl-night-t label{flex:1 1 0;min-width:0;display:block}
+.sl-night-t label span{
+  display:block;font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:4px;
+}
+.sl-night-t input{width:100%}
+/* A night that has been closed keeps its place in the list, quietly, so the undo is
+   where the row was rather than somewhere else. */
+.sl-night.is-skipped{opacity:.55;padding-bottom:9px}
+.sl-night.is-skipped .sl-night-h{margin-bottom:0}
 .sleep-ok{
   font:12px var(--mono);color:var(--faint);text-align:center;
   margin:-4px 2px 12px;line-height:1.5;
@@ -4465,7 +4491,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.1";
+const APP_VERSION = "15.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11636,6 +11662,12 @@ function wakeSamples(){
   Object.keys(ci).sort().slice(-WAKE_LOOKBACK).forEach(d=>{
     const c = ci[d];
     if(!c || !c.wokeAt) return;
+    /* A REMEMBERED TIME IS NOT A SAMPLE. predictedWake() takes the median of these and
+       fires a notification at it; a time somebody typed from memory at a settings screen
+       is a guess, and a guess that sets an alarm is worse than no alarm. Hand-entered
+       nights are stamped approx and stay out of it — they still count everywhere sleep is
+       read as evidence, which is what they are good for. */
+    if(c.approx) return;
     const t = new Date(c.wokeAt);
     if(!isFinite(t.getTime())) return;
     const min = t.getHours()*60 + t.getMinutes();
@@ -21065,27 +21097,64 @@ function settingsDayHTML(){
      recovery is the real problem, the patterns card, the Body charts — then reads it as
      no data rather than as a short night.
 
-     So a number can be put in by hand, for last night or the night before, and it is
-     stamped `approx` so nothing downstream mistakes it for a measured one. It sits under
-     the tracking switch rather than on Today on purpose: catching up is a thing you do
-     occasionally and deliberately, not a prompt to meet every morning. */
+     IT ASKS FOR CLOCK TIMES, NOT A DURATION, because clock times are what anybody
+     actually remembers. Nobody knows they got "six and a half hours"; everybody knows
+     they went up at midnight and the alarm went at half six. The subtraction is the
+     app's job, and doing it in your head at a settings screen was the whole reason this
+     went unused.
+
+     EITHER HALF ON ITS OWN IS A REAL ANSWER. You remember the alarm and not when you
+     actually dropped off, or the reverse — so one time is stored alone and the other
+     stays blank, rather than the pair being all-or-nothing. A duration only appears once
+     both ends are known, because only then is there one.
+
+     AND A NIGHT YOU CANNOT ACCOUNT FOR CAN BE CLOSED. Some nights are simply gone, and a
+     row that keeps asking about one you will never remember is a permanent small nag.
+     The × marks it as not recorded and it stops asking; it is reversible and it stores
+     nothing, so nothing downstream sees a night that did not happen.
+
+     Everything written here is stamped `approx`, and wakeSamples() skips approx records
+     so a remembered time never enters the measured median the morning reminder is aimed
+     with. It sits under the tracking switch rather than on Today on purpose: catching up
+     is a thing you do occasionally and deliberately, not a prompt to meet every morning. */
   if(p.sleepPrompt !== false){
-    const ci = d=> (S.checkins || {})[d] || {};
     const nightRow = (d, label)=>{
-      const rec = ci(d), have = parseFloat(rec.sleep);
-      return `<div class="sl-catch">
-        <span class="sl-catch-k">${esc(label)}</span>
-        <input class="timein" inputmode="decimal" data-sleepfix="${esc(d)}"
-          value="${have > 0 ? esc(String(have)) : ""}" placeholder="hours"
-          aria-label="Hours slept, ${esc(label)}">
-        <span class="sl-catch-w">${have > 0
-          ? (rec.approx ? "approximate" : "measured")
-          : "nothing logged"}</span>
+      const rec = (S.checkins || {})[d] || {};
+      const hhmm = ts=>{
+        if(!ts) return "";
+        const t = new Date(ts);
+        return isFinite(t.getTime())
+          ? String(t.getHours()).padStart(2,"0") + ":" + String(t.getMinutes()).padStart(2,"0") : "";
+      };
+      if(rec.sleepSkip){
+        return `<div class="sl-night is-skipped">
+          <div class="sl-night-h"><span class="sl-night-k">${esc(label)}</span>
+            <span class="sl-night-w">not recorded</span>
+            <button class="linklike" data-sleepunskip="${esc(d)}">undo</button></div>
+        </div>`;
+      }
+      const hrs = parseFloat(rec.sleep);
+      const state = hrs > 0
+        ? fmtHours(hrs) + (rec.approx ? " \u00b7 estimate" : " \u00b7 measured")
+        : (rec.bedAt || rec.wokeAt) ? "one time so far" : "nothing logged";
+      return `<div class="sl-night">
+        <div class="sl-night-h">
+          <span class="sl-night-k">${esc(label)}</span>
+          <span class="sl-night-w">${esc(state)}</span>
+          <button class="sl-night-x" data-sleepskip="${esc(d)}"
+            aria-label="Can't remember ${esc(label)} \u2014 stop asking" title="Can't remember \u2014 stop asking">\u00d7</button>
+        </div>
+        <div class="sl-night-t">
+          <label><span>Asleep</span><input type="time" class="timein" data-sleepbed="${esc(d)}"
+            value="${esc(hhmm(rec.bedAt))}" aria-label="Time you fell asleep, ${esc(label)}"></label>
+          <label><span>Woke</span><input type="time" class="timein" data-sleepwake="${esc(d)}"
+            value="${esc(hhmm(rec.wokeAt))}" aria-label="Time you woke up, ${esc(label)}"></label>
+        </div>
       </div>`;
     };
     const y = dayStr(Date.now() - DAY_MS), y2 = dayStr(Date.now() - 2*DAY_MS);
     h += setBlock("Forgot to log a night?",
-      "Put in roughly what you got and it counts, marked as an estimate so it is never mistaken for a measured night. Clear the box to remove it.",
+      "Roughly when you went up and roughly when you got up \u2014 either one on its own is fine, and the hours work themselves out once both are in. It counts as an estimate, never as a measured night. Tap \u00d7 on a night you cannot remember and it stops asking.",
       nightRow(todayStr(), "Last night") + nightRow(y, fmtDateShort(y)) + nightRow(y2, fmtDateShort(y2)));
   }
   h += setBlock("Hours of sleep you want",
@@ -21373,29 +21442,85 @@ function bind(){
     save(); queueSync(); render();
     toast(trainPrefs().sleepPrompt ? "Tracking your sleep" : "Won't ask about sleep or mornings");
   });
-  document.querySelectorAll("[data-sleepfix]").forEach(el=> el.onchange = ()=>{
-    const d = el.dataset.sleepfix;
-    const raw = (el.value || "").trim();
+  /* WRITING A NIGHT FROM TWO CLOCK TIMES.
+
+     The date on a check-in is the morning it ENDED — that is the convention the morning
+     sheet already writes to — so the wake time belongs to that date and the bed time is
+     whichever side of midnight puts it BEFORE the waking. Asked as "the most recent
+     instant before you woke", which gets 23:00→07:00 and 01:00→07:00 both right without
+     a rule about what counts as late. */
+  const sleepStamp = (d, hhmm, isBed)=>{
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || "").trim());
+    if(!m) return null;
+    const parts = String(d).split("-").map(Number);
+    if(parts.length !== 3 || !parts.every(isFinite)) return null;
+    const at = new Date(parts[0], parts[1]-1, parts[2], Math.min(23,+m[1]), Math.min(59,+m[2]), 0, 0);
+    if(!isBed) return at.getTime();
+    return at.getTime();          // the day is corrected once both ends are known
+  };
+  const writeNight = (d)=>{
     if(!S.checkins) S.checkins = {};
     const rec = (S.checkins[d] = S.checkins[d] || {});
-    if(raw === ""){
-      delete rec.sleep; delete rec.approx;
-      // a check-in holding nothing is not a check-in
-      if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt) delete S.checkins[d];
-      save(); queueSync(); render();
-      toast("Removed");
-      return;
+    const bedEl  = [...document.querySelectorAll("[data-sleepbed]")].find(x=> x.dataset.sleepbed === d);
+    const wakeEl = [...document.querySelectorAll("[data-sleepwake]")].find(x=> x.dataset.sleepwake === d);
+    const bedRaw  = bedEl  ? bedEl.value  : "";
+    const wakeRaw = wakeEl ? wakeEl.value : "";
+    let bed  = sleepStamp(d, bedRaw, true);
+    let wake = sleepStamp(d, wakeRaw, false);
+    if(bed != null && wake != null && bed >= wake) bed -= DAY_MS;   // it was the night before
+    /* A night that is one clock time and nothing else is still worth keeping — half an
+       answer beats none, and the other half can arrive later. There is simply no
+       duration to state until both ends exist. */
+    if(bed  != null) rec.bedAt  = bed;  else delete rec.bedAt;
+    if(wake != null) rec.wokeAt = wake; else delete rec.wokeAt;
+    if(bed != null && wake != null){
+      const hrs = (wake - bed) / 3600e3;
+      /* A BAND, NOT JUST A SIGN. The midnight rule means the two times always subtract to
+         something positive, so "negative" was never the failure mode — a typo comes out
+         as a plausible-looking thirty-five minutes instead. Under an hour is not a night
+         and neither is over sixteen, and in both cases the times are kept so the wrong
+         one can be corrected rather than retyped. */
+      if(!(hrs >= 1 && hrs <= 16)){
+        toast("That comes to " + fmtHours(hrs) + " \u2014 check the two times", "warn");
+        delete rec.sleep;
+      } else {
+        rec.sleep = String(Math.round(hrs * 10) / 10);
+        rec.approx = true;                // remembered, not measured, and it stays labelled
+        toast("Logged " + fmtHours(hrs) + ", as an estimate", "good");
+      }
+    } else {
+      delete rec.sleep;
     }
-    const v = parseFloat(raw);
-    if(!isFinite(v) || v <= 0 || v > 24){
-      el.value = rec.sleep || "";
-      toast("Hours, somewhere between 0 and 24", "warn");
-      return;
+    if(bed != null || wake != null) rec.approx = true;
+    delete rec.sleepSkip;                 // answering it un-dismisses it
+    // a check-in holding nothing at all is not a check-in
+    if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt && !rec.bedAt && !rec.sleepSkip){
+      delete S.checkins[d];
     }
-    rec.sleep = String(Math.round(v * 10) / 10);
-    rec.approx = true;              // never let an estimate pass as a measured night
     save(); queueSync(); render();
-    toast("Logged " + fmtHours(v) + ", as an estimate");
+  };
+  document.querySelectorAll("[data-sleepbed],[data-sleepwake]").forEach(el=> el.onchange = ()=>{
+    writeNight(el.dataset.sleepbed || el.dataset.sleepwake);
+  });
+  document.querySelectorAll("[data-sleepskip]").forEach(b=> b.onclick = ()=>{
+    const d = b.dataset.sleepskip;
+    if(!S.checkins) S.checkins = {};
+    const rec = (S.checkins[d] = S.checkins[d] || {});
+    /* Marked, not filled in. Nothing downstream should see a night here — the point is
+       that it is unknown, and an unknown night must not become a number. */
+    rec.sleepSkip = true;
+    delete rec.sleep; delete rec.bedAt; delete rec.wokeAt; delete rec.approx;
+    save(); queueSync(); render();
+    toast("Won't ask about that night again");
+  });
+  document.querySelectorAll("[data-sleepunskip]").forEach(b=> b.onclick = ()=>{
+    const d = b.dataset.sleepunskip;
+    const rec = (S.checkins || {})[d];
+    if(rec){
+      delete rec.sleepSkip;
+      if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt && !rec.bedAt) delete S.checkins[d];
+    }
+    save(); queueSync(); render();
   });
   const slT = $("#prefSleepT");
   if(slT) slT.onchange = ()=>{
