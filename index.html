@@ -4492,7 +4492,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.4";
+const APP_VERSION = "15.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20958,6 +20958,9 @@ function syncCardHTML(){
    Everything below is the same set of controls, in the same groups, with the same ids —
    the change is what the screen looks like before you touch it. */
 let SET_PAGE = null;                 // which group is open, or null for the grid
+/* The catch-up list is a list of nights that still WANT something, so a night that has
+   been settled leaves it. This is the way back in when one was settled wrongly. */
+let SLEEP_ALL = false;
 /* One list, read by both the grid and the page it opens. A group is a title, the line
    under it, the value on the tile, its gauge, and its body. */
 function setGroups(){
@@ -21162,8 +21165,15 @@ function settingsDayHTML(){
         return isFinite(t.getTime())
           ? String(t.getHours()).padStart(2,"0") + ":" + String(t.getMinutes()).padStart(2,"0") : "";
       };
-      // a night that has been closed is GONE from the list, not greyed out in it
+      /* A NIGHT LEAVES THIS LIST THE MOMENT IT STOPS ASKING FOR ANYTHING.
+
+         Closed is one way; settled is the other. Once both ends are in there is a
+         duration, nothing about that night is outstanding, and a row still sitting there
+         reads as unfinished work — on a panel whose entire purpose is "what have I not
+         got round to". A night that is only half answered STAYS, because it genuinely
+         still wants the other end. */
       if(rec.sleepSkip) return "";
+      if(!SLEEP_ALL && parseFloat(rec.sleep) > 0) return "";
       const hrs = parseFloat(rec.sleep);
       const state = hrs > 0
         ? fmtHours(hrs) + (rec.approx ? " \u00b7 estimate" : " \u00b7 measured")
@@ -21187,19 +21197,24 @@ function settingsDayHTML(){
     const y = dayStr(Date.now() - DAY_MS), y2 = dayStr(Date.now() - 2*DAY_MS);
     const nights = [[todayStr(), "Last night"], [y, fmtDateShort(y)], [y2, fmtDateShort(y2)]];
     const rows = nights.map(n=> nightRow(n[0], n[1])).join("");
-    const closed = nights.filter(n=> (((S.checkins || {})[n[0]]) || {}).sleepSkip);
-    /* A WAY BACK, WITHOUT A ROW SITTING THERE TO PROVIDE IT. Closing a night takes it off
-       the list entirely — that is what closing it is for — so the undo cannot live in the
-       row it just removed. One quiet line under the lot does the job and costs nothing
-       when there is nothing to undo. */
-    const foot = closed.length
-      ? `<div class="sl-closed">${closed.length} night${closed.length === 1 ? "" : "s"} closed
-           <button class="linklike" data-sleepunskip="${esc(closed.map(n=> n[0]).join(","))}">bring ${
-             closed.length === 1 ? "it" : "them"} back</button></div>`
-      : "";
+    const recOf = d=> ((S.checkins || {})[d]) || {};
+    const closed = nights.filter(n=> recOf(n[0]).sleepSkip);
+    const settled = nights.filter(n=> !recOf(n[0]).sleepSkip && parseFloat(recOf(n[0]).sleep) > 0);
+    /* A WAY BACK, WITHOUT A ROW SITTING THERE TO PROVIDE IT. Both kinds of departure take
+       the night off the list — that is the point of both — so neither undo can live in
+       the row it removed. One quiet line under the lot carries them, and costs nothing on
+       a day when there is nothing to undo. */
+    const bits = [];
+    if(settled.length) bits.push(`${settled.length} logged
+      <button class="linklike" data-sleepall="${SLEEP_ALL ? "0" : "1"}">${
+        SLEEP_ALL ? "hide" : "edit"}</button>`);
+    if(closed.length) bits.push(`${closed.length} closed
+      <button class="linklike" data-sleepunskip="${esc(closed.map(n=> n[0]).join(","))}">bring ${
+        closed.length === 1 ? "it" : "them"} back</button>`);
+    const foot = bits.length ? `<div class="sl-closed">${bits.join(" \u00b7 ")}</div>` : "";
     h += setBlock("Forgot to log a night?",
       "Roughly when you went up and roughly when you got up \u2014 either one on its own is fine, and the hours work themselves out once both are in. It counts as an estimate, never as a measured night. Tap \u00d7 on a night you cannot remember and it goes off the list.",
-      (rows || `<div class="sub" style="margin:0">Nothing outstanding \u2014 every recent night is either logged or closed.</div>`) + foot);
+      (rows || `<div class="sub" style="margin:0">Nothing outstanding \u2014 every recent night is logged or closed.</div>`) + foot);
   }
   h += setBlock("Hours of sleep you want",
     "Optional, and off until you fill it in. Late sessions cost sleep, and sleep is what recovery is made of.",
@@ -21563,6 +21578,10 @@ function bind(){
      pressed, which is the only state that matters, and says so when they hold nothing.
      The dirty-tracking was solving a problem nobody had. */
   document.querySelectorAll("[data-sleepsave]").forEach(b=> b.onclick = ()=> writeNight(b.dataset.sleepsave));
+  document.querySelectorAll("[data-sleepall]").forEach(b=> b.onclick = ()=>{
+    SLEEP_ALL = b.dataset.sleepall === "1";
+    render();
+  });
   /* CLOSING A NIGHT ERASES IT. Whatever had been guessed at for that night goes — the
      times, the duration, the estimate stamp — and the row leaves the list. What survives
      is a single flag saying the night was closed, and it survives for one reason: without
