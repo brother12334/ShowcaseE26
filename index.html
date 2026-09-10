@@ -946,7 +946,10 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 }
 .chg-chip.up{color:#7fbf7a;border-color:rgba(127,191,122,.5);background:rgba(127,191,122,.12)}
 .chg-chip.dn{color:var(--acc);border-color:var(--acc-line);background:var(--acc-soft)}
-.chg-sub{font:11.5px var(--mono);color:var(--faint);margin:0 0 9px;line-height:1.45}
+.chg-sub{font:11.5px var(--mono);color:var(--faint);margin:0 0 4px;line-height:1.45}
+/* The same sentence the Body tab's flag carries, in the same quiet-but-readable type it
+   uses there, so the two surfaces say why in identical words. */
+.chg-why{font-size:12.5px;color:var(--dim);line-height:1.45;margin:0 0 9px;max-width:60ch}
 .plan-line{
   font:12px var(--mono);color:var(--acc);background:var(--acc-soft);
   border-left:2px solid var(--acc);border-radius:0 6px 6px 0;
@@ -4669,7 +4672,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "16.7";
+const APP_VERSION = "16.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11883,7 +11886,8 @@ function reminderHook(wid, ex){
       const up = parseFloat(b.to) > parseFloat(b.from);
       return {title: nm + " is " + (up ? "up to " : "down to ") + fmtLoad(b.to),
               why: (up ? "Raised from " : "Cut from ") + fmtLoad(b.from) + " after your "
-                 + fmtDateShort(dayStr(b.at)) + " grade. First session at the new weight."};
+                 + fmtDateShort(dayStr(b.at)) + " grade. "
+                 + (b.why ? b.why + " " : "") + "First session at the new weight."};
     }
   }catch(e){}
   // mid-rebuild: the number to beat is a real, specific target
@@ -21351,7 +21355,8 @@ function planMarkHTML(e){
   if(e.byApp && e.byApp.what){
     h += `<span class="plan-mark plan-app" title="${attrSafe(
       "Element 26 made this change from a workout grade \u2014 " + e.byApp.what
-      + ". You can edit it like anything else.")}">changed by Element 26</span>`;
+      + "." + (e.byApp.why ? " " + e.byApp.why : "")
+      + " You can edit it like anything else.")}">changed by Element 26</span>`;
   }
   return h;
 }
@@ -24251,7 +24256,7 @@ function finishWorkout(){
      rather than asking again. On "hold" nothing is written and nothing is suggested. */
   if(trainPrefs().progression === "auto" && !deloadActive()){
     sessObj.progression.filter(p=> p.kind === "up" && p.to != null).forEach(p=>{
-      if(applyProgression(p.name, p.to)) p.auto = true;
+      if(applyProgression(p.name, p.to, null, progReason(p))) p.auto = true;
     });
   }
   /* AFTER the auto-progression pass, so a session that earned another increase keeps
@@ -26476,7 +26481,8 @@ function openScoreCard(sess, onDone){
        can legitimately refuse — a deload is running, the movement is not in the current
        programme — and it used to refuse in silence on this screen, leaving somebody
        certain they had pressed it and no way to tell that they had. */
-    if(applyProgression(name, to)){
+    if(applyProgression(name, to, null, progReason(
+        (sess.progression || []).find(x=> x && x.name === name)))){
       markApplied(name);
       btn.textContent = "Applied";
       btn.disabled = true;
@@ -26491,7 +26497,7 @@ function openScoreCard(sess, onDone){
   if(all) all.onclick = ()=>{
     let n = 0;
     (sess.progression || []).filter(p=>p.kind === "up" && !progressionApplied(p)).forEach(p=>{
-      if(applyProgression(p.name, typedTo(p.name, p.to))){ p.applied = true; n++; }
+      if(applyProgression(p.name, typedTo(p.name, p.to), null, progReason(p))){ p.applied = true; n++; }
     });
     if(n){ save(); queueSync(); }
     toast(n ? n + " load" + (n === 1 ? "" : "s") + " updated in your programme" : "Nothing to apply");
@@ -27038,7 +27044,8 @@ function applyFlag(id, choice){
       ok = addRestToExercise(f.ex, f.restAdd == null ? FADE_REST_ADD : f.restAdd);
     } else if(choice === "load" && f.to != null){
       ok = applyProgression(f.ex, f.to,
-        "Applied from the Body tab: reps collapsed across the sets, so the opening load comes down.");
+        "Applied from the Body tab: reps collapsed across the sets, so the opening load comes down.",
+        f.msg);
     }
     if(ok){ f.applied = true; f.appliedAs = choice; save(); queueSync(); }
     return ok;
@@ -27056,7 +27063,8 @@ function applyFlag(id, choice){
     }
     ok = applyProgression(f.ex, f.to, f.kind === "load"
       ? "Applied from the Body tab: the prescribed range was not reachable at the old load."
-      : "Applied from the Body tab: the last set cleared the top of the range at target RPE.");
+      : "Applied from the Body tab: the last set cleared the top of the range at target RPE.",
+      f.msg);
   } else if(f.kind === "stall"){
     /* The stall protocol, which is a set cut and not a load cut: dropping the weight is
        what costs you the strength you built getting there.
@@ -27076,7 +27084,9 @@ function applyFlag(id, choice){
       e.sets = to;
       e.setsCut = {from: cur, to, at: Date.now(), until: Date.now() + SET_CUT_DAYS * DAY_MS,
                    why: "stall"};
-      e.byApp = {at: Date.now(), what: "cut to " + to + " set" + (to === 1 ? "" : "s")};
+      e.setsCut.reason = f.msg || null;
+      e.byApp = {at: Date.now(), what: "cut to " + to + " set" + (to === 1 ? "" : "s"),
+                 why: f.msg || null};
       logPlanChange("programme", null, e.name, [cur + " → " + to + " sets"],
         {note: "Stall protocol, applied from the Body tab. Temporary: back to " + cur
              + " sets on " + fmtDate(dayStr(Date.now() + SET_CUT_DAYS * DAY_MS)) + "."});
@@ -27229,6 +27239,21 @@ function buildProgression(sess){
    So the figure is found three ways, in descending order of trust: the one stored with
    the finding; the same arithmetic re-run against the set the finding CITES, which is
    also stored; and failing both, the number in the app's own sentence. */
+/* WHY THE LOAD MOVED, IN THE FINDING'S OWN WORDS.
+
+   The Body tab's flag has always carried the evidence — "35 lb for 8-10 reps is not
+   reachable: on Sun, Aug 23 set 1 was 40 lb for 6 reps at RPE 9.5" — while the chip that
+   greets you on the set row mid-workout said only "cut to 30 lb by Element 26". Same
+   change, same app, two different levels of explanation, and the terse one is the one you
+   meet at the moment you are deciding whether to trust the number. So the sentence
+   travels with the change: written onto the plan entry when the load moves, and printed
+   under the chip and on the Program tab wherever that change is shown. */
+function progReason(p){
+  if(!p) return null;
+  if(p.detail && p.detail.msg) return p.detail.msg;
+  if(p.stall && p.stall.msg) return p.stall.msg;
+  return p.msg || null;
+}
 function toohardTarget(p){
   const d = p && p.detail;
   if(!d) return null;
@@ -27409,7 +27434,7 @@ function addRestToExercise(name, seconds){
   toast(e.name + ": rest now " + fmtClock(next[0]) + "\u2013" + fmtClock(next[1]));
   return true;
 }
-function applyProgression(name, to, why){
+function applyProgression(name, to, why, reason){
   const e = findProgramEntry(name);
   if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
   const from = e.weight;
@@ -27444,7 +27469,7 @@ function applyProgression(name, to, why){
      you to take both on trust. Stamped here, shown on the Program tab and on the set row
      you are about to log against. */
   e.byApp = {at: Date.now(), what: (down ? "load cut to " : "load raised to ") + fmtLoad(v),
-             from: from, to: v};
+             from: from, to: v, why: reason ? String(reason) : null};
   logPlanChange("weight", null, e.name,
     [fmtLoad(from) + " → " + fmtLoad(v)],
     {note: why ? why
@@ -29035,7 +29060,7 @@ function pctLineHTML(en){
 function planChangeLineHTML(en){
   const p = findProgramEntry(en && en.name);
   if(!p) return "";
-  const chips = [], subs = [];
+  const chips = [], subs = [], whys = [];
   const cut = p.setsCut && p.setsCut.until && Date.now() < p.setsCut.until;
   const b = p.byApp;
   // the set cut says all of this in its own chip below; two of them is the app repeating itself
@@ -29051,6 +29076,7 @@ function planChangeLineHTML(en){
       : (up ? "\u25b2 " : "\u25bc ") + esc(b.what)});
     subs.push((up ? "raised" : "cut") + " to " + fmtLoad(p.weight)
       + " by Element 26 \u00b7 " + fmtDateShort(dayStr(b.at)) + " grade");
+    if(b.why) whys.push(b.why);
   }
   const c = p.setsCut;
   if(cut){
@@ -29058,11 +29084,13 @@ function planChangeLineHTML(en){
                                  + (c.from - c.to === 1 ? "" : "s")});
     subs.push("cut to " + c.to + " set" + (c.to === 1 ? "" : "s")
       + " until " + fmtDateShort(dayStr(c.until)) + ", back to " + c.from);
+    if(c.reason) whys.push(c.reason);
   }
   if(!chips.length) return "";
   return `<div class="chg-row">${chips.map(x=>
       `<span class="chg-chip ${x.up ? "up" : "dn"}">${x.text}</span>`).join("")}</div>
-    <div class="chg-sub">${subs.map(x=> esc(x)).join(" \u00b7 ")}</div>`;
+    <div class="chg-sub">${subs.map(x=> esc(x)).join(" \u00b7 ")}</div>${
+    whys.length ? `<div class="chg-why">${whys.map(x=> esc(x)).join(" ")}</div>` : ""}`;
 }
 /* The strip that sits ON the set, naming what kind of set it is. A technique the plan
    asked for is useless if you have to infer it from a cue three rows down — if this is a
