@@ -1061,10 +1061,12 @@ button.side-chip.sc-set::after{
   color:var(--faint);margin-bottom:4px;
 }
 .sl-night-t input{width:100%}
-/* A night that has been closed keeps its place in the list, quietly, so the undo is
-   where the row was rather than somewhere else. */
-.sl-night.is-skipped{opacity:.55;padding-bottom:9px}
-.sl-night.is-skipped .sl-night-h{margin-bottom:0}
+/* The confirm. Full width under the pair, because it belongs to both boxes rather than
+   to either one, and visibly dead until there is something to confirm. */
+.sl-night-go{width:100%;margin-top:9px}
+.sl-night-go[disabled]{opacity:.38;pointer-events:none}
+.sl-closed{font:11px var(--mono);color:var(--faint);margin-top:2px}
+.sl-closed .linklike{margin-left:6px}
 .sleep-ok{
   font:12px var(--mono);color:var(--faint);text-align:center;
   margin:-4px 2px 12px;line-height:1.5;
@@ -4491,7 +4493,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "15.2";
+const APP_VERSION = "15.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -21126,13 +21128,8 @@ function settingsDayHTML(){
         return isFinite(t.getTime())
           ? String(t.getHours()).padStart(2,"0") + ":" + String(t.getMinutes()).padStart(2,"0") : "";
       };
-      if(rec.sleepSkip){
-        return `<div class="sl-night is-skipped">
-          <div class="sl-night-h"><span class="sl-night-k">${esc(label)}</span>
-            <span class="sl-night-w">not recorded</span>
-            <button class="linklike" data-sleepunskip="${esc(d)}">undo</button></div>
-        </div>`;
-      }
+      // a night that has been closed is GONE from the list, not greyed out in it
+      if(rec.sleepSkip) return "";
       const hrs = parseFloat(rec.sleep);
       const state = hrs > 0
         ? fmtHours(hrs) + (rec.approx ? " \u00b7 estimate" : " \u00b7 measured")
@@ -21150,12 +21147,25 @@ function settingsDayHTML(){
           <label><span>Woke</span><input type="time" class="timein" data-sleepwake="${esc(d)}"
             value="${esc(hhmm(rec.wokeAt))}" aria-label="Time you woke up, ${esc(label)}"></label>
         </div>
+        <button class="btn ghost small sl-night-go" data-sleepsave="${esc(d)}" disabled>Save this night</button>
       </div>`;
     };
     const y = dayStr(Date.now() - DAY_MS), y2 = dayStr(Date.now() - 2*DAY_MS);
+    const nights = [[todayStr(), "Last night"], [y, fmtDateShort(y)], [y2, fmtDateShort(y2)]];
+    const rows = nights.map(n=> nightRow(n[0], n[1])).join("");
+    const closed = nights.filter(n=> (((S.checkins || {})[n[0]]) || {}).sleepSkip);
+    /* A WAY BACK, WITHOUT A ROW SITTING THERE TO PROVIDE IT. Closing a night takes it off
+       the list entirely — that is what closing it is for — so the undo cannot live in the
+       row it just removed. One quiet line under the lot does the job and costs nothing
+       when there is nothing to undo. */
+    const foot = closed.length
+      ? `<div class="sl-closed">${closed.length} night${closed.length === 1 ? "" : "s"} closed
+           <button class="linklike" data-sleepunskip="${esc(closed.map(n=> n[0]).join(","))}">bring ${
+             closed.length === 1 ? "it" : "them"} back</button></div>`
+      : "";
     h += setBlock("Forgot to log a night?",
-      "Roughly when you went up and roughly when you got up \u2014 either one on its own is fine, and the hours work themselves out once both are in. It counts as an estimate, never as a measured night. Tap \u00d7 on a night you cannot remember and it stops asking.",
-      nightRow(todayStr(), "Last night") + nightRow(y, fmtDateShort(y)) + nightRow(y2, fmtDateShort(y2)));
+      "Roughly when you went up and roughly when you got up \u2014 either one on its own is fine, and the hours work themselves out once both are in. It counts as an estimate, never as a measured night. Tap \u00d7 on a night you cannot remember and it goes off the list.",
+      (rows || `<div class="sub" style="margin:0">Nothing outstanding \u2014 every recent night is either logged or closed.</div>`) + foot);
   }
   h += setBlock("Hours of sleep you want",
     "Optional, and off until you fill it in. Late sessions cost sleep, and sleep is what recovery is made of.",
@@ -21499,27 +21509,44 @@ function bind(){
     }
     save(); queueSync(); render();
   };
-  document.querySelectorAll("[data-sleepbed],[data-sleepwake]").forEach(el=> el.onchange = ()=>{
-    writeNight(el.dataset.sleepbed || el.dataset.sleepwake);
+  /* TYPING IS NOT AGREEING. Every keystroke used to be the commit, which meant a time
+     picker halfway through being scrolled had already been written and announced — and on
+     a native time control there is no moment that reliably means "done". So the boxes
+     only arm the button, and the button is the answer. */
+  const armNight = d=>{
+    const btn = [...document.querySelectorAll("[data-sleepsave]")].find(x=> x.dataset.sleepsave === d);
+    if(btn) btn.disabled = false;
+  };
+  document.querySelectorAll("[data-sleepbed],[data-sleepwake]").forEach(el=>{
+    const d = el.dataset.sleepbed || el.dataset.sleepwake;
+    el.oninput = ()=> armNight(d);
+    el.onchange = ()=> armNight(d);
   });
+  document.querySelectorAll("[data-sleepsave]").forEach(b=> b.onclick = ()=> writeNight(b.dataset.sleepsave));
+  /* CLOSING A NIGHT ERASES IT. Whatever had been guessed at for that night goes — the
+     times, the duration, the estimate stamp — and the row leaves the list. What survives
+     is a single flag saying the night was closed, and it survives for one reason: without
+     it the row is back on the next render, which is the opposite of closing it.
+
+     Anything else the day is carrying — a bodyweight, an energy rating — is left alone.
+     This is a statement about the night, not about the day. */
   document.querySelectorAll("[data-sleepskip]").forEach(b=> b.onclick = ()=>{
     const d = b.dataset.sleepskip;
     if(!S.checkins) S.checkins = {};
     const rec = (S.checkins[d] = S.checkins[d] || {});
-    /* Marked, not filled in. Nothing downstream should see a night here — the point is
-       that it is unknown, and an unknown night must not become a number. */
-    rec.sleepSkip = true;
     delete rec.sleep; delete rec.bedAt; delete rec.wokeAt; delete rec.approx;
+    rec.sleepSkip = true;
     save(); queueSync(); render();
-    toast("Won't ask about that night again");
+    toast("That night is off the list");
   });
   document.querySelectorAll("[data-sleepunskip]").forEach(b=> b.onclick = ()=>{
-    const d = b.dataset.sleepunskip;
-    const rec = (S.checkins || {})[d];
-    if(rec){
+    String(b.dataset.sleepunskip || "").split(",").filter(Boolean).forEach(d=>{
+      const rec = (S.checkins || {})[d];
+      if(!rec) return;
       delete rec.sleepSkip;
+      // nothing left on the day at all means there is no check-in to keep
       if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt && !rec.bedAt) delete S.checkins[d];
-    }
+    });
     save(); queueSync(); render();
   });
   const slT = $("#prefSleepT");
