@@ -4656,7 +4656,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "16.3";
+const APP_VERSION = "16.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8968,8 +8968,10 @@ function showRestUI(min){
     const ui = document.getElementById("restUI");
     if(!ui || !S.active || !S.active.restTimer){ hideRestUI(); return; }
     const sec = restElapsed();
-    /* The moment the rest is served the boxes open, without a tap and without a
-       re-render taking the focus out of one somebody is already typing in. */
+    /* The rest passing its target no longer opens the boxes — stopping the clock does,
+       and that runs through hideRestUI(). What still changes here is what the WIDGET says
+       about itself, so the sweep stays, and the locks are refreshed with it in case a
+       session was resumed into a state the last render did not cover. */
     const served = restServed();
     if(ui.dataset.served !== String(served)){
       ui.dataset.served = String(served);
@@ -20528,9 +20530,12 @@ let VOICE_ON = false;                     // what you asked for
 let VOICE_REC = null;                     // the recogniser object, if one exists
 let VOICE_LIVE = false;                   // whether it is REALLY open, per the engine
 let VOICE_TRIES = 0;                      // consecutive failed restarts
+/* AND THE MICROPHONE FOLLOWS THE SAME RULE. "It should only be listening after stopping
+   a rest" — a set said out loud while the clock is still running is the same set typed
+   into a box while the clock is still running. */
 function voicePaused(){
   const a = S.active;
-  return !!(a && a.restTimer && !restServed());
+  return !!(a && a.restTimer);
 }
 /* THE MICROPHONE AND THE MUSIC CANNOT BOTH HAVE THE PHONE.
 
@@ -20653,8 +20658,10 @@ function voiceHint(){
   if(strip) strip.classList.remove("tap-me");
   if(!VOICE_ON){ el.innerHTML = "Off"; return; }
   if(voicePaused()){
-    el.innerHTML = "Resting — it listens again when the clock is done ("
-      + esc(fmtClock(restLeft())) + " to go)";
+    el.innerHTML = restServed()
+      ? "Rest is done \u2014 tap \u25a0 to stop the clock and it starts listening"
+      : "Resting \u2014 stop the clock when you're ready ("
+        + esc(fmtClock(restLeft())) + " to go)";
     return;
   }
   if(VOICE_LIVE){
@@ -22560,8 +22567,10 @@ function bind(){
          Once the rest is served the tick works normally, with nothing to confirm. */
       if(!st.done && !entry.superset){
         const rt = S.active.restTimer;
-        if(rt && !(rt.e===ei && rt.s===si) && !restServed()){
-          nudge("Still resting \u2014 " + fmtClock(restLeft()) + " to go, or tap \u25a0 to stop it");
+        if(rt && !(rt.e===ei && rt.s===si)){
+          nudge(restServed()
+            ? "Rest is done \u2014 tap \u25a0 to stop the clock and log this"
+            : "Still resting \u2014 " + fmtClock(restLeft()) + " to go, or tap \u25a0 to stop it");
           showRestUI(false);            // and put the clock in front of them, not a toast alone
           return;
         }
@@ -28868,7 +28877,9 @@ function setRowHTML(en, ei, si, last, idxLabel){
   /* REPS AND EFFORT BELONG TO A SET THAT HAS HAPPENED. While the clock is running the
      set in front of you has not, so those two fields are shut on it — typing a rep count
      into the row you are about to do is how a session ends up describing a set nobody
-     did. The WEIGHT stays live, because loading the bar is exactly what rest is for. */
+     did. They open when you STOP the rest, not when it has merely run long enough: a
+     clock past its target says nothing about whether you have stood up. The WEIGHT stays
+     live, because loading the bar is exactly what rest is for. */
   const lock = restLocks(en, si);
   return `${setTagHTML(en, si, rx)}<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}">
     <span class="idx">${(()=>{
@@ -29102,7 +29113,7 @@ function insaneValue(f, raw, en, ei, si){
   }
   return null;
 }
-const LOCK_WHY = "You're still resting \u2014 log this when the set is done";
+const LOCK_WHY = "Resting \u2014 tap \u25a0 to stop the clock, then log the set";
 /* HOW LONG THIS REST STILL HAS TO RUN, and whether it counts as served.
 
    The clock is a stopwatch, not a countdown: it keeps running until the next set is
@@ -29125,12 +29136,28 @@ function restLeft(){
 /* True while a rest is still being served and this set is the one you have not done
    yet. A set you have already logged stays editable, because correcting a typo is not
    logging a set. */
+/* STOPPED, NOT MERELY SERVED.
+
+   The lock used to lift on its own the moment the clock passed the rest the set had
+   earned — no tap needed, which read as generous and was wrong. A clock that has run
+   long enough is not the same statement as "I am done resting": you can be three minutes
+   in and still sitting down, and the boxes opening by themselves invites a rep count to
+   be typed for a set that has not happened. That is the same failure the ✓ gate exists
+   to prevent, arriving through the other door.
+
+   So the fields belong to the set you are ABOUT to do, and they stay shut for as long as
+   a rest is running. ■ Stop rest is the one control that means you are ready, and it is
+   always on screen while the clock is. The weight box is deliberately still live: loading
+   the bar is exactly what a rest is for.
+
+   restServed() keeps its own job — whether the rest met its target, which is what the
+   short-rest confirmation and the grade read. It simply no longer decides this. */
 function restLocks(en, si){
   const a = S.active;
   if(!a || !a.restTimer) return false;
   const st = (en.sets || [])[si];
   if(!st || st.done) return false;
-  return !restServed();
+  return true;
 }
 /* Every exercise whose sets are all ticked is FINISHED, and finished does not come
    undone. Going back to look at one and catching the ✓ used to untick it, which threw
