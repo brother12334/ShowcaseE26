@@ -4656,7 +4656,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "16.4";
+const APP_VERSION = "16.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23270,16 +23270,24 @@ function bind(){
     }
   });
   /* A warm-up rung, ticked off. Stored on the session entry so it survives a re-render
-     and is thrown away with the session; nothing downstream reads it, by design. */
+     and is thrown away with the session; nothing downstream reads it, by design.
+
+     ONE WAY ONLY. A rung goes done and stays done — the rendering above turns it into
+     plain text at that point, so this never sees a second tap on the same one. Marking it
+     costs nothing and un-marking it would be the only undo in the app that puts work back
+     on your list. */
   document.querySelectorAll("[data-warmtick]").forEach(b=> b.onclick = ()=>{
     const [ei, wi] = b.dataset.warmtick.split(":").map(n=> parseInt(n, 10));
     const en = S.active && S.active.entries[ei];
     if(!en) return;
     if(!Array.isArray(en.warmDone)) en.warmDone = [];
-    en.warmDone[wi] = !en.warmDone[wi];
-    b.classList.toggle("warm-on", !!en.warmDone[wi]);
-    b.setAttribute("aria-pressed", en.warmDone[wi] ? "true" : "false");
+    if(en.warmDone[wi]) return;
+    en.warmDone[wi] = true;
+    b.classList.add("warm-on");
+    /* Re-rendered so the rung becomes plain text rather than a struck-through button
+       that still invites a press. */
     save();
+    render();
   });
   document.querySelectorAll("[data-setmax]").forEach(b=> b.onclick = (ev)=>{
     ev.stopPropagation();
@@ -28246,14 +28254,20 @@ function warmupHTML(e, kind, ctx){
          it done and nothing else: warm-ups are still not counted anywhere, they earn no
          volume, they start no rest clock and they never reach the grade. This is a
          checklist, not a log. */
+      /* A RUNG THAT IS DONE STOPS BEING A BUTTON. Not merely disabled — rendered as
+         plain text, so there is nothing to press and nothing that looks pressable. A
+         warm-up you have done is a fact about the last two minutes; the ✓ on a working
+         set can be taken back because it carries numbers that might be wrong, and this
+         carries none. */
       const ei2 = entryIndexOf(e);
       const on = !!(e && e.warmDone && e.warmDone[wi]);
-      return ei2 < 0
-        ? `<span class="warm-set${x.placeholder?" warm-ph":""}">${esc(x.label)}${x.reps?` <i>&times;${esc(x.reps)}</i>`:""}</span>`
-        : `<button type="button" class="warm-set${x.placeholder?" warm-ph":""}${on?" warm-on":""}"
-             data-warmtick="${ei2}:${wi}" aria-pressed="${on ? "true" : "false"}"
-             title="${on ? "Done" : "Mark this rung done"}">${esc(x.label)}${
-             x.reps?` <i>&times;${esc(x.reps)}</i>`:""}</button>`;
+      const face = `${esc(x.label)}${x.reps?` <i>&times;${esc(x.reps)}</i>`:""}`;
+      if(ei2 < 0 || on){
+        return `<span class="warm-set${x.placeholder?" warm-ph":""}${on?" warm-on":""}"${
+          on ? ` title="Done"` : ""}>${face}</span>`;
+      }
+      return `<button type="button" class="warm-set${x.placeholder?" warm-ph":""}"
+             data-warmtick="${ei2}:${wi}" title="Mark this rung done">${face}</button>`;
     }).join("")}</span>
     <span class="warm-note">${
       kind === "plan"
