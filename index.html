@@ -4672,7 +4672,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "16.9";
+const APP_VERSION = "17.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -17874,9 +17874,15 @@ function asymHintHTML(e){
     return `<div class="asym-hint"><b>Sides are level</b> at about ${r1(st.R.reps)} reps.
       <span class="asym-note">${esc(asymSampleText(st))}.</span></div>`;
   }
-  const cap = Math.floor(Math.min(st.R.reps, st.L.reps));
-  return `<div class="asym-hint"><b>Cap both sides at ${cap} reps.</b>
-    ${esc(asymGapText(st))} <span class="asym-note">${esc(asymSampleText(st))}.</span></div>`;
+  const c = asymCap(e.name, st);
+  if(!c) return "";
+  /* Where the weaker side has already been logged today the banner says so, or the cap
+     looks like it disagrees with the averages printed in the same sentence. */
+  const note = (c.live
+    ? "Your " + sideWordFull(st.weaker) + " did " + c.n + " this session, so that is today's number. "
+    : "") + asymSampleText(st);
+  return `<div class="asym-hint"><b>Cap both sides at ${c.n} reps.</b>
+    ${esc(asymGapText(st))} <span class="asym-note">${esc(note)}.</span></div>`;
 }
 /* =====================================================================
    COACHING HINTS, AND WHY THEY EXPIRE
@@ -18123,9 +18129,8 @@ function setPrescription(entry, si){
     const side = setSide(entry, si);
     const st = sideStats(entry.name);
     if(side && st.ok && st.stronger && side === st.stronger){
-      const live = weakerSideRepsThisSession(entry.name, st.weaker);
-      const avg = st[st.weaker] && st[st.weaker].reps;
-      const n = live != null ? live : (avg != null ? Math.round(avg) : null);
+      const cap = asymCap(entry.name, st);
+      const n = cap ? cap.n : null;
       out.match = n;
       out.reps = n != null ? String(n) : null;
       out.rpe = null;                       // a capped set has no effort target to hit
@@ -28480,6 +28485,30 @@ function asymSampleText(st){
   return n + " balanced session" + (n===1?"":"s") +
     (st.dropped ? ", oldest " + st.dropped + " dropped to keep the opening sides even" : "") +
     (st.confident ? "" : " — too few to cancel the fresh-set bias, treat as provisional");
+}
+/* THE CAP NUMBER, COMPUTED IN ONE PLACE.
+
+   It was computed in two, and they disagreed. The banner above the exercise floored the
+   average — Math.floor(min(13.5, 10.5)) = 10 — while the strip on the set rounded it —
+   Math.round(10.5) = 11 — so a weaker side sitting on a half rep produced "Cap both sides
+   at 10 reps" three lines above "STOP AT 11", on the same screen, about the same set.
+   Two implementations of one rule will always find a way to differ; there is now one.
+
+   FLOOR, NOT ROUND, and that is the right answer as well as the consistent one: a cap
+   that rounds UP asks the stronger side for more reps than the weaker side has ever
+   managed, which is precisely what the rule exists to prevent.
+
+   What the weaker side did TODAY outranks any average. The rule is "match the weaker
+   side", and once that side has been logged this session it is a fact rather than an
+   estimate — so the cap follows it, on the banner and on the set row alike. */
+function asymCap(exName, st){
+  st = st || sideStats(exName);
+  if(!st || !st.ok || !st.weaker) return null;
+  const live = weakerSideRepsThisSession(exName, st.weaker);
+  if(live != null && live > 0) return {n: Math.round(live), live: true};
+  const r = st.R && st.R.reps, l = st.L && st.L.reps;
+  if(r == null || l == null) return null;
+  return {n: Math.max(1, Math.floor(Math.min(r, l))), live: false};
 }
 // A movement retires from the rule individually once its own gap has closed.
 function asymRetiredFor(exName){
