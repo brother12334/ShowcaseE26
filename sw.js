@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "10.2";
+const VERSION = "10.3";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -244,14 +244,35 @@ self.addEventListener("fetch", event=>{
            open page is told. It is not reloaded from under you: doing that mid-session
            would tear down an in-progress workout to deliver a cosmetic change. The page
            says a new version is ready and leaves the moment to you. */
+        /* THE SNAPSHOT IS TAKEN HERE, NOT INSIDE THE FETCH, and that is the whole fix
+           for "it says there is an update every single launch".
+
+           `cached` is about to be handed to respondWith, and the browser consumes its
+           body to render the page. The comparison below used to clone it AFTER the
+           network round trip had come back — by which time the body was already spent,
+           so the clone threw, the catch swallowed it, and `changed` kept its optimistic
+           default of true. Every launch, on every build, the app announced an update to
+           itself. Cloning before the response leaves this scope costs nothing and is the
+           only moment the body is still untouched. */
+        const snapshot = cached.clone();
         event.waitUntil(fetch(req).then(async res=>{
           if(!res || !res.ok) return;
-          let changed = true;
+          /* Copies for the cache, taken before anything reads a body: put() consumes the
+             response it is given, and so does text(). */
+          const forIndex = res.clone(), forRoot = res.clone();
+          /* NOT BEING ABLE TO TELL IS NOT EVIDENCE OF AN UPDATE. If either body cannot be
+             read the honest answer is silence — a notice that fires when the check fails
+             is indistinguishable from one that fires when the check succeeds, which is
+             how this got shipped in the first place. */
+          let changed = false;
           try{
-            const [was, now] = await Promise.all([cached.clone().text(), res.clone().text()]);
+            const [was, now] = await Promise.all([snapshot.text(), res.text()]);
             changed = was !== now;
-          }catch(e){}
-          await cache.put("./index.html", res.clone());
+          }catch(e){ changed = false; }
+          await cache.put("./index.html", forIndex);
+          /* Both keys the lookup above will try, so the next launch cannot compare a
+             fresh shell against a copy of the directory URL left over from install. */
+          await cache.put("./", forRoot).catch(()=>{});
           if(changed){
             const clients = await self.clients.matchAll({type:"window"});
             clients.forEach(c=> c.postMessage({type:"e26-shell-updated"}));
