@@ -4672,7 +4672,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "17.0";
+const APP_VERSION = "17.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -22788,22 +22788,26 @@ function bind(){
     const n = $("#sessNote");
     if(n) S.active.note = n.value;
   }
-  /* The rest clock stores which entry it belongs to as an index, so any swap has to move
-     it too or it silently starts pointing at somebody else's exercise. */
-  const swapEntries = (i, j)=>{
+  /* The rest clock stores which entry it belongs to as an index, so any reorder has to
+     move it too or it silently starts pointing at somebody else's exercise. */
+  const moveEntry = (i, dir)=>{
     const list = S.active.entries;
-    if(i < 0 || j < 0 || i >= list.length || j >= list.length) return false;
+    if(!list || i < 0 || i >= list.length) return false;
+    const idx = entryOrderAfterMove(list, i, dir);
+    if(!idx) return false;                       // already at the end it was heading for
     const doneAt = k=> list[k].sets.length && list[k].sets.every(x=>x.done);
-    /* BOTH ENDS. Refusing only the one you tapped still let an unfinished exercise be
-       dragged up past a finished one, which moves the finished one just as surely. */
-    if(doneAt(i) || doneAt(j)){ toast("That one's done — its place in the session is set"); return false; }
+    /* EVERY ENTRY THAT ACTUALLY MOVES, not just the one you tapped. Refusing only the
+       tapped card still let an unfinished exercise be dragged past a finished one, which
+       moves the finished one just as surely — and with blocks a single tap can now shift
+       three cards, so the check has to cover all of them. */
+    const moved = idx.filter((oldI, newI)=> oldI !== newI);
+    if(moved.some(doneAt)){ toast("That one's done — its place in the session is set"); return false; }
     harvestActive();
-    [list[i], list[j]] = [list[j], list[i]];
+    const pos = new Map();
+    idx.forEach((oldI, newI)=> pos.set(oldI, newI));
+    S.active.entries = idx.map(k=> list[k]);
     const rt = S.active.restTimer;
-    if(rt){
-      if(rt.e === i) rt.e = j;
-      else if(rt.e === j) rt.e = i;
-    }
+    if(rt && pos.has(rt.e)) rt.e = pos.get(rt.e);
     save(); render();
     return true;
   };
@@ -22872,14 +22876,10 @@ function bind(){
     });
   })();
   document.querySelectorAll("[data-exup]").forEach(b=> b.onclick=()=>{
-    const i = parseInt(b.dataset.exup,10);
-    if(i<=0) return;
-    swapEntries(i, i-1);
+    moveEntry(parseInt(b.dataset.exup, 10), -1);
   });
   document.querySelectorAll("[data-exdown]").forEach(b=> b.onclick=()=>{
-    const i = parseInt(b.dataset.exdown,10);
-    if(i>=S.active.entries.length-1) return;
-    swapEntries(i, i+1);
+    moveEntry(parseInt(b.dataset.exdown, 10), 1);
   });
   document.querySelectorAll("[data-exchoose]").forEach(b=> b.onclick = ()=>
     openPickModal(parseInt(b.dataset.exchoose, 10)));
@@ -28703,6 +28703,45 @@ function supersetPair(list, i){
   const a = info.role === "first" ? i : i - 1;
   const b = a + 1;
   return (list[a] && list[b]) ? {a, b} : null;
+}
+/* THE SESSION AS BLOCKS, BECAUSE A SUPERSET IS ONE THING AND MOVES LIKE ONE.
+
+   Superset membership here is POSITIONAL: an entry carrying `superset` is paired with
+   whatever sits at the next index. Nothing records "these two exercises are a pair" —
+   the pairing IS the adjacency. So a plain neighbour swap does not move an exercise past
+   a superset, it moves it INTO one: with [A(superset) B] as the pair and C after it,
+   tapping ↑ on C swapped C with B and left A pointing at its new neighbour. C was now
+   half of a superset it was never part of, and B had fallen out of one it was.
+
+   Reordering therefore works on blocks, not on indices. A pair is one block, everything
+   else is a block of one, and a move hops the whole neighbouring block instead of
+   trading places with its nearest edge. C moving up clears the pair entirely and lands
+   in front of A; the pair stays a pair either way.
+
+   A trailing `superset` flag with nothing after it is a block of one, matching
+   supersetPair(), which also refuses to call that a pair. */
+function supersetBlocks(list){
+  const out = [];
+  for(let k = 0; k < (list || []).length; ){
+    if(list[k] && list[k].superset && list[k+1]){ out.push({from:k, to:k+1}); k += 2; }
+    else { out.push({from:k, to:k}); k += 1; }
+  }
+  return out;
+}
+/* The order this list would have if the block holding `i` hopped one block in `dir`.
+   Returns an array of OLD indices in their new positions, or null when there is nowhere
+   to go. Pure: it reorders nothing itself, so the caller can still refuse the move. */
+function entryOrderAfterMove(list, i, dir){
+  const blocks = supersetBlocks(list);
+  const bi = blocks.findIndex(b=> i >= b.from && i <= b.to);
+  if(bi < 0) return null;
+  const ni = bi + (dir < 0 ? -1 : 1);
+  if(ni < 0 || ni >= blocks.length) return null;
+  const order = blocks.slice();
+  [order[bi], order[ni]] = [order[ni], order[bi]];
+  const idx = [];
+  order.forEach(b=>{ for(let k = b.from; k <= b.to; k++) idx.push(k); });
+  return idx;
 }
 /* Is round `si` of this pair complete on BOTH sides? A round the partner has no set for
    — uneven pairs are normal — counts as complete on the side that has run out, so the
