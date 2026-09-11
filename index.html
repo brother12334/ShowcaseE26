@@ -4695,7 +4695,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "17.3";
+const APP_VERSION = "17.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -26407,8 +26407,11 @@ function scoreCardHTML(q, sess){
       </div>`;
     });
   }
+  /* Wrapped, because this block is the one part of the card that CHANGES while you are
+     reading it: applying a load moves the finding from "the load is wrong here" into
+     "already brought down", and it has to be able to redraw itself to say so. */
   if(sess && sess.progression && sess.progression.length){
-    h += progressionHTML(sess.progression);
+    h += `<div id="progWrap">${progressionHTML(sess.progression)}</div>`;
   }
   const graded = q.sections.filter(s=>!s.na);
   h += `<div class="rev-head">How the ${graded.length} graded section${graded.length===1?"":"s"} scored</div>`;
@@ -26509,35 +26512,59 @@ function openScoreCard(sess, onDone){
     if(r !== v) el.value = r;
     return r;
   };
-  document.querySelectorAll("#modal [data-progapply]").forEach(btn=> btn.onclick = ()=>{
-    const name = btn.dataset.progapply;
-    const to = typedTo(name, btn.dataset.progto);
-    /* A BUTTON THAT DOES NOTHING AND SAYS NOTHING IS THE WORST OUTCOME HERE. The apply
-       can legitimately refuse — a deload is running, the movement is not in the current
-       programme — and it used to refuse in silence on this screen, leaving somebody
-       certain they had pressed it and no way to tell that they had. */
-    if(applyProgression(name, to, null, progReason(
-        (sess.progression || []).find(x=> x && x.name === name)))){
-      markApplied(name);
-      btn.textContent = "Applied";
-      btn.disabled = true;
-      btn.classList.add("done");
-      toast(esc(name) + " set to " + fmtLoad(to) + " in your programme", "good");
-    } else {
-      btn.classList.remove("done");
-      btn.disabled = false;
-    }
-  });
-  const all = $("#progApplyAll");
-  if(all) all.onclick = ()=>{
-    let n = 0;
-    (sess.progression || []).filter(p=>p.kind === "up" && !progressionApplied(p)).forEach(p=>{
-      if(applyProgression(p.name, typedTo(p.name, p.to), null, progReason(p))){ p.applied = true; n++; }
-    });
-    if(n){ save(); queueSync(); }
-    toast(n ? n + " load" + (n === 1 ? "" : "s") + " updated in your programme" : "Nothing to apply");
-    openScoreCard(sess, onDone);
+  /* THE CARD HAS TO AGREE WITH ITSELF THE MOMENT YOU PRESS THE BUTTON.
+
+     Applying a cut worked — the plan was written, the flag was closed, the toast said so
+     — and then the card went on showing the finding under "THE LOAD IS WRONG HERE" with
+     "Load already brought down" listing somebody else, because the section headings were
+     computed when the card opened and nothing redrew them. Everything about that reads
+     as an apply that failed, and the only way to see it had not was to close the card and
+     reopen it. Pressing Apply is the one moment this block is guaranteed to be stale, so
+     it now redraws itself and rewires from the progression list, which markApplied() has
+     already updated.
+
+     Redrawn in place rather than through openScoreCard(): rebuilding the whole modal
+     throws you back to the top of a card you were halfway down and replays the ring
+     animation, which is its own kind of "did that work?". */
+  const redrawProgression = ()=>{
+    const wrap = $("#progWrap");
+    if(!wrap) return;
+    const box = $("#modal");
+    const y = box ? box.scrollTop : 0;
+    wrap.innerHTML = progressionHTML(sess.progression);
+    if(box) box.scrollTop = y;
+    wireProgression();
   };
+  function wireProgression(){
+    document.querySelectorAll("#modal [data-progapply]").forEach(btn=> btn.onclick = ()=>{
+      const name = btn.dataset.progapply;
+      const to = typedTo(name, btn.dataset.progto);
+      /* A BUTTON THAT DOES NOTHING AND SAYS NOTHING IS THE WORST OUTCOME HERE. The apply
+         can legitimately refuse — a deload is running, the movement is not in the current
+         programme — and it used to refuse in silence on this screen, leaving somebody
+         certain they had pressed it and no way to tell that they had. */
+      if(applyProgression(name, to, null, progReason(
+          (sess.progression || []).find(x=> x && x.name === name)))){
+        markApplied(name);
+        toast(esc(name) + " set to " + fmtLoad(to) + " in your programme", "good");
+        redrawProgression();
+      } else {
+        btn.classList.remove("done");
+        btn.disabled = false;
+      }
+    });
+    const all = $("#progApplyAll");
+    if(all) all.onclick = ()=>{
+      let n = 0;
+      (sess.progression || []).filter(p=>p.kind === "up" && !progressionApplied(p)).forEach(p=>{
+        if(applyProgression(p.name, typedTo(p.name, p.to), null, progReason(p))){ p.applied = true; n++; }
+      });
+      if(n){ save(); queueSync(); }
+      toast(n ? n + " load" + (n === 1 ? "" : "s") + " updated in your programme" : "Nothing to apply");
+      redrawProgression();
+    };
+  }
+  wireProgression();
   const b = $("#scDone");
   if(b) b.onclick = hideModal;      // hideModal fires MODAL_DISMISS exactly once
 }
