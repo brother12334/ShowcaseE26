@@ -233,12 +233,11 @@ export default {
       return fail(502, "Couldn't reach Google from the proxy.", origin);
     }
 
-    /* The model was retired (404), or THIS SPECIFIC MODEL has hit its own quota (429).
-       Both are the same underlying situation from here — this one name is not usable
-       right now for a reason that has nothing to do with the request — so both ask what
-       else this key can call and retry once. A 400 is different in kind: the request
-       itself is malformed, and no amount of switching models fixes that, so it is left
-       alone.
+    /* The model was retired (404), hit its own quota (429), or is overloaded right now
+       (503, and 500 often enough to be worth the same treatment). All of them are the
+       same underlying situation from here — this one NAME is not usable at this moment
+       for a reason that has nothing to do with the request — so all of them ask what
+       else this key can call and retry once.
 
        429 was added to this list after "gemini-flash-latest" landed on a brand-new
        model with a 20-request daily free cap, RESOURCE_EXHAUSTED, quotaId
@@ -247,8 +246,19 @@ export default {
        existing `avoid` parameter to resolveModel() is what keeps the retry from landing
        right back on the model that just failed: it filters that name out of the
        candidates before scoring, so a fresh lookup cannot simply re-choose it. */
+    /* 503 IS THE COMMON ONE AND IT WAS THE ONE NOT HANDLED. "The model is overloaded,
+       please try again later" is Google's busiest-hour answer, it is per-MODEL, and it
+       is the exact failure a different model fixes instantly — the same key answers 200
+       against a sibling flash model in the same second. It was passed straight through
+       to the app, which could only show "our servers are having a moment" and give up.
+       500 INTERNAL joins it for the same reason: retrying the identical request against
+       the identical name is the one thing guaranteed not to help.
+
+       A 400 stays excluded. That is a malformed request, and no amount of switching
+       models fixes a body Google cannot parse. */
+    const SWITCH_MODEL_ON = [404, 429, 500, 503];
     let served = model;
-    if (upstream.status === 404 || upstream.status === 429) {
+    if (SWITCH_MODEL_ON.includes(upstream.status)) {
       const alt = await resolveModel(env.GEMINI_API_KEY, model);
       if (alt) {
         try {

@@ -4695,7 +4695,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "17.4";
+const APP_VERSION = "17.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13742,16 +13742,23 @@ function aiFilePart(file){
    person retypes and taps import again for a failure that would have cleared itself in
    the time it took them to do that.
 
-   Bounded to two retries — three attempts total — with a short backoff and a little
+   Bounded to four retries — five attempts total — with a growing backoff and a little
    jitter so many people hitting the same overloaded model do not all retry in lockstep
    and recreate the spike they are waiting out.
+
+   IT USED TO GIVE UP AFTER 4.7 SECONDS, which is shorter than a Gemini overload
+   typically lasts: two retries 1.2s and 3.5s apart, then the failure. An import is a
+   thing somebody does once, having already waited for a file to upload, and against
+   that the difference between failing at five seconds and succeeding at fifteen is not
+   close. The ceiling is now about 17 seconds of waiting before it gives up, and the
+   screen says which attempt it is on so the pause reads as work rather than as a hang.
 
    ONLY THE TRANSIENT ONES. A dropped connection and a 429/5xx are retried because the
    exact same request can succeed on the next attempt. A 400, 401, 403 or 404 is not,
    because it is a deterministic answer about this key, this model or this request, and
    retrying it spends nothing but the person's time to learn the same fact twice. */
-const AI_RETRY_MAX = 2;
-const AI_RETRY_DELAYS = [1200, 3500];   // ms before the 1st and 2nd retry
+const AI_RETRY_MAX = 4;
+const AI_RETRY_DELAYS = [900, 2200, 5000, 9000];   // ms before each retry
 function aiRetryable(res, threw){
   if(threw) return true;
   return res.status === 429 || res.status >= 500;
@@ -13792,7 +13799,9 @@ async function aiCall(parts, spec){
     }
     if(!aiRetryable(res, threw)) break;
     if(attempt === AI_RETRY_MAX) break;    // out of attempts, fall through to the error below
-    aiRetryNote("Servers are busy — retrying…");
+    /* Counted out loud. "Retrying…" that has already said the same thing twice is
+       indistinguishable from a stuck screen; "attempt 3 of 5" is visibly progress. */
+    aiRetryNote("Servers are busy \u2014 attempt " + (attempt + 2) + " of " + (AI_RETRY_MAX + 1) + "\u2026");
     const base = AI_RETRY_DELAYS[attempt] || AI_RETRY_DELAYS[AI_RETRY_DELAYS.length - 1];
     await new Promise(r=> setTimeout(r, base + Math.random()*400));
   }
