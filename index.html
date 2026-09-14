@@ -4699,7 +4699,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "17.6";
+const APP_VERSION = "17.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13779,10 +13779,26 @@ function aiOwnRateLimit(body){
 }
 const AI_RETRY_MAX = 4;
 const AI_RETRY_DELAYS = [900, 2200, 5000, 9000];   // ms before each retry
+/* A QUOTA IS NOT AN OVERLOAD, AND 429 SHOULD NEVER HAVE BEEN ON THIS LIST.
+
+   503 is the case this retry loop was built for: the model is busy this second, the
+   identical request succeeds four seconds later, nothing changed. A 429 is the opposite
+   kind of answer — it says a counter has been exceeded, and the counter is a minute or a
+   day wide. Repeating the request cannot clear it and, where the quota counts attempts
+   rather than successes, each retry digs deeper into the hole it is reporting.
+
+   It is also already handled, one layer down, and better: the proxy answers a per-MODEL
+   429 by asking which other models this key can call and re-running the request against
+   one of them. So by the time a 429 reaches this code the substitution has ALREADY been
+   tried and has ALSO been refused — which means the limit is project-wide or daily, and
+   is the one shape of failure guaranteed not to improve by asking again.
+
+   So both flavours of 429 stop here now: ours (per address, per minute) and Google's
+   (per key, per day). 500 and 503 keep the full budget, because those really do clear. */
 function aiRetryable(res, threw, body){
   if(threw) return true;
   if(!res) return true;
-  if(res.status === 429) return !aiOwnRateLimit(body);
+  if(res.status === 429) return false;
   return res.status >= 500;
 }
 /* WHAT THE SERVER ACTUALLY SAID, kept for the error screen. Every message below is
@@ -13888,10 +13904,19 @@ async function aiCall(parts, spec){
         ? "The plan reader's address isn't answering (404, no detail). The proxy is probably not deployed. That's ours to fix."
         : "The plan reader is misconfigured. Our servers said: " + msg + " (asked for \"" + AI_MODEL + "\"). That's ours to fix.");
     }
-    if(res.status === 429)
-      throw new Error(aiOwnRateLimit(j)
-        ? "That's too many import attempts from this connection in the last minute. Wait a full minute without tapping import, then try once \u2014 every attempt counts against the same window, so trying repeatedly is what keeps it locked."
-        : "The plan reader is busy \u2014 it's had a lot of use today. Wait a few minutes and try again.");
+    /* "Busy, try again in a few minutes" was wrong about both halves of it. A daily quota
+       is not busy-ness and it does not clear in a few minutes — it clears at midnight,
+       Pacific, which is when Google's day rolls over. Telling somebody to wait a few
+       minutes and try again sends them back to burn more of an allowance that is already
+       gone, which is the loop this whole thread has been stuck in. */
+    if(res.status === 429){
+      if(aiOwnRateLimit(j))
+        throw new Error("That's too many import attempts from this connection in the last minute. Wait a full minute without tapping import, then try once \u2014 every attempt counts against the same window, so trying repeatedly is what keeps it locked.");
+      const daily = /per ?day|perday|daily/i.test(String(msg));
+      throw new Error(daily
+        ? "The plan reader has used up its allowance with our model provider for today. It resets at midnight US Pacific time \u2014 trying again before then will keep failing, and each try uses more of tomorrow's. That's ours to fix, not yours: in the meantime your programme can be entered by hand in the Program tab."
+        : "The plan reader is over its limit with our model provider right now. That's ours to fix, not yours \u2014 trying again won't clear it. You can enter your programme by hand in the Program tab in the meantime.");
+    }
     if(res.status >= 500)
       throw new Error("Our servers are having a moment (" + res.status + "). Try again shortly.");
     throw new Error(msg);
