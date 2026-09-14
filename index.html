@@ -618,6 +618,23 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .flag-opt .pg-to{margin:0}
 .flag-opt .pg-to input{width:56px}
 .flag-opt .btn.small{width:auto;flex:0 0 auto;padding:8px 14px}
+/* The per-half decline. Small glyph, real touch target, and it sits AFTER Apply so the
+   destructive one is never the first thing a thumb lands on. */
+.flag-opt-x{
+  flex:0 0 auto;background:none;border:0;cursor:pointer;color:var(--faint);
+  font-size:12px;line-height:1;padding:8px 6px;margin:-8px -4px -8px 0;border-radius:7px;
+}
+.flag-opt-x:active{background:var(--card);color:var(--bad)}
+/* A half that has been settled keeps its row as the record of what you chose, without
+   the controls that would invite choosing it again. */
+.flag-opt.is-done{border-color:rgba(74,147,88,.35);background:rgba(74,147,88,.07)}
+.flag-opt.is-skipped{opacity:.55}
+.flag-opt-said{
+  flex:0 0 auto;font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--faint);
+}
+.flag-opt.is-done .flag-opt-said{color:var(--ok)}
+.flag-pick-n{font-size:12px;color:var(--faint);line-height:1.45;margin:7px 2px 0}
 .swap-mine{
   font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--acc);border:1px solid var(--line);border-radius:999px;padding:1px 6px;margin-left:8px;
@@ -4707,7 +4724,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "17.8";
+const APP_VERSION = "17.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20011,25 +20028,40 @@ function viewBody(){
           ? `<span class="conf-tag conf-${esc(f.conf)}">${esc((CONF_BANDS.find(b=>b.k===f.conf)||{}).label||"")}</span>` : ""}</div>
         <div class="nb-flag-m">${esc(f.msg)}</div>
         ${f.fix?`<div class="nb-flag-f">${esc(f.fix)}</div>`:""}
-        ${f.kind === "fade" ? `
-        <div class="flag-pick">
-          <div class="flag-opt">
-            <span class="flag-opt-t">Rest longer</span>
-            <span class="pg-to"><input inputmode="numeric" data-faderest="${esc(f.id)}"
-              value="${f.restAdd == null ? 30 : f.restAdd}" aria-label="Extra seconds of rest"><i>s more</i></span>
-            <button class="btn small" data-flagdo="${esc(f.id)}" data-fadepick="rest">Apply</button>
-          </div>
-          <div class="flag-opt">
-            <span class="flag-opt-t">Start lighter</span>
-            <span class="pg-to"><input inputmode="decimal" data-fadeload="${esc(f.id)}"
-              value="${f.to == null ? "" : f.to}" aria-label="Opening weight"><i>${esc(unitWord())}</i></span>
-            <button class="btn small" data-flagdo="${esc(f.id)}" data-fadepick="load"
-              ${f.to == null ? "disabled style=opacity:.4" : ""}>Apply</button>
-          </div>
+        ${f.kind === "fade" ? (()=>{
+          /* Each half draws its own state, so half a decision looks like half a decision
+             rather than like the card having failed. A settled half keeps its row — it is
+             the record of what you chose — but loses its controls. */
+          const optHTML = (part, label, control)=>{
+            const st = fadePartState(f, part);
+            if(st === "na") return "";
+            if(st !== "open") return `<div class="flag-opt is-${st}">
+              <span class="flag-opt-t">${esc(label)}</span>
+              <span class="flag-opt-said">${st === "done" ? "applied \u2713" : "not this one"}</span>
+            </div>`;
+            return `<div class="flag-opt" data-part="${part}">
+              <span class="flag-opt-t">${esc(label)}</span>
+              ${control}
+              <button class="btn small" data-flagdo="${esc(f.id)}" data-fadepick="${part}">Apply</button>
+              <button class="flag-opt-x" data-flagnopart="${esc(f.id)}:${part}"
+                aria-label="Not this one" title="Not this one">\u2715</button>
+            </div>`;
+          };
+          const left = fadeOpenParts(f).length;
+          return `<div class="flag-pick">
+          ${optHTML("rest", "Rest longer",
+            `<span class="pg-to"><input inputmode="numeric" data-faderest="${esc(f.id)}"
+              value="${f.restAdd == null ? 30 : f.restAdd}" aria-label="Extra seconds of rest"><i>s more</i></span>`)}
+          ${optHTML("load", "Start lighter",
+            `<span class="pg-to"><input inputmode="decimal" data-fadeload="${esc(f.id)}"
+              value="${f.to == null ? "" : f.to}" aria-label="Opening weight"><i>${esc(unitWord())}</i></span>`)}
         </div>
+        <div class="flag-pick-n">Both are worth doing, and you can take one, the other, or both.</div>
         <div class="btn-row" style="margin-top:9px">
-          <button class="btn ghost small" data-flagno="${esc(f.id)}" style="flex:1">Dismiss</button>
-        </div>` : `
+          <button class="btn ghost small" data-flagno="${esc(f.id)}" style="flex:1">${
+            left > 1 ? "Dismiss both" : "Dismiss"}</button>
+        </div>`;
+        })() : `
         <div class="btn-row" style="margin-top:9px">
           ${actionable && f.kind !== "stall" ? `<span class="pg-to">
             <input inputmode="decimal" data-flagtoin="${esc(f.id)}" value="${f.to == null ? "" : f.to}"
@@ -23512,6 +23544,13 @@ function bind(){
   });
   document.querySelectorAll("#app [data-flagno]").forEach(b=> b.onclick=()=>{
     dismissFlag(b.dataset.flagno); render(); toast("Dismissed");
+  });
+  /* Waving away ONE half of the collapse flag. The other half stays put. */
+  document.querySelectorAll("#app [data-flagnopart]").forEach(b=> b.onclick=()=>{
+    const [id, part] = b.dataset.flagnopart.split(":");
+    if(!dismissFlagPart(id, part)) return;
+    render();
+    toast(part === "rest" ? "Rest left as it is" : "Opening weight left as it is");
   });
   const nsr = $("#nbSideRule");
   if(nsr) nsr.onclick = ()=>{
@@ -27266,6 +27305,9 @@ function applyFlag(id, choice){
   if(!f || f.applied) return false;
   let ok = false;
   if(f.kind === "fade"){
+    /* Each half once. A second tap on a half already applied would add another 30
+       seconds of rest to a window that has already been lengthened. */
+    if(fadePartState(f, choice) !== "open") return false;
     if(choice === "rest"){
       ok = addRestToExercise(f.ex, f.restAdd == null ? FADE_REST_ADD : f.restAdd);
     } else if(choice === "load" && f.to != null){
@@ -27273,7 +27315,12 @@ function applyFlag(id, choice){
         "Applied from the Body tab: reps collapsed across the sets, so the opening load comes down.",
         f.msg);
     }
-    if(ok){ f.applied = true; f.appliedAs = choice; save(); queueSync(); }
+    if(ok){
+      if(!f.did) f.did = {};
+      f.did[choice] = true;
+      fadeSettle(f);                 // only closes once the other half is settled too
+      save(); queueSync();
+    }
     return ok;
   }
   if((f.kind === "up" || f.kind === "load") && f.to != null){
@@ -27399,6 +27446,56 @@ function openMaxSheet(name){
     toast(v === "" ? "Back to the estimate from your log"
                    : esc(name) + " max set to " + fmtLoad(parseFloat(v)));
   };
+}
+/* A TWO-ANSWER FLAG NEEDS TWO ANSWERS, AND IT WAS ONLY EVER GIVEN ONE.
+
+   The collapse flag offers both honest fixes — rest longer, start lighter — because the
+   app genuinely cannot tell which it was, and they are not alternatives: doing both is a
+   perfectly sensible response to reps falling off a cliff. But applyFlag() stamped
+   `applied` on the whole record the instant either button was pressed, so choosing one
+   took the other off the screen mid-decision. The only way to get both was to apply one,
+   find the card gone, and go and edit the plan by hand.
+
+   So each half settles on its own. A half is settled when it has been applied or waved
+   away, and the flag itself only closes once BOTH are — as APPLIED if either was applied,
+   as DISMISSED if neither was, which keeps "already acted on" honest.
+
+   A half with no number behind it cannot be applied and counts as settled from the start,
+   or a flag with no suggested weight could never close. */
+const FADE_PARTS = ["rest", "load"];
+function fadePartOffered(f, part){
+  if(part === "load") return f && f.to != null;
+  return true;
+}
+function fadePartState(f, part){
+  if(!fadePartOffered(f, part)) return "na";
+  if(f.did && f.did[part]) return "done";
+  if(f.skip && f.skip[part]) return "skipped";
+  return "open";
+}
+function fadeOpenParts(f){
+  return FADE_PARTS.filter(k=> fadePartState(f, k) === "open");
+}
+/* Close the flag if nothing is left open, recording which way it went. */
+function fadeSettle(f){
+  if(fadeOpenParts(f).length) return;
+  if(FADE_PARTS.some(k=> fadePartState(f, k) === "done")){
+    f.applied = true; f.appliedAt = Date.now();
+    f.appliedAs = FADE_PARTS.filter(k=> fadePartState(f, k) === "done").join("+");
+  } else {
+    f.dismissed = true; f.dismissedAt = Date.now();
+  }
+}
+/* Waving away ONE half of a two-answer flag. The other stays exactly where it was. */
+function dismissFlagPart(id, part){
+  const f = flagLog().find(x=> x && x.id === id);
+  if(!f || f.kind !== "fade" || FADE_PARTS.indexOf(part) < 0) return false;
+  if(fadePartState(f, part) !== "open") return false;
+  if(!f.skip) f.skip = {};
+  f.skip[part] = true;
+  fadeSettle(f);
+  save(); queueSync();
+  return true;
 }
 function dismissFlag(id){
   const f = flagLog().find(x=> x && x.id === id);
