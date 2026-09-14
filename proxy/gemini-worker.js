@@ -162,6 +162,12 @@ const cors = (origin) => ({
   "Access-Control-Allow-Origin": origin || "null",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
+  /* WITHOUT THIS THE APP CANNOT READ X-E26-Model AT ALL. A cross-origin response only
+     exposes the handful of safelisted headers to script unless it says otherwise, so the
+     header that records which model actually answered was visible in the network tab and
+     invisible to the code — which is no use at all when the import failed on a phone and
+     the question is whether the fallback ran. */
+  "Access-Control-Expose-Headers": "X-E26-Model",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
 });

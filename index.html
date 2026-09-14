@@ -1462,6 +1462,10 @@ body.onboarding{padding-bottom:24px}
   padding:2px 5px;flex-shrink:0;
 }
 .ai-busy{display:flex;align-items:center;gap:12px;padding:18px 2px;color:var(--dim);font-size:14.5px}
+/* Deliberately plain and quiet: this is not for the reader, it is for whoever they show
+   it to. Monospace because every part of it is an identifier or a number. */
+.ai-diag{font:11.5px var(--mono);color:var(--faint);margin:-6px 0 10px;line-height:1.45;
+  word-break:break-word;-webkit-user-select:text;user-select:text}
 .ai-spin{
   width:22px;height:22px;border-radius:50%;flex-shrink:0;
   border:2.5px solid var(--line);border-top-color:var(--text);animation:aiSpin .8s linear infinite;
@@ -4695,7 +4699,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "17.5";
+const APP_VERSION = "17.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13756,13 +13760,37 @@ function aiFilePart(file){
    ONLY THE TRANSIENT ONES. A dropped connection and a 429/5xx are retried because the
    exact same request can succeed on the next attempt. A 400, 401, 403 or 404 is not,
    because it is a deterministic answer about this key, this model or this request, and
-   retrying it spends nothing but the person's time to learn the same fact twice. */
+   retrying it spends nothing but the person's time to learn the same fact twice.
+
+   AND NOT OUR OWN RATE LIMIT, which is the exception that was making this worse rather
+   than better. The proxy caps plan reads per address per minute; when it refuses, it
+   refuses with a 429 — the same status Google uses for a quota — so the retry loop could
+   not tell the two apart and hammered the limiter four more times with requests it had
+   already said no to. Every one of those counts against the same window, so retrying is
+   not merely useless there, it is what keeps the door shut. Widening the retry budget
+   turned that from a nuisance into a trap: an import is two calls, so a failing one went
+   from 6 requests to 10, and two of those inside a minute is the whole allowance.
+
+   The proxy's refusal says so in words, so the words are what tells them apart — no
+   redeploy needed to start reading them. */
+function aiOwnRateLimit(body){
+  const m = body && body.error && body.error.message;
+  return !!m && /too many plan reads|from this connection/i.test(String(m));
+}
 const AI_RETRY_MAX = 4;
 const AI_RETRY_DELAYS = [900, 2200, 5000, 9000];   // ms before each retry
-function aiRetryable(res, threw){
+function aiRetryable(res, threw, body){
   if(threw) return true;
-  return res.status === 429 || res.status >= 500;
+  if(!res) return true;
+  if(res.status === 429) return !aiOwnRateLimit(body);
+  return res.status >= 500;
 }
+/* WHAT THE SERVER ACTUALLY SAID, kept for the error screen. Every message below is
+   written for a person and says nothing a maintainer could act on — which is fine until
+   an import fails on a phone with no terminal anywhere near it, and the only way to find
+   out what went wrong is to read HTTP statuses off somebody's laptop. This is the status,
+   the model that answered, and the upstream sentence, printed small under the error. */
+let AI_LAST_ERR = null;
 /* One call to the model. `spec` carries the system prompt and the response schema, so
    the screening pass and the extraction pass share every line of transport and error
    handling and can never drift apart in how they report a failure. */
@@ -13789,15 +13817,18 @@ async function aiCall(parts, spec){
     url = AI_ENDPOINT + encodeURIComponent(AI_MODEL) + ":generateContent";
     headers["x-goog-api-key"] = String(AI_KEY).trim();
   }
-  let res, threw = false;
+  let res, threw = false, errBody = null;
   for(let attempt = 0; attempt <= AI_RETRY_MAX; attempt++){
-    threw = false;
+    threw = false; errBody = null;
     try{
       res = await fetch(url, {method:"POST", headers, body: JSON.stringify(body)});
     }catch(e){
       threw = true;
     }
-    if(!aiRetryable(res, threw)) break;
+    /* Read here, not after the loop: whether this is worth retrying can depend on WHAT
+       the refusal said, and a Response body can only be read once. */
+    if(!threw && !res.ok){ try{ errBody = await res.json(); }catch(e){ errBody = null; } }
+    if(!aiRetryable(res, threw, errBody)) break;
     if(attempt === AI_RETRY_MAX) break;    // out of attempts, fall through to the error below
     /* Counted out loud. "Retrying…" that has already said the same thing twice is
        indistinguishable from a stuck screen; "attempt 3 of 5" is visibly progress. */
@@ -13812,8 +13843,12 @@ async function aiCall(parts, spec){
       : "Couldn't reach our servers. Check your connection and try again.");
   }
   let j = {};
-  try{ j = await res.json(); }catch(e){}
+  if(res.ok){ try{ j = await res.json(); }catch(e){} }
+  else j = errBody || {};
   if(!res.ok){
+    /* Recorded before any of the friendly wording replaces it. */
+    AI_LAST_ERR = {status: res.status, model: (()=>{ try{ return res.headers.get("X-E26-Model"); }catch(e){ return null; } })(),
+                   said: (j.error && j.error.message) || null, at: Date.now()};
     /* A key problem is the app owner's to fix, not this person's, so the wording never
        asks them to go and do something about it — it tells them it is not their fault
        and that it will be back.
@@ -13854,7 +13889,9 @@ async function aiCall(parts, spec){
         : "The plan reader is misconfigured. Our servers said: " + msg + " (asked for \"" + AI_MODEL + "\"). That's ours to fix.");
     }
     if(res.status === 429)
-      throw new Error("The plan reader is busy — it's had a lot of use today. Wait a few minutes and try again.");
+      throw new Error(aiOwnRateLimit(j)
+        ? "That's too many import attempts from this connection in the last minute. Wait a full minute without tapping import, then try once \u2014 every attempt counts against the same window, so trying repeatedly is what keeps it locked."
+        : "The plan reader is busy \u2014 it's had a lot of use today. Wait a few minutes and try again.");
     if(res.status >= 500)
       throw new Error("Our servers are having a moment (" + res.status + "). Try again shortly.");
     throw new Error(msg);
@@ -14862,6 +14899,29 @@ function aiImportHTML(){
 /* The animated stage — a document becoming three workouts and a week — shared by the
    importer's own first screen and the app's very first screen, which are the same
    invitation and should look it. */
+/* THE ERROR, AND THE THING A MAINTAINER WOULD ASK FOR NEXT.
+
+   Every message aiCall() raises is written for the person holding the phone, and none of
+   them says which status came back, which model answered, or what the upstream actually
+   said — so diagnosing a failed import meant running curl against the proxy from a
+   laptop. That is fine right up against the case that matters: an import failing in the
+   gym, on a phone, with no terminal within reach.
+
+   So the friendly sentence stays exactly as it is, and the raw answer goes underneath it
+   in small type. It appears only when there IS one, it is one line, and it is the line
+   somebody can read out or screenshot. */
+function aiErrHTML(a){
+  if(!a || !a.err) return "";
+  let out = `<div class="ai-err">${esc(a.err)}</div>`;
+  const d = AI_LAST_ERR;
+  if(d && Date.now() - d.at < 5*60e3){
+    const bits = ["HTTP " + d.status];
+    if(d.model) bits.push("served by " + d.model);
+    if(d.said) bits.push(aiTrim(String(d.said), 160));
+    out += `<div class="ai-diag">${esc(bits.join(" \u00b7 "))}</div>`;
+  }
+  return out;
+}
 function aiHeroArtHTML(){
   return `<div class="ai-stage" aria-hidden="true">
       <div class="ai-doc">
@@ -14892,7 +14952,7 @@ function aiHeroHTML(){
       `<span class="ai-file"><span>${esc(f.name)}</span><button data-airm="${i}" aria-label="Remove">✕</button></span>`
     ).join("") + `</div>`;
   }
-  if(a.err) h += `<div class="ai-err">${esc(a.err)}</div>`;
+  h += aiErrHTML(a);
   h += `<div class="btn-row" style="margin-top:16px"><button class="btn" id="aiPick" style="flex:1">Upload training plan</button></div>
     <div class="ai-sub-cta">Choose a PDF, photo or file from your device</div>
     <div class="ai-reassure"><span class="ai-re-ic" aria-hidden="true"></span><span>We check the document first, and nothing is added to your workouts until you've seen it.</span></div>
@@ -15012,7 +15072,7 @@ function aiCautionHTML(){
   }
   h += `<div class="ai-note">You can carry on — anything we couldn't read is flagged before your plan
     is created, and you'll see every exercise first. Or attach a clearer copy.</div>`;
-  if(a.err) h += `<div class="ai-err">${esc(a.err)}</div>`;
+  h += aiErrHTML(a);
   h += `<div class="btn-row"><button class="btn small" id="aiForce" style="flex:1">Read it anyway</button></div>
     <div class="btn-row"><button class="btn ghost small" id="aiAgain" style="flex:1">Use a different document</button></div>
     <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`;
@@ -15075,7 +15135,7 @@ function aiQuestionHTML(){
       </button>`;
     }).join("") + `</div>`;
   }
-  if(a.err) h += `<div class="ai-err">${esc(a.err)}</div>`;
+  h += aiErrHTML(a);
   const done = aiAnswered(q);
   h += `<div class="btn-row">
       <button class="btn ghost small" id="aiQBack" style="flex:1">${first ? "‹ Start over" : "‹ Back"}</button>
