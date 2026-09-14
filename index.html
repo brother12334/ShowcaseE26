@@ -1223,6 +1223,42 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
 }
 .pl-collar{position:relative;z-index:1;flex:0 0 auto;width:6px;height:17px;border-radius:2px;
   background:linear-gradient(180deg,#5c5c68,#3e3e48);margin-left:2px}
+/* ---------- the session card ---------- */
+.sx{
+  border:1px solid var(--line);border-left:3px solid var(--day,var(--acc));
+  border-radius:12px;background:var(--card2);padding:12px 13px;margin:16px 0 4px;
+  position:relative;overflow:hidden;
+}
+/* A wash of the day's own colour from the top edge, so the card is identifiably THAT
+   day's before a word of it is read. */
+.sx::before{content:"";position:absolute;inset:0 0 auto;height:70px;pointer-events:none;
+  background:linear-gradient(180deg,var(--day,var(--acc)),transparent);opacity:.09}
+.sx-top{display:flex;align-items:center;gap:9px;position:relative}
+.sx-dot{width:13px;height:13px;border-radius:50%;flex:0 0 auto;
+  box-shadow:inset 0 0 0 3px rgba(0,0,0,.3)}
+.sx-name{font-family:var(--disp);font-size:16px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.09em;flex:1 1 auto;min-width:0}
+.sx-date{font-size:11.5px;color:var(--faint);flex:0 0 auto}
+.sx-body{display:flex;align-items:center;gap:14px;margin-top:10px;position:relative}
+.sx-map{flex:0 0 auto;display:flex;gap:2px;width:106px}
+.sx-map svg{width:52px;height:auto;display:block;overflow:visible;shape-rendering:geometricPrecision}
+.sx-stats{flex:1 1 auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 10px;min-width:0}
+.sx-s{display:flex;flex-direction:column;gap:1px;min-width:0}
+.sx-s b{font-family:var(--disp);font-size:clamp(15px,4.2vw,18px);font-weight:600;line-height:1.05;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sx-s i{font:9.5px var(--mono);color:var(--faint);font-style:normal;letter-spacing:.06em;
+  text-transform:uppercase}
+.sx-tops{display:flex;flex-direction:column;gap:4px;margin-top:11px;padding-top:10px;
+  border-top:1px solid var(--line);position:relative}
+.sx-t{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  font:11.5px var(--mono);color:var(--dim)}
+.sx-t b{font-weight:400;color:var(--text);min-width:0;flex:1 1 auto;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sx-t em{font-style:normal;flex:0 0 auto;white-space:nowrap}
+@media (max-width:360px){
+  .sx-map{width:82px}
+  .sx-map svg{width:40px}
+}
 .lp-rom{display:flex;align-items:center;gap:11px;margin:9px 0 10px}
 .lp-bar{
   flex:0 0 auto;width:26px;height:46px;border-radius:6px;
@@ -4905,7 +4941,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "18.4";
+const APP_VERSION = "18.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -27171,6 +27207,69 @@ function scoreBlurb(q){
   return lead + " Your weakest section was <b>" + esc(weakest.label) + "</b> at " +
     weakest.pts + "/" + weakest.max + ".";
 }
+/* =====================================================================
+   THE CARD AT THE END
+
+   Finishing a session gave you confetti and then a page of marking. Both are right and
+   neither is the thing you would show anybody: the confetti is gone in two seconds and
+   the grade card is an audit. This is the session as one object — the day, the date, what
+   it moved, what it cost, which muscles it lit up and the best set in it.
+
+   It reuses the preflight's map deliberately: the figure that showed what today WOULD hit
+   now shows what it DID, and seeing the same drawing close the loop is most of why the
+   pair is worth having. */
+function sessionCardHTML(sess){
+  if(!sess) return "";
+  const m = dayMeta(sess.workoutId);
+  const vol = sessVolume(sess);
+  const sets = sessSets(sess);
+  const mins = sess.startedAt && sess.finishedAt
+    ? Math.round((sess.finishedAt - sess.startedAt)/60000) : 0;
+  const prs = (()=>{ try{ return sessionPRs(sess).length; }catch(e){ return 0; } })();
+  const load = pfMuscleLoad(sess.entries);
+  /* The three heaviest sets in the session, which is what anybody reads off a card like
+     this first — and deduplicated by movement, or three sets of the same lift crowd out
+     the rest of the session. */
+  const tops = [];
+  (sess.entries || []).forEach(e=>{
+    let best = null;
+    (e.sets || []).forEach(st=>{
+      const w = parseFloat(st.weight)||0, r = parseFloat(st.reps)||0;
+      if(!(r > 0)) return;
+      if(!best || w > best.w || (w === best.w && r > best.r)) best = {w, r};
+    });
+    if(best) tops.push({name: e.name, w: best.w, r: best.r});
+  });
+  tops.sort((a,b)=> b.w - a.w || b.r - a.r);
+  const stat = (v, k)=> `<span class="sx-s"><b class="num" data-countup>${v}</b><i>${esc(k)}</i></span>`;
+  return `<div class="sx" style="--day:${m.color}">
+    <div class="sx-top">
+      <span class="sx-dot" style="background:${m.color}"></span>
+      <span class="sx-name">${esc(m.name)}</span>
+      <span class="sx-date num">${esc(fmtDate(sess.date))}</span>
+    </div>
+    <div class="sx-body">
+      <div class="sx-map">${pfMapSVG("front", load)}${pfMapSVG("back", load)}</div>
+      <div class="sx-stats">
+        ${stat(Math.round(vol).toLocaleString() + " " + unitWord(), "moved")}
+        ${stat(String(sets), "sets")}
+        ${mins ? stat(mins + " min", "on the clock") : ""}
+        ${prs ? stat(String(prs), "PR" + (prs > 1 ? "s" : "")) : ""}
+      </div>
+    </div>
+    ${tops.length ? `<div class="sx-tops">${tops.slice(0,3).map(t=>
+      `<span class="sx-t"><b>${esc(t.name)}</b><em>${
+        t.w > 0 ? esc(fmtLoad(t.w)) + " \u00d7 " + t.r : t.r + " reps"}</em></span>`).join("")}</div>` : ""}
+  </div>`;
+  /* NO GRADE ON THE CARD. The ring directly above it already says A− and the percentage,
+     and a second copy in the corner was both a repetition and — being absolutely
+     positioned — printed straight through the third lift in the list. Two bugs from one
+     redundancy, which is usually how redundancy announces itself.
+
+     The names are handed over whole and truncated by CSS, so a long one ends in a real
+     ellipsis at whatever width the card happens to be, rather than being chopped at a
+     fixed character count that lands mid-word ("Mid Cable Fly (on benc"). */
+}
 function scoreCardHTML(q, sess){
   const ringPct = Math.round(q.pct*100);
   const col = gradeColor(q.pct);
@@ -27184,6 +27283,9 @@ function scoreCardHTML(q, sess){
     </div>
     <div class="sc-blurb">${scoreBlurb(q)}</div>
   </div>`;
+  /* Before the marking, after the number. The grade answers "how did that go"; this
+     answers "what was that", and the second question is the one worth keeping. */
+  h += sessionCardHTML(sess);
   /* HOW MUCH OF THIS IS WORTH BELIEVING, said once, at the top, in a sentence — not a
      percentage and not a badge. Only shown while it is genuinely limiting: once there
      is history behind most of the session, saying "this is well evidenced" every week
