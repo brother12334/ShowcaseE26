@@ -602,6 +602,10 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
    headings, and nothing else. About a third of the height and every value readable in one
    pass down the right-hand edge. Rectilinear, like the rest of it. */
 /* ---------- a setting as a list of self-explaining choices ---------- */
+.nb-catch{margin:0 0 14px}
+.nb-catch-b{margin-top:10px;border:1px solid var(--line);border-radius:11px;
+  background:var(--card);padding:12px}
+.nb-catch-b .set-block{margin:0}
 .set-choice .set-name{margin-bottom:9px}
 .ch-list{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card2)}
 .ch{
@@ -5002,7 +5006,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "18.8";
+const APP_VERSION = "18.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -16582,52 +16586,21 @@ function prefsGymHTML(){
         placeholder="e.g. ${barDefault()} \u2014 blank if you'd rather not say"></div></div>` : "");
   return h + gymGearHTML();
 }
-// THE SESSION: how a workout is shown to you and how it is judged.
-function prefsSessionHTML(){
+/* TEN SETTINGS IN ONE BIN, AND THEY WERE NOT THE SAME KIND OF THING. "How sessions work"
+   held the workout screen's layout next to the rule that decides when a weight goes up:
+   one is how the app looks while you use it, the other is how your programme is run. You
+   went to the same 2,600px page for both and read past five unrelated decisions to reach
+   either. Split, so each page answers one question. */
+function prefsScreenHTML(){
   const p = trainPrefs();
-  const anyUni = DAYS.some(d=> (S.program[d]||[]).some(e=> isSingleArm(e) || isCrossover(e) || e.sideMode));
   let h = setChoice("The workout screen", [
       {v:"regular", t:"Regular", d:"The whole session on one page, scrolled."},
       {v:"focus",   t:"Focus",   d:"One exercise at a time, bigger buttons, for the gym floor."}
     ], "data-vmode", S.viewMode === "focus" ? "focus" : "regular");
-  h += setChoice("Warm-up sets", [
-      {v:"auto",     t:"Add them",  d:"A ramp worked out before the first big lift of the day."},
-      {v:"planOnly", t:"Plan only", d:"Only the warm-ups your programme wrote."},
-      {v:"manual",   t:"Off",       d:"No warm-up rows at all."}
-    ], "data-prefwarm", p.warmups, "Never counted as working sets either way.");
   h += setChoice("The rest clock", [
       {v:"up",   t:"Count up",   d:"A stopwatch from zero."},
       {v:"down", t:"Count down", d:"From the rest that set earned, then into negative overtime."}
     ], "data-prefrestclock", p.restClock === "down" ? "down" : "up");
-  h += setChoice("Rating your sets", [
-      /* Plain text: setChoice() escapes titles, so term()'s markup came out as literal
-         angle brackets on screen. The glossary link lives in the footnote instead. */
-      {v:"on",  t:"Track RPE", d:"How close to failure each set was. The biggest single input the grade has."},
-      {v:"off", t:"Weight and reps only",       d:"Drops the column. Still graded, with less to go on."}
-    ], "data-prefrpe", p.rpe === false ? "off" : "on",
-    "What " + term("rpe","RPE") + " means, if you have not used it before.");
-  h += setChoice("When a weight is ready to go up", [
-      {v:"auto", t:"Automatic",   d:"Writes the increase into your plan the moment a session earns it."},
-      {v:"ask",  t:"Ask me",      d:"Offers it on the grade card with a one-tap Apply."},
-      {v:"hold", t:"I'll manage", d:"Says nothing. You change the loads yourself."}
-    ], "data-prefprog", p.progression);
-  if(anyUni){
-    h += setChoice("One-arm and one-leg exercises", [
-        {v:"separate",    t:"Separately",   d:"Each set is marked L or R and tracked on its own."},
-        {v:"matchWeaker", t:"Match weaker", d:"Holds both sides to the weaker one, so the gap closes."},
-        {v:"both",        t:"Together",     d:"One set counts as covering both limbs."}
-      ], "data-prefsides", p.sides);
-    if(p.sides !== "both"){
-      h += setChoice("Which side goes first", [
-          {v:"fixed", t:"Always right",    d:"Every session opens on the right."},
-          {v:"flip",  t:"Swap each cycle", d:"Alternates, so the fresh set does not always go to the same limb."}
-        ], "data-prefstart", p.startSideFlip ? "flip" : "fixed");
-    }
-  }
-  h += setChoice("Deload weeks", [
-      {v:"auto",     t:"Suggest one",    d:"Offered every " + DELOAD_EVERY_WEEKS + " weeks, or earlier if your RPE and check-ins say so."},
-      {v:"planOnly", t:"Leave it to me", d:"Stays quiet. For a programme that schedules its own."}
-    ], "data-prefdeload", p.deloads);
   h += setChoice("Coaching tips", [
       {v:"on",  t:"Show them", d:"Short notes on how a movement is run. Each stops once you have logged it."},
       {v:"off", t:"Off",       d:"Never shown."}
@@ -16637,6 +16610,56 @@ function prefsSessionHTML(){
       {v:"off", t:"Don't ask", d:"Logs the set and says nothing."}
     ], "data-askwhy", S.askWhy === false ? "off" : "on");
   return h;
+}
+// HOW THE TRAINING ITSELF IS RUN: the rules that change your programme or how it is judged.
+function prefsSessionHTML(){
+  const p = trainPrefs();
+  let h = setChoice("Warm-up sets", [
+      {v:"auto",     t:"Add them",  d:"A ramp worked out before the first big lift of the day."},
+      {v:"planOnly", t:"Plan only", d:"Only the warm-ups your programme wrote."},
+      {v:"manual",   t:"Off",       d:"No warm-up rows at all."}
+    ], "data-prefwarm", p.warmups, "Never counted as working sets either way.");
+  h += setChoice("Rating your sets", [
+      {v:"on",  t:"Track RPE", d:"How close to failure each set was. The biggest single input the grade has."},
+      {v:"off", t:"Weight and reps only", d:"Drops the column. Still graded, with less to go on."}
+    ], "data-prefrpe", p.rpe === false ? "off" : "on",
+    "What " + term("rpe","RPE") + " means, if you have not used it before.");
+  h += setChoice("When a weight is ready to go up", [
+      {v:"auto", t:"Automatic",   d:"Writes the increase into your plan the moment a session earns it."},
+      {v:"ask",  t:"Ask me",      d:"Offers it on the grade card with a one-tap Apply."},
+      {v:"hold", t:"I'll manage", d:"Says nothing. You change the loads yourself."}
+    ], "data-prefprog", p.progression);
+  h += setChoice("Deload weeks", [
+      {v:"auto",     t:"Suggest one",    d:"Offered every " + DELOAD_EVERY_WEEKS + " weeks, or earlier if your RPE and check-ins say so."},
+      {v:"planOnly", t:"Leave it to me", d:"Stays quiet. For a programme that schedules its own."}
+    ], "data-prefdeload", p.deloads);
+  if(anyUnilateralInPlan()){
+    h += setChoice("One-arm and one-leg exercises", [
+        {v:"separate",    t:"Separately",   d:"Each set is marked L or R and tracked on its own."},
+        {v:"matchWeaker", t:"Match weaker", d:"Holds both sides to the weaker one, so the gap closes."},
+        {v:"both",        t:"Together",     d:"One set counts as covering both limbs."}
+      ], "data-prefsides", p.sides);
+    /* ONLY ONCE THERE IS SOMETHING TO ORDER. This decides which limb gets the fresh set,
+       which is meaningless until you have actually done a one-limb set — before that it
+       is a question about a thing that has never happened, sitting among settings that
+       matter today. Gated on the LOG rather than on the plan containing such a movement. */
+    if(p.sides !== "both" && hasLoggedUnilateral()){
+      h += setChoice("Which side goes first", [
+          {v:"fixed", t:"Always right",    d:"Every session opens on the right."},
+          {v:"flip",  t:"Swap each cycle", d:"Alternates, so the fresh set does not always go to the same limb."}
+        ], "data-prefstart", p.startSideFlip ? "flip" : "fixed");
+    }
+  }
+  return h;
+}
+/* Does the PLAN contain one-limb work, and have you actually LOGGED any? Two different
+   questions, and the second is the one "which side first" waits on. */
+function anyUnilateralInPlan(){
+  return DAYS.some(d=> (S.program[d]||[]).some(e=> isSingleArm(e) || isCrossover(e) || e.sideMode));
+}
+function hasLoggedUnilateral(){
+  return (S.sessions || []).some(x=> (x.entries || []).some(e=>
+    e && e.startSide && (e.sets || []).some(st=> st && st.done)));
 }
 /* WHAT YOUR GYM ACTUALLY STOCKS.
 
@@ -20344,6 +20367,17 @@ function viewBody(){
   const cycLine = cyc.complete
     ? `You've finished all ${cyc.total} workouts in this cycle.`
     : `You're ${cyc.done} of ${cyc.total} workouts through this cycle, with ${esc(dayList(cyc.names))} still to come.`;
+  /* Folded away under one line: on most days there is nothing outstanding and this costs
+     a single row, and on the day there is, it is on the same screen as the number it
+     corrects instead of four taps away in Settings. */
+  (function(){
+    const cu = sleepCatchUpHTML();
+    if(!cu) return;
+    h += `<div class="nb-catch nb-in" style="--d:270ms">
+      <button class="nb-link" data-sec="nbsleep">${BODY_OPEN.nbsleep
+        ? "Hide the sleep catch-up" : "Forgot to log a night?"}</button>
+      ${BODY_OPEN.nbsleep ? `<div class="nb-catch-b">${cu}</div>` : ""}</div>`;
+  })();
   h += `<div class="nb-says nb-in" style="--d:300ms">
     <div class="nb-says-k">What this means</div>
     <p>${esc(st.advice)}</p>
@@ -22404,7 +22438,20 @@ let SHOW_KEY = false;      // the recovery key is hidden until asked for, every 
    you can check. */
 function gymsCardHTML(){
   const gs = gymList();
-  if(!geoReady() && !gs.length) return "";
+  /* NO DEAD END. This used to return "" when the device had no geolocation and no gym
+     had ever been saved, and the settings row opened onto a 78px card with nothing in
+     it — a whole entry in the list leading nowhere. The page now always says what the
+     feature is and either offers the switch or explains why there isn't one. */
+  if(!geoReady() && !gs.length){
+    return `<div class="set-block">
+      <div class="set-name">Filing sessions by gym</div>
+      <div class="set-help">Element 26 can take one location reading when you tap Start and compare it
+        only with gyms you have saved. Train somewhere new and it asks, so the session is filed under the
+        right room instead of being compared against a bar that weighs something different.</div>
+      <div class="set-says">This device can't read a location, so there is nothing to switch on. Everything
+        else works exactly the same; sessions are simply filed with no gym on them.</div>
+    </div>`;
+  }
   const on = S.geo === "on";
   let h = `<div class="sub" style="margin:0 0 10px">Element 26 takes one location reading when you tap Start, and
       compares it only with the gyms below. Same place as usual and nothing happens \u2014 it just puts back the
@@ -22544,13 +22591,17 @@ function setGroups(){
      val: unitWord() + (p.barWeight ? " · " + fmtLoad(p.barWeight) + " bar" : ""),
      body: prefsGymHTML},
     {k:"where", icon:"pin", title:"Where you train", sub:"The gyms Element 26 knows about, and whether it checks.",
-     val: S.geo === "on" ? (gyms === 1 ? "1 gym" : gyms + " gyms") : (S.geo === "off" ? "off" : "not set up"),
-     body: ()=> gymsCardHTML() || `<div class="sub">This device can't read a location, so there's nothing to set here.</div>`},
+     val: S.geo === "on" ? (gyms === 1 ? "1 gym" : gyms + " gyms")
+        : (S.geo === "off" ? "off" : geoReady() ? "not set up" : "not available"),
+     body: gymsCardHTML},
     /* "4 of 6 on" counted an arbitrary six of the ten settings in this group and called a
        three-way choice like progression "on", which is two kinds of wrong in five
        characters. A row has space for one fact, so it gets the consequential one: what
        the app does when a session earns more weight. */
-    {k:"sess", icon:"bars", title:"How sessions work", sub:"Warm-ups, RPE, the rest clock, one-limb work, and when weights go up.",
+    {k:"screen", icon:"bars", title:"The workout screen", sub:"How a session looks while you are in it, and what it asks you.",
+     val: (S.viewMode === "focus" ? "focus" : "regular") + " \u00b7 rest counts " + (p.restClock === "down" ? "down" : "up"),
+     body: prefsScreenHTML},
+    {k:"sess", icon:"barbell", title:"How training is run", sub:"Warm-ups, RPE, deloads, one-limb work, and when weights go up.",
      val: p.progression === "auto" ? "weights go up on their own"
         : p.progression === "hold" ? "you manage the weights" : "asks before adding weight",
      body: prefsSessionHTML},
@@ -22591,7 +22642,7 @@ function setGroupRowHTML(g){
    as a wall and hunted. Three short sections give the hunt a first step: is this about
    training, about the day around it, or about the app itself. */
 const SET_SECTIONS = [
-  {t:"Training",   keys:["sess", "plan", "gym"]},
+  {t:"Training",   keys:["sess", "screen", "plan", "gym"]},
   {t:"Day to day", keys:["day", "remind", "where"]},
   {t:"The app",    keys:["acct", "data", "help"]}
 ];
@@ -22661,11 +22712,116 @@ function settingsAccountHTML(){
     identifies the account and never opens it.</div>`;
   const sync = syncCardHTML();
   if(sync) a += `<div class="set-name" style="margin-top:4px">Cloud backup</div>${sync}`;
+  /* Signing out is reversible and belongs with the identity. DELETING the account is not,
+     and it now sits with the other irreversible button under Your data rather than a tab
+     away from it — two ways to destroy everything, in two different places, is how one of
+     them gets pressed by somebody looking for the other. */
   a += `<div class="btn-row" style="margin-top:14px">
-    <button class="btn ghost small" id="acctSignOut">Sign out</button>
-    <button class="btn ghost small danger" id="acctDelete">Delete account</button>
-  </div>`;
+    <button class="btn ghost small" id="acctSignOut" style="flex:1">Sign out</button>
+  </div>
+  <div class="set-says">Deleting the account for good lives with the other irreversible
+    action, under <b>Your data</b>.</div>`;
   return a;
+}
+/* =====================================================================
+   THE CATCH-UP LIST LIVES WHERE SLEEP LIVES
+
+   Filling in a night you forgot is not a setting, it is a piece of data entry — six time
+   fields and three Save buttons, sitting in a list of preferences. And it was in the
+   wrong place for finding as well as for filing: the number it corrects is on the Body
+   tab, so noticing it was wrong and fixing it were two different screens.
+
+   It moves to Body, folded away under a one-line link, so it costs nothing on the days
+   when there is nothing outstanding \u2014 which is most of them. */
+function sleepCatchUpHTML(){
+  /* THE NIGHT YOU FORGOT TO LOG. Sleep is measured here rather than remembered, which is
+   the right default and leaves one hole: open the app at noon and last night is simply
+   gone. Every rule that reads sleep — the stall protocol refusing to cut volume when
+   recovery is the real problem, the patterns card, the Body charts — then reads it as
+   no data rather than as a short night.
+
+   IT ASKS FOR CLOCK TIMES, NOT A DURATION, because clock times are what anybody
+   actually remembers. Nobody knows they got "six and a half hours"; everybody knows
+   they went up at midnight and the alarm went at half six. The subtraction is the
+   app's job, and doing it in your head at a settings screen was the whole reason this
+   went unused.
+
+   EITHER HALF ON ITS OWN IS A REAL ANSWER. You remember the alarm and not when you
+   actually dropped off, or the reverse — so one time is stored alone and the other
+   stays blank, rather than the pair being all-or-nothing. A duration only appears once
+   both ends are known, because only then is there one.
+
+   AND A NIGHT YOU CANNOT ACCOUNT FOR CAN BE CLOSED. Some nights are simply gone, and a
+   row that keeps asking about one you will never remember is a permanent small nag.
+   The × marks it as not recorded and it stops asking; it is reversible and it stores
+   nothing, so nothing downstream sees a night that did not happen.
+
+   Everything written here is stamped `approx`, and wakeSamples() skips approx records
+   so a remembered time never enters the measured median the morning reminder is aimed
+   with. It sits under the tracking switch rather than on Today on purpose: catching up
+   is a thing you do occasionally and deliberately, not a prompt to meet every morning. */
+const p = trainPrefs();
+if(p.sleepPrompt !== false){
+  const nightRow = (d, label)=>{
+    const rec = (S.checkins || {})[d] || {};
+    const hhmm = ts=>{
+      if(!ts) return "";
+      const t = new Date(ts);
+      return isFinite(t.getTime())
+        ? String(t.getHours()).padStart(2,"0") + ":" + String(t.getMinutes()).padStart(2,"0") : "";
+    };
+    /* A NIGHT LEAVES THIS LIST THE MOMENT IT STOPS ASKING FOR ANYTHING.
+
+       Closed is one way; settled is the other. Once both ends are in there is a
+       duration, nothing about that night is outstanding, and a row still sitting there
+       reads as unfinished work — on a panel whose entire purpose is "what have I not
+       got round to". A night that is only half answered STAYS, because it genuinely
+       still wants the other end. */
+    if(rec.sleepSkip) return "";
+    if(!SLEEP_ALL && parseFloat(rec.sleep) > 0) return "";
+    const hrs = parseFloat(rec.sleep);
+    const state = hrs > 0
+      ? fmtHours(hrs) + (rec.approx ? " \u00b7 estimate" : " \u00b7 measured")
+      : (rec.bedAt || rec.wokeAt) ? "one time so far" : "nothing logged";
+    return `<div class="sl-night">
+      <div class="sl-night-h">
+        <span class="sl-night-k">${esc(label)}</span>
+        <span class="sl-night-w">${esc(state)}</span>
+        <button class="sl-night-x" data-sleepskip="${esc(d)}"
+          aria-label="Can't remember ${esc(label)} \u2014 stop asking" title="Can't remember \u2014 stop asking">\u00d7</button>
+      </div>
+      <div class="sl-night-t">
+        <label><span>Asleep</span><input type="time" class="timein" data-sleepbed="${esc(d)}"
+          value="${esc(hhmm(rec.bedAt))}" aria-label="Time you fell asleep, ${esc(label)}"></label>
+        <label><span>Woke</span><input type="time" class="timein" data-sleepwake="${esc(d)}"
+          value="${esc(hhmm(rec.wokeAt))}" aria-label="Time you woke up, ${esc(label)}"></label>
+      </div>
+      <button class="btn ghost small sl-night-go" data-sleepsave="${esc(d)}">Save this night</button>
+    </div>`;
+  };
+  const y = dayStr(Date.now() - DAY_MS), y2 = dayStr(Date.now() - 2*DAY_MS);
+  const nights = [[todayStr(), "Last night"], [y, fmtDateShort(y)], [y2, fmtDateShort(y2)]];
+  const rows = nights.map(n=> nightRow(n[0], n[1])).join("");
+  const recOf = d=> ((S.checkins || {})[d]) || {};
+  const closed = nights.filter(n=> recOf(n[0]).sleepSkip);
+  const settled = nights.filter(n=> !recOf(n[0]).sleepSkip && parseFloat(recOf(n[0]).sleep) > 0);
+  /* A WAY BACK, WITHOUT A ROW SITTING THERE TO PROVIDE IT. Both kinds of departure take
+     the night off the list — that is the point of both — so neither undo can live in
+     the row it removed. One quiet line under the lot carries them, and costs nothing on
+     a day when there is nothing to undo. */
+  const bits = [];
+  if(settled.length) bits.push(`${settled.length} logged
+    <button class="linklike" data-sleepall="${SLEEP_ALL ? "0" : "1"}">${
+      SLEEP_ALL ? "hide" : "edit"}</button>`);
+  if(closed.length) bits.push(`${closed.length} closed
+    <button class="linklike" data-sleepunskip="${esc(closed.map(n=> n[0]).join(","))}">bring ${
+      closed.length === 1 ? "it" : "them"} back</button>`);
+  const foot = bits.length ? `<div class="sl-closed">${bits.join(" \u00b7 ")}</div>` : "";
+  return setBlock("Forgot to log a night?",
+    "Roughly when you went up and roughly when you got up \u2014 either one on its own is fine, and the hours work themselves out once both are in. It counts as an estimate, never as a measured night. Tap \u00d7 on a night you cannot remember and it goes off the list.",
+    (rows || `<div class="sub" style="margin:0">Nothing outstanding \u2014 every recent night is logged or closed.</div>`) + foot);
+}
+  return "";
 }
 /* The day-shaped settings: the two things the app asks you about outside a workout, and
    the sleep numbers those questions feed. */
@@ -22677,92 +22833,6 @@ function settingsDayHTML(){
     ], "data-slprompt", p.sleepPrompt === false ? "off" : "on")
     + (p.sleepPrompt === false ? "" : `<div class="set-block"><div class="field" style="margin:0"><label>My night starts at</label>
       <input type="time" id="prefSleepT" class="timein" value="${esc(p.sleepTime || "22:30")}" aria-label="Sleep time"></div></div>`);
-  /* THE NIGHT YOU FORGOT TO LOG. Sleep is measured here rather than remembered, which is
-     the right default and leaves one hole: open the app at noon and last night is simply
-     gone. Every rule that reads sleep — the stall protocol refusing to cut volume when
-     recovery is the real problem, the patterns card, the Body charts — then reads it as
-     no data rather than as a short night.
-
-     IT ASKS FOR CLOCK TIMES, NOT A DURATION, because clock times are what anybody
-     actually remembers. Nobody knows they got "six and a half hours"; everybody knows
-     they went up at midnight and the alarm went at half six. The subtraction is the
-     app's job, and doing it in your head at a settings screen was the whole reason this
-     went unused.
-
-     EITHER HALF ON ITS OWN IS A REAL ANSWER. You remember the alarm and not when you
-     actually dropped off, or the reverse — so one time is stored alone and the other
-     stays blank, rather than the pair being all-or-nothing. A duration only appears once
-     both ends are known, because only then is there one.
-
-     AND A NIGHT YOU CANNOT ACCOUNT FOR CAN BE CLOSED. Some nights are simply gone, and a
-     row that keeps asking about one you will never remember is a permanent small nag.
-     The × marks it as not recorded and it stops asking; it is reversible and it stores
-     nothing, so nothing downstream sees a night that did not happen.
-
-     Everything written here is stamped `approx`, and wakeSamples() skips approx records
-     so a remembered time never enters the measured median the morning reminder is aimed
-     with. It sits under the tracking switch rather than on Today on purpose: catching up
-     is a thing you do occasionally and deliberately, not a prompt to meet every morning. */
-  if(p.sleepPrompt !== false){
-    const nightRow = (d, label)=>{
-      const rec = (S.checkins || {})[d] || {};
-      const hhmm = ts=>{
-        if(!ts) return "";
-        const t = new Date(ts);
-        return isFinite(t.getTime())
-          ? String(t.getHours()).padStart(2,"0") + ":" + String(t.getMinutes()).padStart(2,"0") : "";
-      };
-      /* A NIGHT LEAVES THIS LIST THE MOMENT IT STOPS ASKING FOR ANYTHING.
-
-         Closed is one way; settled is the other. Once both ends are in there is a
-         duration, nothing about that night is outstanding, and a row still sitting there
-         reads as unfinished work — on a panel whose entire purpose is "what have I not
-         got round to". A night that is only half answered STAYS, because it genuinely
-         still wants the other end. */
-      if(rec.sleepSkip) return "";
-      if(!SLEEP_ALL && parseFloat(rec.sleep) > 0) return "";
-      const hrs = parseFloat(rec.sleep);
-      const state = hrs > 0
-        ? fmtHours(hrs) + (rec.approx ? " \u00b7 estimate" : " \u00b7 measured")
-        : (rec.bedAt || rec.wokeAt) ? "one time so far" : "nothing logged";
-      return `<div class="sl-night">
-        <div class="sl-night-h">
-          <span class="sl-night-k">${esc(label)}</span>
-          <span class="sl-night-w">${esc(state)}</span>
-          <button class="sl-night-x" data-sleepskip="${esc(d)}"
-            aria-label="Can't remember ${esc(label)} \u2014 stop asking" title="Can't remember \u2014 stop asking">\u00d7</button>
-        </div>
-        <div class="sl-night-t">
-          <label><span>Asleep</span><input type="time" class="timein" data-sleepbed="${esc(d)}"
-            value="${esc(hhmm(rec.bedAt))}" aria-label="Time you fell asleep, ${esc(label)}"></label>
-          <label><span>Woke</span><input type="time" class="timein" data-sleepwake="${esc(d)}"
-            value="${esc(hhmm(rec.wokeAt))}" aria-label="Time you woke up, ${esc(label)}"></label>
-        </div>
-        <button class="btn ghost small sl-night-go" data-sleepsave="${esc(d)}">Save this night</button>
-      </div>`;
-    };
-    const y = dayStr(Date.now() - DAY_MS), y2 = dayStr(Date.now() - 2*DAY_MS);
-    const nights = [[todayStr(), "Last night"], [y, fmtDateShort(y)], [y2, fmtDateShort(y2)]];
-    const rows = nights.map(n=> nightRow(n[0], n[1])).join("");
-    const recOf = d=> ((S.checkins || {})[d]) || {};
-    const closed = nights.filter(n=> recOf(n[0]).sleepSkip);
-    const settled = nights.filter(n=> !recOf(n[0]).sleepSkip && parseFloat(recOf(n[0]).sleep) > 0);
-    /* A WAY BACK, WITHOUT A ROW SITTING THERE TO PROVIDE IT. Both kinds of departure take
-       the night off the list — that is the point of both — so neither undo can live in
-       the row it removed. One quiet line under the lot carries them, and costs nothing on
-       a day when there is nothing to undo. */
-    const bits = [];
-    if(settled.length) bits.push(`${settled.length} logged
-      <button class="linklike" data-sleepall="${SLEEP_ALL ? "0" : "1"}">${
-        SLEEP_ALL ? "hide" : "edit"}</button>`);
-    if(closed.length) bits.push(`${closed.length} closed
-      <button class="linklike" data-sleepunskip="${esc(closed.map(n=> n[0]).join(","))}">bring ${
-        closed.length === 1 ? "it" : "them"} back</button>`);
-    const foot = bits.length ? `<div class="sl-closed">${bits.join(" \u00b7 ")}</div>` : "";
-    h += setBlock("Forgot to log a night?",
-      "Roughly when you went up and roughly when you got up \u2014 either one on its own is fine, and the hours work themselves out once both are in. It counts as an estimate, never as a measured night. Tap \u00d7 on a night you cannot remember and it goes off the list.",
-      (rows || `<div class="sub" style="margin:0">Nothing outstanding \u2014 every recent night is logged or closed.</div>`) + foot);
-  }
   h += setBlock("Hours of sleep you want",
     "Optional, and off until you fill it in. Late sessions cost sleep, and sleep is what recovery is made of.",
     `<div class="field" style="margin:0"><input class="timein" inputmode="decimal" id="sleepTargetIn"
@@ -23019,9 +23089,15 @@ function settingsDataHTML(){
   + `<div class="set-block set-danger">
       <div class="set-name danger">Erase my training data</div>
       <div class="set-help">This deletes your plan and every workout you have logged on this device. Your
-        account itself stays — sign in again and you start empty. To remove the account as well, use
-        <b>Delete account</b> under Your account.</div>
+        account itself stays — sign in again and you start empty.</div>
       <div class="btn-row" style="margin-top:0"><button class="btn ghost small danger" id="resetBtn" style="flex:1">Erase my training data</button></div>
+    </div>
+    <div class="set-block">
+      <div class="set-name danger">Delete my account</div>
+      <div class="set-help">The account itself, and everything stored against it. There is no way back
+        from this one and no copy anywhere — export a backup above first if there is any chance you
+        want the log later.</div>
+      <div class="btn-row" style="margin-top:0"><button class="btn ghost small danger" id="acctDelete" style="flex:1">Delete account</button></div>
     </div>`;
 }
 
