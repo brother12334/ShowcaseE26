@@ -787,23 +787,6 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .rev-head{font-family:var(--disp);font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin:16px 0 4px;border-bottom:1px solid var(--line);padding-bottom:5px}
 .rev-line{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:14.5px}
 .rev-line .num{color:var(--dim)}
-/* ---------- the cycle, in miniature, on every other tab ---------- */
-.cyc-mini{
-  display:flex;align-items:center;gap:10px;width:100%;
-  background:none;border:0;padding:2px 2px 12px;margin:-6px 0 0;cursor:pointer;color:inherit;
-}
-.cm-row{display:flex;align-items:center;gap:5px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
-.cm-d{
-  width:11px;height:11px;border-radius:50%;background:var(--c,#555);opacity:.32;
-  box-shadow:inset 0 0 0 2px rgba(0,0,0,.35);flex:0 0 auto;
-}
-.cm-d.done{opacity:.95}
-.cm-d.cur{opacity:1;box-shadow:inset 0 0 0 2px rgba(0,0,0,.35), 0 0 0 2px var(--bg), 0 0 0 3.5px var(--text)}
-.cm-r{width:7px;height:7px;border-radius:50%;background:transparent;flex:0 0 auto;
-  box-shadow:inset 0 0 0 1px var(--line)}
-.cm-r.on{background:var(--line);box-shadow:none}
-.cm-n{font-size:11px;color:var(--faint);flex:0 0 auto}
-.cyc-mini:active .cm-n{color:var(--acc)}
 /* ---------- the record book, offering what it holds ---------- */
 .rb-teaser{
   display:flex;flex-direction:column;gap:10px;width:100%;text-align:left;cursor:pointer;
@@ -4991,7 +4974,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "18.6";
+const APP_VERSION = "18.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20250,7 +20233,7 @@ function nbMapPickHTML(A, metric, advanced){
 function viewBody(){
   const LIVE = liveStripHTML();
   const metric = BODY_METRIC;
-  let h = `<div class="hdr"><h1>Body</h1>${hdrRight()}</div>` + cycleMiniHTML() + LIVE;
+  let h = `<div class="hdr"><h1>Body</h1>${hdrRight()}</div>` + LIVE;
   if(!S.sessions.length){
     return h + `<div class="empty nb-empty">
       <div class="nb-empty-t">Nothing to show yet</div>
@@ -21809,45 +21792,6 @@ function recTestedHTML(r){
       <button class="linklike" data-setmax="${esc(r.name)}">${has ? "change" : "add yours"}</button></span>
   </div>`;
 }
-/* =====================================================================
-   THE CYCLE, EVERYWHERE
-
-   The plate strip on Today is the app's signature and it was on one screen. Everywhere
-   else you had no idea where in the cycle you were without going back to look — which is
-   the one piece of context every other tab is implicitly about.
-
-   A read-only miniature: the same order, the same day colours, ticked for what is done
-   and ringed for today. It is not the Today strip shrunk — that one is a control with
-   rests you can spend and days you can jump to, and a control small enough to sit under a
-   heading is a control nobody can hit. This one answers the question and sends you to the
-   real thing if you want to do something about it. */
-function cycleMiniHTML(){
-  try{
-    if(!CYCLE_LAYOUT || !CYCLE_LAYOUT.length) return "";
-    const doneIds = new Set((S.cycleDone || []).map(i=> ROTATION[i]).filter(Boolean));
-    const todayId = todaysWorkoutId();
-    const restLeft = (()=>{ try{ return restCreditsLeft(); }catch(e){ return 0; } })();
-    let restSeen = 0, nTrain = 0, nDone = 0;
-    const cells = CYCLE_LAYOUT.map(key=>{
-      if(key === "rest"){
-        const i = restSeen++;
-        const spent = i < (REST_CREDITS - restLeft);
-        return `<i class="cm-r${spent ? " on" : ""}"></i>`;
-      }
-      nTrain++;
-      const m = dayMeta(key);
-      const done = doneIds.has(key);
-      if(done) nDone++;
-      const cur = key === todayId && !done;
-      return `<i class="cm-d${done ? " done" : ""}${cur ? " cur" : ""}" style="--c:${
-        m.color}" title="${attrSafe(m.name)}"></i>`;
-    }).join("");
-    return `<button class="cyc-mini" data-goto="today" aria-label="Go to Today">
-      <span class="cm-row">${cells}</span>
-      <span class="cm-n num">${nDone}/${nTrain}</span>
-    </button>`;
-  }catch(e){ return ""; }
-}
 /* The record book's entry point, which was a grey button with a word on it — for the one
    screen in the app that is purely a reward. It now shows the thing it is offering. */
 function recordTeaserHTML(){
@@ -22133,7 +22077,6 @@ function histHeatHTML(ctx){
 }
 function viewHistory(){
   let h = `<div class="hdr"><h1>History</h1>${hdrRight(`<span class="date num">${S.sessions.length} sessions</span>`)}</div>`;
-  h += cycleMiniHTML();
   h += liveStripHTML();
   if(!S.sessions.length) return h + `<div class="empty nb-empty">
       <div class="nb-empty-t">No workouts yet</div>
@@ -22289,7 +22232,7 @@ function planMarkHTML(e){
 function viewProgram(){
   restoreSetCuts();
   if(DAY_EDIT && (S.program[DAY_EDIT] || DAY_EDIT === "finisher")) return viewDayEdit(DAY_EDIT);
-  let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>` + cycleMiniHTML() + liveStripHTML() + `
+  let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>` + liveStripHTML() + `
   <div class="sub" style="margin:-8px 2px 14px">Your rotation: ${esc(ROTATION.map(w=>dayName(w)).join(" → "))}.${
     hasAltExercises() ? " Exercises marked ⇄ alternate automatically every other session of that day." : ""
   } Targets show <span class="rpe-help">RPE</span>, tap to see what it means.</div>
