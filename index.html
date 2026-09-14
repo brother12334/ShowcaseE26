@@ -737,6 +737,43 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .plate.cur{opacity:1;transform:scale(1.12);box-shadow:inset 0 0 0 4px rgba(0,0,0,.28), inset 0 0 0 11px rgba(255,255,255,.06), 0 0 0 2px var(--bg), 0 0 0 4px var(--text)}
 .plate small{position:absolute;bottom:-17px;left:0;right:0;text-align:center;color:var(--faint);font:9.5px var(--mono);letter-spacing:0}
 .plates-wrap{margin-bottom:30px}
+/* ---------- the cycle, in miniature, on every other tab ---------- */
+.cyc-mini{
+  display:flex;align-items:center;gap:10px;width:100%;
+  background:none;border:0;padding:2px 2px 12px;margin:-6px 0 0;cursor:pointer;color:inherit;
+}
+.cm-row{display:flex;align-items:center;gap:5px;flex:1 1 auto;min-width:0;flex-wrap:wrap}
+.cm-d{
+  width:11px;height:11px;border-radius:50%;background:var(--c,#555);opacity:.32;
+  box-shadow:inset 0 0 0 2px rgba(0,0,0,.35);flex:0 0 auto;
+}
+.cm-d.done{opacity:.95}
+.cm-d.cur{opacity:1;box-shadow:inset 0 0 0 2px rgba(0,0,0,.35), 0 0 0 2px var(--bg), 0 0 0 3.5px var(--text)}
+.cm-r{width:7px;height:7px;border-radius:50%;background:transparent;flex:0 0 auto;
+  box-shadow:inset 0 0 0 1px var(--line)}
+.cm-r.on{background:var(--line);box-shadow:none}
+.cm-n{font-size:11px;color:var(--faint);flex:0 0 auto}
+.cyc-mini:active .cm-n{color:var(--acc)}
+/* ---------- the record book, offering what it holds ---------- */
+.rb-teaser{
+  display:flex;flex-direction:column;gap:10px;width:100%;text-align:left;cursor:pointer;
+  background:var(--card);border:1px solid var(--line);border-left:3px solid var(--acc);
+  border-radius:11px;padding:11px 13px 12px;margin:0 0 12px;color:var(--text);
+}
+.rb-teaser:active{background:var(--card2)}
+.rb-t-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.rb-t-k{
+  display:flex;align-items:center;gap:6px;
+  font:600 10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acc);
+}
+/* Three columns that share the width evenly, so the numbers line up as a row of figures
+   rather than reflowing into a second line the moment a movement has a long name. */
+.rb-t-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.rb-t-grid span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.rb-t-grid b{font-family:var(--disp);font-size:clamp(16px,4.6vw,20px);font-weight:600;line-height:1.05}
+.rb-t-grid i{font:9.5px var(--mono);color:var(--faint);font-style:normal;letter-spacing:.03em;
+  line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.rb-t-go{flex:0 0 auto;color:var(--faint);font-size:18px;line-height:1}
 
 /* cards */
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:17px 16px;margin-bottom:12px}
@@ -4868,7 +4905,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "18.3";
+const APP_VERSION = "18.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8332,6 +8369,54 @@ function durFmt(s){
   return mins >= 60 ? Math.floor(mins/60)+"h "+(mins%60)+"m" : mins+" min";
 }
 const pick = a => a[Math.floor(Math.random()*a.length)];
+/* =====================================================================
+   NUMBERS THAT ARRIVE RATHER THAN APPEAR
+
+   The grade ring sweeps up to its percentage and the number inside it is simply there,
+   finished, before the ring has started — so the one animated thing on the card is racing
+   a static one. Same on the Body tiles: four values that took a month of training to earn,
+   painted instantly.
+
+   Generic and opt-in: anything carrying data-countup is counted from zero to the value
+   already written in it, keeping whatever prefix and suffix the text has ("100%", "7h",
+   "17,280 lb"). Only the FIRST number in the string moves, because "7h 45m" counting both
+   halves at once is a slot machine.
+
+   Runs once per element per paint — marked as it goes, so a re-render mid-animation
+   cannot start a second one on top of the first. Off entirely under reduced motion, where
+   the final value is what was in the markup anyway. */
+function countUpAll(root){
+  if(reducedMotion()) return;
+  (root || document).querySelectorAll("[data-countup]:not([data-counted])").forEach(el=>{
+    el.setAttribute("data-counted", "1");
+    const txt = el.textContent || "";
+    const m = txt.match(/-?[\d,]*\.?\d+/);
+    if(!m) return;
+    const target = parseFloat(m[0].replace(/,/g, ""));
+    if(!isFinite(target) || target === 0) return;
+    const dp = (m[0].split(".")[1] || "").length;
+    const grouped = m[0].indexOf(",") > -1;
+    const pre = txt.slice(0, m.index), post = txt.slice(m.index + m[0].length);
+    const ms = Math.max(420, Math.min(1100, 380 + Math.abs(target) * 0.9));
+    const t0 = performance.now();
+    const tick = now=>{
+      if(!el.isConnected) return;
+      /* CLAMPED AT BOTH ENDS, and the low end is not theoretical. A rAF callback is handed
+         the FRAME's start time, which can be earlier than a performance.now() taken
+         moments before it — so k arrives negative, (1-k)³ exceeds 1, and the easing
+         returns a negative number. Observed: a recovery of 84% opening on "-5%". */
+      const k = Math.max(0, Math.min(1, (now - t0) / ms));
+      /* Decelerating, so it lands rather than stops. */
+      const v = target * (1 - Math.pow(1 - k, 3));
+      const shown = dp ? v.toFixed(dp) : String(Math.round(v));
+      el.textContent = pre + (grouped ? Number(shown).toLocaleString(undefined,
+        {minimumFractionDigits: dp, maximumFractionDigits: dp}) : shown) + post;
+      if(k < 1) requestAnimationFrame(tick);
+      else el.textContent = txt;          // exact, including its original formatting
+    };
+    requestAnimationFrame(tick);
+  });
+}
 function reducedMotion(){ return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
 /* The finish sequence. Staged, and deliberately blocking: the page underneath is
    frozen while it plays, because the thing that made the old one feel broken was the
@@ -16584,6 +16669,7 @@ function render(){
   else if(TAB==="program") app.innerHTML = viewProgram();
   else app.innerHTML = viewSync();
   bind();
+  countUpAll(app);
   // the page just changed height, so the tab bar's "am I at the bottom?" test needs
   // the new figure. Read it here, once, rather than inside the scroll handler.
   refreshNavBounds();
@@ -20078,7 +20164,7 @@ function nbMapPickHTML(A, metric, advanced){
 function viewBody(){
   const LIVE = liveStripHTML();
   const metric = BODY_METRIC;
-  let h = `<div class="hdr"><h1>Body</h1>${hdrRight()}</div>` + LIVE;
+  let h = `<div class="hdr"><h1>Body</h1>${hdrRight()}</div>` + cycleMiniHTML() + LIVE;
   if(!S.sessions.length){
     return h + `<div class="empty nb-empty">
       <div class="nb-empty-t">Nothing to show yet</div>
@@ -20108,7 +20194,7 @@ function viewBody(){
   h += `<div class="nb-tiles">${bodyTiles(A).map((x,i)=>`
     <div class="nb-tile nb-in" style="--d:${60+i*55}ms">
       <div class="nb-tile-k">${x.term?term(x.term, x.label):esc(x.label)}</div>
-      <div class="nb-tile-v" style="color:${x.color}">${esc(x.val)}</div>
+      <div class="nb-tile-v" style="color:${x.color}" data-countup>${esc(x.val)}</div>
       ${x.sub?`<div class="nb-tile-sub">${esc(x.sub)}</div>`:""}
       <div class="nb-meter"><i style="--w:${Math.max(0,Math.min(100,x.pct))}%;background:${x.color}"></i></div>
       <div class="nb-tile-n">${esc(x.note)}</div>
@@ -21637,6 +21723,70 @@ function recTestedHTML(r){
       <button class="linklike" data-setmax="${esc(r.name)}">${has ? "change" : "add yours"}</button></span>
   </div>`;
 }
+/* =====================================================================
+   THE CYCLE, EVERYWHERE
+
+   The plate strip on Today is the app's signature and it was on one screen. Everywhere
+   else you had no idea where in the cycle you were without going back to look — which is
+   the one piece of context every other tab is implicitly about.
+
+   A read-only miniature: the same order, the same day colours, ticked for what is done
+   and ringed for today. It is not the Today strip shrunk — that one is a control with
+   rests you can spend and days you can jump to, and a control small enough to sit under a
+   heading is a control nobody can hit. This one answers the question and sends you to the
+   real thing if you want to do something about it. */
+function cycleMiniHTML(){
+  try{
+    if(!CYCLE_LAYOUT || !CYCLE_LAYOUT.length) return "";
+    const doneIds = new Set((S.cycleDone || []).map(i=> ROTATION[i]).filter(Boolean));
+    const todayId = todaysWorkoutId();
+    const restLeft = (()=>{ try{ return restCreditsLeft(); }catch(e){ return 0; } })();
+    let restSeen = 0, nTrain = 0, nDone = 0;
+    const cells = CYCLE_LAYOUT.map(key=>{
+      if(key === "rest"){
+        const i = restSeen++;
+        const spent = i < (REST_CREDITS - restLeft);
+        return `<i class="cm-r${spent ? " on" : ""}"></i>`;
+      }
+      nTrain++;
+      const m = dayMeta(key);
+      const done = doneIds.has(key);
+      if(done) nDone++;
+      const cur = key === todayId && !done;
+      return `<i class="cm-d${done ? " done" : ""}${cur ? " cur" : ""}" style="--c:${
+        m.color}" title="${attrSafe(m.name)}"></i>`;
+    }).join("");
+    return `<button class="cyc-mini" data-goto="today" aria-label="Go to Today">
+      <span class="cm-row">${cells}</span>
+      <span class="cm-n num">${nDone}/${nTrain}</span>
+    </button>`;
+  }catch(e){ return ""; }
+}
+/* The record book's entry point, which was a grey button with a word on it — for the one
+   screen in the app that is purely a reward. It now shows the thing it is offering. */
+function recordTeaserHTML(){
+  const all = (()=>{ try{ return buildRecordBook(); }catch(e){ return []; } })();
+  if(!all.length){
+    return `<button class="btn ghost small" id="recordsBtn" style="width:100%">${ICON.pr} Record book</button>`;
+  }
+  const heaviest = all.map(r=> r.top).filter(Boolean)
+    .sort((a,b)=> (b.w||0) - (a.w||0))[0];
+  const best1 = all.map(r=> r.best1).filter(Boolean)
+    .sort((a,b)=> (b.e1||0) - (a.e1||0))[0];
+  const hName = heaviest ? (all.find(r=> r.top === heaviest) || {}).name : "";
+  const bName = best1 ? (all.find(r=> r.best1 === best1) || {}).name : "";
+  return `<button class="rb-teaser" id="recordsBtn">
+    <span class="rb-t-top">
+      <span class="rb-t-k">${ICON.pr} Record book</span>
+      <span class="rb-t-go">\u203a</span>
+    </span>
+    <span class="rb-t-grid">
+      <span><b class="num" data-countup>${all.length}</b><i>movements</i></span>
+      ${heaviest ? `<span><b class="num">${esc(fmtLoad(heaviest.w))}</b><i>heaviest \u00b7 ${esc(aiTrim(hName, 18))}</i></span>` : ""}
+      ${best1 ? `<span><b class="num">${esc(fmtLoad(Math.round(best1.e1)))}</b><i>best 1RM \u00b7 ${esc(aiTrim(bName, 18))}</i></span>` : ""}
+    </span>
+  </button>`;
+}
 function viewRecords(){
   const all = buildRecordBook();
   const q = nrm(RECORDS_Q || "");
@@ -21897,6 +22047,7 @@ function histHeatHTML(ctx){
 }
 function viewHistory(){
   let h = `<div class="hdr"><h1>History</h1>${hdrRight(`<span class="date num">${S.sessions.length} sessions</span>`)}</div>`;
+  h += cycleMiniHTML();
   h += liveStripHTML();
   if(!S.sessions.length) return h + `<div class="empty nb-empty">
       <div class="nb-empty-t">No workouts yet</div>
@@ -21904,9 +22055,7 @@ function viewHistory(){
       <p class="nb-empty-w">That history is what lets Element 26 tell you when to add weight.</p>
       <button class="btn" data-goto="today">Start your first workout</button>
     </div>`;
-  h += `<div class="btn-row" style="margin-bottom:10px">
-    <button class="btn ghost small" id="recordsBtn" style="flex:1">${ICON.pr} Record book</button>
-  </div>`;
+  h += recordTeaserHTML();
   const HCTX = histContext();
   h += histHeatHTML(HCTX);
   /* SEARCH, ONCE THERE IS ENOUGH TO SEARCH. Twelve sessions is a list; two hundred is an
@@ -22054,7 +22203,7 @@ function planMarkHTML(e){
 function viewProgram(){
   restoreSetCuts();
   if(DAY_EDIT && (S.program[DAY_EDIT] || DAY_EDIT === "finisher")) return viewDayEdit(DAY_EDIT);
-  let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>` + liveStripHTML() + `
+  let h = `<div class="hdr"><h1>Program</h1>${hdrRight()}</div>` + cycleMiniHTML() + liveStripHTML() + `
   <div class="sub" style="margin:-8px 2px 14px">Your rotation: ${esc(ROTATION.map(w=>dayName(w)).join(" → "))}.${
     hasAltExercises() ? " Exercises marked ⇄ alternate automatically every other session of that day." : ""
   } Targets show <span class="rpe-help">RPE</span>, tap to see what it means.</div>
@@ -27030,7 +27179,7 @@ function scoreCardHTML(q, sess){
     <div class="sc-ring" data-scp="${ringPct}" style="--scp:0%;--scc:${col}">
       <div class="sc-ring-in">
         <div class="sc-grade" style="color:${col}">${q.grade}</div>
-        <div class="sc-total">${q.total}/${q.max}</div>
+        <div class="sc-total"><span data-countup>${q.total}</span>/${q.max}</div>
       </div>
     </div>
     <div class="sc-blurb">${scoreBlurb(q)}</div>
@@ -27165,6 +27314,9 @@ function openScoreCard(sess, onDone){
   const q = sess.quality || scoreWorkout(sess);
   showModal(scoreCardHTML(q, sess) + `<button class="btn" style="margin-top:18px" id="scDone">Got it</button>`);
   stageReveal($("#modal"));
+  /* Started with the ring rather than with the markup, so the number and the sweep are
+     running the same race instead of one finishing before the other begins. */
+  setTimeout(()=> countUpAll($("#modal")), 260);
   /* On the NEXT frame, so the transition has a start value to run from — set in the same
      frame as the markup it would simply be the final value with nothing to animate. */
   const ring = $("#modal").querySelector(".sc-ring");
