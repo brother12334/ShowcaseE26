@@ -635,6 +635,63 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 }
 .flag-opt.is-done .flag-opt-said{color:var(--ok)}
 .flag-pick-n{font-size:12px;color:var(--faint);line-height:1.45;margin:7px 2px 0}
+
+/* =====================================================================
+   WHAT APPLYING AND DISMISSING LOOK LIKE
+
+   These two do opposite things and looked identical: the card was there, render() ran,
+   the card was different. No motion, so no difference between "I took your advice" and
+   "I threw it away" — and on a flag with two halves, no way to see WHICH half you just
+   answered.
+
+   APPLY sweeps. A band of green crosses the row once, then the row lifts and fades and
+   the confirmed line arrives in its place. It runs on the ROW, not the card, which is the
+   whole point: apply one half and that half is the thing that moves while the other sits
+   untouched, waiting. Apply the second later and it sweeps in its turn.
+
+   DISMISS pops. The card collapses inward and eight copper dots are thrown out of its
+   centre — one size, one colour, one distance, one curve, so it reads as a single burst
+   rather than as several overlapping ones.
+
+   The burst is appended to the BODY at fixed coordinates rather than inside the card,
+   because the card is collapsing with overflow hidden and would clip its own dots.
+
+   Both degrade to a plain removal under prefers-reduced-motion. */
+.flag-opt{position:relative;overflow:hidden}
+.fo-sweep{position:absolute;inset:0;border-radius:10px;overflow:hidden;pointer-events:none;opacity:0}
+.fo-sweep i{position:absolute;inset:0;transform:translateX(-102%);
+  background:linear-gradient(100deg,transparent,rgba(74,147,88,.45) 45%,transparent)}
+.flag-opt.fo-apply{will-change:transform,opacity}
+.flag-opt.fo-apply .fo-sweep{opacity:1}
+.flag-opt.fo-apply .fo-sweep i{animation:foWash .5s cubic-bezier(.4,0,.2,1) both}
+.flag-opt.fo-apply{animation:foLift .26s ease-in .42s both}
+@keyframes foWash{to{transform:translateX(102%)}}
+@keyframes foLift{to{opacity:0;transform:translateY(-12px) scale(.97)}}
+/* The settled row arriving in the gap the lifted one left. Only on the half just
+   answered — every other re-render of this card must not replay it. */
+@keyframes foDrop{from{opacity:0;transform:translateY(-9px)}to{opacity:1;transform:none}}
+.flag-opt.fo-in{animation:foDrop .32s cubic-bezier(.2,.8,.3,1) both}
+/* The card leaving. `height` is set to its measured pixel value first and then to zero,
+   so the close eases over the card's real size — a max-height guess spends most of its
+   curve before anything moves, which reads as a stall and then a snap. */
+.nb-flag.flag-leave{overflow:hidden;will-change:transform,opacity;
+  transition:height .3s cubic-bezier(.33,0,.2,1), margin .3s cubic-bezier(.33,0,.2,1),
+             padding .3s cubic-bezier(.33,0,.2,1), opacity .26s ease, transform .3s ease}
+.nb-flag.flag-pop{animation:flagPop .3s cubic-bezier(.4,0,.6,1) both}
+.nb-flag.flag-applied{animation:flagCalm .3s ease-in both}
+@keyframes flagPop{0%{opacity:1;transform:scale(1)}26%{opacity:1;transform:scale(1.015)}
+  100%{opacity:0;transform:scale(.9)}}
+@keyframes flagCalm{to{opacity:0;transform:translateY(-8px) scale(.985)}}
+.fb{position:fixed;pointer-events:none;z-index:401}
+.fb b{position:absolute;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;
+  background:var(--acc);opacity:0;will-change:transform,opacity;
+  animation:fbDot .44s cubic-bezier(.12,.72,.24,1) both}
+@keyframes fbDot{0%{opacity:0;transform:translate(0,0) scale(.5)}14%{opacity:1}
+  100%{opacity:0;transform:translate(var(--x),var(--y)) scale(.35)}}
+@media (prefers-reduced-motion:reduce){
+  .flag-opt.fo-apply,.flag-opt.fo-in,.nb-flag.flag-pop,.nb-flag.flag-applied,.fb b{animation:none}
+  .nb-flag.flag-leave{transition:none}
+}
 .swap-mine{
   font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
   color:var(--acc);border:1px solid var(--line);border-radius:999px;padding:1px 6px;margin-left:8px;
@@ -4724,7 +4781,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "17.9";
+const APP_VERSION = "18.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20035,11 +20092,13 @@ function viewBody(){
           const optHTML = (part, label, control)=>{
             const st = fadePartState(f, part);
             if(st === "na") return "";
-            if(st !== "open") return `<div class="flag-opt is-${st}">
+            const justIn = FLAG_IN && FLAG_IN.id === f.id && FLAG_IN.part === part ? " fo-in" : "";
+            if(st !== "open") return `<div class="flag-opt is-${st}${justIn}">
               <span class="flag-opt-t">${esc(label)}</span>
               <span class="flag-opt-said">${st === "done" ? "applied \u2713" : "not this one"}</span>
             </div>`;
             return `<div class="flag-opt" data-part="${part}">
+              <span class="fo-sweep"><i></i></span>
               <span class="flag-opt-t">${esc(label)}</span>
               ${control}
               <button class="btn small" data-flagdo="${esc(f.id)}" data-fadepick="${part}">Apply</button>
@@ -23512,10 +23571,21 @@ function bind(){
     f.to = roundLoadable(v, f.ex); el.value = f.to; save(); queueSync();
   });
   document.querySelectorAll("#app [data-flagdo]").forEach(b=> b.onclick=()=>{
-    if(applyFlag(b.dataset.flagdo, b.dataset.fadepick)){
-      render();
-      // addRestToExercise() says its own piece; a second toast would talk over it
-      if(b.dataset.fadepick !== "rest") toast("Applied to your programme");
+    const id = b.dataset.flagdo, part = b.dataset.fadepick;
+    const row = b.closest(".flag-opt"), card = b.closest(".nb-flag");
+    if(!applyFlag(id, part)) return;
+    // addRestToExercise() says its own piece; a second toast would talk over it
+    const say = ()=>{ if(part !== "rest") toast("Applied to your programme"); };
+    const gone = !flagLog().some(x=> x && x.id === id && !x.applied && !x.dismissed);
+    if(part && row && !gone){
+      /* One half of a two-answer flag: the ROW moves and the other half stays put. */
+      flagSweepRow(row, ()=>{ FLAG_IN = {id, part}; render(); FLAG_IN = null; say(); });
+    } else if(part && row){
+      /* The half that settles the whole flag: sweep it, then the card leaves quietly —
+         a card whose advice you took should not go out like one you threw away. */
+      flagSweepRow(row, ()=> flagLeaveCard(card, "applied", ()=>{ render(); say(); }));
+    } else {
+      flagLeaveCard(card, "applied", ()=>{ render(); say(); });
     }
   });
   /* A warm-up rung, ticked off. Stored on the session entry so it survives a re-render
@@ -23543,14 +23613,25 @@ function bind(){
     openMaxSheet(b.dataset.setmax);
   });
   document.querySelectorAll("#app [data-flagno]").forEach(b=> b.onclick=()=>{
-    dismissFlag(b.dataset.flagno); render(); toast("Dismissed");
+    const card = b.closest(".nb-flag");
+    dismissFlag(b.dataset.flagno);
+    flagLeaveCard(card, "pop", ()=>{ render(); toast("Dismissed"); });
   });
-  /* Waving away ONE half of the collapse flag. The other half stays put. */
+  /* Waving away ONE half of the collapse flag. The other half stays put, so the ROW
+     leaves and is replaced by its record — the card only pops if this was the last
+     thing open on it. */
   document.querySelectorAll("#app [data-flagnopart]").forEach(b=> b.onclick=()=>{
     const [id, part] = b.dataset.flagnopart.split(":");
+    const row = b.closest(".flag-opt"), card = b.closest(".nb-flag");
     if(!dismissFlagPart(id, part)) return;
-    render();
-    toast(part === "rest" ? "Rest left as it is" : "Opening weight left as it is");
+    const say = ()=> toast(part === "rest" ? "Rest left as it is" : "Opening weight left as it is");
+    const gone = !flagLog().some(x=> x && x.id === id && !x.applied && !x.dismissed);
+    if(gone){ flagLeaveCard(card, "pop", ()=>{ render(); say(); }); return; }
+    if(row && !reducedMo()){
+      row.style.transition = "opacity .2s ease, transform .2s ease";
+      row.style.opacity = "0"; row.style.transform = "translateY(-6px)";
+      setTimeout(()=>{ FLAG_IN = {id, part}; render(); FLAG_IN = null; say(); }, 210);
+    } else { FLAG_IN = {id, part}; render(); FLAG_IN = null; say(); }
   });
   const nsr = $("#nbSideRule");
   if(nsr) nsr.onclick = ()=>{
@@ -27496,6 +27577,63 @@ function dismissFlagPart(id, part){
   fadeSettle(f);
   save(); queueSync();
   return true;
+}
+/* WHICH HALF WAS JUST ANSWERED, so the row that replaces it can arrive rather than
+   appear. Consumed by the next render and cleared, because every OTHER re-paint of this
+   card — a tab change, a sync landing — must not replay it. */
+let FLAG_IN = null;
+function reducedMo(){ try{ return reducedMotion(); }catch(e){ return false; } }
+/* THE SWEEP. Runs on the row, not the card: applying one half of a two-answer flag must
+   move that half and leave the other sitting there untouched. */
+function flagSweepRow(row, done){
+  if(!row || reducedMo()){ done(); return; }
+  row.classList.add("fo-apply");
+  setTimeout(done, 680);
+}
+/* THE POP — V1, eight dots and nothing else.
+
+   Eight on an even circle, offset half a step so none fires straight down the card's
+   centre line where the eye already is, and flattened vertically because the card is wide
+   and short: a true circle throws dots further above and below it than the shape they
+   came out of. One size, one colour, one distance, one curve — out fast, coasting to a
+   stop, shrinking as they fade. The scatter in the first pass came from having three
+   travel distances and four stagger delays, which is four small bursts rather than one.
+
+   Fixed to the viewport rather than parented to the card, because the card is collapsing
+   with overflow hidden and would clip its own dots. */
+function flagBurstAt(box){
+  const cx = box.left + box.width/2, cy = box.top + box.height/2;
+  const wrap = document.createElement("span");
+  wrap.className = "fb";
+  wrap.style.cssText += `left:${cx}px;top:${cy}px`;
+  const N = 8, R = 62;
+  for(let i = 0; i < N; i++){
+    const a = ((i + 0.5)/N) * Math.PI * 2;
+    const d = document.createElement("b");
+    d.style.setProperty("--x", (Math.cos(a)*R).toFixed(1) + "px");
+    d.style.setProperty("--y", (Math.sin(a)*R*0.58).toFixed(1) + "px");
+    wrap.appendChild(d);
+  }
+  document.body.appendChild(wrap);
+  setTimeout(()=> wrap.remove(), 620);
+}
+/* The card going. "pop" for a dismissal, which is a thing thrown away; "applied" for the
+   quieter leave of a card whose advice you took. */
+function flagLeaveCard(card, mode, done){
+  if(!card || reducedMo()){ done(); return; }
+  const box = card.getBoundingClientRect();
+  if(mode === "pop") flagBurstAt(box);
+  const cs = getComputedStyle(card);
+  card.style.height = box.height + "px";
+  card.classList.add("flag-leave", mode === "pop" ? "flag-pop" : "flag-applied");
+  requestAnimationFrame(()=>{
+    card.style.height = "0px";
+    card.style.marginTop = "0px"; card.style.marginBottom = "0px";
+    card.style.paddingTop = "0px"; card.style.paddingBottom = "0px";
+    card.style.borderTopWidth = "0px"; card.style.borderBottomWidth = "0px";
+  });
+  setTimeout(done, mode === "pop" ? 430 : 400);
+  void cs;
 }
 function dismissFlag(id){
   const f = flagLog().find(x=> x && x.id === id);
