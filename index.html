@@ -3361,6 +3361,14 @@ body.cele-open{overflow:hidden}
   color:var(--text);padding:5px 7px;
 }
 .rest-mini .rest-time{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:18px;font-weight:600}
+/* PAST ZERO IS NOT AN ERROR. Resting longer than the target is an ordinary thing to do
+   and the app holds no opinion about it — so overtime takes the accent, the colour this
+   palette uses for "the app is telling you something", and not the red it uses for
+   something being wrong. The pill borrows the accent edge too, because at a glance from
+   across a rack the ring of colour is the only part of it you actually read. */
+.rest-over .rest-time{color:var(--acc)}
+.rest-mini.rest-over{border-color:var(--acc-line);box-shadow:0 8px 28px rgba(0,0,0,.55), 0 0 0 3px rgba(201,138,75,.10)}
+.rest-over .pf-label{color:var(--acc)}
 .rest-dot{
   width:12px;height:12px;border-radius:50%;
   box-shadow:inset 0 0 0 3px rgba(0,0,0,.3);
@@ -4699,7 +4707,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "17.7";
+const APP_VERSION = "17.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6065,6 +6073,12 @@ const PREF_DEFAULTS = {
   effort: "auto",         // auto | reserve | close | failure — only used where a plan gives no target
   progression: "ask",     // auto | ask | hold — what happens when a load is ready to go up
   restDefault: null,      // seconds; null = judge each set on its own (restTargetFor)
+  /* Which way the rest clock runs. "up" is a stopwatch from zero, which is what this has
+     always been and stays the default. "down" counts the set's own rest target down to
+     zero and then keeps going into negative — overtime — rather than stopping, because a
+     countdown that freezes at 0:00 hides the one number you want at that point: how long
+     you have been standing there since it finished. */
+  restClock: "up",        // up | down
   /* WHERE THE REST DAYS FALL. "scheduled" is the default because it is what almost
      every written programme means: the rest sits at a fixed point in the rotation —
      three days on, one off — and the plan, not the person, decides when. "floating"
@@ -8513,6 +8527,43 @@ function markPriorDone(ei, si){
 }
 let restTick = null;
 function fmtClock(sec){ const m=Math.floor(sec/60), s=sec%60; return m+":"+String(s).padStart(2,"0"); }
+/* fmtClock() floors, so a negative second count comes out as "-1:-7". Overtime needs the
+   sign carried on the front of a normal clock instead. */
+function fmtClockSigned(sec){
+  const n = Math.round(sec);
+  const a = Math.abs(n);
+  return (n < 0 ? "\u2212" : "") + Math.floor(a/60) + ":" + String(a%60).padStart(2,"0");
+}
+/* THE REST THE RUNNING CLOCK IS COUNTING TOWARDS. The bottom of the ideal window — the
+   rest the movement actually asks for — not `warn`, which is the lower line where a rest
+   becomes short enough to query. 90s when there is no set to ask about, which only
+   happens if a timer outlives its entry. */
+function restTargetSec(){
+  const info = restingSetInfo();
+  const t = info && info.target;
+  const lo = t && Array.isArray(t.ideal) ? t.ideal[0] : null;
+  return lo > 0 ? Math.round(lo) : 90;
+}
+/* WHAT THE CLOCK READS, WHICHEVER WAY IT RUNS — one answer, so the pill, the dial and the
+   tick cannot drift apart the way two implementations of one number always eventually do.
+
+   `over` is the state past zero on a countdown. It is not an error and it is not styled
+   like one: resting longer than the target is a normal thing to do and the app has no
+   opinion about it. It just stops pretending the clock has stopped. */
+function restClockNow(){
+  const sec = restElapsed();
+  if(trainPrefs().restClock !== "down") return {text: fmtClock(sec), over: false, sec, frac: (sec%60)/60};
+  const target = restTargetSec();
+  const left = target - sec;
+  return {
+    text: fmtClockSigned(left),
+    over: left < 0,
+    sec,
+    /* Draining while it counts down, then sweeping again by the minute once it is into
+       overtime — the ring goes back to meaning "how long has this been going". */
+    frac: left >= 0 ? Math.max(0, Math.min(1, left / target)) : ((-left) % 60) / 60
+  };
+}
 function restElapsed(){
   return (S.active && S.active.restTimer) ? Math.max(0, Math.floor((Date.now()-S.active.restTimer.start)/1000)) : 0;
 }
@@ -8984,21 +9035,22 @@ function showRestUI(min){
   const color = DAY_HEX[S.active.workoutId] || "#e8e6e1";
   let el = document.getElementById("restUI");
   if(!el){ el = document.createElement("div"); el.id = "restUI"; document.body.appendChild(el); }
+  const c0 = restClockNow();
   if(min){
-    el.className = "rest-mini";
-    el.innerHTML = `<button class="rest-expand"><span class="rest-dot" style="background:${color}"></span><span class="rest-time num">${fmtClock(restElapsed())}</span></button><button class="rest-stop-mini" aria-label="Stop rest">■</button>`;
+    el.className = "rest-mini" + (c0.over ? " rest-over" : "");
+    el.innerHTML = `<button class="rest-expand"><span class="rest-dot" style="background:${color}"></span><span class="rest-time num">${c0.text}</span></button><button class="rest-stop-mini" aria-label="Stop rest">■</button>`;
     el.querySelector(".rest-expand").onclick = ()=> showRestUI(false);
     el.querySelector(".rest-stop-mini").onclick = stopRest;
   } else {
-    el.className = "rest-full";
+    el.className = "rest-full" + (c0.over ? " rest-over" : "");
     el.innerHTML = `<button class="rest-x" aria-label="Minimize">✕</button>
       <div class="pf-wrap">
         <div class="pf-plate" style="background:${color}">
           <div class="pf-tex"></div>
           <div class="pf-ring"></div>
           <div class="pf-hub">
-            <div class="pf-label">Rest</div>
-            <div class="rest-time num">${fmtClock(restElapsed())}</div>
+            <div class="pf-label">${trainPrefs().restClock === "down" ? (c0.over ? "Overtime" : "Rest left") : "Rest"}</div>
+            <div class="rest-time num">${c0.text}</div>
           </div>
         </div>
         ${restNextLineHTML()}
@@ -9022,9 +9074,17 @@ function showRestUI(min){
       voiceSync();               // the rest is done, so it starts listening again
     }
     if(VOICE_ON && voicePaused()) voiceHint();   // count the wait down on the strip
-    ui.querySelectorAll(".rest-time").forEach(t=> t.textContent = fmtClock(sec));
+    const c = restClockNow();
+    ui.querySelectorAll(".rest-time").forEach(t=> t.textContent = c.text);
+    /* The moment it crosses zero the whole widget changes what it is saying, so the class
+       and the label move with the number rather than waiting for the next open. */
+    if(ui.classList.contains("rest-over") !== c.over){
+      ui.classList.toggle("rest-over", c.over);
+      const lab = ui.querySelector(".pf-label");
+      if(lab && trainPrefs().restClock === "down") lab.textContent = c.over ? "Overtime" : "Rest left";
+    }
     const ring = ui.querySelector(".pf-ring");
-    if(ring) ring.style.setProperty("--sw", ((sec%60)/60*100)+"%");
+    if(ring) ring.style.setProperty("--sw", (c.frac*100)+"%");
     const hub = ui.querySelector(".pf-hub");
     if(hub){
       const mins = Math.floor(sec/60);
@@ -16155,6 +16215,10 @@ function prefsSessionHTML(){
   h += setBlock("Warm-up sets",
     "A ramp before the first big lift of the day. Warm-ups never count as working sets either way.",
     prefSeg("data-prefwarm", p.warmups, [{v:"auto", t:"Add them"}, {v:"planOnly", t:"Plan only"}, {v:"manual", t:"Off"}]));
+  h += setBlock("The rest clock",
+    "<b>Count up</b> is a stopwatch from zero. <b>Count down</b> starts at the rest that set has earned and runs down \u2014 and keeps going past zero into overtime, so you can still see how long you have been standing there. Either way the rest is recorded the same and graded the same.",
+    prefSeg("data-prefrestclock", p.restClock === "down" ? "down" : "up",
+      [{v:"up", t:"Count up"}, {v:"down", t:"Count down"}]));
   h += setBlock("Rating your sets",
     term("rpe","RPE") + " is how close to failure a set was \u2014 10 is nothing left, 8 is two reps in you. Turning it off drops the column; sessions are still graded, with less to go on.",
     prefSeg("data-prefrpe", p.rpe === false ? "off" : "on", [{v:"on", t:"Track RPE"}, {v:"off", t:"Weight and reps only"}]));
@@ -23091,6 +23155,12 @@ function bind(){
      nothing already logged moves, and no exercise that states its own behaviour is
      touched. */
   const setPref = (k, v, msg)=>{ trainPrefs()[k] = v; save(); queueSync(); render(); toast(msg); };
+  document.querySelectorAll("[data-prefrestclock]").forEach(b=> b.onclick=()=>{
+    setPref("restClock", b.dataset.prefrestclock,
+      b.dataset.prefrestclock === "down" ? "Rest clock counts down" : "Rest clock counts up");
+    /* A clock already running has to change shape now, not at the next rest. */
+    if(S.active && S.active.restTimer) showRestUI(S.active.restTimer.min);
+  });
   document.querySelectorAll("[data-prefsides]").forEach(b=> b.onclick=()=> setPref("sides", b.dataset.prefsides,
     b.dataset.prefsides === "both" ? "A set now covers both limbs"
       : b.dataset.prefsides === "matchWeaker" ? "Both sides held to the weaker one"
