@@ -2674,6 +2674,29 @@ body.pfl-open{overflow:hidden}
 .pfl-stage{flex:0 0 auto;padding:26px 0}
 .pfl-foot{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:12px}
 .pfl-go{width:100%;font-size:15px;padding:16px}
+/* Shut rather than hidden: a button that vanishes until you answer reads as a bug, one
+   that is visibly waiting reads as a question you have not finished. */
+.pfl-go.is-wait{opacity:.4;pointer-events:none}
+.pfl-need{margin-top:10px;font-size:12.5px;color:var(--faint);line-height:1.45;text-align:center}
+/* ---------- the preflight muscle map ---------- */
+.pfl-maps{display:flex;gap:6px;justify-content:center;align-items:flex-start;margin:14px 0 4px}
+.pfm-fig{flex:1;min-width:0;max-width:168px}
+.pfm-fig svg{width:100%;height:auto;display:block;overflow:visible;shape-rendering:geometricPrecision}
+.pfm-off{fill:#23232b;stroke:#0b0b0e;stroke-width:2.2;stroke-linejoin:round}
+/* Lit in the DAY's own colour, which the plate above it is already wearing — the map and
+   the plate are describing the same session and should say so without a caption. */
+.pfm-on{
+  fill:var(--day,#c98a4b);stroke:#0b0b0e;stroke-width:2.4;stroke-linejoin:round;
+  opacity:0;animation:pfmLight .5s cubic-bezier(.2,.8,.3,1) var(--d,0ms) both;
+}
+@keyframes pfmLight{from{opacity:0}to{opacity:var(--o,.85)}}
+.pfm-step{text-align:center}
+.pfl-stage.pfm-out{animation:pfmOut .26s ease-in both}
+@keyframes pfmOut{to{opacity:0;transform:translateY(-10px)}}
+@media (prefers-reduced-motion:reduce){
+  .pfm-on{animation:none;opacity:var(--o,.85)}
+  .pfl-stage.pfm-out{animation:none;opacity:0}
+}
 /* every direct child rises into place, in order */
 .pfl-hero>*,.pfl-q>*{animation:pfRise .5s cubic-bezier(.2,.9,.28,1.06) both;animation-delay:var(--d,0ms)}
 @keyframes pfRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
@@ -4823,7 +4846,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "18.1";
+const APP_VERSION = "18.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -17412,6 +17435,88 @@ function pfAddGymStep(){
   if(before <= at) return;                         // too late to be worth asking
   PF.steps.splice(before, 0, "gym");
 }
+/* =====================================================================
+   WHAT TODAY ACTUALLY HITS, BEFORE YOU LIFT ANY OF IT
+
+   The preflight opened on a plate, a line of encouragement and three numbers — true,
+   and none of it about the session. The muscle map is the best thing the app draws and
+   it lived in one place, halfway down another tab, describing the past. Pointed at the
+   session in front of you it answers the only question worth asking at that moment:
+   what am I about to train.
+
+   Weighted, not binary. A day with five chest movements and one set of calves is not a
+   chest-and-calves day, and lighting both the same is a worse answer than lighting
+   neither — so each group is scored by the WORK it is about to receive (sets × how much
+   of that movement it is) and drawn at an opacity that follows. */
+function pfMuscleLoad(entries){
+  const score = {}, lead = {};
+  (entries || []).forEach(e=>{
+    const mm = musclesFor(e.name);
+    if(!mm) return;
+    const nSets = (e.sets || []).length || 1;
+    Object.keys(mm).forEach(g=>{
+      if(!GROUPS[g]) return;
+      score[g] = (score[g] || 0) + mm[g] * nSets;
+      /* TWO SCORES, BECAUSE THEY ANSWER TWO QUESTIONS.
+
+         `score` is total work and it is what the brightness follows — a muscle assisting
+         on six movements really is getting a lot of work and should look like it.
+
+         `lead` is what the day is CALLED, and summing shares gets that wrong: triceps
+         take a third of every press, so across six pressing movements they out-total the
+         chest that is the point of the session, and the headline reads "Triceps, Chest".
+         Squaring the share before weighting it rewards being the muscle a movement is
+         FOR — chest at 1.0 across four beats triceps at 0.4 across six — which is how
+         anybody standing in the gym would name the day. */
+      lead[g] = (lead[g] || 0) + mm[g] * mm[g] * nSets;
+    });
+  });
+  const peak = Math.max(0, ...Object.keys(score).map(g=> score[g]));
+  return {score, lead, peak};
+}
+/* The same figure the Body tab draws, lit for a plan rather than for recovery. Shares
+   groupPaths/mmPaths/MM_INERT with it, so the anatomy can never drift between the two. */
+function pfMapSVG(view, load){
+  const inert = MM_INERT[view].concat((()=>{ try{ return retiredPaths(view); }catch(e){ return []; } })());
+  const all = Object.keys(MM_REGIONS).map(k=>(MM_REGIONS[k]&&MM_REGIONS[k][view])||[]).flat().concat(MM_INERT[view]);
+  let out = `<svg viewBox="${MM_VIEW[view]}" role="img" aria-label="Muscles this session trains, ${view}">`;
+  out += `<g class="bm-weld">${mmPaths(all)}</g>`;
+  out += `<g class="bm-inert">${mmPaths(inert)}</g>`;
+  /* Heaviest first, so the stagger reads as "and this, and this" in order of how much
+     each one is in for rather than in whatever order the groups happen to be declared. */
+  const lit = GKEYS.filter(g=> (load.score[g] || 0) > 0)
+    .sort((a,b)=> (load.score[b]||0) - (load.score[a]||0));
+  let i = 0;
+  GKEYS.forEach(g=>{
+    const paths = groupPaths(g, view);
+    if(!paths.length) return;
+    const v = load.score[g] || 0;
+    if(v <= 0){ out += `<g class="pfm-off">${mmPaths(paths)}</g>`; return; }
+    const share = load.peak > 0 ? v / load.peak : 1;
+    const rank = lit.indexOf(g);
+    out += `<g class="pfm-on" style="--o:${(0.38 + 0.62*share).toFixed(2)};--d:${
+      (rank * 55)}ms"><title>${esc(gName(g))}</title>${mmPaths(paths)}</g>`;
+    i++;
+  });
+  void i;
+  return out + `</svg>`;
+}
+function pfMapStepHTML(){
+  const load = pfMuscleLoad(S.active && S.active.entries);
+  const top = GKEYS.filter(g=> (load.lead[g] || 0) > 0)
+    .sort((a,b)=> (load.lead[b]||0) - (load.lead[a]||0))
+    .slice(0, 3).map(gName);
+  const m = dayMeta(PF ? PF.wid : (S.active && S.active.workoutId));
+  return `<div class="pfl-q pfm-step" style="--day:${(m && m.color) || "var(--acc)"}">
+    <div class="pfl-k" style="--d:0ms">Today</div>
+    <div class="pfl-h" style="--d:80ms">${top.length ? esc(joinList(top)) : "Everything you've got"}</div>
+    <div class="pfl-maps">
+      <div class="pfm-fig">${pfMapSVG("front", load)}</div>
+      <div class="pfm-fig">${pfMapSVG("back", load)}</div>
+    </div>
+    <div class="pfl-sub" style="--d:520ms">Brighter is more of the session.</div>
+  </div>`;
+}
 function pfPlanSummary(){
   const a = S.active;
   if(!a) return {ex:0, sets:0, sec:0};
@@ -17431,7 +17536,7 @@ function openPreflight(wid){
   const m = dayMeta(wid);
   PF = {i: 0, wid, step: "hero", energy: null, mins: null, gymAsk: null, gymSaid: "",
         line: pick(PF_LINES), cut: null, done: false,
-        steps: ["hero"].concat(energyDue() ? ["energy"] : []).concat(["time", "ready"])};
+        steps: ["hero", "map"].concat(energyDue() ? ["energy"] : []).concat(["time", "ready"])};
   const el = document.createElement("div");
   el.id = "preflight";
   el.innerHTML = `<div class="pfl-glow" style="--day:${m.color}"></div><div class="pfl-in"></div>`;
@@ -17527,6 +17632,8 @@ function pfDraw(){
         <span><b class="num">${esc(fmtMins(sum.sec))}</b>about</span>
       </div>
     </div>`;
+  } else if(PF.step === "map"){
+    body = pfMapStepHTML();
   } else if(PF.step === "energy"){
     body = `<div class="pfl-q">
       <div class="pfl-k" style="--d:0ms">Before the first set</div>
@@ -17582,18 +17689,46 @@ function pfDraw(){
     </div>`;
   }
   const last = PF.step === "ready";
+  /* THE SURVEY IS THE POINT AND IT USED TO BE SKIPPABLE FROM EVERY STEP. "Skip the rest"
+     sat under every question, which makes the questions optional — and an energy reading
+     nobody gives is the one input the recovery number cannot be adjusted by, so the
+     answer to "why does it think I'm fine" becomes "because you never said". Two
+     questions is not a form. The link is gone, and the one question with no default
+     cannot be walked past: Next stays shut until it has an answer.
+
+     Time is different — "No rush" is a real answer and it is preselected, so that step
+     is always satisfiable with one tap. */
+  const needsAnswer = PF.step === "energy" && PF.energy == null;
   host.innerHTML = `${dots}
     <div class="pfl-stage" key="${PF.step}">${body}</div>
     <div class="pfl-foot">
-      <button class="btn pfl-go" id="pfGo">${last ? "Start the workout" : PF.step === "hero" ? "Let's go" : "Next"}</button>
-      ${last ? "" : `<button class="nb-link" id="pfSkip">Skip the rest</button>`}
+      <button class="btn pfl-go${needsAnswer ? " is-wait" : ""}" id="pfGo"${needsAnswer ? " disabled" : ""}>${
+        last ? "Start the workout" : PF.step === "hero" ? "Let's go" : "Next"}</button>
+      ${needsAnswer ? `<div class="pfl-need">Pick one to carry on \u2014 it takes a tap and it is what your recovery number is adjusted by.</div>` : ""}
     </div>`;
   const go = document.getElementById("pfGo");
   if(go) go.onclick = ()=> last ? pfFinish() : pfNext();
-  const sk = document.getElementById("pfSkip");
-  if(sk) sk.onclick = pfFinish;
+  /* The map shows itself and moves on. It is a thing to look at, not a thing to answer,
+     and a screen that waits for permission to continue stops being that. Any tap takes
+     you on early; leaving the flow cancels it. */
+  if(PF.step === "map"){
+    if(PF._mapT) clearTimeout(PF._mapT);
+    const onward = ()=>{
+      if(!PF || PF.step !== "map") return;
+      const stage = document.querySelector("#preflight .pfl-stage");
+      if(stage && !reducedMotion()){
+        stage.classList.add("pfm-out");
+        setTimeout(()=>{ if(PF && PF.step === "map") pfNext(); }, 260);
+      } else pfNext();
+    };
+    PF._mapT = setTimeout(onward, reducedMotion() ? 900 : 3000);
+    const stage = document.querySelector("#preflight .pfl-stage");
+    if(stage) stage.onclick = ()=>{ clearTimeout(PF._mapT); onward(); };
+  }
   host.querySelectorAll("[data-pfen]").forEach(b=> b.onclick = ()=>{
+    const wasEmpty = PF.energy == null;
     PF.energy = parseInt(b.dataset.pfen, 10);
+    if(wasEmpty) setTimeout(()=>{ if(PF && PF.step === "energy") pfDraw(); }, 0);
     const d = todayStr();
     const rec = (S.checkins[d] = S.checkins[d] || {});
     rec.energy = String(PF.energy);
