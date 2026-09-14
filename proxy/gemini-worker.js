@@ -54,6 +54,11 @@ const ALLOWED_MODELS = [
   "gemini-flash-latest",
   "gemini-3.6-flash",
   "gemini-3.5-flash-lite",
+  /* Deliberately kept available to pin. It is not the newest and that is the point: an
+     older model carries the larger free-tier allowance, and reading a document into JSON
+     does not need the newest anything. When the quota is the binding constraint rather
+     than the capability, this is the one to be on. */
+  "gemini-2.5-flash",
 ];
 
 /* WHY THIS PROXY PICKS ITS OWN MODEL WHEN THE NAMED ONE IS GONE.
@@ -137,6 +142,53 @@ async function resolveModel(key, avoid) {
   const best = list.sort((a, b) => scoreModel(b) - scoreModel(a))[0];
   RESOLVED = { name: best, at: Date.now() };
   return best;
+}
+
+/* ONE ALTERNATIVE WAS NOT ENOUGH, AND THE REASON IS QUOTA RATHER THAN AVAILABILITY.
+
+   This branch was written for a retired model name, where one substitution is plainly
+   sufficient: the name is gone, something else is there, use it. Quota does not behave
+   like that. Free-tier allowances are granted per model and the newest models get the
+   smallest ones — a brand-new flash release has shipped with a 20-request DAILY cap —
+   so "the highest-scoring model that is not the one that just failed" walks straight
+   from one exhausted new model onto another. Observed exactly that: asked for
+   gemini-3.6-flash, served by gemini-flash-latest, refused again with "You exceeded your
+   current quota", while gemini-2.5-flash sat further down the list with the generous
+   free allowance an older model keeps.
+
+   So it walks the list instead of taking one step down it. Bounded, and it stops the
+   moment something answers — or the moment an answer comes back that a different model
+   would not fix. Every candidate is remembered so the chain cannot revisit one. */
+/* AND A QUOTA FAILURE WANTS THE OPPOSITE ORDERING FROM A RETIREMENT.
+
+   scoreModel() ranks newest-first, which is right when a name has been retired: the model
+   is gone, take the best thing that is there. It is precisely wrong when the refusal is a
+   quota, because free-tier allowances run the other way — Google grants established
+   models a generous daily request count and ships brand-new releases with tiny ones (the
+   20-a-day cap noted above was on a model released that month). Ranking newest-first
+   under a 429 walks from one squeezed new model to the next and never reaches the older
+   one that still has room. Measured on a real key: 3.6-flash, flash-latest,
+   flash-lite-latest, 3.8-flash, all refused, while 2.5-flash sat untouched below them.
+
+   So under a 429 the generation term is inverted and the "-latest" aliases are penalised
+   rather than rewarded — an alias tracks the newest model, which is the squeezed one.
+   This is a heuristic about how allowances are handed out, not a rule Google publishes,
+   and it costs nothing when wrong: the walk is bounded and stops at the first answer. */
+function scoreForQuota(name) {
+  let s = 0;
+  if (/flash/.test(name)) s += 100;
+  if (/preview|-exp|experimental/.test(name)) s -= 40;
+  if (/lite/.test(name)) s -= 5;          // lite usually has the LARGER free allowance
+  if (/-latest$/.test(name)) s -= 30;     // an alias points at the newest, so at the smallest
+  const v = parseFloat((name.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  if (v) s += (10 - Math.min(10, v)) * 5; // older generation wins, which is the whole point
+  return s;
+}
+const FALLBACK_TRIES = 3;
+async function fallbackModels(key, tried, status) {
+  const score = status === 429 ? scoreForQuota : scoreModel;
+  const list = (await availableModels(key)).filter((m) => !tried.includes(m));
+  return list.sort((a, b) => score(b) - score(a)).slice(0, FALLBACK_TRIES);
 }
 
 async function callGoogle(model, body, key) {
@@ -265,15 +317,24 @@ export default {
     const SWITCH_MODEL_ON = [404, 429, 500, 503];
     let served = model;
     if (SWITCH_MODEL_ON.includes(upstream.status)) {
-      const alt = await resolveModel(env.GEMINI_API_KEY, model);
-      if (alt) {
+      const tried = [model];
+      for (const alt of await fallbackModels(env.GEMINI_API_KEY, tried, upstream.status)) {
+        tried.push(alt);
+        let retry;
         try {
-          const retry = await callGoogle(alt, body, env.GEMINI_API_KEY);
-          upstream = retry;
-          served = alt;
+          retry = await callGoogle(alt, body, env.GEMINI_API_KEY);
         } catch {
-          /* keep the original error, which at least carries Google's explanation */
+          continue;   /* this one is unreachable; the next may not be */
         }
+        upstream = retry;
+        served = alt;
+        if (retry.ok) {
+          RESOLVED = { name: alt, at: Date.now() };
+          break;
+        }
+        /* A status no model change can help — a malformed body, say — ends the walk
+           rather than spending three requests learning the same thing three times. */
+        if (!SWITCH_MODEL_ON.includes(retry.status)) break;
       }
     }
 
