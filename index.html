@@ -1418,6 +1418,48 @@ button.side-chip.sc-set::after{
 .sess .row1 b{font-size:17px}
 .sess .detail{margin-top:10px;border-top:1px solid var(--line);padding-top:10px;display:none}
 .sess.open .detail{display:block}
+/* ---------- history: the heat grid, week headers and notables ---------- */
+.hx-card{padding:12px 13px 11px}
+.hx-head{display:flex;align-items:baseline;justify-content:space-between;margin:0 0 9px}
+.hx-k{font:600 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.hx-n{font-size:12px;color:var(--faint)}
+/* Scrolls rather than shrinks: a square small enough to fit any width is a square nobody
+   can aim at, and this one is tappable. */
+.hx-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px;padding:0 2px}
+.hx-inner{display:inline-block;min-width:100%}
+.hx-months{display:flex;gap:3px;margin-bottom:4px}
+.hx-mo{width:13px;flex:0 0 13px;font:9px var(--mono);color:var(--faint);letter-spacing:.02em;
+  white-space:nowrap;overflow:visible}
+.hx-grid{display:flex;gap:3px}
+.hx-col{display:flex;flex-direction:column;gap:3px}
+.hx{width:13px;height:13px;border-radius:3px;background:#1b1b20;display:block;
+  border:1px solid transparent}
+.hx-on{cursor:pointer}
+.hx-on:active{outline:2px solid var(--acc);outline-offset:1px}
+/* A logged rest has to be visibly different from a day nothing happened on — they are
+   opposite facts, and at 13px a five-per-cent difference in grey is no difference. */
+.hx-rest{background:#33333d}
+.hx-skip{background:transparent;border:1px dashed var(--line)}
+.hx-ahead{background:transparent;border:1px solid rgba(40,40,47,.55)}
+.hx-legend{display:flex;align-items:center;gap:6px;margin-top:10px;
+  font:10.5px var(--mono);color:var(--faint);letter-spacing:.04em}
+.hx-legend .hx{width:10px;height:10px;margin-left:7px}
+.hx-legend .hx:first-child{margin-left:0}
+/* The card the grid sent you to, named for a moment so the jump is followable. */
+@keyframes hxFlash{0%,100%{box-shadow:none}30%,70%{box-shadow:0 0 0 2px var(--acc-line)}}
+.sess.hx-hit{animation:hxFlash 1.25s ease both}
+.hw{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  margin:18px 2px 8px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.hw-k{font:600 11px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--acc)}
+.hw-n{font-size:11.5px;color:var(--faint);white-space:nowrap}
+/* WHAT WAS DIFFERENT, not what was the same. Chips rather than another grey sentence,
+   because the whole point is that these rows should stop looking alike. */
+.hn{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.hn-b{font:10.5px var(--mono);letter-spacing:.05em;color:var(--dim);
+  border:1px solid var(--line);border-radius:999px;padding:3px 9px;background:var(--card2)}
+.hn-pr{color:var(--acc);border-color:var(--acc-line);background:var(--acc-soft)}
+.hn-best{color:var(--ok);border-color:rgba(74,147,88,.4);background:rgba(74,147,88,.09)}
+.hn-plain,.hn-top{color:var(--faint)}
 .sess .detail .exline{margin-bottom:8px;font-size:14px}
 .sess .detail .exline .num{color:var(--dim);font-size:13px}
 
@@ -4781,7 +4823,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "18.0";
+const APP_VERSION = "18.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -21513,6 +21555,189 @@ function liveStripHTML(){
     <span class="live-go">\u203a</span>
   </button>`;
 }
+/* =====================================================================
+   HISTORY, AS SOMETHING YOU CAN READ
+
+   The list was fifteen cards saying "5 exercises · 17,280 lb total · Fine", then 17,010,
+   then 16,740. The numbers differed by about one per cent, nothing carried direction, and
+   "5 exercises" was true of every session ever logged — so the screen you open to find out
+   how the last month went could not tell you.
+
+   Three changes, and they answer three different questions:
+     the heat grid   did I turn up?          (months, at a glance, gaps included)
+     the week rows   how much did I do?      (totals where they can be compared)
+     the notables    what was different?     (instead of what was the same)
+   ===================================================================== */
+function sessVolume(s){
+  return (s.entries || []).reduce((t,e)=>
+    t + (e.sets || []).reduce((u,st)=>
+      u + ((parseFloat(st.weight)||0) * (parseFloat(st.reps)||0)), 0), 0);
+}
+function sessSets(s){
+  return (s.entries || []).reduce((t,e)=> t + (e.sets || []).filter(x=> x && x.reps).length, 0);
+}
+/* The Monday of whatever week this date falls in, as a date string — the key a week is
+   grouped under and the label it is headed with. */
+function weekStartStr(dstr){
+  const d = new Date(dstr + "T12:00:00");
+  const back = (d.getDay() + 6) % 7;          // Monday = 0
+  d.setDate(d.getDate() - back);
+  return d.toLocaleDateString("en-CA");
+}
+/* WHAT MADE THIS SESSION DIFFERENT FROM THE OTHERS.
+
+   Everything here is a comparison against this day's OWN history — a Push day is measured
+   against Push days, because "biggest session ever" on a day with three exercises against
+   one with eight is not a fact about training. Falls back to the shape of the session only
+   when there is genuinely nothing to say, which on a new profile is most of them. */
+function sessNotables(s, ctx){
+  const out = [];
+  const vol = ctx.vol.get(s.id) || 0;
+  const bb = ctx.before.get(s.id) || {n:0, best:0, avg:0};
+  const pr = (()=>{ try{ return sessionPRs(s).length; }catch(e){ return 0; } })();
+  if(pr) out.push({k:"pr", t: pr + " PR" + (pr > 1 ? "s" : "")});
+  /* A MILESTONE HAS TO BE RARE TO BE ONE. Training that is working produces a slightly
+     bigger session than the last one nearly every time, so "biggest yet" on any margin at
+     all fires on almost every row — which is the same noise as "5 exercises", just
+     flattering. It needs a real gap over the previous best, and enough history behind it
+     for "best" to mean anything. */
+  /* A MILESTONE HAS TO BE RARE TO BE ONE. Training that is working produces a slightly
+     bigger session than the last one nearly every time, so "biggest yet" on any margin at
+     all fires on almost every row — which is the same noise as "5 exercises", just
+     flattering. It needs a real gap over the previous best and some history behind it.
+
+     THE WORKHORSE IS THE COMPARISON UNDERNEATH IT. Most sessions are not records and
+     never will be, and they are still not all the same: "+9% on your last Upper A" is
+     true, different every week, and the actual answer to "how did that one go". Held to
+     six per cent so a session that genuinely matched the last one says nothing rather
+     than dressing up noise as a trend. */
+  const dayName = dayMeta(s.workoutId).name || "session";
+  if(bb.n >= 3 && bb.best > 0 && vol > bb.best * 1.06){
+    out.push({k:"best", t:"biggest " + dayName + " yet"});
+  } else if(bb.n >= 1 && bb.last > 0){
+    const d = (vol - bb.last) / bb.last;
+    if(d >= 0.06) out.push({k:"up", t:"+" + Math.round(d*100) + "% on your last " + dayName});
+    else if(d <= -0.06) out.push({k:"down", t:"\u2212" + Math.round(-d*100) + "% on your last " + dayName});
+  }
+  const mins = s.startedAt && s.finishedAt ? Math.round((s.finishedAt - s.startedAt)/60000) : 0;
+  if(out.length < 2 && mins > 0 && ctx.medMins > 0){
+    if(mins <= ctx.medMins * 0.7) out.push({k:"fast", t:"in and out in " + mins + " min"});
+    else if(mins >= ctx.medMins * 1.45) out.push({k:"long", t:"a long one, " + mins + " min"});
+  }
+  /* The first time a movement appears anywhere in the log. Worth saying once, and only
+     once — every later session containing it is not news. */
+  if(out.length < 2 && ctx.firstSeen.get(s.id)){
+    out.push({k:"new", t:"first " + aiTrim(ctx.firstSeen.get(s.id), 26)});
+  }
+  /* AND WHEN THERE IS GENUINELY NOTHING REMARKABLE, say the most interesting ordinary
+     thing rather than the least. Most sessions are not records and never will be; the
+     heaviest set in them still differs every time, which "5 exercises" never does. */
+  if(!out.length){
+    let top = null;
+    (s.entries || []).forEach(e=> (e.sets || []).forEach(st=>{
+      const w = parseFloat(st.weight)||0, r = parseFloat(st.reps)||0;
+      if(!(w > 0 && r > 0)) return;
+      if(!top || w > top.w || (w === top.w && r > top.r)) top = {w, r, name: e.name};
+    }));
+    out.push(top
+      ? {k:"top", t:"top set " + fmtLoad(top.w) + " \u00d7 " + top.r + " \u00b7 " + aiTrim(top.name, 20)}
+      : {k:"plain", t: sessSets(s) + " sets"});
+  }
+  return out.slice(0, 2);
+}
+/* Everything the notables need, worked out once for the whole list rather than per row —
+   a running comparison per day-of-the-rotation, in the order the sessions happened. */
+function histContext(){
+  const all = [...S.sessions].sort((a,b)=> (a.startedAt||0) - (b.startedAt||0));
+  const vol = new Map(), before = new Map(), firstSeen = new Map(), seen = {};
+  const everEx = new Set();
+  const mins = [];
+  all.forEach(s=>{
+    (s.entries || []).forEach(e=>{
+      const k = nrm(e.name || "");
+      if(!k || everEx.has(k)) return;
+      everEx.add(k);
+      if(!firstSeen.has(s.id)) firstSeen.set(s.id, e.name);
+    });
+    const v = sessVolume(s);
+    vol.set(s.id, v);
+    const k = s.workoutId || "?";
+    const prev = seen[k] || (seen[k] = []);
+    before.set(s.id, {
+      n: prev.length,
+      best: prev.length ? Math.max.apply(null, prev) : 0,
+      avg: prev.length ? prev.reduce((a,b)=>a+b,0)/prev.length : 0,
+      last: prev.length ? prev[prev.length-1] : 0
+    });
+    prev.push(v);
+    if(s.startedAt && s.finishedAt) mins.push(Math.round((s.finishedAt - s.startedAt)/60000));
+  });
+  mins.sort((a,b)=>a-b);
+  /* The very first session introduces every movement in it, which is not a fact worth a
+     chip — everything is new on day one. */
+  if(all.length) firstSeen.delete(all[0].id);
+  return {vol, before, firstSeen, medMins: mins.length ? mins[Math.floor(mins.length/2)] : 0};
+}
+/* THE HEAT GRID. Eighteen weeks as columns, Monday at the top, because the question it
+   answers is "did I turn up" and that is a question about gaps — which are invisible in a
+   list of the days you DID train.
+
+   A trained day takes its own rotation colour, at an opacity set by how much work it was
+   against the busiest day on screen, so a heavy week reads darker without a second legend
+   to learn. A logged rest is a quiet filled square, a skipped session a dashed outline,
+   and an untouched day the faintest thing on the grid. */
+const HEAT_WEEKS = 18;
+function histHeatHTML(ctx){
+  const byDay = {};
+  S.sessions.forEach(s=>{ if(s && s.date) byDay[s.date] = s; });
+  const rest = new Set(S.restLog || []), skip = new Set(S.skipLog || []);
+  const start = new Date(todayStr() + "T12:00:00");
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7) - (HEAT_WEEKS - 1) * 7);
+  let peak = 0;
+  Object.keys(byDay).forEach(d=>{ peak = Math.max(peak, ctx.vol.get(byDay[d].id) || 0); });
+  const today = todayStr();
+  let cols = "", months = "", lastMonth = "";
+  for(let w = 0; w < HEAT_WEEKS; w++){
+    let cells = "";
+    for(let d = 0; d < 7; d++){
+      const day = new Date(start);
+      day.setDate(day.getDate() + w*7 + d);
+      const ds = day.toLocaleDateString("en-CA");
+      const ahead = ds > today;
+      const s = byDay[ds];
+      let cls = "hx", st = "", title = fmtDate(ds);
+      if(ahead) cls += " hx-ahead";
+      else if(s){
+        const m = dayMeta(s.workoutId);
+        const v = ctx.vol.get(s.id) || 0;
+        const a = peak > 0 ? 0.35 + 0.65 * Math.min(1, v/peak) : 0.7;
+        cls += " hx-on";
+        st = `background:${m.color};opacity:${a.toFixed(2)}`;
+        title += " \u2014 " + (m.name || "session") + ", " + Math.round(v).toLocaleString() + " " + unitWord();
+      }
+      else if(rest.has(ds)){ cls += " hx-rest"; title += " \u2014 rest day"; }
+      else if(skip.has(ds)){ cls += " hx-skip"; title += " \u2014 session missed"; }
+      cells += `<i class="${cls}"${st ? ` style="${st}"` : ""} title="${attrSafe(title)}"${
+        s ? ` data-heat="${esc(s.id)}"` : ""}></i>`;
+    }
+    cols += `<span class="hx-col">${cells}</span>`;
+    const mid = new Date(start); mid.setDate(mid.getDate() + w*7 + 3);
+    const mn = mid.toLocaleDateString(undefined, {month:"short"});
+    months += `<span class="hx-mo">${mn !== lastMonth ? esc(mn) : ""}</span>`;
+    lastMonth = mn;
+  }
+  const trained = Object.keys(byDay).filter(d=> d >= start.toLocaleDateString("en-CA")).length;
+  return `<div class="card hx-card">
+    <div class="hx-head"><span class="hx-k">Last ${HEAT_WEEKS} weeks</span>
+      <span class="hx-n num">${trained} session${trained === 1 ? "" : "s"}</span></div>
+    <div class="hx-scroll"><div class="hx-inner">
+      <div class="hx-months">${months}</div>
+      <div class="hx-grid">${cols}</div>
+    </div></div>
+    <div class="hx-legend"><i class="hx hx-on" style="background:var(--acc);opacity:.85"></i>trained
+      <i class="hx hx-rest"></i>rest<i class="hx hx-skip"></i>missed</div>
+  </div>`;
+}
 function viewHistory(){
   let h = `<div class="hdr"><h1>History</h1>${hdrRight(`<span class="date num">${S.sessions.length} sessions</span>`)}</div>`;
   h += liveStripHTML();
@@ -21525,6 +21750,8 @@ function viewHistory(){
   h += `<div class="btn-row" style="margin-bottom:10px">
     <button class="btn ghost small" id="recordsBtn" style="flex:1">${ICON.pr} Record book</button>
   </div>`;
+  const HCTX = histContext();
+  h += histHeatHTML(HCTX);
   /* SEARCH, ONCE THERE IS ENOUGH TO SEARCH. Twelve sessions is a list; two hundred is an
      archive, and scrolling was the only way through it. Matches on the day's name, the
      date as it reads on screen, and any exercise in the session — which is the question
@@ -21567,13 +21794,31 @@ function viewHistory(){
   } else if(hq){
     h += `<div class="sub" style="margin:-4px 2px 12px">${shown.length} of ${S.sessions.length} sessions</div>`;
   }
+  /* Weeks, so the list has a shape. Totals go on the header rather than on every row,
+     because a number is only worth printing where something can be compared against it —
+     and a week is the unit anybody actually thinks in. */
+  const weekTotals = {};
+  shown.forEach(x=>{
+    const k = weekStartStr(x.date);
+    const t = weekTotals[k] || (weekTotals[k] = {n:0, vol:0});
+    t.n++; t.vol += HCTX.vol.get(x.id) || 0;
+  });
+  let lastWeek = null;
   shown.forEach(s=>{
     const m = dayMeta(s.workoutId);
-    const vol = s.entries.reduce((t,e)=>t+e.sets.reduce((u,st)=>u+((parseFloat(st.weight)||0)*(parseFloat(st.reps)||0)),0),0);
+    const vol = HCTX.vol.get(s.id) || 0;
     const q = s.quality;
-    const nPr = sessionPRs(s).length;
     const qc = q ? gradeColor(q.pct) : null;
-    h += `<div class="card sess" data-sess="${s.id}">
+    const wk = weekStartStr(s.date);
+    if(wk !== lastWeek){
+      lastWeek = wk;
+      const t = weekTotals[wk] || {n:0, vol:0};
+      const thisWeek = wk === weekStartStr(todayStr());
+      h += `<div class="hw"><span class="hw-k">${thisWeek ? "This week" : "Week of " + esc(fmtDateShort(wk))}</span>
+        <span class="hw-n num">${t.n} session${t.n === 1 ? "" : "s"} \u00b7 ${
+          Math.round(t.vol).toLocaleString()} ${esc(unitWord())}</span></div>`;
+    }
+    h += `<div class="card sess" id="sess-${esc(s.id)}" data-sess="${s.id}">
       <div class="row1">
         <div style="display:flex;align-items:center;gap:9px">
           <span class="dot" style="background:${m.color}"></span><b>${esc(m.name)}</b>
@@ -21583,7 +21828,10 @@ function viewHistory(){
           <span class="sub num">${fmtDate(s.date)}</span>
         </span>
       </div>
-      <div class="sub num" style="margin-top:2px">${s.entries.length} exercises · ${Math.round(vol).toLocaleString()} ${unitWord()} total${s.feel?' · '+feelIcon(s.feel)+' '+esc(FEEL_WORDS[s.feel-1]):''}${nPr?' · '+ICON.pr+' '+nPr+' PR'+(nPr>1?"s":""):''}</div>
+      <div class="sub num" style="margin-top:3px">${Math.round(vol).toLocaleString()} ${unitWord()}${
+        s.feel ? ' \u00b7 ' + feelIcon(s.feel) + ' ' + esc(FEEL_WORDS[s.feel-1]) : ''}</div>
+      <div class="hn">${sessNotables(s, HCTX).map(n=>
+        `<span class="hn-b hn-${n.k}">${n.k === "pr" ? ICON.pr + " " : ""}${esc(n.t)}</span>`).join("")}</div>
       ${s.gymName && gymList().length > 1 ? `<div class="sub" style="margin-top:3px;color:var(--faint)">at ${esc(s.gymName)}</div>` : ""}
       ${s.note?`<div class="sub" style="margin-top:4px;font-style:italic">"${esc(s.note)}"</div>`:""}
       <div class="detail">${((ssm)=> s.entries.map((e,i)=>
@@ -23478,6 +23726,16 @@ function bind(){
   const docB = $("#docBtn");
   if(docB) docB.onclick = downloadDoc;
 
+  /* A square on the grid goes to its session rather than filtering to it: filtering
+     throws away the context the grid just gave you. */
+  document.querySelectorAll("[data-heat]").forEach(c=> c.onclick = ()=>{
+    const card = document.getElementById("sess-" + c.dataset.heat);
+    if(!card) return;
+    document.querySelectorAll(".sess.hx-hit").forEach(x=> x.classList.remove("hx-hit"));
+    card.classList.add("open", "hx-hit");
+    card.scrollIntoView({behavior: reducedMotion() ? "auto" : "smooth", block:"center"});
+    setTimeout(()=> card.classList.remove("hx-hit"), 1400);
+  });
   document.querySelectorAll(".sess").forEach(c=>{
     c.onclick = e=>{
       const d = e.target.dataset || {};
