@@ -1161,9 +1161,31 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
 .plate-line{
   font:12px var(--mono);color:var(--dim);line-height:1.45;
   border:1px dashed var(--line);border-radius:9px;
-  padding:7px 10px;margin:0 0 10px;
+  padding:8px 10px;margin:0 0 10px;
 }
 .plate-line b{color:var(--text);font-weight:400}
+.pl-say{margin-top:7px}
+/* The drawing. Plates hang on a sleeve that runs left to right, heaviest nearest the
+   middle of the bar, which is the order you actually load them in. */
+.pl-art{display:flex;align-items:center;gap:0;min-height:54px}
+.pl-stub{
+  flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  height:13px;padding:0 7px;border-radius:3px 0 0 3px;
+  background:linear-gradient(180deg,#4a4a55,#33333c);
+}
+.pl-stub b{font:8.5px var(--mono);color:#c9c6c0;font-weight:600;letter-spacing:.04em}
+.pl-sleeve{position:relative;flex:0 1 auto;display:flex;align-items:center;gap:2px;
+  padding:0 9px 0 4px;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* The bar itself, behind the discs. */
+/* Runs past the collar, or the bar looks like it stops where the plates do. */
+.pl-rod{position:absolute;left:0;right:-7px;top:50%;height:7px;margin-top:-3.5px;
+  background:linear-gradient(180deg,#54545f,#3a3a44);border-radius:2px}
+.pl-d{
+  position:relative;z-index:1;flex:0 0 auto;border-radius:2px;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.5);
+}
+.pl-collar{position:relative;z-index:1;flex:0 0 auto;width:6px;height:17px;border-radius:2px;
+  background:linear-gradient(180deg,#5c5c68,#3e3e48);margin-left:2px}
 .lp-rom{display:flex;align-items:center;gap:11px;margin:9px 0 10px}
 .lp-bar{
   flex:0 0 auto;width:26px;height:46px;border-radius:6px;
@@ -4846,7 +4868,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "18.2";
+const APP_VERSION = "18.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -29924,6 +29946,45 @@ function setRowHTML(en, ei, si, last, idxLabel){
    actually asking for — the number already typed, else the one the plan prescribes — so
    it answers the question in front of you rather than a general one, and it disappears
    the moment there is nothing honest to say. */
+/* =====================================================================
+   THE PLATES, DRAWN
+
+   "45 lb bar + 2×45 + 25 + 10 a side" is correct and it is a sentence you have to parse
+   while standing at a rack looking at a pile of discs. A bar is a picture, so this draws
+   one: the sleeve, and the plates on it heaviest-inward, each one sized and coloured the
+   way the real thing is.
+
+   THE COLOURS ARE A DELIBERATE EXCEPTION to the one-accent rule, on the same grounds the
+   day plates and the muscle map already are — they are WAYFINDING, not decoration. You
+   find a 25 on a rack by its colour before you read the number on it, and a monochrome
+   diagram of a thing you identify by colour is a worse diagram. They are pulled well
+   down in saturation so the copper stays the loudest thing on screen.
+
+   The sentence stays as the label under it, because the drawing is an aid and the numbers
+   are the answer — and because a picture cannot say "2.5 a side short". */
+/* Recognisable, then pulled down until the copper is still the loudest thing on screen.
+   The first pass used real bumper saturation and the blue fought the accent from across
+   the card, which is exactly the failure the one-accent rule exists to prevent. */
+const PLATE_HUE_LB = {45:"#46617f", 35:"#8a7b46", 25:"#4a7a56", 10:"#a8a59d",
+                      5:"#8f4f4a", 2.5:"#6f6d69", 1.25:"#56545a"};
+const PLATE_HUE_KG = {25:"#8f4f4a", 20:"#46617f", 15:"#8a7b46", 10:"#4a7a56",
+                      5:"#a8a59d", 2.5:"#8f4f4a", 1.25:"#6f6d69"};
+function plateArtHTML(b){
+  if(!b || !b.plates.length) return "";
+  const hue = inKg() ? PLATE_HUE_KG : PLATE_HUE_LB;
+  const big = inKg() ? 25 : 45;
+  /* Square-root, not linear: a 1.25 next to a 45 on a linear scale is three pixels tall
+     and reads as a smudge, and the point of the drawing is that you can tell them apart. */
+  const hOf = w=> Math.round(19 + 33 * Math.sqrt(Math.min(1, w / big)));
+  const wOf = w=> w >= big * 0.5 ? 13 : w >= big * 0.2 ? 11 : 9;
+  const discs = b.plates.map(w=>
+    `<i class="pl-d" style="height:${hOf(w)}px;width:${wOf(w)}px;background:${hue[w] || "#56545a"}"
+       title="${esc(r1(w) + " " + unitWord())}"></i>`).join("");
+  return `<div class="pl-art" aria-hidden="true">
+    ${b.platesOnly ? "" : `<span class="pl-stub"><b>${esc(fmtLoad(b.bar))}</b></span>`}
+    <span class="pl-sleeve"><span class="pl-rod"></span>${discs}<span class="pl-collar"></span></span>
+  </div>`;
+}
 function plateLineHTML(en){
   if(!en || !en.name) return "";
   const typed = (en.sets || []).map(st=> parseFloat(st && st.weight)).find(v=> v > 0);
@@ -29931,7 +29992,9 @@ function plateLineHTML(en){
   if(!(want > 0)) return "";
   const line = plateLine(want, en.name);
   if(!line) return "";
-  return `<div class="plate-line"><b>${esc(fmtLoad(want))}</b> = ${esc(line)}</div>`;
+  const b = plateBreakdown(want, en.name);
+  return `<div class="plate-line">${plateArtHTML(b)}<div class="pl-say"><b>${
+    esc(fmtLoad(want))}</b> = ${esc(line)}</div></div>`;
 }
 function lpLineHTML(en){
   if(!lpWholeExercise(en)) return "";
