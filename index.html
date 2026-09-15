@@ -4679,6 +4679,12 @@ body.cele-open{overflow:hidden}
 .fx-c .num{flex:0 0 auto;font-size:11.5px;color:var(--faint)}
 .fx-c.on{background:var(--acc-soft);border-color:var(--acc-line)}
 .fx-c.on .num{color:var(--acc)}
+/* The plan itself, as a list of before-and-afters: an app that edits your training owes
+   you the diff before you press the button, not a summary of it. */
+.fx-plan{
+  border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-top:6px;
+  font:12px var(--mono);line-height:1.75;color:var(--dim);background:var(--card2);
+}
 .fx-days{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
 .fx-d{
   padding:8px 11px;border-radius:9px;border:1px solid var(--line);background:var(--card2);
@@ -5327,7 +5333,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.5";
+const APP_VERSION = "20.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10107,6 +10113,149 @@ function shiftedRange(reps){
    can say it and the modal can show it. Returns null when a finding is not something
    software can carry out — "run the days that carry your calf work" is a fact about
    which sessions you actually do, and no plan edit fixes it. */
+/* =====================================================================
+   SPREADING THE WORK ACROSS THE CYCLE, NOT PILING IT ONTO ONE DAY
+
+   The old fix added sets "spread across the movements that already train it". That is
+   spreading across EXERCISES, which is not the same thing and is often not spreading at
+   all: if everything that trains your chest sits on Push A, three of those movements are
+   three slots in one session, and four added sets land on the same afternoon.
+
+   The app already believes frequency matters — adjustedLandmarks() raises what it thinks
+   you recover from by 15% at three sessions a week for a muscle and drops it 10% at one.
+   Its own suggestion then ignored the factor its own arithmetic uses.
+
+   So the work is dealt out by DAY. Four rules, in order:
+
+     1. A SET IS WORTH A FRACTION OF A SET. Three sets of a 50%-chest movement are 1.5
+        sets of chest, so the count that matters is contribution, not slots. The old
+        version counted raw sets and under-delivered on every accessory.
+     2. DAYS THAT ALREADY TRAIN IT COME FIRST, poorest-served day first, then the
+        shortest session — so the volume lands where there is both need and room, and
+        the long day does not get longer.
+     3. NOBODY GOES PAST SIX SETS of one movement. Past that it is a different exercise's
+        job, and the sixth set of anything is already paying less than the second.
+     4. IF THE MUSCLE ONLY LIVES ON ONE DAY, one new movement goes on a second. Frequency
+        is the lever with the most evidence behind it and the one thing added sets on the
+        same day cannot buy. Exactly one — a fix that quietly rewrites two days is not a
+        fix you can read before you press it.
+
+   And it stops at the ceiling. Volume you cannot recover from is not a fix for volume
+   you are short of. */
+const SPREAD_MAX_PER_EX = 6;
+function daySetCount(wid){
+  return (S.program[wid] || []).reduce((t, e)=> t + (parseInt(e.sets, 10) || 0), 0);
+}
+function spreadPlan(A, m, need){
+  if(!GROUPS[m] || !(need > 0)) return null;
+  const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
+  const have = ((A.wk[m] || {}).sets || 0) + ((A.cyc && A.cyc.pending[m]) || 0);
+  const room = Math.max(0, (L.mrv || 0) - have);
+  let left = Math.min(need, room > 0 ? room : need);
+  if(!(left > 0)) return null;
+
+  const ents = planEntriesForMuscle(m);
+  const adds = [];                     // {wid, i, name, from, to, frac}
+  const keyOf = x => x.wid + "#" + x.i;
+  const byKey = {};
+  const dayOf = {};                    // wid -> entries for this muscle on it
+  ents.forEach(x=>{ (dayOf[x.wid] = dayOf[x.wid] || []).push(x); });
+  const daysTrained = Object.keys(dayOf);
+
+  /* FREQUENCY IS CHOSEN FIRST, NOT LEFT OVER. Filling the existing day to its caps and
+     then asking "is there anything left for a second day" is how a muscle trained once a
+     cycle stays trained once a cycle: two movements with headroom will absorb any
+     realistic shortfall, and the branch that raises frequency never fires. Since raising
+     frequency is the lever with the most evidence behind it — and the one thing more
+     sets on the same day cannot buy — it gets first refusal on the work. */
+  /* A SECOND DAY, where there is only one — AND IT HAS TO BE A DAY THE MOVEMENT BELONGS
+     ON. Picking purely by "shortest session" put a cable chest press on leg day, which
+     raises chest frequency and is obviously wrong advice: nobody wants a pressing
+     movement in the middle of squats and leg curls.
+
+     So each free day is scored by how much it already trains the muscles this movement
+     trains — a chest press shares chest, front delts and triceps with an upper day and
+     nothing with a lower one. Session length only breaks ties. */
+  let newEx = null;
+  const wantFreq = Math.min(3, Math.max(2, Math.floor(DAYS.length / 2)));
+  if(daysTrained.length < 2 && DAYS.length > 1){
+    const pick = fixCandidates(m, ents.map(x=> x.e.name))[0];
+    const fits = pick ? (musclesFor(pick.name) || {}) : {};
+    const kinship = wid=> (S.program[wid] || []).reduce((t, e)=>{
+      const mm = musclesFor(e.name) || {};
+      let share = 0;
+      Object.keys(fits).forEach(k=>{ if(mm[k]) share += Math.min(fits[k], mm[k]); });
+      return t + share * (parseInt(e.sets, 10) || 1);
+    }, 0);
+    const free = DAYS.filter(d=> !dayOf[d]).sort((p,q)=>{
+      const kp = kinship(p), kq = kinship(q);
+      if(Math.abs(kp - kq) > 0.01) return kq - kp;       // the day it belongs on
+      return daySetCount(p) - daySetCount(q);            // then the shorter session
+    });
+    /* A day with nothing whatever in common is not a home for it. Better to add the sets
+       to the one day that does train it than to file a press under legs. */
+    if(free.length && pick && kinship(free[0]) < 0.5) return finish();
+    /* A WHOLE NEW EXERCISE FOR ONE SET IS NOT A FIX, IT IS CLUTTER. The round-robin has
+       already filled the days that train the muscle, so `left` here is what those days
+       could not absorb. Under a set and a half that is not worth restructuring a session
+       for — the shortfall is small enough that the existing days will do. */
+    if(free.length && pick && left >= 1.5){
+      /* About half the shortfall goes to the new day, so the second session is worth
+         showing up for without the first one being gutted to pay for it. */
+      const want = Math.max(2, Math.min(3, Math.ceil((left / 2) / Math.max(0.1, pick.frac))));
+      newEx = {wid: free[0], name: pick.name, sets: want, frac: pick.frac};
+      left -= want * pick.frac;
+    }
+  }
+
+  /* Round-robin over the days, one set per visit, so eight sets across three days land
+     3/3/2 rather than 6/2/0. Re-sorted every pass, because adding to a day changes both
+     of the things the order is based on. */
+  let guard = 0;
+  while(left > 0.001 && guard++ < 60){
+    const order = daysTrained.slice().sort((p, q)=>{
+      const sp = (dayOf[p] || []).reduce((t,x)=> t + ((byKey[keyOf(x)] || {}).to || x.e.sets || 1) * x.frac, 0);
+      const sq = (dayOf[q] || []).reduce((t,x)=> t + ((byKey[keyOf(x)] || {}).to || x.e.sets || 1) * x.frac, 0);
+      if(Math.abs(sp - sq) > 0.01) return sp - sq;        // the day doing least of it
+      return daySetCount(p) - daySetCount(q);             // then the shorter session
+    });
+    let placed = false;
+    for(const wid of order){
+      const slot = (dayOf[wid] || [])
+        .filter(x=> (((byKey[keyOf(x)] || {}).to) || x.e.sets || 1) < SPREAD_MAX_PER_EX)
+        .sort((p,q)=> q.frac - p.frac)[0];
+      if(!slot) continue;
+      const k = keyOf(slot);
+      const cur = (byKey[k] || {}).to || slot.e.sets || 1;
+      if(byKey[k]) byKey[k].to = cur + 1;
+      else { byKey[k] = {wid: slot.wid, i: slot.i, name: slot.e.name, from: slot.e.sets || 1,
+                         to: cur + 1, frac: slot.frac}; adds.push(byKey[k]); }
+      left -= slot.frac;
+      placed = true;
+      break;
+    }
+    if(!placed) break;                 // every movement is at its cap
+  }
+
+  return finish();
+
+  function finish(){
+    if(!adds.length && !newEx) return null;
+    const gained = adds.reduce((t,a)=> t + (a.to - a.from) * a.frac, 0)
+                 + (newEx ? newEx.sets * newEx.frac : 0);
+    const daysAfter = new Set(adds.map(a=> a.wid).concat(newEx ? [newEx.wid] : [])).size;
+    return {adds, newEx, gained: r1(gained), daysTouched: daysAfter,
+            freqBefore: daysTrained.length,
+            freqAfter: new Set(daysTrained.concat(newEx ? [newEx.wid] : [])).size,
+            wantFreq, atCeiling: room <= 0.001};
+  }
+}
+function spreadList(plan){
+  const out = plan.adds.map(a=> widName(a.wid) + " · " + a.name + ": " + a.from + " → " + a.to + " sets");
+  if(plan.newEx) out.push(widName(plan.newEx.wid) + " · " + plan.newEx.name + ": new, " +
+    plan.newEx.sets + " set" + (plan.newEx.sets === 1 ? "" : "s"));
+  return out;
+}
 function findingPlan(w, A){
   if(!w) return null;
   const m = w.muscle, M = MUSCLES[m];
@@ -10136,27 +10285,20 @@ function findingPlan(w, A){
   if(w.kind === "under" || w.kind === "balance"){
     if(!ents.length) return null;
     const need = Math.max(1, Math.ceil((lm.mev || 0) - ((A.wk[m]||{}).sets || 0) - ((A.cyc&&A.cyc.pending[m])||0)));
-    // Spread over the movements that already train it, one at a time, biggest contributor
-    // first, and never past 6 sets on any one exercise.
-    const adds = [];
-    let left = Math.max(1, Math.min(6, need));
-    for(let pass=0; pass<3 && left>0; pass++){
-      for(const x of ents){
-        if(left <= 0) break;
-        const cur = (adds.find(a=>a.wid===x.wid && a.i===x.i) || {}).to || x.e.sets || 1;
-        if(cur >= 6) continue;
-        const found = adds.find(a=>a.wid===x.wid && a.i===x.i);
-        if(found) found.to = cur + 1; else adds.push({wid:x.wid, i:x.i, name:x.e.name, from:x.e.sets||1, to:cur+1});
-        left--;
-      }
-    }
-    if(!adds.length) return null;
-    const total = adds.reduce((t,a)=> t + (a.to - a.from), 0);
-    return {mode:"sets", adds,
-      label:"Add " + total + " set" + (total===1?"":"s"),
-      does:"Adds " + total + " working set" + (total===1?"":"s") + " of direct " + name +
-           " work to your plan, spread across the movements that already train it. This one sticks until you change it.",
-      list: adds.map(a=> a.name + ": " + a.from + " \u2192 " + a.to + " sets")};
+    const plan = spreadPlan(A, m, Math.min(8, need));
+    if(!plan) return null;
+    const slots = plan.adds.length + (plan.newEx ? 1 : 0);
+    const freq = plan.freqAfter > plan.freqBefore;
+    return {mode:"spread", plan,
+      label:"Add " + plan.gained + " set" + (plan.gained === 1 ? "" : "s"),
+      does:"Adds about " + plan.gained + " set" + (plan.gained === 1 ? "" : "s") + " of direct " + name +
+           " work, dealt across " + plan.daysTouched + " day" + (plan.daysTouched === 1 ? "" : "s") +
+           " of your cycle rather than piled onto one" +
+           (freq ? ", including one new movement so " + name + " is trained on " + plan.freqAfter +
+                   " days instead of " + plan.freqBefore : "") +
+           ". Fractions count: a set of a movement that is half " + name + " is half a set of it. " +
+           "This one sticks until you change it.",
+      list: spreadList(plan)};
   }
   if(w.kind === "stall"){
     const rows = [];
@@ -10373,13 +10515,22 @@ function applyFinding(idx){
       rpeCap: plan.rpeCap, why: w.act, at: Date.now()};
     logPlanChange("ease", null, M.name, plan.list,
       {note: plan.label + " \u2014 lifts automatically after " + EASE_DAYS + " days."});
-  } else if(plan.mode === "sets"){
-    plan.adds.forEach(a=>{
+  } else if(plan.mode === "sets" || plan.mode === "spread"){
+    const adds = plan.mode === "spread" ? plan.plan.adds : plan.adds;
+    adds.forEach(a=>{
       const e = (S.program[a.wid]||[])[a.i];
       if(!e) return;
       e.sets = a.to;
       if(Array.isArray(e.rpes)) while(e.rpes.length < a.to) e.rpes.push(e.rpes[e.rpes.length-1]);
     });
+    /* The new movement, where the plan calls for one. Built like anything else the
+       Program tab adds, so it behaves like a normal entry from the next session on: its
+       own rep range and rest, and no load invented for it. */
+    if(plan.mode === "spread" && plan.plan.newEx){
+      const n = plan.plan.newEx;
+      if(!Array.isArray(S.program[n.wid])) S.program[n.wid] = [];
+      S.program[n.wid].push({name: n.name, sets: n.sets, reps: "8-12", rest: REST_SECOND});
+    }
     logPlanChange("programme", null, M.name, plan.list, {note:"Applied from the Body tab."});
   } else if(plan.mode === "reps"){
     plan.rows.forEach(r=>{
@@ -21507,15 +21658,16 @@ function openOwnFix(idx){
   }
   const draw = ()=>{
     const MODES = [
-      {k:"own",  t:"Add a movement"},
-      {k:"one",  t:"Add sets to one"},
-      {k:"swap", t:"Swap one out"}
+      {k:"own",    t:"Add a movement"},
+      {k:"one",    t:"Add sets to one"},
+      {k:"spread", t:"Spread it out"},
+      {k:"swap",   t:"Swap one out"}
     ];
     let h = `<h3>Fix it your way</h3>
       <div class="sub" style="margin:6px 0 13px;text-transform:none;letter-spacing:0">Whatever
         you pick, the number underneath says what it would actually do to your ${esc(M.name.toLowerCase())}
         volume before anything is written.</div>
-      <div class="fx-modes fx-m3">${MODES.map(x=>
+      <div class="fx-modes">${MODES.map(x=>
         `<button type="button" class="fx-m${FIX.mode===x.k?" on":""}" data-fxm="${x.k}"
           aria-pressed="${FIX.mode===x.k}">${esc(x.t)}</button>`).join("")}</div>
       <div id="fxBody"></div>`;
@@ -21557,6 +21709,34 @@ function openOwnFix(idx){
           <div class="k-lab" style="margin-top:12px">Sets on ${esc(x.e.name)}</div>
           ${stepRow("fxSetsOne", FIX.setsOne, 1, 8)}
           <div class="sub" style="margin:6px 2px 0">Was ${from}.</div>`;
+      }
+    } else if(FIX.mode === "spread"){
+      /* THE SAME PLANNER THE APP'S OWN SUGGESTION USES, with the amount in your hands.
+         The default picks the number for you; here you say how much and see exactly
+         which days it lands on before anything is written. */
+      if(FIX.spread == null) FIX.spread = 3;
+      const sp = spreadPlan(A, m, FIX.spread);
+      add = sp ? sp.gained : 0;
+      ok = !!sp;
+      h += `<div class="k-lab">How much ${esc(M.name.toLowerCase())} work to add</div>
+        ${stepRow("fxSpread", FIX.spread, 1, 10)}
+        <div class="set-says" style="margin-top:7px">Counted as sets of ${esc(M.name.toLowerCase())},
+          so a movement that is half ${esc(M.name.toLowerCase())} contributes half a set.</div>`;
+      if(!sp){
+        h += `<div class="wd-none">${sp === null && planEntriesForMuscle(m).length === 0
+          ? "Nothing in your plan trains " + esc(M.name.toLowerCase()) + " yet, so there is nowhere to spread it. Use <b>Add a movement</b>."
+          : esc(M.name) + " is already at the top of what the app thinks you recover from, so there is no room to add anywhere."}</div>`;
+      } else {
+        h += `<div class="k-lab" style="margin-top:14px">Where it lands</div>
+          <div class="fx-plan">${spreadList(sp).map(x=>`<div>${esc(x)}</div>`).join("")}</div>
+          <div class="set-says" style="margin-top:7px">${
+            sp.freqAfter > sp.freqBefore
+              ? "Across <b>" + sp.daysTouched + "</b> day" + (sp.daysTouched===1?"":"s") + ", and "
+                + esc(M.name.toLowerCase()) + " goes from <b>" + sp.freqBefore + "</b> day"
+                + (sp.freqBefore===1?"":"s") + " a cycle to <b>" + sp.freqAfter + "</b>."
+              : "Across <b>" + sp.daysTouched + "</b> day" + (sp.daysTouched===1?"":"s")
+                + " of your cycle, poorest-served first, and nothing goes past "
+                + SPREAD_MAX_PER_EX + " sets of one movement."}</div>`;
       }
     } else if(FIX.mode === "swap"){
       const weakest = ents.slice().sort((a,b)=> a.frac - b.frac);
@@ -21641,7 +21821,7 @@ function openOwnFix(idx){
     m2.querySelectorAll("[data-fxstep]").forEach(b=> b.onclick = ()=>{
       const [id, dir, lo, hi, st] = b.dataset.fxstep.split(":");
       const step = parseFloat(st) || 1;
-      const key = {fxSets:"sets", fxSetsOne:"setsOne"}[id];
+      const key = {fxSets:"sets", fxSetsOne:"setsOne", fxSpread:"spread"}[id];
       const v = (parseFloat(FIX[key]) || 0) + (dir === "up" ? step : -step);
       FIX[key] = Math.max(parseFloat(lo), Math.min(parseFloat(hi), Math.round(v*10)/10));
       redraw();
@@ -21689,6 +21869,25 @@ function applyOwnFix(idx){
     logPlanChange("programme", null, e.name, [from + " → " + e.sets + " sets"],
       {note: "Chosen from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
     toast(e.name + " now " + e.sets + " sets");
+  } else if(FIX.mode === "spread"){
+    const sp = spreadPlan(A, m, FIX.spread || 3);
+    if(!sp) return;
+    sp.adds.forEach(a=>{
+      const e = (S.program[a.wid] || [])[a.i];
+      if(!e) return;
+      e.sets = a.to;
+      if(Array.isArray(e.rpes)) while(e.rpes.length < a.to) e.rpes.push(e.rpes[e.rpes.length-1]);
+    });
+    if(sp.newEx){
+      const n = sp.newEx;
+      if(!Array.isArray(S.program[n.wid])) S.program[n.wid] = [];
+      S.program[n.wid].push({name: n.name, sets: n.sets, reps: "8-12", rest: REST_SECOND});
+    }
+    logPlanChange("programme", null, M.name, spreadList(sp),
+      {note: "Spread across " + sp.daysTouched + " day" + (sp.daysTouched===1?"":"s") +
+             " from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
+    toast("About " + sp.gained + " sets of " + M.name.toLowerCase() + " added across " +
+          sp.daysTouched + " day" + (sp.daysTouched===1?"":"s"));
   } else if(FIX.mode === "swap"){
     const weakest = ents.slice().sort((a,b)=> a.frac - b.frac);
     const from = weakest[Math.min(FIX.swapFrom || 0, weakest.length-1)];
