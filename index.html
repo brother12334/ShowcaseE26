@@ -5346,7 +5346,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "21.0";
+const APP_VERSION = "21.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10165,15 +10165,17 @@ function daySetCount(wid){
    the days that already train the muscle. */
 function spreadPlan(A, m, need, avoid, pin){
   if(!GROUPS[m] || !(need > 0)) return null;
-  const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
-  /* The ceiling is judged on what the muscle has actually taken over the window its
-     thresholds are scaled to — see sideRoom(). */
-  const have = (A.wk[m] || {}).sets || 0;
+  /* The ceiling a plan edit must respect is the one the PLAN will hit, not the one this
+     cycle has reached so far — see fixProjection(). Adding three sets to a programme that
+     already prescribes twenty-two is past the ceiling on the day it is written, however
+     far through the cycle you happen to be when you write it. */
+  const have = planCycleVolume(m);
+  const L2 = cycleLandmarks(A, m);
   /* AT THE CEILING MEANS NO PLAN, not "ignore the ceiling". `room > 0 ? room : need` read
      as "cap it at the room available, unless there is none, in which case add everything
      you were asked for" — which is the one case the cap exists for. A muscle with no room
      gets no plan, and the caller says so instead of offering to add to it. */
-  const room = Math.max(0, (L.mrv || 0) - have);
+  const room = Math.max(0, (L2.mrv || 0) - have);
   if(!(room > 0.001)) return null;
   let left = Math.min(need, room);
   if(!(left > 0)) return null;
@@ -10453,19 +10455,57 @@ function muscleFrac(exName, m){
 /* Where the muscle stands now, and where a proposed change would put it. `addSets` is in
    REAL sets of the muscle (already multiplied by the fraction), so every mode can share
    this and none of them can quietly forget the weighting. */
-function fixProjection(A, m, addSets){
-  const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
-  /* ONE NUMBER, THE SAME ONE THE BAR SHOWS. This used to fold the sets still queued for
-     the rest of the cycle into the figure being compared, so the panel opened on 19 where
-     the finding behind it showed 10 — against the same threshold, which is scaled to the
-     days elapsed rather than to the whole cycle. Explaining the discrepancy in a caption
-     was the wrong fix for it; the right one is not to have two numbers.
+/* =====================================================================
+   A PLAN EDIT IS JUDGED ON WHAT THE PLAN DELIVERS
 
-     The queued sets are still worth knowing, so they are still said — underneath, as
-     context about what is coming, rather than mixed into the comparison. */
+   The panel used to compare what a muscle had taken SO FAR this cycle against a
+   threshold scaled to the days elapsed. Internally consistent, and the wrong question:
+   you are editing a programme, and a programme is spent every cycle whether or not you
+   have reached that part of it yet. Ten sets logged with nine more already prescribed
+   reads as ten, so adding three read as "clears it, 13 against a 6.7 floor" — while the
+   cycle was actually about to deliver twenty-two against a ceiling of fifteen.
+
+   Both halves move together now. The volume is what the PROGRAMME prescribes per cycle,
+   and the thresholds are converted from the per-week figures to that same cycle. Nothing
+   is scaled to how far through you happen to be, because that is not a fact about the
+   plan you are changing.
+
+   The Body tab's bar keeps doing what it does — how far through this cycle you are —
+   because that is a different and equally real question. The panel now says which of the
+   two it is answering. */
+function cycleLenDays(){
+  const n = (CYCLE_LAYOUT || []).length;
+  return n > 0 ? n : 7;
+}
+// What the saved programme prescribes for one muscle over one full cycle, weighted.
+function planCycleVolume(m){
+  let t = 0;
+  DAYS.concat(["finisher"]).forEach(wid=>{
+    (S.program[wid] || []).forEach(e=>{
+      const f = muscleFrac(e.name, m);
+      if(f > 0) t += (parseInt(e.sets, 10) || 0) * f;
+    });
+  });
+  return t;
+}
+/* The same landmarks the Body tab uses, converted from the window they are scaled to
+   into one whole cycle. adjustedLandmarks() returns them already multiplied by
+   win.scale (days elapsed / 7), so dividing that out gives the per-week figure and
+   multiplying by the cycle's own length gives the per-cycle one. */
+function cycleLandmarks(A, m){
+  const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
+  const sc = (A.win && A.win.scale) || 1;
+  const k = (cycleLenDays() / 7) / (sc > 0 ? sc : 1);
+  return {mev: L.mev * k, mav: L.mav * k, mrv: L.mrv * k, k};
+}
+function fixProjection(A, m, addSets){
+  const L = cycleLandmarks(A, m);
+  /* `done` and `queued` are kept for the caption, which names the difference between what
+     this screen measures and what the Body tab's bar measures. Neither of them is part of
+     the comparison — see the note above this function. */
   const done = (A.wk[m] || {}).sets || 0;
   const queued = (A.cyc && A.cyc.pending[m]) || 0;
-  const now = done;
+  const now = planCycleVolume(m);
   const after = Math.max(0, now + (addSets || 0));
   const R = v => Math.round(v * 10) / 10;
   let verdict, tone;
@@ -10474,6 +10514,7 @@ function fixProjection(A, m, addSets){
      for nothing. Say what is true instead. */
   if(!(L.mev > 0)){
     return {now: R(now), after: R(after), mev: 0, mav: R(L.mav), mrv: R(L.mrv), tone: "warn",
+      done: R(done), queued: R(queued), cycleDays: cycleLenDays(),
       verdict: "There is no set floor for this one, so nothing here can clear it — what you add is a judgement call rather than a gap being closed."};
   }
   /* JUDGE THE NUMBERS THAT ARE ON SCREEN. A set is worth a fraction of a set to each
@@ -10496,7 +10537,7 @@ function fixProjection(A, m, addSets){
     tone = "bad";
   }
   return {now: R(now), after: R(after), mev: R(L.mev), mav: R(L.mav), mrv: R(L.mrv),
-          done: R(done), queued: R(queued), verdict, tone};
+          done: R(done), queued: R(queued), cycleDays: cycleLenDays(), verdict, tone};
 }
 /* WHEN THE FINDING IS A RATIO, THE ANSWER HAS TO BE A RATIO.
 
@@ -10514,7 +10555,9 @@ function balanceProjection(A, m, addSets){
   const R = ratioPairFor(m);
   if(!R) return null;
   const side = R.a.indexOf(m) > -1 ? "a" : "b";
-  const sum = keys => keys.reduce((t, k)=> t + ((A.wk[k] || {}).sets || 0), 0);
+  /* The ratio a plan edit is judged on is the ratio the PLAN produces, for the same
+     reason the set count is — see fixProjection(). */
+  const sum = keys => keys.reduce((t, k)=> t + planCycleVolume(k), 0);
   const a0 = sum(R.a), b0 = sum(R.b);
   const a1 = a0 + (side === "a" ? (addSets || 0) : 0);
   const b1 = b0 + (side === "b" ? (addSets || 0) : 0);
@@ -10549,9 +10592,9 @@ function fixReadoutHTML(pr, bal){
     <div class="fx-bar"><i style="width:${pct(pr.after)}%"></i>
       <u style="left:${pct(pr.mev)}%"></u></div>
     <div class="fx-say">${esc(pr.verdict)}</div>
-    ${pr.queued > 0 ? `<div class="fx-made">Counted the way the Body tab counts it: what this
-      muscle has taken so far. Your plan has ${pr.queued} more set${pr.queued === 1 ? "" : "s"}
-      of it still to come in this cycle.</div>` : ""}
+    <div class="fx-made">What your programme prescribes over one full ${pr.cycleDays}-day cycle,
+      against the same target converted to a cycle. The Body tab's bar shows something else —
+      how much of it you have taken so far${pr.done > 0 ? ", " + pr.done + " at the moment" : ""}.</div>
   </div>`;
 }
 /* Movements this app knows that actually train the muscle, best first, minus the ones
