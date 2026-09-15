@@ -5006,7 +5006,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "19.0";
+const APP_VERSION = "19.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8174,7 +8174,7 @@ function migrate(){
   if(skipLog().length && (S.restLog||[]).length)
     S.skipLog = skipLog().filter(d=> S.restLog.indexOf(d) < 0);
   if(!Array.isArray(S.planLog)) S.planLog = [];
-  if(!S.volWindow) S.volWindow = "cycle";   // Body tab accumulates over the cycle by default
+  delete S.volWindow;                       // the window is no longer a stored choice
   if(S.askWhy === undefined) S.askWhy = true;   // ask what happened when a set collapses
 
   /* ---- Spider Curl is bilateral ----
@@ -10952,26 +10952,29 @@ function r1(n){ return Math.round(n*10)/10; }
 /* =====================================================================
    EXPERIENCE LEVEL
 
-   Inferred from your logged history, overridable per person. The inference can only
-   see how long you have used THIS APP, which is not the same as your training age, so
-   with little history it deliberately assumes intermediate rather than beginner, and
-   the Body tab tells you to set it.
+   Inferred from your logged history, continuously, with no way to override it by hand:
+   asking somebody to grade their own training age is asking a question the log answers
+   better every week. The inference can only see how long you have used THIS APP, which
+   is not the same as a training age, so with little history it falls back to whatever
+   an import was told and otherwise assumes intermediate rather than beginner.
    ===================================================================== */
 const EXP_LEVELS = ["beginner","intermediate","advanced"];
 function inferExperience(){
-  if(!S.sessions.length) return "intermediate";
+  /* WHAT YOU TOLD THE IMPORTER IS A SEED, NOT AN OVERRIDE. The inference can only see
+     this app, so for the first couple of months it has nothing to judge with and a real
+     beginner would be read as intermediate. Where a level was actually stated at import
+     it fills exactly that gap — and stops mattering the moment the log can speak for
+     itself, which is the whole point of not making this a dial you set once and forget. */
+  const stated = EXP_LEVELS.indexOf(S.experience) > -1 ? S.experience : null;
+  if(!S.sessions.length) return stated || "intermediate";
   const weeks = (Date.now() - S.sessions[0].startedAt)/(7*DAY_MS);
   const n = S.sessions.length;
-  if(weeks < 8) return "intermediate";                 // too little to judge, assume the middle
+  if(weeks < 8) return stated || "intermediate";       // too little to judge
   if(weeks < 30 || n < 55) return "beginner";
   if(weeks < 100 || n < 190) return "intermediate";
   return "advanced";
 }
-function experience(){
-  const set = S.experience;
-  return (set && set !== "auto" && EXP_LEVELS.indexOf(set) > -1) ? set : inferExperience();
-}
-function experienceIsAuto(){ return !S.experience || S.experience === "auto"; }
+function experience(){ return inferExperience(); }
 
 /* =====================================================================
    ADJUSTED VOLUME LANDMARKS
@@ -11058,13 +11061,6 @@ function adjustedLandmarks(A, g){
   mev = R(mev); mav = R(Math.max(mav, mev+1)); mrv = R(Math.max(mrv, mav+1));
   return {mev, mav, mrv, weekly, scale, why, exp, base:{mev:G.mev, mav:G.mav, mrv:G.mrv}};
 }
-/* What each level means, in one line, so the setting can stand on its own now that it is
-   no longer sitting inside a page of prose that explained it by implication. */
-const EXP_WHAT = {
-  beginner:     "Under a year in. Lower targets \u2014 you grow on less.",
-  intermediate: "A year or two, still adding weight most months.",
-  advanced:     "Several years. Higher targets to move the needle."
-};
 function landmarkExplainerHTML(A){
   let h = `<div class="bm-explain">Your set targets are not fixed numbers. They start from published
     population figures for each muscle group, then get scaled by five things the app can read from your own log,
@@ -11149,7 +11145,10 @@ function volWindowInfo(now){
   const week = {mode:"week", from: now - 7*DAY_MS, to: now + 1, days: 7, scale: 1,
                 label:"the last 7 days", short:"this week", unit:"per week",
                 prevFrom: now - 14*DAY_MS, prevTo: now - 7*DAY_MS, prevLabel:"the week before"};
-  if((S.volWindow || "cycle") !== "cycle") return week;
+  /* The cycle is the only window that scales a threshold to a rotation that is rarely
+     seven days long, so it is the window — no longer a choice. Everything below is
+     the fallback: whenever the cycle cannot honestly be read, the rolling week covers
+     it, which is what auto-detection here actually amounts to. */
   const start = S.cycleStart;
   if(!start || start > now) return week;
   const raw = (now - start)/DAY_MS;
@@ -22343,6 +22342,7 @@ function viewProgram(){
   } Targets show <span class="rpe-help">RPE</span>, tap to see what it means.</div>
   <div class="btn-row" style="margin-bottom:10px">
     <button class="btn ghost small" id="planBtn" style="flex:1">${ICON.doc} Full plan</button>
+    <button class="btn ghost small" id="setupSplit" style="flex:1">Change the schedule</button>
   </div>
   <div class="btn-row" style="margin-bottom:16px">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
@@ -22608,8 +22608,9 @@ function setGroups(){
     {k:"day", icon:"moon2", title:"Sleep and mornings", sub:"The morning check, sleep tracking, and how much sleep you want.",
      val: p.sleepPrompt === false ? "off" : (target > 0 ? r1(target) + " h target" : "tracking"),
      body: settingsDayHTML},
-    {k:"plan", icon:"book", title:"Your plan", sub:"What you're training for, your schedule, deloads, volume targets.",
-     val: String(splitName() || "").split(",")[0],
+    {k:"plan", icon:"book", title:"Your plan", sub:"Deloads, and how your volume targets are worked out.",
+     val: deloadActive() ? "deload week"
+        : Math.floor(weeksSince(blockStartAt())) + "w into the block",
      body: settingsPlanHTML},
     {k:"data", icon:"disc", title:"Your data", sub:"Export a backup, bring one in, or erase what's on this device.",
      val: S.sessions.length + (S.sessions.length === 1 ? " session" : " sessions"),
@@ -22861,17 +22862,19 @@ function settingsDayHTML(){
    Body tab judges it against. The plan itself is edited on the Program tab — this is
    only the frame around it. */
 function settingsPlanHTML(){
-  let h = setBlock("What you're training for",
-    "This decides what the Body tab measures you against and how a session is graded. It never rewrites your plan: the sets and reps stay whatever your programme says.",
-    `<div class="ob-opts" style="gap:7px">${Object.keys(GOALS).map(k=>
-      `<button class="ob-opt${(S.setup&&S.setup.goal)===k?" on":""}" data-setgoal="${k}" style="padding:11px 13px">
-        <span class="ob-opt-t">${esc(GOALS[k].name)}</span>
-        <span class="ob-opt-s">${esc(GOALS[k].sub)}</span>
-        <span class="ob-tick">✓</span>
-      </button>`).join("")}</div>`);
-  h += setBlock("Your schedule",
-    "Currently on <b>" + esc(splitName()) + "</b> — " + esc(ROTATION.map(w=>dayName(w)).join(" → ")) + ".",
-    `<div class="btn-row" style="margin-top:0"><button class="btn ghost small" id="setupSplit" style="flex:1">Change the schedule</button></div>`);
+  /* WHAT WAS HERE AND WHY IT IS NOT.
+
+     "What you're training for" claimed to decide what the Body tab measures you
+     against and how a session is graded. Neither was true: the only thing that ever
+     read S.setup.goal is applyGoalReps(), which runs on an import or a schedule
+     change. Tapping a goal on this screen changed nothing you could see — it quietly
+     altered what your NEXT import would do. The goal still comes from the plan you
+     import, which is the only place it has ever meant anything.
+
+     "Change the schedule" is not a setting, it is the plan. It now sits on the
+     Program tab next to the rotation it changes, where you are already looking at
+     the days it rebuilds. */
+  let h = "";
   h += setBlock("Deload",
     "Same loads, every exercise cut to " + DELOAD_SETS + " sets, everything stopped 3-4 reps short of failure. Due every " +
     DELOAD_EVERY_WEEKS + " weeks, or earlier if your check-ins and RPE start showing warning signs.",
@@ -22880,27 +22883,16 @@ function settingsPlanHTML(){
       : `<button class="btn ghost small" id="startDeloadBtn2" style="flex:1">Start a deload week</button>`}</div>
     <div class="set-says num">${Math.floor(weeksSince(blockStartAt()))} weeks into this block${
       deloadSignals().length ? " · signs showing: " + esc(deloadSignals().join("; ")) : ""}</div>`);
-  /* Moved here from the Body tab, and then off the old Setup page. It is reference
-     material about how the numbers on another screen are produced, which is exactly what
-     a settings page is for and exactly what a map is not. */
-  h += setChoice("What a “week” means in your volume targets", [
-      {v:"cycle", t:"This cycle",     d:"Everything since the cycle began, thresholds scaled to its real length. Recommended."},
-      {v:"week",  t:"Rolling 7 days", d:"The last seven calendar days, unscaled. Simpler, noisier."}
-    ], "data-volwin", S.volWindow || "cycle",
-    "A rotation is workouts plus rest days, and rarely takes exactly seven of them.");
-  /* THE EXPERIENCE LEVEL WAS BURIED, AND IT IS NOT A FOOTNOTE.
+  /* THE TWO NUMBERS THAT USED TO BE DIALS.
 
-     It used to live inside landmarkExplainerHTML() — a long piece of prose about how the
-     thresholds are worked out — under a small heading three screens into a setting called
-     "what a week means". It is one of the most consequential settings in the app: it
-     moves every volume target you are measured against. It gets its own setting. */
-  h += setChoice("Your training experience", [
-      {v:"auto", t:"Work it out", d:experienceIsAuto()
-        ? "Reading you as <b>" + esc(experience()) + "</b> from " + S.sessions.length + " sessions here. It cannot see training you did before this app."
-        : "Infer it from how much you have logged here."}
-    ].concat(EXP_LEVELS.map(l=>({v:l, t:l[0].toUpperCase()+l.slice(1), d:EXP_WHAT[l] || ""}))),
-    "data-exp", experienceIsAuto() ? "auto" : experience(),
-    "This moves every volume target you are measured against.");
+     A volume window and a training level are both things the app can read off your
+     own log, and both were asking you to answer a question you have less information
+     about than it does. The window now always counts the cycle and falls back to a
+     rolling week on its own whenever the cycle cannot be read — which was the
+     recommended setting and the only one that scales thresholds to a rotation that is
+     rarely seven days long. The level is inferred continuously from how long and how
+     often you have trained here, seeded by what you told the importer until there is
+     enough log to judge. Neither is gone; both stopped being a switch. */
   if(S.sessions.length){
     h += `<div class="set-block">${landmarkExplainerHTML(bodyAnalysis())}</div>`;
   }
@@ -24384,25 +24376,17 @@ function bind(){
     openMuscleDetail(r.dataset.mrow);
   });
   document.querySelectorAll("[data-sec]").forEach(b=> b.onclick=e=>{ e.stopPropagation(); bodyToggle(b.dataset.sec); });
-  document.querySelectorAll("[data-exp]").forEach(b=> b.onclick=()=>{
-    S.experience = b.dataset.exp;
-    save(); queueSync(); render();
-    toast(b.dataset.exp==="auto" ? "Experience set from your history" : "Targets scaled for "+b.dataset.exp);
-  });
   document.querySelectorAll("[data-askwhy]").forEach(b=> b.onclick=()=>{
     S.askWhy = b.dataset.askwhy === "on";
     save(); queueSync(); render();
     toast(S.askWhy ? "I'll ask about collapsed sets" : "Won't ask about collapsed sets");
   });
-  document.querySelectorAll("[data-volwin]").forEach(b=> b.onclick=()=>{
-    S.volWindow = b.dataset.volwin;
-    save(); queueSync(); render();
-    toast(S.volWindow==="cycle" ? "Volume counted over your cycle" : "Volume counted over a rolling 7 days");
-  });
 
   document.querySelectorAll("[data-edit]").forEach(b=> b.onclick=()=> openExEditor(...b.dataset.edit.split(":")));
   document.querySelectorAll("[data-addex]").forEach(b=> b.onclick=()=> openExEditor(b.dataset.addex, -1));
   /* ---- the day editor ---- */
+  const sus = $("#setupSplit");
+  if(sus) sus.onclick = openSplitEditor;
   document.querySelectorAll("[data-dayedit]").forEach(b=>{
     b.onclick = ()=> dayEditOpen(b.dataset.dayedit);
     // the day card is a div, so it needs the keyboard behaviour a button gets for free
@@ -24614,14 +24598,6 @@ function bind(){
   /* The goal, changeable in place. It moves what the Body tab measures against and
      nothing else — a plan is imported, never generated, so there is no "rebuild my plan
      from my answers" here to stumble into. */
-  document.querySelectorAll("[data-setgoal]").forEach(b=> b.onclick = ()=>{
-    S.setup = Object.assign({name:"Me", level:"intermediate", gear:"full", at:Date.now()},
-                            S.setup || {}, {goal: b.dataset.setgoal});
-    save(); queueSync(); render();
-    toast("Training for " + ((GOALS[b.dataset.setgoal]||{}).name || "").toLowerCase());
-  });
-  const sus = $("#setupSplit");
-  if(sus) sus.onclick = openSplitEditor;
   /* The account card. The ID is copyable in one tap because the whole point of it is
      that people keep it somewhere; the key needs a deliberate reveal, because it is the
      credential and a screenshot of this screen should not hand it over. */
@@ -31091,7 +31067,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","volWindow","askWhy","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
@@ -32114,7 +32090,7 @@ function mergeBackup(into, d){
       if(d[k] !== undefined) into[k] = d[k];
     });
   }
-  ["setup","lastReview","wakeTime","sleepTarget","remindAt","remindBed","remindWake","asymRetest","volWindow","askWhy",
+  ["setup","lastReview","wakeTime","sleepTarget","remindAt","remindBed","remindWake","asymRetest","askWhy",
    "experience","sex","viewMode"].forEach(k=>{ if(d[k] !== undefined && d[k] !== null) into[k] = d[k]; });
   return stats;
 }
