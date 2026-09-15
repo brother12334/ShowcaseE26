@@ -4705,6 +4705,9 @@ body.cele-open{overflow:hidden}
   transition:width .35s cubic-bezier(.2,.9,.25,1)}
 .fx-bar u{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--text);opacity:.75;text-decoration:none}
 .fx-say{font-size:13px;line-height:1.45;color:var(--dim)}
+.fx-made{font:11px var(--mono);line-height:1.5;color:var(--faint);margin-top:7px}
+.fx-ratio b{font-size:16px;color:var(--text);line-height:1.4}
+.fx-okline{color:var(--ok)}
 .fx-good .fx-bar i{background:var(--ok)}
 .fx-good .fx-say{color:var(--text)}
 .fx-warn .fx-bar i{background:var(--acc)}
@@ -5324,7 +5327,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.4";
+const APP_VERSION = "20.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10199,7 +10202,14 @@ function muscleFrac(exName, m){
    this and none of them can quietly forget the weighting. */
 function fixProjection(A, m, addSets){
   const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
-  const now = ((A.wk[m] || {}).sets || 0) + ((A.cyc && A.cyc.pending[m]) || 0);
+  /* DONE PLUS STILL PRESCRIBED, and it has to SAY so. The Body tab's bar shows what you
+     have actually logged in the window; this panel is editing a PLAN, so what matters is
+     what the whole cycle will deliver — logged sets plus the ones still queued in it.
+     Both are right and they are different numbers, and showing 10 on one screen and 19 on
+     the next with no explanation is how a person ends up not trusting either. */
+  const done = (A.wk[m] || {}).sets || 0;
+  const queued = (A.cyc && A.cyc.pending[m]) || 0;
+  const now = done + queued;
   const after = Math.max(0, now + (addSets || 0));
   const R = v => Math.round(v * 10) / 10;
   let verdict, tone;
@@ -10229,16 +10239,63 @@ function fixProjection(A, m, addSets){
     verdict = "Past " + R(L.mrv) + ", which is more than the evidence says you recover from.";
     tone = "bad";
   }
-  return {now: R(now), after: R(after), mev: R(L.mev), mav: R(L.mav), mrv: R(L.mrv), verdict, tone};
+  return {now: R(now), after: R(after), mev: R(L.mev), mav: R(L.mav), mrv: R(L.mrv),
+          done: R(done), queued: R(queued), verdict, tone};
 }
-function fixReadoutHTML(pr){
+/* WHEN THE FINDING IS A RATIO, THE ANSWER HAS TO BE A RATIO.
+
+   An imbalance card measured against the floor answered a question nobody asked. Chest at
+   19 sets is comfortably over a 6.7 floor, so every option read "clears it" — or, once it
+   passed the ceiling, red — while the finding on the screen behind it said pressing was
+   behind pulling. Two true statements that read as a contradiction, because the panel was
+   marking the wrong exam.
+
+   So a balance finding gets the balance: where the ratio sits, where the change would put
+   it, and the band that counts as level. The set count and its ceiling stay underneath,
+   because "this fixes the ratio and puts you past what you recover from" is something to
+   be told before pressing Apply rather than after. */
+function balanceProjection(A, m, addSets){
+  const R = ratioPairFor(m);
+  if(!R) return null;
+  const side = R.a.indexOf(m) > -1 ? "a" : "b";
+  const sum = keys => keys.reduce((t, k)=>
+    t + ((A.wk[k] || {}).sets || 0) + ((A.cyc && A.cyc.pending[k]) || 0), 0);
+  const a0 = sum(R.a), b0 = sum(R.b);
+  const a1 = a0 + (side === "a" ? (addSets || 0) : 0);
+  const b1 = b0 + (side === "b" ? (addSets || 0) : 0);
+  if(!(b0 > 0.01) || !(b1 > 0.01)) return null;
+  const now = a0 / b0, after = a1 / b1;
+  const F = v => (Math.round(v * 100) / 100).toFixed(2).replace(/0$/, "");
+  const ok = after >= R.lo && after <= R.hi;
+  return {
+    R, side, now, after, ok,
+    line: F(now) + " → " + F(after) + " " + R.an + " to " + R.bn,
+    band: F(R.lo) + "–" + F(R.hi) + " counts as level",
+    verdict: ok
+      ? "That brings the balance level."
+      : (after < R.lo
+          ? "Still " + R.an + "-light — " + F(after) + " against a " + F(R.lo) + " floor for the ratio."
+          : "Still " + R.an + "-heavy — " + F(after) + " against a " + F(R.hi) + " ceiling for the ratio.")
+  };
+}
+function fixReadoutHTML(pr, bal){
   const pct = v => Math.max(0, Math.min(100, (v / Math.max(1, pr.mrv * 1.15)) * 100));
-  return `<div class="fx-read fx-${pr.tone}">
-    <div class="fx-nums"><b class="num">${pr.now}</b><i>→</i><b class="num fx-to">${pr.after}</b>
+  /* The ratio leads when there is one, because it is what the finding is about; the set
+     count stays underneath it, because the ceiling still applies to the answer. */
+  const head = bal
+    ? `<div class="fx-nums fx-ratio"><b class="num">${esc(bal.line)}</b></div>
+       <div class="fx-say${bal.ok ? " fx-okline" : ""}">${esc(bal.verdict)}</div>
+       <div class="fx-made">${esc(bal.band)}.</div>`
+    : "";
+  return `<div class="fx-read fx-${bal ? (pr.tone === "bad" ? "bad" : (bal.ok ? "good" : "warn")) : pr.tone}">
+    ${head}
+    <div class="fx-nums"${bal ? ' style="margin-top:11px"' : ""}><b class="num">${pr.now}</b><i>→</i><b class="num fx-to">${pr.after}</b>
       <span>sets, against a ${pr.mev} floor</span></div>
     <div class="fx-bar"><i style="width:${pct(pr.after)}%"></i>
       <u style="left:${pct(pr.mev)}%"></u></div>
     <div class="fx-say">${esc(pr.verdict)}</div>
+    ${pr.queued > 0 ? `<div class="fx-made">${pr.done} logged so far, plus ${pr.queued} still
+      prescribed in this cycle. The Body tab's bar shows the ${pr.done} on its own.</div>` : ""}
   </div>`;
 }
 /* Movements this app knows that actually train the muscle, best first, minus the ones
@@ -11526,6 +11583,31 @@ const EXP_SCALE = {
   intermediate: {mev:1.00, mav:1.00, mrv:1.00},
   advanced:     {mev:1.20, mav:1.18, mrv:1.22}
 };
+/* THE STRUCTURAL PAIRS, AT MODULE LEVEL. They were local to the weak-point scan, which
+   meant the panel that offers to FIX an imbalance had no way to read the band it was
+   being measured against — so it fell back to measuring the floor, which is not what a
+   ratio finding is about at all. One definition, read by both. */
+const RATIO_PAIRS = [
+    {a:["chest","delts_front","triceps"], b:["lats","upper_back","traps","biceps"],
+     an:"pushing", bn:"pulling", lo:0.75, hi:1.35,
+     actLow:"Add pressing volume, your back work is ahead of your chest.",
+     actHigh:"Add rowing and pulldown volume to balance the pressing.",
+     whyLow:"Press work has fallen behind pull work.",
+     whyHigh:"Push dominance rounds the shoulders forward and is the most common source of front-shoulder pain."},
+    {a:["quads"], b:["hams"], an:"quad", bn:"hamstring", lo:0.8, hi:2.0,
+     actLow:"Add quad work: leg extensions or squats.",
+     actHigh:"Add hamstring work: RDLs and leg curls.",
+     whyLow:"Your hamstrings are ahead of your quads.",
+     whyHigh:"Quad dominance well past 2:1 tracks with hamstring strains and knee complaints."},
+    {a:["delts_front"], b:["delts_rear"], an:"front delt", bn:"rear delt", lo:0.6, hi:1.6,
+     actLow:"Check your press volume, front delts are behind.",
+     actHigh:"Add rear delt work: face pulls or reverse flyes.",
+     whyLow:"Front delts are mostly fed by pressing, so this usually means press volume dropped.",
+     whyHigh:"Front delts get paid by every press you do; rear delts only grow from what you give them directly."}
+  ];
+function ratioPairFor(m){
+  return RATIO_PAIRS.find(R=> R.a.indexOf(m) > -1 || R.b.indexOf(m) > -1) || null;
+}
 /* Clamped rather than trusted: a scale restored from a backup written by hand, or by a
    future build with a wider range, must not be able to set every target in the app to
    zero or to ten times the evidence. */
@@ -11956,24 +12038,7 @@ function weakPoints(A){
   });
 
   // 4, structural balance between opposing / paired muscles
-  const ratios = [
-    {a:["chest","delts_front","triceps"], b:["lats","upper_back","traps","biceps"],
-     an:"pushing", bn:"pulling", lo:0.75, hi:1.35,
-     actLow:"Add pressing volume, your back work is ahead of your chest.",
-     actHigh:"Add rowing and pulldown volume to balance the pressing.",
-     whyLow:"Press work has fallen behind pull work.",
-     whyHigh:"Push dominance rounds the shoulders forward and is the most common source of front-shoulder pain."},
-    {a:["quads"], b:["hams"], an:"quad", bn:"hamstring", lo:0.8, hi:2.0,
-     actLow:"Add quad work: leg extensions or squats.",
-     actHigh:"Add hamstring work: RDLs and leg curls.",
-     whyLow:"Your hamstrings are ahead of your quads.",
-     whyHigh:"Quad dominance well past 2:1 tracks with hamstring strains and knee complaints."},
-    {a:["delts_front"], b:["delts_rear"], an:"front delt", bn:"rear delt", lo:0.6, hi:1.6,
-     actLow:"Check your press volume, front delts are behind.",
-     actHigh:"Add rear delt work: face pulls or reverse flyes.",
-     whyLow:"Front delts are mostly fed by pressing, so this usually means press volume dropped.",
-     whyHigh:"Front delts get paid by every press you do; rear delts only grow from what you give them directly."}
-  ];
+  const ratios = RATIO_PAIRS;
   ratios.forEach(R=>{
     const sa = R.a.reduce((t,m)=>t+A.wk[m].sets,0);
     const sb = R.b.reduce((t,m)=>t+A.wk[m].sets,0);
@@ -11998,17 +12063,40 @@ function weakPoints(A){
     const ratio = sa/sb;
     if(ratio > R.hi && proj <= R.hi) return;         // the rest of the cycle already fixes it
     if(ratio < R.lo && proj >= R.lo) return;
+    /* A RATIO IS TWO NUMBERS, AND ONLY ONE OF THEM HAS ROOM.
+
+       "Add pressing volume" was the advice whenever pushing lagged pulling, regardless of
+       what pushing was already doing — so a chest sitting at 19 sets against a ceiling of
+       15.4 was told to add more, and the panel that opened to help then painted the
+       result red for exceeding what you recover from. The app arguing with itself inside
+       two taps.
+
+       The lagging side is only the right lever when it has somewhere to go. Once its
+       projected volume is at the top of its productive range the imbalance is real but
+       the remedy is the other way round: the leading side is what needs to come down. */
+    const sideRoom = keys=>{
+      let have = 0, cap = 0;
+      keys.forEach(m2=>{ have += A.wk[m2].sets + pend(m2); cap += L(m2).mav; });
+      return {have, cap, room: have < cap - 0.5};
+    };
+    const nm = x => x.replace(/^./, c=> c.toUpperCase());
     if(ratio > R.hi){
+      const rm = sideRoom(R.b);
       push(Math.min(95, Math.round(40 + (ratio/R.hi - 1)*90)), R.b[0], "balance",
-        R.bn.replace(/^./,c=>c.toUpperCase())+"s lag behind "+R.an+"s",
-        R.actHigh,
-        r1(sa)+" sets of "+R.an+" against "+r1(sb)+" of "+R.bn+", a "+ratio.toFixed(1)+":1 ratio where about 1:1 keeps the joint balanced.",
+        nm(R.bn)+"s lag behind "+R.an+"s",
+        rm.room ? R.actHigh
+          : "Bring the "+R.an+" volume down — "+R.bn+" work is already at the top of its useful range.",
+        r1(sa)+" sets of "+R.an+" against "+r1(sb)+" of "+R.bn+", a "+ratio.toFixed(1)+":1 ratio where about 1:1 keeps the joint balanced."
+          + (rm.room ? "" : " "+nm(R.bn)+" is at "+r1(rm.have)+" of a "+r1(rm.cap)+" productive ceiling, so there is no room to add there."),
         R.whyHigh);
     } else if(ratio < R.lo){
+      const rm = sideRoom(R.a);
       push(Math.min(95, Math.round(40 + (R.lo/ratio - 1)*90)), R.a[0], "balance",
-        R.an.replace(/^./,c=>c.toUpperCase())+"s lag behind "+R.bn+"s",
-        R.actLow,
-        r1(sa)+" sets of "+R.an+" against "+r1(sb)+" of "+R.bn+" ("+ratio.toFixed(2)+":1).",
+        nm(R.an)+"s lag behind "+R.bn+"s",
+        rm.room ? R.actLow
+          : "Bring the "+R.bn+" volume down — "+R.an+" work is already at the top of its useful range.",
+        r1(sa)+" sets of "+R.an+" against "+r1(sb)+" of "+R.bn+" ("+ratio.toFixed(2)+":1)."
+          + (rm.room ? "" : " "+nm(R.an)+" is at "+r1(rm.have)+" of a "+r1(rm.cap)+" productive ceiling, so there is no room to add there."),
         R.whyLow);
     }
   });
@@ -21512,7 +21600,9 @@ function openOwnFix(idx){
        moving the goalposts, one muscle at a time, with no view of the others. It lives in
        Settings now, for every group at once. */
     const pr = fixProjection(A, m, add);
-    h += fixReadoutHTML(pr);
+    /* An imbalance is judged on the imbalance. See balanceProjection(). */
+    const bal = (w.kind === "balance") ? balanceProjection(A, m, add) : null;
+    h += fixReadoutHTML(pr, bal);
     if(why) h += `<div class="sub" style="margin:-4px 2px 8px;color:var(--bad)">${esc(why)}</div>`;
     h += `<div class="btn-row" style="margin-top:12px">
         <button class="btn small" id="fxApply" style="flex:1"${ok?"":" disabled aria-disabled=\"true\""}>Apply it</button>
