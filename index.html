@@ -5209,7 +5209,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "19.9";
+const APP_VERSION = "20.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10087,13 +10087,20 @@ function fixProjection(A, m, addSets){
     return {now: R(now), after: R(after), mev: 0, mav: R(L.mav), mrv: R(L.mrv), tone: "warn",
       verdict: "There is no set floor for this one, so nothing here can clear it — what you add is a judgement call rather than a gap being closed."};
   }
-  if(after >= L.mev && after <= L.mrv){
-    verdict = after >= L.mav
+  /* JUDGE THE NUMBERS THAT ARE ON SCREEN. A set is worth a fraction of a set to each
+     muscle it touches, so these are floats, and 1.4 + 4 x 0.3 lands on 2.5999999999999996
+     rather than on 2.6. Compared raw against a 2.6 floor that is a miss; rounded to one
+     decimal for display it is a match — so the card printed "2.6 → 2.6" and then "still 0
+     short of the 2.6 floor", which is the app disagreeing with its own arithmetic in the
+     space of one line. Round first, then compare, so what is judged is what is shown. */
+  const a1 = R(after), mev1 = R(L.mev), mav1 = R(L.mav), mrv1 = R(L.mrv);
+  if(a1 >= mev1 && a1 <= mrv1){
+    verdict = a1 >= mav1
       ? "Clears it, and lands in the productive range."
-      : "Clears it — " + R(after) + " against a " + R(L.mev) + " floor.";
+      : "Clears it — " + a1 + " against a " + mev1 + " floor.";
     tone = "good";
-  } else if(after < L.mev){
-    verdict = "Still " + R(L.mev - after) + " short of the " + R(L.mev) + " floor.";
+  } else if(a1 < mev1){
+    verdict = "Still " + R(mev1 - a1) + " short of the " + mev1 + " floor.";
     tone = "warn";
   } else {
     verdict = "Past " + R(L.mrv) + ", which is more than the evidence says you recover from.";
@@ -21351,7 +21358,13 @@ function openOwnFix(idx){
     } else {
       const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
       const cur = Math.round(L.mev * 10) / 10;
-      if(FIX.target == null) FIX.target = Math.max(1, Math.round((((A.wk[m]||{}).sets||0) + ((A.cyc&&A.cyc.pending[m])||0)) * 10) / 10);
+      /* START ON THE APP'S NUMBER, NOT ON YOURS. This used to open on your CURRENT volume,
+         so the dial said "the floor for side abs: 1.4" with a paragraph directly under it
+         saying the app works the floor out at 2.6 — two different numbers, both labelled
+         the floor, on one screen. The dial is the floor being disputed, so it starts where
+         the app put it and you move it from there; the readout below then shows what your
+         training does against whatever you move it to. */
+      if(FIX.target == null) FIX.target = cur;
       h += `<div class="k-lab">The floor for ${esc(M.name.toLowerCase())}</div>
         ${stepRow("fxTarget", FIX.target, 1, Math.max(4, Math.round(L.mrv)), 0.5)}
         <div class="sub" style="margin:8px 2px 0">Element 26 works this out at <b>${cur}</b> from published
@@ -21363,12 +21376,16 @@ function openOwnFix(idx){
     }
     const pr = FIX.mode === "target"
       ? (()=>{ const base = fixProjection(A, m, 0);
-               const now = base.now, t = FIX.target;
                const R = v=> Math.round(v*10)/10;
-               return {now, after: now, mev: R(t), mav: base.mav, mrv: base.mrv,
+               /* Rounded on both sides before they are compared, for the same reason the
+                  projection is: these are fractional sets, and judging raw floats while
+                  printing rounded ones is how "still 0 short" gets onto the screen. */
+               const now = R(base.now), t = R(FIX.target);
+               return {now, after: now, mev: t, mav: base.mav, mrv: base.mrv,
                  tone: now >= t ? "good" : "warn",
-                 verdict: now >= t ? "At " + R(now) + ", your current work already clears a " + R(t) + " floor."
-                                   : "Even at " + R(t) + " you would still be " + R(t - now) + " short."};})()
+                 verdict: now >= t
+                   ? "At " + now + ", your current work already clears a " + t + " floor."
+                   : "Even at " + t + " you would still be " + R(t - now) + " short."};})()
       : fixProjection(A, m, add);
     h += fixReadoutHTML(pr);
     if(why) h += `<div class="sub" style="margin:-4px 2px 8px;color:var(--bad)">${esc(why)}</div>`;
