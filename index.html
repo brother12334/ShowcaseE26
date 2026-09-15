@@ -4659,6 +4659,11 @@ body.cele-open{overflow:hidden}
 .sc-total{font-family:var(--mono);font-size:12.5px;color:var(--dim);margin-top:3px}
 .sc-blurb{font-size:14.5px;color:var(--dim);line-height:1.45}
 /* ================= FIX IT YOUR WAY ================= */
+.fx-warn{
+  border-left:3px solid var(--acc);background:var(--acc-soft);border-radius:0 9px 9px 0;
+  padding:10px 12px;margin:0 0 13px;font-size:13px;line-height:1.5;color:var(--dim);
+}
+.fx-warn b{color:var(--text)}
 .fx-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:0 0 14px}
 /* Three routes, not four: an odd count would leave a half-width gap on the second row,
    so they run as one column of three at phone width and a row of three above it. */
@@ -5333,7 +5338,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.6";
+const APP_VERSION = "20.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10150,8 +10155,13 @@ function spreadPlan(A, m, need){
   if(!GROUPS[m] || !(need > 0)) return null;
   const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
   const have = ((A.wk[m] || {}).sets || 0) + ((A.cyc && A.cyc.pending[m]) || 0);
+  /* AT THE CEILING MEANS NO PLAN, not "ignore the ceiling". `room > 0 ? room : need` read
+     as "cap it at the room available, unless there is none, in which case add everything
+     you were asked for" — which is the one case the cap exists for. A muscle with no room
+     gets no plan, and the caller says so instead of offering to add to it. */
   const room = Math.max(0, (L.mrv || 0) - have);
-  let left = Math.min(need, room > 0 ? room : need);
+  if(!(room > 0.001)) return null;
+  let left = Math.min(need, room);
   if(!(left > 0)) return null;
 
   const ents = planEntriesForMuscle(m);
@@ -10250,6 +10260,60 @@ function spreadPlan(A, m, need){
             wantFreq, atCeiling: room <= 0.001};
   }
 }
+/* TAKING WORK OFF, WHEN ADDING IS THE WRONG END OF THE PROBLEM.
+
+   A ratio is two numbers. When the lagging side has nowhere to go — it is already at the
+   top of what the app thinks you recover from — the only honest fix is the other side,
+   and the app has to be able to CARRY IT OUT, not merely say it. Offering "add a set"
+   under a heading that reads "bring the pulling volume down" is the app contradicting
+   itself in the space of one card, which is exactly what it was doing.
+
+   Two rules keep it from swinging too far the other way:
+
+     NOTHING GOES UNDER ITS OWN FLOOR. Trimming pulling to balance pushing must not leave
+     your lats below the least work that still grows them. A muscle at its floor is
+     skipped, and if every one of them is, there is no plan — the imbalance is real and
+     the answer is not a set count at all.
+     BIGGEST CONTRIBUTORS LAST. Sets come off the accessories first, because a row is the
+     reason the day exists and the fourth set of a rear-delt fly is not. */
+function nmUp(x){ return String(x || "").replace(/^./, c=> c.toUpperCase()); }
+function trimPlan(A, keys, need){
+  if(!Array.isArray(keys) || !keys.length || !(need > 0)) return null;
+  const floorOf = m => ((A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m]).mev || 0;
+  const haveOf  = m => ((A.wk[m] || {}).sets || 0) + ((A.cyc && A.cyc.pending[m]) || 0);
+  /* Every slot on the leading side, smallest contributor first. A slot is only cuttable
+     while the muscle it mainly feeds stays above its own floor. */
+  const slots = [];
+  keys.forEach(m=>{
+    planEntriesForMuscle(m).forEach(x=>{
+      if(slots.some(y=> y.wid === x.wid && y.i === x.i)) return;
+      slots.push({wid:x.wid, i:x.i, name:x.e.name, from:x.e.sets || 1, to:x.e.sets || 1, m, frac:x.frac});
+    });
+  });
+  if(!slots.length) return null;
+  slots.sort((p,q)=> p.frac - q.frac || p.from - q.from);
+  const spent = {};
+  keys.forEach(m=>{ spent[m] = 0; });
+  let left = need, guard = 0;
+  while(left > 0.001 && guard++ < 60){
+    let moved = false;
+    for(const sl of slots){
+      if(left <= 0.001) break;
+      if(sl.to <= 1) continue;                                  // a movement is not zero sets
+      if(haveOf(sl.m) - spent[sl.m] - sl.frac < floorOf(sl.m)) continue;   // its own floor
+      sl.to -= 1;
+      spent[sl.m] += sl.frac;
+      left -= sl.frac;
+      moved = true;
+    }
+    if(!moved) break;
+  }
+  const cuts = slots.filter(x=> x.to < x.from);
+  if(!cuts.length) return null;
+  const taken = cuts.reduce((t,x)=> t + (x.from - x.to) * x.frac, 0);
+  return {cuts, taken: r1(taken),
+          list: cuts.map(x=> widName(x.wid) + " · " + x.name + ": " + x.from + " → " + x.to + " sets")};
+}
 function spreadList(plan){
   const out = plan.adds.map(a=> widName(a.wid) + " · " + a.name + ": " + a.from + " → " + a.to + " sets");
   if(plan.newEx) out.push(widName(plan.newEx.wid) + " · " + plan.newEx.name + ": new, " +
@@ -10281,6 +10345,21 @@ function findingPlan(w, A){
       list: ents.map(x=> x.e.name + ": " + x.e.sets + " \u2192 " +
             Math.max(1, Math.round((x.e.sets||1) * (half?0.5:0.66))) + " sets")
     };
+  }
+  /* THE PLAN CANNOT DISAGREE WITH THE HEADLINE. A ratio finding whose lagging side is at
+     its ceiling says "bring the other side down", and used to sit above a button that
+     added a set to the very muscle it had just said had no room. */
+  if(w.kind === "balance" && w.noRoom){
+    const need = Math.max(1, Math.ceil((((A.wk[m]||{}).sets || 0) + ((A.cyc&&A.cyc.pending[m])||0)) * 0.15));
+    const tp = trimPlan(A, w.trimSide, need);
+    if(!tp) return null;
+    return {mode:"trim", trim: tp,
+      label:"Take " + tp.taken + " set" + (tp.taken === 1 ? "" : "s") + " off",
+      does:"Takes about " + tp.taken + " set" + (tp.taken === 1 ? "" : "s") + " of " + w.trimName +
+           " work out of your plan, off the accessories first and never below what each muscle needs " +
+           "on its own. " + nmUp(w.lagName) + " is left where it is, because it has no room to grow into. " +
+           "This one sticks until you change it.",
+      list: tp.list};
   }
   if(w.kind === "under" || w.kind === "balance"){
     if(!ents.length) return null;
@@ -10532,6 +10611,15 @@ function applyFinding(idx){
       S.program[n.wid].push({name: n.name, sets: n.sets, reps: "8-12", rest: REST_SECOND});
     }
     logPlanChange("programme", null, M.name, plan.list, {note:"Applied from the Body tab."});
+  } else if(plan.mode === "trim"){
+    plan.trim.cuts.forEach(c=>{
+      const e = (S.program[c.wid] || [])[c.i];
+      if(!e) return;
+      e.sets = c.to;
+      if(Array.isArray(e.rpes)) e.rpes = e.rpes.slice(0, c.to);
+    });
+    logPlanChange("programme", null, M.name, plan.list,
+      {note:"Applied from the Body tab to bring the balance back without adding volume."});
   } else if(plan.mode === "reps"){
     plan.rows.forEach(r=>{
       const e = (S.program[r.wid]||[])[r.i];
@@ -12103,9 +12191,9 @@ function weakPoints(A){
   const L = m => (A.lm && A.lm[m]) || GROUPS[m];
   // `score` is 0-100 confidence-weighted urgency; the displayed severity band is
   // derived from it, so a 5%-short muscle never shouts as loud as a missing one.
-  const push = (score, muscle, kind, title, act, why, detail)=> out.push({
+  const push = (score, muscle, kind, title, act, why, detail, extra)=> out.push(Object.assign({
     score, sev: score>=68 ? 3 : score>=38 ? 2 : 1, muscle, kind, title, act, why, detail
-  });
+  }, extra || {}));
   /* What the rest of this cycle still prescribes for each muscle. Every rule below that
      reads a shortfall has to net this off first, or it reports the rotation's own
      ordering back to you as a training error. */
@@ -12239,7 +12327,8 @@ function weakPoints(A){
           : "Bring the "+R.an+" volume down — "+R.bn+" work is already at the top of its useful range.",
         r1(sa)+" sets of "+R.an+" against "+r1(sb)+" of "+R.bn+", a "+ratio.toFixed(1)+":1 ratio where about 1:1 keeps the joint balanced."
           + (rm.room ? "" : " "+nm(R.bn)+" is at "+r1(rm.have)+" of a "+r1(rm.cap)+" productive ceiling, so there is no room to add there."),
-        R.whyHigh);
+        R.whyHigh,
+        rm.room ? null : {noRoom: true, trimSide: R.a.slice(), trimName: R.an, lagName: R.bn});
     } else if(ratio < R.lo){
       const rm = sideRoom(R.a);
       push(Math.min(95, Math.round(40 + (R.lo/ratio - 1)*90)), R.a[0], "balance",
@@ -12248,7 +12337,8 @@ function weakPoints(A){
           : "Bring the "+R.bn+" volume down — "+R.an+" work is already at the top of its useful range.",
         r1(sa)+" sets of "+R.an+" against "+r1(sb)+" of "+R.bn+" ("+ratio.toFixed(2)+":1)."
           + (rm.room ? "" : " "+nm(R.an)+" is at "+r1(rm.have)+" of a "+r1(rm.cap)+" productive ceiling, so there is no room to add there."),
-        R.whyLow);
+        R.whyLow,
+        rm.room ? null : {noRoom: true, trimSide: R.b.slice(), trimName: R.bn, lagName: R.an});
     }
   });
 
@@ -21667,6 +21757,10 @@ function openOwnFix(idx){
       <div class="sub" style="margin:6px 0 13px;text-transform:none;letter-spacing:0">Whatever
         you pick, the number underneath says what it would actually do to your ${esc(M.name.toLowerCase())}
         volume before anything is written.</div>
+      ${w.noRoom ? `<div class="fx-warn">Three of these add volume, and ${esc(w.lagName)} work is
+        already at the top of what the app thinks you recover from — so they will read red however
+        they are set. <b>Swap one out</b> is the one that changes the balance without adding anything.
+        The suggestion above this panel takes sets off your ${esc(w.trimName)} work instead.</div>` : ""}
       <div class="fx-modes">${MODES.map(x=>
         `<button type="button" class="fx-m${FIX.mode===x.k?" on":""}" data-fxm="${x.k}"
           aria-pressed="${FIX.mode===x.k}">${esc(x.t)}</button>`).join("")}</div>
@@ -21987,9 +22081,9 @@ function openWeakPoint(idx){
   if(!already && (w.kind === "under" || w.kind === "balance" || w.kind === "none")){
     h += `<div class="wd-apply wd-own">
       <div class="wd-apply-k">Or fix it your way</div>
-      <p>Add a movement of your own, put the sets on one lift you choose, swap something
-        out for a better fit, or change the target itself. Whichever you pick, it says
-        what it would do to the number before anything is written.</p>
+      <p>Add a movement of your own, put the sets on one lift you choose, spread them
+        across your cycle, or swap something out for a better fit. Whichever you pick, it
+        says what it would do to the number before anything is written.</p>
       <button class="btn ghost small" id="wdOwn">Show me the options</button>
     </div>`;
   }
