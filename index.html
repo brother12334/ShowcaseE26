@@ -4684,6 +4684,22 @@ body.cele-open{overflow:hidden}
 .fx-bad .fx-say{color:var(--bad)}
 .wd-own p{margin-bottom:10px}
 /* ================= VOLUME TARGETS ================= */
+/* ---------- a target the log disagrees with ---------- */
+.tgs{border-left:3px solid var(--acc)}
+.tgs-k{
+  display:flex;align-items:center;gap:7px;
+  font:11px var(--mono);text-transform:uppercase;letter-spacing:.09em;color:var(--acc);
+  margin-bottom:8px;
+}
+.tgs-t{font-size:17px;margin:0 0 7px}
+.tgs-why{font-size:13.5px;line-height:1.55;color:var(--dim);margin-bottom:12px}
+/* The move itself, big enough to read before the paragraph explaining it. */
+.tgs-move{display:flex;align-items:baseline;gap:9px;margin:0 0 10px}
+.tgs-move span{font-family:var(--disp);font-size:26px;color:var(--faint);line-height:1}
+.tgs-move .tgs-to{color:var(--acc)}
+.tgs-move i{font-style:normal;color:var(--faint);font-size:15px}
+.tgs-move em{font-style:normal;font:11px var(--mono);color:var(--faint);letter-spacing:.06em}
+.tgs-does{font-size:13px;line-height:1.5;color:var(--dim)}
 .tg-plain p{font-size:13.5px;line-height:1.55;color:var(--dim);margin:0 0 9px}
 .tg-plain p:last-child{margin-bottom:0}
 .tg-plain b{color:var(--text);font-weight:600}
@@ -5280,7 +5296,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.2";
+const APP_VERSION = "20.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8465,6 +8481,14 @@ function migrate(){
   if(!Array.isArray(S.planLog)) S.planLog = [];
   delete S.volWindow;                       // the window is no longer a stored choice
   if(S.askWhy === undefined) S.askWhy = true;   // ask what happened when a set collapses
+  /* A target suggestion you turned down goes quiet for ten weeks rather than for ever.
+     The evidence behind it is a six-week comparison, so by then it is a different reading
+     of a different block — and a permanent "no" to a question the log may answer
+     differently later is the app refusing to change its mind. */
+  if(S.lmSuggest && S.lmSuggest.no){
+    const cut = Date.now() - 70*DAY_MS;
+    Object.keys(S.lmSuggest.no).forEach(k=>{ if(!(S.lmSuggest.no[k] > cut)) delete S.lmSuggest.no[k]; });
+  }
 
   /* ---- THE ARROW THAT NEVER APPEARED ON LOADS THE APP HAD ALREADY MOVED ----
 
@@ -21054,6 +21078,12 @@ function viewBody(){
   }
   h += `</div>`;
 
+  /* AFTER the findings, not among them. Everything above is "here is something to do
+     about your training"; this is "here is something the app thinks it has wrong about
+     you", which is a different claim and should not be mistaken for a fourth thing to
+     fix. It appears rarely and only with a couple of months of evidence behind it. */
+  h += tgSuggestHTML(A);
+
   /* ---- 5. WHICH WAY AM I GOING? ------------------------------------------------ */
   const tr = bodyTrends();
   const maxSets = Math.max(6, ...tr.map(d=>d.sets));
@@ -23851,6 +23881,137 @@ function tgCommit(pct, was){
     {note: "You scaled every muscle's targets from Settings."});
   save(); queueSync(); render();
 }
+/* =====================================================================
+   A TARGET THE LOG DISAGREES WITH
+
+   The floors already move with your training — experience, frequency, cycle length and
+   time off all shift them. What they have never done is learn from whether the volume
+   they ask for is actually the volume YOU need. This does, with one rule that decides
+   the whole design:
+
+     IT READS WHAT YOU GOT BACK, NEVER WHAT YOU PUT IN.
+
+   Adjusting a target because of how much work you did is the one version of this feature
+   that must not exist. Do less side-ab work for a month and a compliance-driven detector
+   lowers the side-ab floor until "behind" stops firing — at which point the standard has
+   quietly become a description of your habits, and the app has taught itself to agree
+   with you. Volume you skipped says nothing about what you need. It says what you did.
+
+   So both cases below are about RESPONSE, measured the way the Body tab already measures
+   it: estimated 1RM on the movements that train the muscle, over six weeks against the
+   six before.
+
+     THE FLOOR LOOKS HIGH   you are under it and getting stronger anyway. You grow on
+                            less than the figure says you need, which is the honest case
+                            for lowering it.
+     THE FLOOR LOOKS LOW    you are meeting it and nothing is happening. MEV is defined
+                            as the least volume that still grows the muscle, so meeting
+                            it without growing means yours is higher.
+
+   It is deliberately as willing to raise as to lower. A detector that only ever lowers
+   is a standards-lowering machine whatever its author intended.
+
+   And it never applies anything. It proposes, states its evidence, and waits. */
+const TGS_WEEKS = 6;                  // each half of the comparison
+const TGS_MIN_SESSIONS = 8;           // touching that muscle, across both halves
+function tgEvidence(A, g){
+  if(!GROUPS[g] || GROUPS[g].optional) return null;
+  if(S.lmFloor && g in S.lmFloor) return null;          // you have already ruled on this one
+  if(deloadActive()) return null;                        // a deload is not a signal about volume
+  if(activeEases()[g]) return null;                      // nor is a week you were told to ease off
+  const L = (A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g];
+  if(!(L.mev > 0)) return null;
+  const now = Date.now(), W = TGS_WEEKS * 7 * DAY_MS;
+  const a = windowStats(now - W, now + 1)[g];
+  const b = windowStats(now - 2*W, now - W)[g];
+  if(!a || !b) return null;
+  /* BOTH HALVES HAVE TO BE REAL. Comparing a block you trained against one you did not
+     is not a strength trend, it is a gap — and it is exactly the shape that would let
+     time off masquerade as evidence about a target. */
+  const days = Object.keys(a.dates || {}).length + Object.keys(b.dates || {}).length;
+  if(days < TGS_MIN_SESSIONS) return null;
+  if(!(a.sets > 0) || !(b.sets > 0)) return null;
+  if(!(b.best > 0)) return null;
+  const strP = (a.best - b.best) / b.best;
+  /* Weekly sets as actually performed across the whole span, not the current window: a
+     target is a claim about how you train, not about the last nine days. */
+  const perWeek = (a.sets + b.sets) / (TGS_WEEKS * 2);
+  const name = GROUPS[g].name;
+  const R = v => Math.round(v * 2) / 2;                  // proposals land on half sets
+  const pc = v => Math.round(Math.abs(v) * 100);
+
+  // ---- the floor looks high: under it, growing anyway ----
+  if(perWeek < L.mev * 0.9 && perWeek >= 1 && strP >= 0.03){
+    const to = Math.max(1, Math.min(R(perWeek), Math.floor(L.mev * 10) / 10 - 0.5));
+    if(to < L.mev - 0.4){
+      return {g, dir:"down", to, perWeek: r1(perWeek), mev: r1(L.mev), strP,
+        title: name + (GROUPS[g].pl ? " grow" : " grows") + " on less than the target asks",
+        why: "About " + r1(perWeek) + " sets a week against a " + r1(L.mev) + " floor, and estimated "
+           + "strength on your " + name.toLowerCase() + " work is up " + pc(strP) + "% over the last "
+           + TGS_WEEKS + " weeks versus the " + TGS_WEEKS + " before. The number is asking for volume "
+           + "you are evidently growing without.",
+        does: "Sets the " + name.toLowerCase() + " floor to " + to + " sets — what you have actually "
+           + "been doing while getting stronger. It stops being reported as behind, and nothing about "
+           + "your plan changes."};
+    }
+    return null;
+  }
+  // ---- the floor looks low: meeting it, nothing happening ----
+  /* Between flat and slightly down, NOT falling. Strength going backwards at adequate
+     volume is fatigue, and the app already has a finding for that which tells you to ease
+     off — answering it with "your floor is too low, do more" would be the worst advice in
+     the app. */
+  /* CLOSE TO THE FLOOR, not merely above it. MEV is a MINIMUM: being flat at twelve sets
+     against a seven-set floor says nothing about where the minimum is — you are deep in
+     the productive range and stalling for some other reason, which is the "stalled despite
+     adequate volume" finding the Body tab already raises. The floor is only implicated
+     when the volume you are doing is roughly the floor itself, so the band stops a
+     quarter above it rather than running all the way to MAV. */
+  if(perWeek >= L.mev && perWeek <= L.mev * 1.25 && strP <= 0.005 && strP > -0.02){
+    const to = Math.min(r1(L.mav), R(perWeek + Math.max(1, perWeek * 0.25)));
+    if(to > L.mev + 0.4){
+      return {g, dir:"up", to, perWeek: r1(perWeek), mev: r1(L.mev), strP,
+        title: name + " " + (GROUPS[g].pl ? "are" : "is") + " meeting the target and not moving",
+        why: "About " + r1(perWeek) + " sets a week, at or above the " + r1(L.mev) + " floor, and "
+           + "estimated strength is " + (strP < 0 ? "down " + pc(strP) + "%" : "flat")
+           + " over the last " + TGS_WEEKS + " weeks versus the " + TGS_WEEKS + " before. The floor is "
+           + "the least work that still grows a muscle, so meeting it without growing means yours sits higher.",
+        does: "Sets the " + name.toLowerCase() + " floor to " + to + " sets, so the Body tab starts "
+           + "telling you when you are under it. It does not add anything to your plan by itself."};
+    }
+  }
+  return null;
+}
+/* At most one at a time, strongest first. Twenty-one muscles each volunteering an opinion
+   about its own target is not advice, it is a negotiation. */
+function tgSuggestion(A){
+  if((S.sessions || []).length < 10) return null;
+  const dis = (S.lmSuggest && S.lmSuggest.no) || {};
+  let best = null;
+  GKEYS.forEach(g=>{
+    if(dis[g]) return;
+    const e = tgEvidence(A, g);
+    if(!e) return;
+    const weight = Math.abs(e.strP);
+    if(!best || weight > best.weight) best = Object.assign({weight}, e);
+  });
+  return best;
+}
+function tgSuggestHTML(A){
+  const e = tgSuggestion(A);
+  if(!e) return "";
+  return `<div class="card tgs" data-tgsfor="${esc(e.g)}">
+    <div class="tgs-k">${ICON.spark} A target your log disagrees with</div>
+    <h3 class="tgs-t">${esc(e.title)}</h3>
+    <div class="tgs-why">${esc(e.why)}</div>
+    <div class="tgs-move"><span class="num">${e.mev}</span><i>→</i><span class="num tgs-to">${e.to}</span><em>sets a week</em></div>
+    <div class="tgs-does">${esc(e.does)}</div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn small" data-tgsyes="${esc(e.g)}" style="flex:1">Use ${e.to} instead</button>
+    </div>
+    <div class="btn-row"><button class="btn ghost small" data-tgsno="${esc(e.g)}" style="flex:1">Leave it as it is</button></div>
+  </div>`;
+}
 function targetsScreenHTML(){
   const A = bodyAnalysis();
   const sc = lmScale();
@@ -25081,6 +25242,34 @@ function bind(){
   document.querySelectorAll("[data-tgopen]").forEach(b=> b.onclick = ()=>{
     TG_OPEN = (TG_OPEN === b.dataset.tgopen) ? null : b.dataset.tgopen;
     render();
+  });
+  document.querySelectorAll("[data-tgsyes]").forEach(b=> b.onclick = ()=>{
+    const g = b.dataset.tgsyes;
+    const A = bodyAnalysis();
+    const e = tgEvidence(A, g);
+    if(!e) return;
+    if(!S.lmFloor) S.lmFloor = {};
+    S.lmFloor[g] = e.to;
+    /* Recorded as yours, with the app named as having proposed it. Both halves matter:
+       it is your number now and can be cleared like any other, and six weeks from now the
+       history says where it came from rather than leaving you to wonder why the Body tab
+       changed its mind about a muscle. */
+    logPlanChange("rule", null, gName(g),
+      [gName(g) + " floor " + e.mev + " \u2192 " + e.to + " sets"],
+      {note: "Element 26 proposed this from your log and you accepted it. " + e.why});
+    save(); queueSync(); render();
+    toast(gName(g) + " floor is now " + e.to);
+  });
+  document.querySelectorAll("[data-tgsno]").forEach(b=> b.onclick = ()=>{
+    const g = b.dataset.tgsno;
+    /* Dismissed for this muscle, not for ever: the evidence that raised it will have
+       moved on in a couple of months, and a suggestion you refused once is not one you
+       refused permanently. Nothing is written to the target itself. */
+    if(!S.lmSuggest) S.lmSuggest = {};
+    if(!S.lmSuggest.no) S.lmSuggest.no = {};
+    S.lmSuggest.no[g] = Date.now();
+    save(); queueSync(); render();
+    toast(gName(g) + " target left as it is");
   });
   const dial = $("#tgDial");
   if(dial){
@@ -32482,7 +32671,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmScale","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
