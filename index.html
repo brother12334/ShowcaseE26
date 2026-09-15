@@ -5346,7 +5346,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "21.1";
+const APP_VERSION = "21.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10207,8 +10207,25 @@ function spreadPlan(A, m, need, avoid, pin){
   if(pin && pin.name && (pin.days || []).length){
     const pf = muscleFrac(pin.name, m);
     const sets = Math.max(1, Math.min(6, pin.sets || 2));
+    const key = nrm(pin.name);
     (pin.days || []).forEach(wid=>{
       if(!wid) return;
+      /* A day that already runs this movement gets its set count raised instead of a
+         second copy of it under the same name. */
+      const at = (S.program[wid] || []).findIndex(e=> nrm(e.name) === key);
+      if(at > -1){
+        const cur = (S.program[wid][at].sets || 1);
+        const to = Math.min(SPREAD_MAX_PER_EX, cur + sets);
+        if(to > cur){
+          /* Registered in byKey as well as pushed, or the round-robin below would find
+             the same slot untouched and overwrite what the pin just set. */
+          const rec = {wid, i: at, name: S.program[wid][at].name, from: cur, to, frac: pf};
+          byKey[wid + "#" + at] = rec;
+          adds.push(rec);
+          left -= (to - cur) * pf;
+        }
+        return;
+      }
       newExs.push({wid, name: pin.name, sets, frac: pf});
       left -= sets * pf;
     });
@@ -10313,8 +10330,11 @@ function spreadPlan(A, m, need, avoid, pin){
 function nmUp(x){ return String(x || "").replace(/^./, c=> c.toUpperCase()); }
 function trimPlan(A, keys, need){
   if(!Array.isArray(keys) || !keys.length || !(need > 0)) return null;
-  const floorOf = m => ((A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m]).mev || 0;
-  const haveOf  = m => (A.wk[m] || {}).sets || 0;
+  /* Per cycle on both sides. Comparing what a muscle has taken SO FAR against its floor
+     would let a trim look safe simply because the cycle is young — and then take the
+     programme under the floor for every cycle after it. */
+  const floorOf = m => cycleLandmarks(A, m).mev || 0;
+  const haveOf  = m => planCycleVolume(m);
   /* Every slot on the leading side, smallest contributor first. A slot is only cuttable
      while the muscle it mainly feeds stays above its own floor. */
   const slots = [];
@@ -10384,7 +10404,9 @@ function findingPlan(w, A){
      its ceiling says "bring the other side down", and used to sit above a button that
      added a set to the very muscle it had just said had no room. */
   if(w.kind === "balance" && w.noRoom){
-    const need = Math.max(1, Math.ceil((((A.wk[m]||{}).sets || 0) + ((A.cyc&&A.cyc.pending[m])||0)) * 0.15));
+    /* Sized off what the PROGRAMME gives the lagging muscle each cycle, for the same
+       reason the additions are — a trim is an edit to the plan, not to this week. */
+    const need = Math.max(1, Math.ceil(planCycleVolume(m) * 0.15));
     const tp = trimPlan(A, w.trimSide, need);
     if(!tp) return null;
     return {mode:"trim", trim: tp,
@@ -10397,7 +10419,17 @@ function findingPlan(w, A){
   }
   if(w.kind === "under" || w.kind === "balance"){
     if(!ents.length) return null;
-    const need = Math.max(1, Math.ceil((lm.mev || 0) - ((A.wk[m]||{}).sets || 0) - ((A.cyc&&A.cyc.pending[m])||0)));
+    /* THE SHORTFALL AND THE PLANNER HAVE TO SPEAK THE SAME UNITS. This was "how far short
+       is this muscle over the current window, once the rest of the cycle is netted off"
+       — a window quantity — and it was handed to a planner that adds sets to a PROGRAMME,
+       which is spent per cycle. Two sets short this week is not two sets a cycle, and the
+       gap between them grows with the length of the rotation.
+
+       Asked per cycle on both sides: how much more must the programme prescribe, each
+       time round, to clear the floor. Pending does not appear because it is already in
+       what the programme prescribes. */
+    const cl = cycleLandmarks(A, m);
+    const need = Math.max(1, Math.ceil((cl.mev || 0) - planCycleVolume(m)));
     const plan = spreadPlan(A, m, Math.min(8, need), w.avoid);
     if(!plan) return null;
     const slots = plan.adds.length + (plan.newExs || []).length;
@@ -10615,9 +10647,11 @@ function swapCollateral(A, outName, inName, sets){
     if(!MUSCLES[k]) return;
     const delta = ((inM[k] || 0) - (outM[k] || 0)) * (sets || 1);
     if(delta >= -0.05) return;                   // unchanged or better, nothing to say
-    const L = (A.lm && A.lm[k]) || adjustedLandmarks(A, k) || GROUPS[k];
+    /* A swap changes the programme, so what it costs another muscle is counted the way
+       every other plan edit is: per cycle, against the per-cycle floor. */
+    const L = cycleLandmarks(A, k);
     if(!L || !(L.mev > 0)) return;
-    const now = ((A.wk[k] || {}).sets || 0) + ((A.cyc && A.cyc.pending[k]) || 0);
+    const now = planCycleVolume(k);
     const after = now + delta;
     if(after >= L.mev) return;                   // still clears its own floor: not a problem
     hits.push({m: k, name: MUSCLES[k].name, now: Math.round(now*10)/10,
@@ -10629,8 +10663,15 @@ function swapCollateral(A, outName, inName, sets){
    short of without also paying those is worth more here than a bigger movement that
    feeds all of them — which is the whole difference between a fly and a bench press when
    your triceps and front delts have run out of room. */
+/* WHAT COUNTS AS NEW IS NEW TO THE WHOLE PROGRAMME, not new to the movements that train
+   this one muscle. The caller passes the entries that feed the muscle at 34% or more, so
+   anything already in your plan below that line — a press that gives your triceps 30% —
+   was offered as a fresh exercise and would have been added a second time, on another
+   day, under the same name. */
 function fixCandidates(m, excludeNames, avoid){
   const have = new Set((excludeNames || []).map(nrm));
+  DAYS.concat(["finisher"]).forEach(wid=>
+    (S.program[wid] || []).forEach(e=> have.add(nrm(e.name))));
   const dodge = avoid || [];
   const out = [];
   Object.keys(EX_MUSCLES_C).forEach(k=>{
@@ -12427,12 +12468,12 @@ function weakPoints(A){
       let have = 0, cap = 0;
       const tight = [];
       keys.forEach(m2=>{
-        const v = A.wk[m2].sets, c = L(m2).mav;
+        const v = planCycleVolume(m2), c = cycleLandmarks(A, m2).mav;
         have += v; cap += c;
         if(v >= c - 0.5) tight.push(m2);
       });
       const lag = keys[0];
-      const lagHave = A.wk[lag].sets, lagCap = L(lag).mav;
+      const lagHave = planCycleVolume(lag), lagCap = cycleLandmarks(A, lag).mav;
       return {have, cap, tight, lag, lagHave, lagCap,
               room: lagHave < lagCap - 0.5,            // the muscle the finding is filed under
               sideFull: have >= cap - 0.5};
