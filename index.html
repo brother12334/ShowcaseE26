@@ -5346,7 +5346,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "21.3";
+const APP_VERSION = "21.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10148,6 +10148,53 @@ function easeMap(){
   if(!S.easeOff || typeof S.easeOff !== "object") S.easeOff = {};
   return S.easeOff;
 }
+/* ---------- MUSCLES YOU HAVE SAID YOU DO NOT TRAIN ----------
+
+   The neck is the awkward case. Most people genuinely do not train it and are not
+   interested in starting, so flagging it forever is how you teach somebody to swipe past
+   the findings list without reading it — and the findings list is the one part of the
+   Body tab that asks you to do something. But it is also the muscle group with the best
+   injury-prevention evidence behind it of anything in here, so silently dropping it is
+   not honest either.
+
+   So it flags once, it says why it matters before it will let you dismiss it, and then
+   it stays dismissed. The decline is per group and it is reversible from the group's own
+   detail sheet, because a thing you turned off that you cannot find again is a bug. */
+function declinedMap(){
+  if(!S.declined || typeof S.declined !== "object") S.declined = {};
+  return S.declined;
+}
+function isDeclined(g){ return !!declinedMap()[g]; }
+/* WHAT YOU ARE TURNING DOWN. Written per group rather than generically, because "this
+   muscle is important too" is exactly the sentence people have learned to ignore. Each
+   one is the specific reason this particular group is worth the four minutes. */
+const DECLINE_CASE = {
+  neck: {
+    head: "Before you turn this off",
+    body: "Neck training has better evidence behind it than almost anything else in this app, and it is not about how it looks. Neck strength is one of the few things that reliably changes how much force reaches your head: stronger necks take more of the hit before your skull moves, which is why contact sports train it and why it keeps showing up in concussion research. It also carries your head over a desk all day, and it is the one muscle group that no other lift in your programme trains even slightly \u2014 pressing and rowing and shrugging all miss it completely.",
+    cost: "Two movements, one flexion and one extension, two sets each, twice a week. Four minutes. Start with your own hand for resistance before you put a plate anywhere near your head.",
+    keep: "Show me neck movements",
+    drop: "I don't train neck"
+  },
+  adductors: {
+    head: "Before you turn this off",
+    body: "Groin strains are one of the most common injuries in anything involving a change of direction, and adductor strength is the thing that most reliably predicts them. The Copenhagen plank has a proper randomised trial behind it for exactly this. Squats and lunges load the inner thigh a little, but only in the stretched positions most people never reach, so a programme without direct work usually leaves it well behind the quads and glutes it sits between.",
+    cost: "One movement, two or three sets, twice a week. The Copenhagen plank needs nothing but a bench.",
+    keep: "Show me inner thigh movements",
+    drop: "I don't train inner thigh"
+  }
+};
+/* Anything optional that has no case written for it still gets one, rather than getting
+   a dismiss button with nothing behind it. */
+function declineCase(g){
+  return DECLINE_CASE[g] || {
+    head: "Before you turn this off",
+    body: gName(g) + " is marked optional because no ordinary programme trains it directly \u2014 not because it does not matter. Nothing else in your plan covers it.",
+    cost: "One movement, two or three sets, twice a week.",
+    keep: "Show me " + gName(g).toLowerCase() + " movements",
+    drop: "I don't train " + gName(g).toLowerCase()
+  };
+}
 /* Drops the entries that have run their course. Called wherever the map is read, so an
    expired ease-off can never quietly go on applying. */
 function activeEases(){
@@ -12901,14 +12948,17 @@ function weakPoints(A){
 
   // 2, nothing trains it, which is three different claims and used to be one
   MKEYS.forEach(m=>{
-    /* OPTIONAL GROUPS ARE TRACKED, NOT NAGGED ABOUT. Neck and inner thigh carry mev 0
-       precisely because no normal programme trains them directly and nobody is worse off
-       for it — which rule 1 honours for free, since nothing is ever below a floor of
-       zero, but this rule did not, so it was pushing "Nothing in your program trains
-       neck" at score 92 to the top of everybody's list. They still show on the figure,
-       still take volume when you do train them, and the library is full of movements for
-       them if you want to; they just do not get to open the findings. */
-    if(MUSCLES[m].optional) return;
+    /* OPTIONAL GROUPS GET ONE SAY, NOT A STANDING ONE. Neck and inner thigh carry mev 0
+       because no ordinary programme trains them directly, so rule 1 can never fire for
+       them — nothing is below a floor of zero — and this rule used to fire forever, which
+       put "Nothing in your program trains neck" at score 92 on top of everybody's list
+       until they stopped reading the list at all.
+
+       They still flag, because the case for training them is real and worth hearing once.
+       They just flag at a severity that does not outrank an actual shortfall, and they
+       can be declined — after which they stay declined, and go on being tracked and drawn
+       and trainable exactly as before. See declinedMap(). */
+    if(MUSCLES[m].optional && isDeclined(m)) return;
     if(A.wk[m].sets > 0 || A.prevWk[m].sets > 0) return;
     if(A.grow[m].score !== null) return;             // trained inside 3 weeks, just not lately
     const planned = (cyc.planned && cyc.planned[m]) || 0;
@@ -12923,13 +12973,27 @@ function weakPoints(A){
         "A prescription only counts once it's performed. Either those days are the ones getting dropped, in which case the work belongs on a day you reliably train, or the log is behind reality.");
       return;
     }
-    // (c) genuinely nothing in the programme touches it
-    push(92, m, "none",
+    /* (c) genuinely nothing in the programme touches it.
+
+       92 for a muscle your programme is supposed to train and forgot, which is a real
+       hole. 34 for an optional one, which lands it as "minor" and below every actual
+       shortfall in the list — it is a suggestion you have not heard yet, not a fault. */
+    const opt = !!MUSCLES[m].optional;
+    push(opt ? 34 : 92, m, "none",
       "Nothing in your program trains "+MUSCLES[m].name.toLowerCase(),
-      "Add one direct "+MUSCLES[m].lc+" movement to your rotation.",
+      opt ? "Worth adding one direct "+MUSCLES[m].lc+" movement \u2014 or say it's not for you."
+          : "Add one direct "+MUSCLES[m].lc+" movement to your rotation.",
       "No logged sets at all in the last 3 weeks, and nothing across a full pass of the rotation prescribes any.",
-      "With no direct work, "+MUSCLES[m].lc+"s can only fall behind everything around them. Even "+
-      r1(L(m).mev)+" sets is the difference between holding ground and losing it, and assisting on other lifts is not the same as being trained.");
+      /* An optional group has a floor of zero, so the usual closing line came out as
+         "even 0 sets is the difference between holding ground and losing it", which is
+         both false and gibberish. It needs its own paragraph anyway: this is a case for
+         starting something, not a report that you fell below a target. */
+      opt
+        ? declineCase(m).body + " " + declineCase(m).cost +
+          " Nothing in this app will nag you about it twice \u2014 if it is not for you, say so on this card and it stops."
+        : "With no direct work, "+MUSCLES[m].lc+"s can only fall behind everything around them. Even "+
+          r1(L(m).mev)+" sets is the difference between holding ground and losing it, and assisting on other lifts is not the same as being trained.",
+      opt ? {optional: true} : null);
   });
 
   // 3, stalled despite adequate volume
@@ -22807,6 +22871,42 @@ function applyOwnFix(idx){
   FIX = null;
   save(); queueSync(); hideModal(); render();
 }
+/* THE ONE THING IT SAYS BEFORE IT LETS YOU GO.
+
+   This is a confirm step, and confirm steps are usually a way of making somebody click
+   twice for nothing. This one earns its place: the whole reason the neck is flagged at
+   all is that the case for training it is genuinely good and almost nobody has heard it,
+   so the moment you reach for the off switch is the only moment the app will ever have
+   your attention on the subject.
+
+   It says its piece once and then it does what you asked. There is no second confirm, no
+   "are you sure", and the decline button is not hidden behind the other one — somebody
+   who already knows all this and does not care should be able to read the heading, tap
+   the right-hand button and never see it again. */
+function openDeclineCase(g, idx){
+  const C = declineCase(g);
+  const h = `<h3>${esc(C.head)}</h3>
+    <div class="wd-lead"><b>${esc(gName(g))}</b></div>
+    <div class="bm-explain" style="margin-top:10px">${esc(C.body)}</div>
+    <div class="rev-head">What it would actually cost you</div>
+    <div class="bm-explain">${esc(C.cost)}</div>
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn small" id="dcKeep">${esc(C.keep)}</button>
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn ghost small" id="dcDrop">${esc(C.drop)}</button>
+    </div>`;
+  showModal(h);
+  MODAL_REOPEN = ()=> openDeclineCase(g, idx);
+  const k = $("#modal").querySelector("#dcKeep");
+  if(k) k.onclick = ()=>{ FIX = null; openOwnFix(idx); };
+  const d = $("#modal").querySelector("#dcDrop");
+  if(d) d.onclick = ()=>{
+    declinedMap()[g] = Date.now();
+    save(); queueSync(); hideModal(); render();
+    toast(gName(g) + " won't be flagged again");
+  };
+}
 function openWeakPoint(idx){
   const A = bodyAnalysis();
   const w = A.weak[idx];
@@ -22893,12 +22993,32 @@ function openWeakPoint(idx){
     </div>`;
   }
 
+  /* NOT FOR ME. Only on the optional groups, and only on the "nothing trains it" finding
+     — declining is an answer to "you have never trained your neck", not to "your chest is
+     over its ceiling", and there is no version of this that should let somebody switch
+     off a real shortfall. The flag carries the marker itself rather than this card
+     re-deriving it, so the button and the finding can never disagree about which ones are
+     declinable. It does not delete anything: the group goes on being tracked, drawn and
+     trainable, it just stops opening the findings list. */
+  const canDecline = !!w.optional;
+  if(canDecline){
+    h += `<div class="wd-apply wd-own">
+      <div class="wd-apply-k">Not for you?</div>
+      <p>Plenty of people never train ${esc(gName(g).toLowerCase())} and that is a choice you
+        get to make. Turn this off and it stops appearing here \u2014 ${esc(gName(g))} carries on
+        being tracked and stays in the exercise library if you change your mind.</p>
+      <button class="btn ghost small" id="wdDecline">Don't flag ${esc(gName(g).toLowerCase())} again</button>
+    </div>`;
+  }
+
   h += `<div class="btn-row" style="margin-top:16px">
       <button class="btn ghost small" data-gdetail="${g}">Open ${esc(gName(g))}</button>
       <button class="btn ghost small" id="closeModal">Done</button>
     </div>`;
   showModal(h);
   MODAL_REOPEN = ()=> openWeakPoint(idx);
+  const dc = $("#modal").querySelector("#wdDecline");
+  if(dc) dc.onclick = ()=> openDeclineCase(g, idx);
   const ap = $("#modal").querySelector("#wdApply");
   if(ap) ap.onclick = ()=> applyFinding(idx);
   const ow = $("#modal").querySelector("#wdOwn");
@@ -22970,6 +23090,19 @@ function openGroupDetail(g){
     </div>`);
   }
 
+  /* WHERE A DECLINE LIVES AFTER YOU MAKE IT. A switch you turned off and cannot find
+     again is a bug, and this is the card you land on if you ever go looking for this
+     muscle — so it says plainly that it is muted and turns back on in one tap. */
+  if(isDeclined(g)){
+    h += `<div class="wd-apply is-on" style="margin-top:14px">
+      <div class="wd-apply-k">You've turned this one off</div>
+      <p>You told the app you don't train ${esc(G.name.toLowerCase())}, so it has stopped
+        suggesting it. Everything above is still being counted \u2014 log a set of it and it
+        shows up here like any other muscle.</p>
+      <button class="btn ghost small" id="gUndecline">Flag it again</button>
+    </div>`;
+  }
+
   h += heads.length > 1
     ? `<div class="btn-row" style="margin-top:16px">
         <button class="btn small" id="gSplit">Break into its ${heads.length} parts</button>
@@ -22979,6 +23112,12 @@ function openGroupDetail(g){
     : `<button class="btn" style="margin-top:16px" id="closeModal">Done</button>`;
   showModal(h);
   MODAL_REOPEN = ()=> openGroupDetail(g);
+  const ud = $("#modal").querySelector("#gUndecline");
+  if(ud) ud.onclick = ()=>{
+    delete declinedMap()[g];
+    save(); queueSync(); openGroupDetail(g); render();
+    toast(G.name + " is back on");
+  };
   const sp = $("#gSplit");
   if(sp) sp.onclick = ()=>{
     BODY_FOCUS = g; BODY_EXPAND = true;
@@ -33970,7 +34109,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","declined","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
