@@ -4690,7 +4690,15 @@ body.cele-open{overflow:hidden}
   border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-top:6px;
   font:12px var(--mono);line-height:1.75;color:var(--dim);background:var(--card2);
 }
+.fx-opt{
+  font-style:normal;font-size:10px;letter-spacing:.06em;color:var(--faint);
+  text-transform:none;margin-left:6px;
+}
 .fx-days{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+/* A day that suits the movement is marked before you choose, not judged after. */
+.fx-d.fx-fits{border-color:rgba(74,147,88,.45)}
+.fx-d i{font-style:normal;color:var(--ok);margin-left:5px;font-size:10px}
+.fx-d.on i{color:inherit}
 .fx-d{
   padding:8px 11px;border-radius:9px;border:1px solid var(--line);background:var(--card2);
   color:var(--dim);font:11.5px var(--mono);cursor:pointer;
@@ -5338,7 +5346,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.9";
+const APP_VERSION = "21.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10151,7 +10159,11 @@ const SPREAD_MAX_PER_EX = 6;
 function daySetCount(wid){
   return (S.program[wid] || []).reduce((t, e)=> t + (parseInt(e.sets, 10) || 0), 0);
 }
-function spreadPlan(A, m, need, avoid){
+/* `pin` is what you chose by hand — {name, days, sets} — and it replaces the app's own
+   pick entirely. The rest of the arithmetic is unchanged: whatever the pinned movement
+   delivers comes off the shortfall first, and the round-robin spreads what remains over
+   the days that already train the muscle. */
+function spreadPlan(A, m, need, avoid, pin){
   if(!GROUPS[m] || !(need > 0)) return null;
   const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
   /* The ceiling is judged on what the muscle has actually taken over the window its
@@ -10188,9 +10200,17 @@ function spreadPlan(A, m, need, avoid){
      So each free day is scored by how much it already trains the muscles this movement
      trains — a chest press shares chest, front delts and triceps with an upper day and
      nothing with a lower one. Session length only breaks ties. */
-  let newEx = null;
+  let newExs = [];
   const wantFreq = Math.min(3, Math.max(2, Math.floor(DAYS.length / 2)));
-  if(daysTrained.length < 2 && DAYS.length > 1){
+  if(pin && pin.name && (pin.days || []).length){
+    const pf = muscleFrac(pin.name, m);
+    const sets = Math.max(1, Math.min(6, pin.sets || 2));
+    (pin.days || []).forEach(wid=>{
+      if(!wid) return;
+      newExs.push({wid, name: pin.name, sets, frac: pf});
+      left -= sets * pf;
+    });
+  } else if(daysTrained.length < 2 && DAYS.length > 1){
     const pick = fixCandidates(m, ents.map(x=> x.e.name), avoid)[0];
     const fits = pick ? (musclesFor(pick.name) || {}) : {};
     const kinship = wid=> (S.program[wid] || []).reduce((t, e)=>{
@@ -10215,7 +10235,7 @@ function spreadPlan(A, m, need, avoid){
       /* About half the shortfall goes to the new day, so the second session is worth
          showing up for without the first one being gutted to pay for it. */
       const want = Math.max(2, Math.min(3, Math.ceil((left / 2) / Math.max(0.1, pick.frac))));
-      newEx = {wid: free[0], name: pick.name, sets: want, frac: pick.frac};
+      newExs.push({wid: free[0], name: pick.name, sets: want, frac: pick.frac});
       left -= want * pick.frac;
     }
   }
@@ -10261,14 +10281,15 @@ function spreadPlan(A, m, need, avoid){
   return finish();
 
   function finish(){
-    if(!adds.length && !newEx) return null;
+    if(!adds.length && !newExs.length) return null;
     const gained = adds.reduce((t,a)=> t + (a.to - a.from) * a.frac, 0)
-                 + (newEx ? newEx.sets * newEx.frac : 0);
-    const daysAfter = new Set(adds.map(a=> a.wid).concat(newEx ? [newEx.wid] : [])).size;
-    return {adds, newEx, gained: r1(gained), daysTouched: daysAfter,
+                 + newExs.reduce((t,n)=> t + n.sets * n.frac, 0);
+    const newDays = newExs.map(n=> n.wid);
+    const daysAfter = new Set(adds.map(a=> a.wid).concat(newDays)).size;
+    return {adds, newExs, gained: r1(gained), daysTouched: daysAfter,
             freqBefore: daysTrained.length,
-            freqAfter: new Set(daysTrained.concat(newEx ? [newEx.wid] : [])).size,
-            wantFreq, atCeiling: room <= 0.001};
+            freqAfter: new Set(daysTrained.concat(newDays)).size,
+            wantFreq, atCeiling: room <= 0.001, pinned: !!(pin && pin.name)};
   }
 }
 /* TAKING WORK OFF, WHEN ADDING IS THE WRONG END OF THE PROBLEM.
@@ -10327,8 +10348,8 @@ function trimPlan(A, keys, need){
 }
 function spreadList(plan){
   const out = plan.adds.map(a=> widName(a.wid) + " · " + a.name + ": " + a.from + " → " + a.to + " sets");
-  if(plan.newEx) out.push(widName(plan.newEx.wid) + " · " + plan.newEx.name + ": new, " +
-    plan.newEx.sets + " set" + (plan.newEx.sets === 1 ? "" : "s"));
+  (plan.newExs || []).forEach(n=> out.push(widName(n.wid) + " · " + n.name + ": new, " +
+    n.sets + " set" + (n.sets === 1 ? "" : "s")));
   return out;
 }
 function findingPlan(w, A){
@@ -10377,7 +10398,7 @@ function findingPlan(w, A){
     const need = Math.max(1, Math.ceil((lm.mev || 0) - ((A.wk[m]||{}).sets || 0) - ((A.cyc&&A.cyc.pending[m])||0)));
     const plan = spreadPlan(A, m, Math.min(8, need), w.avoid);
     if(!plan) return null;
-    const slots = plan.adds.length + (plan.newEx ? 1 : 0);
+    const slots = plan.adds.length + (plan.newExs || []).length;
     const freq = plan.freqAfter > plan.freqBefore;
     return {mode:"spread", plan,
       label:"Add " + plan.gained + " set" + (plan.gained === 1 ? "" : "s"),
@@ -10625,10 +10646,11 @@ function applyFinding(idx){
     /* The new movement, where the plan calls for one. Built like anything else the
        Program tab adds, so it behaves like a normal entry from the next session on: its
        own rep range and rest, and no load invented for it. */
-    if(plan.mode === "spread" && plan.plan.newEx){
-      const n = plan.plan.newEx;
-      if(!Array.isArray(S.program[n.wid])) S.program[n.wid] = [];
-      S.program[n.wid].push({name: n.name, sets: n.sets, reps: "8-12", rest: REST_SECOND});
+    if(plan.mode === "spread"){
+      (plan.plan.newExs || []).forEach(n=>{
+        if(!Array.isArray(S.program[n.wid])) S.program[n.wid] = [];
+        S.program[n.wid].push({name: n.name, sets: n.sets, reps: "8-12", rest: REST_SECOND});
+      });
     }
     logPlanChange("programme", null, M.name, plan.list, {note:"Applied from the Body tab."});
   } else if(plan.mode === "trim"){
@@ -21806,7 +21828,7 @@ function openOwnFix(idx){
   const ents = planEntriesForMuscle(m);
   if(!FIX || FIX.idx !== idx){
     FIX = {idx, mode:"own", ex:"", sets:3, wid: DAYS[0] || "", pick:null,
-           swapFrom:null, swapTo:null};
+           swapFrom:null, swapTo:null, spEx:"", spDays:[], spSets:2};
   }
   const draw = ()=>{
     const MODES = [
@@ -21867,17 +21889,91 @@ function openOwnFix(idx){
           <div class="sub" style="margin:6px 2px 0">Was ${from}.</div>`;
       }
     } else if(FIX.mode === "spread"){
-      /* THE SAME PLANNER THE APP'S OWN SUGGESTION USES, with the amount in your hands.
-         The default picks the number for you; here you say how much and see exactly
-         which days it lands on before anything is written. */
+      /* THE SAME PLANNER THE APP'S OWN SUGGESTION USES, with the amount — and now the
+         movement and the days — in your hands. Left alone it decides everything; name a
+         movement and it puts that one on the days you pick and spreads the remainder
+         around it. Either way the readout underneath says what it does to the number. */
       if(FIX.spread == null) FIX.spread = 3;
-      const sp = spreadPlan(A, m, FIX.spread, w.avoid);
+      if(FIX.spSets == null) FIX.spSets = 2;
+      if(!Array.isArray(FIX.spDays)) FIX.spDays = [];
+      const pin = (FIX.spEx && FIX.spDays.length)
+        ? {name: FIX.spEx, days: FIX.spDays.slice(), sets: FIX.spSets} : null;
+      const sp = spreadPlan(A, m, FIX.spread, w.avoid, pin);
       add = sp ? sp.gained : 0;
       ok = !!sp;
-      h += `<div class="k-lab">How much ${esc(M.name.toLowerCase())} work to add</div>
+      h += `<div class="k-lab">How much ${esc(M.name.toLowerCase())} work to add, in total</div>
         ${stepRow("fxSpread", FIX.spread, 1, 10)}
         <div class="set-says" style="margin-top:7px">Counted as sets of ${esc(M.name.toLowerCase())},
-          so a movement that is half ${esc(M.name.toLowerCase())} contributes half a set.</div>`;
+          so a movement that is half ${esc(M.name.toLowerCase())} contributes half a set.${
+          pin ? " A movement you have pinned below takes its share of this first; the rest is spread around it." : ""}</div>`;
+
+      /* A MOVEMENT OF YOUR OWN, ON THE DAYS YOU PICK. The app's choice is the default and
+         it stays the default — "let it choose" is a real option, not an empty state — but
+         the moment you name one, the recommendation moves from WHAT to WHERE: every day
+         is scored on whether the movement belongs there, and the ones that fit are
+         marked. */
+      const ents2 = planEntriesForMuscle(m);
+      const cands2 = fixCandidates(m, ents2.map(x=> x.e.name), w.avoid).slice(0, 8);
+      const chosen = FIX.spEx || "";
+      h += `<div class="k-lab" style="margin-top:16px">A movement of your own <i class="fx-opt">optional</i></div>
+        <div class="fx-list">
+          <button type="button" class="fx-c${chosen ? "" : " on"}" data-fxspex="">
+            <b>Let Element 26 choose</b><span class="num">recommended</span></button>
+          ${cands2.map((c, ci)=>
+            `<button type="button" class="fx-c${nrm(c.name)===nrm(chosen)?" on":""}" data-fxspex="${esc(c.name)}">
+              <b>${esc(c.name)}</b><span class="num">${Math.round(c.frac*100)}%${
+                ci === 0 && (w.avoid||[]).length ? " · best fit" : ""}</span></button>`).join("")}
+        </div>
+        <div class="field" style="margin:10px 0 4px"><label>Or type one</label>
+          <input id="fxSpEx" placeholder="e.g. Chest Supported Row" autocomplete="off" value="${esc(chosen)}"></div>`;
+
+      if(FIX.spEx){
+        const fits = musclesFor(FIX.spEx) || {};
+        /* How well each day suits THIS movement: how much of what it trains the day
+           already trains. Same measure the automatic pick uses, shown rather than
+           applied silently, so "which day" stops being a guess. */
+        const kin = wid=> (S.program[wid] || []).reduce((t, e)=>{
+          const mm = musclesFor(e.name) || {};
+          let sh = 0;
+          Object.keys(fits).forEach(k=>{ if(mm[k]) sh += Math.min(fits[k], mm[k]); });
+          return t + sh * (parseInt(e.sets, 10) || 1);
+        }, 0);
+        const best = Math.max(0.01, ...DAYS.map(kin));
+        h += `<div class="k-lab" style="margin-top:14px">Which days</div>
+          <div class="fx-days">${DAYS.map(d=>{
+            const fit = kin(d) / best;
+            const good = fit >= 0.5;
+            return `<button type="button" class="fx-d${FIX.spDays.indexOf(d) > -1 ? " on" : ""}${
+              good ? " fx-fits" : ""}" data-fxspday="${d}" aria-pressed="${FIX.spDays.indexOf(d) > -1}"
+              >${esc(dayName(d))}${good ? `<i>✓</i>` : ""}</button>`;
+          }).join("")}</div>
+          <div class="set-says" style="margin-top:7px">${
+            (()=> {
+              const marked = DAYS.filter(d=> kin(d) / best >= 0.5).map(dayName);
+              return marked.length
+                ? "Ticked days already train what this movement trains — " + joinList(marked) + "."
+                : "None of your days already train what this movement trains, so it will sit on its own wherever it goes.";
+            })()}</div>
+          <div class="k-lab" style="margin-top:14px">Sets of it per day</div>
+          ${stepRow("fxSpSets", FIX.spSets, 1, 6)}`;
+        if(!FIX.spDays.length){
+          h += `<div class="wd-none">Pick at least one day and it will be planned in. Until then the
+            spread below is Element 26's own.</div>`;
+        } else {
+          const pinned = FIX.spDays.length * FIX.spSets * muscleFrac(FIX.spEx, m);
+          if(pinned > FIX.spread + 0.01){
+            h += `<div class="sub" style="margin:8px 2px 0">That is ${r1(pinned)} sets of
+              ${esc(M.name.toLowerCase())} on its own, more than the ${FIX.spread} above — so the
+              total below is what you have pinned, and nothing extra is spread around it.</div>`;
+          }
+          const poor = FIX.spDays.filter(d=> kin(d) / best < 0.5).map(dayName);
+          if(poor.length){
+            h += `<div class="sub" style="margin:8px 2px 0;color:var(--acc)">${esc(joinList(poor))}
+              ${poor.length === 1 ? "trains" : "train"} nothing this movement uses. It still counts
+              toward the number — it is your plan — but it will be the odd exercise out in that session.</div>`;
+          }
+        }
+      }
       if(!sp){
         h += `<div class="wd-none">${sp === null && planEntriesForMuscle(m).length === 0
           ? "Nothing in your plan trains " + esc(M.name.toLowerCase()) + " yet, so there is nowhere to spread it. Use <b>Add a movement</b>."
@@ -21971,13 +22067,28 @@ function openOwnFix(idx){
     m2.querySelectorAll("[data-fxswf]").forEach(b=> b.onclick = ()=>{
       FIX.swapFrom = parseInt(b.dataset.fxswf,10); FIX.swapTo = null; redraw(); });
     m2.querySelectorAll("[data-fxswt]").forEach(b=> b.onclick = ()=>{ FIX.swapTo = b.dataset.fxswt; redraw(); });
+    m2.querySelectorAll("[data-fxspex]").forEach(b=> b.onclick = ()=>{
+      FIX.spEx = b.dataset.fxspex || "";
+      if(!FIX.spEx) FIX.spDays = [];
+      redraw();
+    });
+    m2.querySelectorAll("[data-fxspday]").forEach(b=> b.onclick = ()=>{
+      const d = b.dataset.fxspday, at = FIX.spDays.indexOf(d);
+      if(at > -1) FIX.spDays.splice(at, 1); else FIX.spDays.push(d);
+      redraw();
+    });
+    const spx = m2.querySelector("#fxSpEx");
+    if(spx){
+      spx.oninput = ()=>{ FIX.spEx = spx.value.trim(); };
+      spx.onchange = ()=>{ FIX.spEx = spx.value.trim(); redraw(); };
+    }
     const ex = m2.querySelector("#fxEx");
     if(ex) ex.oninput = ()=>{ FIX.ex = ex.value.trim(); };
     if(ex) ex.onchange = ()=>{ FIX.ex = ex.value.trim(); redraw(); };
     m2.querySelectorAll("[data-fxstep]").forEach(b=> b.onclick = ()=>{
       const [id, dir, lo, hi, st] = b.dataset.fxstep.split(":");
       const step = parseFloat(st) || 1;
-      const key = {fxSets:"sets", fxSetsOne:"setsOne", fxSpread:"spread"}[id];
+      const key = {fxSets:"sets", fxSetsOne:"setsOne", fxSpread:"spread", fxSpSets:"spSets"}[id];
       const v = (parseFloat(FIX[key]) || 0) + (dir === "up" ? step : -step);
       FIX[key] = Math.max(parseFloat(lo), Math.min(parseFloat(hi), Math.round(v*10)/10));
       redraw();
@@ -22026,7 +22137,9 @@ function applyOwnFix(idx){
       {note: "Chosen from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
     toast(e.name + " now " + e.sets + " sets");
   } else if(FIX.mode === "spread"){
-    const sp = spreadPlan(A, m, FIX.spread || 3, w.avoid);
+    const pin = (FIX.spEx && (FIX.spDays || []).length)
+      ? {name: FIX.spEx, days: FIX.spDays.slice(), sets: FIX.spSets || 2} : null;
+    const sp = spreadPlan(A, m, FIX.spread || 3, w.avoid, pin);
     if(!sp) return;
     sp.adds.forEach(a=>{
       const e = (S.program[a.wid] || [])[a.i];
@@ -22034,11 +22147,10 @@ function applyOwnFix(idx){
       e.sets = a.to;
       if(Array.isArray(e.rpes)) while(e.rpes.length < a.to) e.rpes.push(e.rpes[e.rpes.length-1]);
     });
-    if(sp.newEx){
-      const n = sp.newEx;
+    (sp.newExs || []).forEach(n=>{
       if(!Array.isArray(S.program[n.wid])) S.program[n.wid] = [];
       S.program[n.wid].push({name: n.name, sets: n.sets, reps: "8-12", rest: REST_SECOND});
-    }
+    });
     logPlanChange("programme", null, M.name, spreadList(sp),
       {note: "Spread across " + sp.daysTouched + " day" + (sp.daysTouched===1?"":"s") +
              " from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
