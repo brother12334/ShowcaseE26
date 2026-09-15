@@ -4684,6 +4684,16 @@ body.cele-open{overflow:hidden}
 .fx-c .num{flex:0 0 auto;font-size:11.5px;color:var(--faint)}
 .fx-c.on{background:var(--acc-soft);border-color:var(--acc-line)}
 .fx-c.on .num{color:var(--acc)}
+/* A movement you already own carries a second line — which day it is on and how much of
+   it counts — so the row answers "is this the one" without opening anything. The base row
+   is a single centred line, so this one wraps and re-anchors to the top. */
+.fx-have{flex-wrap:wrap;align-items:flex-start}
+.fx-have b{flex:1 1 auto}
+.fx-have .num{padding-top:1px}
+.fx-have-s{
+  flex:1 0 100%;font:10.5px var(--mono);letter-spacing:.03em;color:var(--faint);
+  margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 /* The plan itself, as a list of before-and-afters: an app that edits your training owes
    you the diff before you press the button, not a summary of it. */
 .fx-plan{
@@ -5346,7 +5356,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "21.5";
+const APP_VERSION = "21.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7441,7 +7451,7 @@ const EX_CATALOG = [
   ["T-Bar Row","barbell","pull_horizontal"],
   ["Landmine Row","barbell","pull_horizontal"],
   ["Single-Arm Dumbbell Row","dumbbell","pull_horizontal"],
-  ["Chest-Supported Dumbbell Row","dumbbell","pull_horizontal"],
+  ["Chest Supported Dumbbell Row","dumbbell","pull_horizontal"],   // spelled to match the curated entry above, which carries the cue
   ["Seated Cable Row","cable","pull_horizontal"],
   ["Wide-Grip Seated Row","cable","pull_horizontal"],
   ["Single-Arm Cable Row","cable","pull_horizontal"],
@@ -7685,11 +7695,44 @@ const EX_CATALOG = [
    EX_LIBRARY_EXTRA, and skipping anything already present under either name — the
    curated entry keeps its cue. */
 Object.keys(EX_LIBRARY).forEach(k=>{ EX_LIBRARY[k] = EX_LIBRARY[k] || []; });
+/* THE CATALOGUE'S SLOT IS THE SLOT, and it is the only table that says so explicitly.
+
+   The merge used to check "is this name already in THIS slot", which is no check at all
+   when the same movement is filed in two — and fourteen of them were. A Pallof Press sat
+   in both abs and obliques, Reverse Wrist Curl in both curl and forearms, Good Morning in
+   both hinge and lower_back. It put the movement in every swap shortlist twice, and left
+   exSlotFor() picking whichever slot it happened to reach first.
+
+   So a catalogue row now MOVES the movement: it is removed from wherever else it is
+   filed and placed in the slot the catalogue names. Most of these were mine — the
+   obliques, forearms, adductors, glute_iso and lower_back rows landed beside older
+   entries filed under a coarser slot, and the specific one is the one that should win. */
 EX_CATALOG.forEach(row=>{
   const [name, gear, slot] = row;
+  const c = canonEx(name);
   if(!EX_LIBRARY[slot]) EX_LIBRARY[slot] = [];
-  const have = EX_LIBRARY[slot].some(x=> canonEx(x.name) === canonEx(name));
-  if(!have) EX_LIBRARY[slot].push({name, gear});
+  let keep = null;
+  Object.keys(EX_LIBRARY).forEach(k=>{
+    EX_LIBRARY[k] = EX_LIBRARY[k].filter(x=>{
+      if(canonEx(x.name) !== c) return true;
+      // the curated entry's cue is worth carrying across; its slot is not
+      if(!keep || (!keep.cue && x.cue)) keep = x;
+      return false;
+    });
+  });
+  EX_LIBRARY[slot].push(keep ? Object.assign({}, keep, {gear: keep.gear || gear}) : {name, gear});
+});
+/* AND ONE PASS OVER WHAT IS LEFT, for the movements the catalogue never mentions. The
+   EX_LIBRARY_EXTRA merge above dedupes on swapSquash, which does not know that "Dumbbell
+   RDL" and "Romanian Deadlift" are one movement — the alias table does, and canonEx reads
+   it. Same slot, same movement, one entry. */
+Object.keys(EX_LIBRARY).forEach(k=>{
+  const seen = new Set();
+  EX_LIBRARY[k] = EX_LIBRARY[k].filter(x=>{
+    const c = canonEx(x.name);
+    if(seen.has(c)) return false;
+    seen.add(c); return true;
+  });
 });
 
 /* WHAT THE APP CAN OFFER YOU AS YOU TYPE.
@@ -22493,7 +22536,31 @@ function openOwnFix(idx){
       add = frac * FIX.sets;
       ok = !!FIX.ex && FIX.sets > 0;
       if(FIX.ex && !frac) { ok = false; why = "Element 26 doesn't have " + FIX.ex + " down as " + M.name.toLowerCase() + " work, so it can't say what it would add."; }
-      h += `<div class="k-lab">The movement</div>
+      /* WHAT YOU ALREADY DO, FIRST. This list used to open straight onto movements you do
+         not own, because fixCandidates() excludes everything already in the programme —
+         which is right for "add a movement" and wrong as the first thing you see. The
+         cheapest set of chest work available to you is nearly always the fourth set of a
+         press already sitting on Monday: the day is built, the warm-up is done, the
+         technique is known, and it costs nothing but the set itself. A whole new movement
+         is the answer when nothing you own does the job, not the opening bid.
+
+         Tapping one of these does not add a duplicate entry. It switches to "Add sets to
+         one" with that movement selected, which is the mode that edits the entry you
+         already have \u2014 so the two lists cannot produce two versions of the same lift. */
+      if(ents.length){
+        h += `<div class="k-lab">Already in your plan</div>
+          <div class="fx-list">${ents.slice(0,6).map((e,i)=>
+            `<button type="button" class="fx-c fx-have" data-fxuse="${i}">
+              <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} \u2192 ${(e.e.sets||1)+1} sets${
+                i === 0 ? " \u00b7 best fit" : ""}</span>
+              <span class="fx-have-s">${esc(widName(e.wid))} \u00b7 ${Math.round(e.frac*100)}% ${esc(M.name.toLowerCase())}</span>
+            </button>`).join("")}</div>
+          <div class="set-says" style="margin:7px 2px 0">A set added to one of these costs you
+            nothing but the set \u2014 the day already exists and you are already warm. Tapping one
+            opens it in <b>Add sets to one</b>.</div>`;
+      }
+      h += `<div class="k-lab" style="margin-top:${ents.length ? "16px" : "0"}">${
+          ents.length ? "Or something new" : "The movement"}</div>
         <div class="fx-list">${cands.slice(0,14).map(c=>
           `<button type="button" class="fx-c${nrm(c.name)===nrm(FIX.ex)?" on":""}" data-fxex="${esc(c.name)}">
             <b>${esc(c.name)}</b><span class="num">${Math.round(c.frac*100)}%</span></button>`).join("")}</div>
@@ -22516,7 +22583,8 @@ function openOwnFix(idx){
         h += `<div class="k-lab">Which movement takes them</div>
           <div class="fx-list">${ents.map((e,i)=>
             `<button type="button" class="fx-c${i===FIX.pick?" on":""}" data-fxpick="${i}">
-              <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} sets · ${Math.round(e.frac*100)}%</span></button>`).join("")}</div>
+              <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} sets · ${Math.round(e.frac*100)}%${
+                i === 0 && ents.length > 1 ? " · best fit" : ""}</span></button>`).join("")}</div>
           <div class="k-lab" style="margin-top:12px">Sets on ${esc(x.e.name)}</div>
           ${stepRow("fxSetsOne", FIX.setsOne, 1, 8)}
           <div class="sub" style="margin:6px 2px 0">Was ${from}.</div>`;
@@ -22697,6 +22765,18 @@ function openOwnFix(idx){
     m2.querySelectorAll("[data-fxwid]").forEach(b=> b.onclick = ()=>{ FIX.wid = b.dataset.fxwid; redraw(); });
     m2.querySelectorAll("[data-fxpick]").forEach(b=> b.onclick = ()=>{
       FIX.pick = parseInt(b.dataset.fxpick,10); FIX.setsOne = null; redraw(); });
+    /* Straight from the "already in your plan" shortlist into the mode that can act on
+       it, with the movement chosen and the stepper already one set up from where it is. */
+    m2.querySelectorAll("[data-fxuse]").forEach(b=> b.onclick = ()=>{
+      FIX.mode = "one";
+      FIX.pick = parseInt(b.dataset.fxuse, 10);
+      FIX.setsOne = null;
+      m2.querySelectorAll("[data-fxm]").forEach(x=>{
+        const on = x.dataset.fxm === "one";
+        x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on));
+      });
+      redraw();
+    });
     m2.querySelectorAll("[data-fxswf]").forEach(b=> b.onclick = ()=>{
       FIX.swapFrom = parseInt(b.dataset.fxswf,10); FIX.swapTo = null; redraw(); });
     m2.querySelectorAll("[data-fxswt]").forEach(b=> b.onclick = ()=>{ FIX.swapTo = b.dataset.fxswt; redraw(); });
