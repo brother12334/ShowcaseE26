@@ -5338,7 +5338,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.7";
+const APP_VERSION = "20.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10151,7 +10151,7 @@ const SPREAD_MAX_PER_EX = 6;
 function daySetCount(wid){
   return (S.program[wid] || []).reduce((t, e)=> t + (parseInt(e.sets, 10) || 0), 0);
 }
-function spreadPlan(A, m, need){
+function spreadPlan(A, m, need, avoid){
   if(!GROUPS[m] || !(need > 0)) return null;
   const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
   const have = ((A.wk[m] || {}).sets || 0) + ((A.cyc && A.cyc.pending[m]) || 0);
@@ -10189,7 +10189,7 @@ function spreadPlan(A, m, need){
   let newEx = null;
   const wantFreq = Math.min(3, Math.max(2, Math.floor(DAYS.length / 2)));
   if(daysTrained.length < 2 && DAYS.length > 1){
-    const pick = fixCandidates(m, ents.map(x=> x.e.name))[0];
+    const pick = fixCandidates(m, ents.map(x=> x.e.name), avoid)[0];
     const fits = pick ? (musclesFor(pick.name) || {}) : {};
     const kinship = wid=> (S.program[wid] || []).reduce((t, e)=>{
       const mm = musclesFor(e.name) || {};
@@ -10231,9 +10231,18 @@ function spreadPlan(A, m, need){
     });
     let placed = false;
     for(const wid of order){
+      /* Where a side is saturated, the slot that pays the muscle WITHOUT feeding the full
+         ones wins, even if it is the smaller movement. Adding a fourth set of bench to
+         fix a chest shortfall when the triceps are already over is paying twice and
+         growing once. */
+      const worth = x=>{
+        const mm = musclesFor(x.e.name) || {};
+        const cost = (avoid || []).reduce((t, k)=> t + (mm[k] || 0), 0);
+        return x.frac - cost * 0.8;
+      };
       const slot = (dayOf[wid] || [])
         .filter(x=> (((byKey[keyOf(x)] || {}).to) || x.e.sets || 1) < SPREAD_MAX_PER_EX)
-        .sort((p,q)=> q.frac - p.frac)[0];
+        .sort((p,q)=> worth(q) - worth(p) || q.frac - p.frac)[0];
       if(!slot) continue;
       const k = keyOf(slot);
       const cur = (byKey[k] || {}).to || slot.e.sets || 1;
@@ -10364,7 +10373,7 @@ function findingPlan(w, A){
   if(w.kind === "under" || w.kind === "balance"){
     if(!ents.length) return null;
     const need = Math.max(1, Math.ceil((lm.mev || 0) - ((A.wk[m]||{}).sets || 0) - ((A.cyc&&A.cyc.pending[m])||0)));
-    const plan = spreadPlan(A, m, Math.min(8, need));
+    const plan = spreadPlan(A, m, Math.min(8, need), w.avoid);
     if(!plan) return null;
     const slots = plan.adds.length + (plan.newEx ? 1 : 0);
     const freq = plan.freqAfter > plan.freqBefore;
@@ -10547,8 +10556,13 @@ function swapCollateral(A, outName, inName, sets){
   });
   return hits.sort((a,b)=> (a.after - a.mev) - (b.after - b.mev));
 }
-function fixCandidates(m, excludeNames){
+/* `avoid` is the muscles that are already full. A movement that pays the muscle you are
+   short of without also paying those is worth more here than a bigger movement that
+   feeds all of them — which is the whole difference between a fly and a bench press when
+   your triceps and front delts have run out of room. */
+function fixCandidates(m, excludeNames, avoid){
   const have = new Set((excludeNames || []).map(nrm));
+  const dodge = avoid || [];
   const out = [];
   Object.keys(EX_MUSCLES_C).forEach(k=>{
     const mm = EX_MUSCLES_C[k];
@@ -10556,9 +10570,10 @@ function fixCandidates(m, excludeNames){
     if(!(f >= 0.3)) return;
     const nice = prettyExName(k);
     if(have.has(nrm(nice))) return;
-    out.push({name: nice, frac: f});
+    const cost = dodge.reduce((t, x)=> t + (mm[x] || 0), 0);
+    out.push({name: nice, frac: f, cost, score: f - cost * 0.8});
   });
-  out.sort((a,b)=> b.frac - a.frac || a.name.localeCompare(b.name));
+  out.sort((a,b)=> b.score - a.score || b.frac - a.frac || a.name.localeCompare(b.name));
   return out.slice(0, 40);
 }
 /* The table's keys are canonical, which is lower case with the punctuation flattened.
@@ -12313,32 +12328,62 @@ function weakPoints(A){
        The lagging side is only the right lever when it has somewhere to go. Once its
        projected volume is at the top of its productive range the imbalance is real but
        the remedy is the other way round: the leading side is what needs to come down. */
+    /* A SIDE BEING FULL IS NOT THE SAME AS THE MUSCLE BEING FULL, and conflating them
+       produced the worst advice this app has given. Every press feeds front delts and
+       triceps at a fraction, so a pressing side saturates long before the chest does —
+       41.6 of a 33.1 ceiling across the three, while the chest itself sat at 10 of 14.4.
+       The app concluded there was no room to add pressing and offered to cut back work,
+       which for somebody chasing size means throwing away productive volume to satisfy a
+       ratio that is a joint-health heuristic, not a hypertrophy one.
+
+       What is actually true there is narrower and more useful: there is no room for more
+       PRESSING, and plenty of room for more CHEST. A fly is 100% chest, 30% front delt
+       and no triceps at all. So the finding now reports which members are saturated and
+       leaves the remedy as "add work that misses them", and only calls it no-room when
+       the lagging muscle itself is full. */
     const sideRoom = keys=>{
       let have = 0, cap = 0;
-      keys.forEach(m2=>{ have += A.wk[m2].sets + pend(m2); cap += L(m2).mav; });
-      return {have, cap, room: have < cap - 0.5};
+      const tight = [];
+      keys.forEach(m2=>{
+        const v = A.wk[m2].sets + pend(m2), c = L(m2).mav;
+        have += v; cap += c;
+        if(v >= c - 0.5) tight.push(m2);
+      });
+      const lag = keys[0];
+      const lagHave = A.wk[lag].sets + pend(lag), lagCap = L(lag).mav;
+      return {have, cap, tight, lag, lagHave, lagCap,
+              room: lagHave < lagCap - 0.5,            // the muscle the finding is filed under
+              sideFull: have >= cap - 0.5};
     };
     const nm = x => x.replace(/^./, c=> c.toUpperCase());
     if(ratio > R.hi){
       const rm = sideRoom(R.b);
       push(Math.min(95, Math.round(40 + (ratio/R.hi - 1)*90)), R.b[0], "balance",
         nm(R.bn)+"s lag behind "+R.an+"s",
-        rm.room ? R.actHigh
-          : "Bring the "+R.an+" volume down — "+R.bn+" work is already at the top of its useful range.",
+        !rm.room ? "Bring the "+R.an+" volume down — "+nm(gName(rm.lag))+" is already at the top of its useful range."
+          : rm.sideFull ? "Add "+gName(rm.lag).toLowerCase()+" work that misses "+joinList(rm.tight.map(x=>gName(x).toLowerCase()))+" — those are full, "+gName(rm.lag).toLowerCase()+" is not."
+          : R.actHigh,
         r1(sa)+" sets of "+R.an+" against "+r1(sb)+" of "+R.bn+", a "+ratio.toFixed(1)+":1 ratio where about 1:1 keeps the joint balanced."
-          + (rm.room ? "" : " "+nm(R.bn)+" is at "+r1(rm.have)+" of a "+r1(rm.cap)+" productive ceiling, so there is no room to add there."),
+          + (!rm.room ? " "+nm(gName(rm.lag))+" is at "+r1(rm.lagHave)+" of a "+r1(rm.lagCap)+" productive ceiling, so there is no room to add there."
+             : rm.sideFull ? " "+nm(R.bn)+" as a whole is at "+r1(rm.have)+" of "+r1(rm.cap)+" — "+joinList(rm.tight.map(x=>gName(x).toLowerCase()))+" "+(rm.tight.length===1?"is":"are")+" full — but "+gName(rm.lag).toLowerCase()+" itself is only at "+r1(rm.lagHave)+" of "+r1(rm.lagCap)+"."
+             : ""),
         R.whyHigh,
-        rm.room ? null : {noRoom: true, trimSide: R.a.slice(), trimName: R.an, lagName: R.bn});
+        !rm.room ? {noRoom: true, trimSide: R.a.slice(), trimName: R.an, lagName: R.bn}
+          : rm.sideFull ? {avoid: rm.tight.slice()} : null);
     } else if(ratio < R.lo){
       const rm = sideRoom(R.a);
       push(Math.min(95, Math.round(40 + (R.lo/ratio - 1)*90)), R.a[0], "balance",
         nm(R.an)+"s lag behind "+R.bn+"s",
-        rm.room ? R.actLow
-          : "Bring the "+R.bn+" volume down — "+R.an+" work is already at the top of its useful range.",
+        !rm.room ? "Bring the "+R.bn+" volume down — "+nm(gName(rm.lag))+" is already at the top of its useful range."
+          : rm.sideFull ? "Add "+gName(rm.lag).toLowerCase()+" work that misses "+joinList(rm.tight.map(x=>gName(x).toLowerCase()))+" — those are full, "+gName(rm.lag).toLowerCase()+" is not."
+          : R.actLow,
         r1(sa)+" sets of "+R.an+" against "+r1(sb)+" of "+R.bn+" ("+ratio.toFixed(2)+":1)."
-          + (rm.room ? "" : " "+nm(R.an)+" is at "+r1(rm.have)+" of a "+r1(rm.cap)+" productive ceiling, so there is no room to add there."),
+          + (!rm.room ? " "+nm(gName(rm.lag))+" is at "+r1(rm.lagHave)+" of a "+r1(rm.lagCap)+" productive ceiling, so there is no room to add there."
+             : rm.sideFull ? " "+nm(R.an)+" as a whole is at "+r1(rm.have)+" of "+r1(rm.cap)+" — "+joinList(rm.tight.map(x=>gName(x).toLowerCase()))+" "+(rm.tight.length===1?"is":"are")+" full — but "+gName(rm.lag).toLowerCase()+" itself is only at "+r1(rm.lagHave)+" of "+r1(rm.lagCap)+"."
+             : ""),
         R.whyLow,
-        rm.room ? null : {noRoom: true, trimSide: R.b.slice(), trimName: R.bn, lagName: R.an});
+        !rm.room ? {noRoom: true, trimSide: R.b.slice(), trimName: R.bn, lagName: R.an}
+          : rm.sideFull ? {avoid: rm.tight.slice()} : null);
     }
   });
 
@@ -21771,7 +21816,7 @@ function openOwnFix(idx){
   const bodyFor = ()=>{
     let h = "", add = 0, ok = true, why = "";
     if(FIX.mode === "own"){
-      const cands = fixCandidates(m, ents.map(x=> x.e.name));
+      const cands = fixCandidates(m, ents.map(x=> x.e.name), w.avoid);
       const frac = FIX.ex ? muscleFrac(FIX.ex, m) : 0;
       add = frac * FIX.sets;
       ok = !!FIX.ex && FIX.sets > 0;
@@ -21809,7 +21854,7 @@ function openOwnFix(idx){
          The default picks the number for you; here you say how much and see exactly
          which days it lands on before anything is written. */
       if(FIX.spread == null) FIX.spread = 3;
-      const sp = spreadPlan(A, m, FIX.spread);
+      const sp = spreadPlan(A, m, FIX.spread, w.avoid);
       add = sp ? sp.gained : 0;
       ok = !!sp;
       h += `<div class="k-lab">How much ${esc(M.name.toLowerCase())} work to add</div>
@@ -21964,7 +22009,7 @@ function applyOwnFix(idx){
       {note: "Chosen from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
     toast(e.name + " now " + e.sets + " sets");
   } else if(FIX.mode === "spread"){
-    const sp = spreadPlan(A, m, FIX.spread || 3);
+    const sp = spreadPlan(A, m, FIX.spread || 3, w.avoid);
     if(!sp) return;
     sp.adds.forEach(a=>{
       const e = (S.program[a.wid] || [])[a.i];
@@ -33714,6 +33759,9 @@ function setSentence(st){
 }
 function joinList(arr){
   if(arr.length<=1) return arr.join("");
+  /* No comma before "and" on a pair: "front shoulders, and triceps" is a serial comma
+     with nothing to disambiguate, and it reads as a stutter mid-sentence. */
+  if(arr.length===2) return arr[0]+" and "+arr[1];
   return arr.slice(0,-1).join(", ")+", and "+arr[arr.length-1];
 }
 /* SKIPPED DAYS GET THEIR OWN PARAGRAPH, not a footnote. A training history that lists
