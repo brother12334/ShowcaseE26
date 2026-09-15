@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#0e0e10">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -312,6 +312,18 @@ body{
   font:15px/1.56 var(--sans);
   -webkit-font-smoothing:antialiased;
   padding-bottom:calc(80px + env(safe-area-inset-bottom));
+  /* NO ZOOM. Three separate mechanisms, because no single one covers them all.
+
+     `manipulation` is this one: it removes the ~300ms wait for a possible second tap,
+     which is what double-tap-to-zoom IS. Scrolling and panning are untouched. The
+     viewport tag handles the rest of the browsers, and a gesture handler in the script
+     covers iOS Safari, which has ignored maximum-scale and user-scalable since iOS 10.
+
+     This is deliberately an accessibility trade: somebody who zooms to read small type
+     can no longer do it here. The app answers that with its own type controls rather
+     than with the browser's, and every screen is already built to survive a large
+     accessibility text size. */
+  touch-action:manipulation;
 }
 /* THE STATUS BAR SITS ON TOP OF THIS WITHOUT THE TOP INSET.
 
@@ -5147,7 +5159,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "19.6";
+const APP_VERSION = "19.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -19315,11 +19327,36 @@ function openExNote(ei, si){
       tt.unote = txt || (k ? k.label : "");
       addExNote({ex: en.name, code: picked, text: txt, set: scope,
         sessionId: a.id, workoutId: a.workoutId});
+      /* THE SAME NOTE TWICE IS ONE NOTE. Say "form fell off" on set 3, then decide it was
+         the whole exercise and say it again for all of it, and you had the sentence
+         standing in two places: once on the set and once on the movement. The Body tab
+         and the grade both read the log, so it turned up twice there too, and deleting
+         the exercise note afterwards left the set one behind still saying it.
+
+         So an exercise-wide note absorbs the set notes it repeats. Only the ones that
+         genuinely repeat it — same chip, same words — because a set note that says
+         something different is a different fact about a different set, and swallowing it
+         would be deleting something you wrote. */
+      let absorbed = 0;
+      if(scope == null){
+        const same = (x)=> (x.noteCode || null) === (picked || null)
+          && String(x.unote || "").trim().toLowerCase() === String(tt.unote || "").trim().toLowerCase();
+        (en.sets || []).forEach((st, si2)=>{
+          if(!st || !(st.noteCode || st.unote)) return;
+          if(!same(st)) return;
+          delete st.noteCode; delete st.unote;
+          removeExNote(a.id, en.name, si2);
+          absorbed++;
+        });
+      }
       save(); hideModal(); render();
       /* Confirmation you can actually see. A toast alone is gone in two seconds and the
          mark on the button is 12px wide, so the row the note landed on flashes too. */
       noteSavedFlash(ei, scope);
-      toast(scope == null ? "Noted on " + en.name : "Noted on set " + (scope + 1));
+      toast(scope == null
+        ? "Noted on " + en.name + (absorbed
+            ? " — the same note came off " + absorbed + " set" + (absorbed === 1 ? "" : "s") : "")
+        : "Noted on set " + (scope + 1));
     };
     const cl = m.querySelector("#exNoteClear");
     if(cl) cl.onclick = ()=>{
@@ -29535,6 +29572,23 @@ function sleepWindowHTML(wid){
    a load you have already moved past stops warming you up for the wrong weight.       */
 const WARM_FULL = [{pct:0.40, reps:"8"}, {pct:0.65, reps:"5"}, {pct:0.90, reps:"3"}];
 const WARM_LIGHT = [{pct:0.55, reps:"5"}];
+/* =====================================================================
+   A ONE-LIMB WARM-UP IS NOT THE SAME RAMP WRITTEN TWICE
+
+   Every rung here is a set, and on a movement you do one arm or one leg at a time every
+   set happens twice. So the three-rung ramp that is right for a bench press was silently
+   asking for SIX warm-up sets before the first working set of a single-arm row — which
+   is not a warm-up, it is a session. Nobody does it, so it reads as the app not knowing
+   what the exercise is.
+
+   The load is already much lighter per limb, and the second limb is warm by the time it
+   starts, so the ramp genuinely does not need the same number of steps. The middle rung
+   goes and the top one moves down to meet it: two rungs, each done both sides, which is
+   four sets — the same amount of work the bilateral ramp asks for.
+
+   The rungs also have to SAY they are per side, or "40 lb × 8" is ambiguous on exactly
+   the movement where it matters most. */
+const WARM_FULL_UNI = [{pct:0.45, reps:"6"}, {pct:0.80, reps:"3"}];
 
 /* The Smith machine's carriage. The programme's Smith loads include it (see the note on
    defaultProgram); nothing that gets typed into a set row does. */
@@ -29855,7 +29909,8 @@ function warmupFromPlan(e, ctx){
 function warmupPlan(e, kind, ctx){
   if(!kind) return [];
   if(kind === "plan") return warmupFromPlan(e, ctx);
-  const spec = kind === "full" ? WARM_FULL : WARM_LIGHT;
+  const uni = !!altStyle(e);
+  const spec = kind === "full" ? (uni ? WARM_FULL_UNI : WARM_FULL) : WARM_LIGHT;
   const src = warmWorkingLoad(e, ctx);
   const w = src && src.w;
   if(!(w > 0)){
@@ -29875,12 +29930,14 @@ function warmupPlan(e, kind, ctx){
        every one of these becomes a real number off your own working weight. Rendered
        differently so they never read as a prescription. */
     return kind === "full"
-      ? [{label:"light", reps:"8", placeholder:true}, {label:"build up", reps:"5", placeholder:true},
-         {label:"almost there", reps:"3", placeholder:true}]
+      ? (uni
+          ? [{label:"light", reps:"6", placeholder:true}, {label:"almost there", reps:"3", placeholder:true}]
+          : [{label:"light", reps:"8", placeholder:true}, {label:"build up", reps:"5", placeholder:true},
+             {label:"almost there", reps:"3", placeholder:true}])
       : [{label:"one light set", reps:"5", placeholder:true}];
   }
   return spec.map(x=>({label: warmRound(w * x.pct, e.name) + " " + unitWord(), reps: x.reps,
-                       pct: Math.round(x.pct*100), src: src.src}));
+                       pct: Math.round(x.pct*100), src: src.src, uni}));
 }
 function warmupHTML(e, kind, ctx){
   const plan = warmupPlan(e, kind, ctx);
@@ -29910,6 +29967,11 @@ function warmupHTML(e, kind, ctx){
              data-warmtick="${ei2}:${wi}" title="Mark this rung done">${face}</button>`;
     }).join("")}</span>
     <span class="warm-note">${
+      /* EACH SIDE, SAID ONCE. Every rung on a one-limb movement is done twice, and
+         "40 lb × 6" on a single-arm row means 6 per arm, not 6 in total. Said here
+         rather than on every rung, which would put the same two words on the screen
+         four times in a row. */
+      (plan[0] && plan[0].uni) || altStyle(e) ? "each side · " : ""}${
       kind === "plan"
         ? (e && e.warmupNote ? esc(e.warmupNote) + ". Not counted."
                              : "prescribed by your plan. Not counted.")
@@ -31001,6 +31063,18 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
           </span>
         </span>
       </div>
+      ${/* THE LEG WAS MISSING HALF THE LINES A NORMAL CARD GETS. A superset renders as one
+            card of rounds, and the per-movement header was written to carry only what a
+            round could not: the target, the controls, the plan-change mark and the note.
+            But the plate calculator, the linear-progression line and the percentage line
+            all belong to the MOVEMENT, not to the round — so putting a barbell lift into
+            a superset silently took its plate maths away, on the one screen where you are
+            standing in front of the bar deciding what to load. Same builders, same order
+            as the ordinary card. */""}
+      ${swapNoteHTML(p.en)}
+      ${plateLineHTML(p.en)}
+      ${lpLineHTML(p.en)}
+      ${pctLineHTML(p.en)}
       ${planChangeLineHTML(p.en)}
       ${exNoteLineHTML(p.en)}
       ${p.en.warm ? warmupHTML(p.en, p.en.warm, meta[k].ctx) : ""}
@@ -31354,6 +31428,23 @@ function hideModal(){
   MODAL_DISMISS = null;
   if(d) d();                // a pending askConfirm resolves false
 }
+/* =====================================================================
+   PINCH ZOOM, ON THE ONE BROWSER THAT IGNORES BEING ASKED
+
+   iOS Safari has ignored maximum-scale and user-scalable since iOS 10, deliberately, so
+   the viewport tag stops zoom everywhere except the phone most of this app runs on.
+   What it does still honour is a cancelled gesture event.
+
+   Three of them, not one: `gesturestart` alone stops the zoom from beginning, but a
+   gesture already in flight when a re-render lands can still finish, and `gestureend`
+   is what resets Safari's own scale bookkeeping. Passive is explicitly false because a
+   passive listener cannot call preventDefault, which is the entire point.
+
+   Nothing else is affected: these events only fire for multi-touch scale gestures. One
+   finger scrolls, drags and taps exactly as before. */
+["gesturestart","gesturechange","gestureend"].forEach(evt=>{
+  document.addEventListener(evt, e=> e.preventDefault(), {passive:false});
+});
 $("#modalBg").addEventListener("click", e=>{ if(e.target.id==="modalBg") hideModal(); });
 
 /* A real in-app confirmation instead of the OS `confirm()` box, it can carry the
