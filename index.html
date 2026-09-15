@@ -5338,7 +5338,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.8";
+const APP_VERSION = "20.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10154,7 +10154,9 @@ function daySetCount(wid){
 function spreadPlan(A, m, need, avoid){
   if(!GROUPS[m] || !(need > 0)) return null;
   const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
-  const have = ((A.wk[m] || {}).sets || 0) + ((A.cyc && A.cyc.pending[m]) || 0);
+  /* The ceiling is judged on what the muscle has actually taken over the window its
+     thresholds are scaled to — see sideRoom(). */
+  const have = (A.wk[m] || {}).sets || 0;
   /* AT THE CEILING MEANS NO PLAN, not "ignore the ceiling". `room > 0 ? room : need` read
      as "cap it at the room available, unless there is none, in which case add everything
      you were asked for" — which is the one case the cap exists for. A muscle with no room
@@ -10289,7 +10291,7 @@ function nmUp(x){ return String(x || "").replace(/^./, c=> c.toUpperCase()); }
 function trimPlan(A, keys, need){
   if(!Array.isArray(keys) || !keys.length || !(need > 0)) return null;
   const floorOf = m => ((A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m]).mev || 0;
-  const haveOf  = m => ((A.wk[m] || {}).sets || 0) + ((A.cyc && A.cyc.pending[m]) || 0);
+  const haveOf  = m => (A.wk[m] || {}).sets || 0;
   /* Every slot on the leading side, smallest contributor first. A slot is only cuttable
      while the muscle it mainly feeds stays above its own floor. */
   const slots = [];
@@ -10432,14 +10434,17 @@ function muscleFrac(exName, m){
    this and none of them can quietly forget the weighting. */
 function fixProjection(A, m, addSets){
   const L = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
-  /* DONE PLUS STILL PRESCRIBED, and it has to SAY so. The Body tab's bar shows what you
-     have actually logged in the window; this panel is editing a PLAN, so what matters is
-     what the whole cycle will deliver — logged sets plus the ones still queued in it.
-     Both are right and they are different numbers, and showing 10 on one screen and 19 on
-     the next with no explanation is how a person ends up not trusting either. */
+  /* ONE NUMBER, THE SAME ONE THE BAR SHOWS. This used to fold the sets still queued for
+     the rest of the cycle into the figure being compared, so the panel opened on 19 where
+     the finding behind it showed 10 — against the same threshold, which is scaled to the
+     days elapsed rather than to the whole cycle. Explaining the discrepancy in a caption
+     was the wrong fix for it; the right one is not to have two numbers.
+
+     The queued sets are still worth knowing, so they are still said — underneath, as
+     context about what is coming, rather than mixed into the comparison. */
   const done = (A.wk[m] || {}).sets || 0;
   const queued = (A.cyc && A.cyc.pending[m]) || 0;
-  const now = done + queued;
+  const now = done;
   const after = Math.max(0, now + (addSets || 0));
   const R = v => Math.round(v * 10) / 10;
   let verdict, tone;
@@ -10488,8 +10493,7 @@ function balanceProjection(A, m, addSets){
   const R = ratioPairFor(m);
   if(!R) return null;
   const side = R.a.indexOf(m) > -1 ? "a" : "b";
-  const sum = keys => keys.reduce((t, k)=>
-    t + ((A.wk[k] || {}).sets || 0) + ((A.cyc && A.cyc.pending[k]) || 0), 0);
+  const sum = keys => keys.reduce((t, k)=> t + ((A.wk[k] || {}).sets || 0), 0);
   const a0 = sum(R.a), b0 = sum(R.b);
   const a1 = a0 + (side === "a" ? (addSets || 0) : 0);
   const b1 = b0 + (side === "b" ? (addSets || 0) : 0);
@@ -10524,8 +10528,9 @@ function fixReadoutHTML(pr, bal){
     <div class="fx-bar"><i style="width:${pct(pr.after)}%"></i>
       <u style="left:${pct(pr.mev)}%"></u></div>
     <div class="fx-say">${esc(pr.verdict)}</div>
-    ${pr.queued > 0 ? `<div class="fx-made">${pr.done} logged so far, plus ${pr.queued} still
-      prescribed in this cycle. The Body tab's bar shows the ${pr.done} on its own.</div>` : ""}
+    ${pr.queued > 0 ? `<div class="fx-made">Counted the way the Body tab counts it: what this
+      muscle has taken so far. Your plan has ${pr.queued} more set${pr.queued === 1 ? "" : "s"}
+      of it still to come in this cycle.</div>` : ""}
   </div>`;
 }
 /* Movements this app knows that actually train the muscle, best first, minus the ones
@@ -12341,16 +12346,28 @@ function weakPoints(A){
        and no triceps at all. So the finding now reports which members are saturated and
        leaves the remedy as "add work that misses them", and only calls it no-room when
        the lagging muscle itself is full. */
+    /* MEASURED THE WAY THE BAR UNDERNEATH IT IS MEASURED. This added the sets still
+       PRESCRIBED for the rest of the cycle to a volume figure whose threshold is scaled
+       to the days elapsed so far — a whole-cycle number against a part-cycle ceiling. Two
+       days into a rotation that is arithmetic nobody can win: the card read "chest is at
+       19 of a 14.4 ceiling, no room to add" directly above a bar reading 10 against the
+       same 14.4 with a third of it unused.
+
+       Queued sets are a real thing and they matter to a SHORTFALL — no point adding work
+       the rest of the cycle already delivers, which is why the under-volume rule still
+       nets them off. They are the wrong input to a CEILING, because a ceiling asks what
+       the muscle has actually absorbed, and that has to be counted over the same window
+       its threshold was scaled to. */
     const sideRoom = keys=>{
       let have = 0, cap = 0;
       const tight = [];
       keys.forEach(m2=>{
-        const v = A.wk[m2].sets + pend(m2), c = L(m2).mav;
+        const v = A.wk[m2].sets, c = L(m2).mav;
         have += v; cap += c;
         if(v >= c - 0.5) tight.push(m2);
       });
       const lag = keys[0];
-      const lagHave = A.wk[lag].sets + pend(lag), lagCap = L(lag).mav;
+      const lagHave = A.wk[lag].sets, lagCap = L(lag).mav;
       return {have, cap, tight, lag, lagHave, lagCap,
               room: lagHave < lagCap - 0.5,            // the muscle the finding is filed under
               sideFull: have >= cap - 0.5};
