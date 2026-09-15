@@ -4684,7 +4684,47 @@ body.cele-open{overflow:hidden}
 .fx-bad .fx-say{color:var(--bad)}
 .wd-own p{margin-bottom:10px}
 /* ================= VOLUME TARGETS ================= */
-.tg-scale .fx-step b{min-width:74px}
+.tg-plain p{font-size:13.5px;line-height:1.55;color:var(--dim);margin:0 0 9px}
+.tg-plain p:last-child{margin-bottom:0}
+.tg-plain b{color:var(--text);font-weight:600}
+.tg-plain .num{color:var(--text)}
+.tg-scale{display:flex;flex-direction:column;align-items:center;gap:4px}
+.tg-dial{
+  position:relative;width:186px;max-width:100%;aspect-ratio:1;
+  /* The browser must not decide this drag is a scroll before we have seen it. */
+  touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;
+}
+.tg-dial:active,.tg-dial.is-live{cursor:grabbing}
+.tg-dial svg{width:100%;height:100%;display:block;overflow:visible}
+.tg-track{fill:none;stroke:var(--line);stroke-width:9;stroke-linecap:round}
+/* Filled from the CENTRE of the range, not from one end: the thing worth seeing at a
+   glance is which side of the published figures you have chosen, and how far. */
+.tg-fill{fill:none;stroke:var(--acc);stroke-width:9;stroke-linecap:round;
+  transition:stroke .2s ease}
+.tg-dial.is-off .tg-fill{stroke:transparent}
+.tg-mid{stroke:var(--faint);stroke-width:2;stroke-linecap:round;opacity:.7}
+.tg-knob{
+  fill:var(--card);stroke:var(--text);stroke-width:2.5;
+  transition:r .16s cubic-bezier(.34,1.5,.6,1);
+}
+.tg-dial.is-live .tg-knob{r:10}
+.tg-dial:focus-visible{outline:none}
+.tg-dial:focus-visible .tg-knob{stroke:var(--acc);r:10}
+/* THE NUMBER AND ITS SYMBOL ARE ONE OBJECT, so they are wrapped in one. The readout fills
+   the whole dial; aligning the % against THAT box put it against the top of the circle,
+   and then against the bottom of it — a stray symbol floating near the arc either way. In
+   its own baseline-aligned box it sits on the digits, and the box is what gets centred. */
+.tg-read{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+}
+.tg-val{display:flex;align-items:baseline;gap:2px}
+.tg-read b{font-family:var(--disp);font-size:38px;line-height:1;font-weight:700}
+.tg-read i{font-family:var(--mono);font-style:normal;font-size:14px;color:var(--faint)}
+.tg-dial.is-off .tg-read b{color:var(--dim)}
+@media (prefers-reduced-motion: reduce){
+  .tg-knob,.tg-fill{transition:none}
+}
 .tg-area{
   font:10.5px var(--mono);text-transform:uppercase;letter-spacing:.11em;color:var(--faint);
   margin:14px 2px 5px;
@@ -5240,7 +5280,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.1";
+const APP_VERSION = "20.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23722,23 +23762,125 @@ function settingsDayHTML(){
 
    Both are recorded as yours. The Body tab's explainer names them in its list of what
    moved the figure, so a target you set never gets passed off as one the app worked out. */
+/* =====================================================================
+   THE DIAL
+
+   A stepper is the right control for a number you nudge and the wrong one for a number
+   that is a JUDGEMENT ABOUT A WHOLE SCALE. Twenty-one targets move together here, and
+   "80%" is a position on a range, not a count of anything — so it gets a range you can
+   see: a 270-degree arc from half the published figures to one and a half times them,
+   with where you are along it visible without reading the number.
+
+   The maths, once, so the handle and the arc cannot disagree: value 50-150 maps onto
+   135-405 degrees, clockwise, leaving the gap at the bottom where the two ends sit. SVG
+   y grows downward, which is exactly what makes increasing degrees run clockwise here
+   without negating anything. */
+const TG_A0 = 135, TG_SWEEP = 270, TG_MIN = 50, TG_MAX = 150, TG_STEP = 5;
+function tgAngle(v){ return TG_A0 + TG_SWEEP * (v - TG_MIN) / (TG_MAX - TG_MIN); }
+function tgPoint(deg, r){
+  const a = deg * Math.PI / 180;
+  return [60 + r * Math.cos(a), 60 + r * Math.sin(a)];
+}
+function tgArc(from, to, r){
+  const [x1, y1] = tgPoint(from, r), [x2, y2] = tgPoint(to, r);
+  const big = (to - from) > 180 ? 1 : 0;
+  return "M" + x1.toFixed(2) + " " + y1.toFixed(2) +
+         " A" + r + " " + r + " 0 " + big + " 1 " + x2.toFixed(2) + " " + y2.toFixed(2);
+}
+function tgScaleSay(pct){
+  return pct === 100
+    ? "The figures as published. Nothing of yours is applied."
+    : pct < 100 ? "Every target runs " + (100 - pct) + "% lower than the figures."
+                : "Every target runs " + (pct - 100) + "% higher than the figures.";
+}
+function tgDialHTML(pct){
+  const a = tgAngle(pct);
+  const [hx, hy] = tgPoint(a, 46);
+  /* role=slider with the real value on it, and tabindex so the arrows work: a control
+     you can only operate by dragging is a control somebody cannot operate at all. */
+  return `<div class="tg-dial" id="tgDial" role="slider" tabindex="0"
+      aria-label="How all volume targets compare to the published figures"
+      aria-valuemin="${TG_MIN}" aria-valuemax="${TG_MAX}" aria-valuenow="${pct}"
+      aria-valuetext="${pct}% of the published figures">
+    <svg viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+      <path class="tg-track" d="${tgArc(TG_A0, TG_A0 + TG_SWEEP, 46)}"/>
+      <path class="tg-fill" id="tgFill" d="${tgArc(Math.min(tgAngle(100), a), Math.max(tgAngle(100), a), 46)}"/>
+      <line class="tg-mid" x1="60" y1="8" x2="60" y2="17"/>
+      <circle class="tg-knob" id="tgKnob" cx="${hx.toFixed(2)}" cy="${hy.toFixed(2)}" r="8"/>
+    </svg>
+    <div class="tg-read"><span class="tg-val"><b class="num" id="tgPct">${pct}</b><i>%</i></span></div>
+  </div>`;
+}
+/* Live, without a render: dragging a dial that rebuilds twenty-one rows on every frame
+   is a dial that stutters. Only the four things that actually move are touched, and the
+   real save happens once, when the finger comes off. */
+function tgDialPaint(pct){
+  const d = $("#tgDial"); if(!d) return;
+  const a = tgAngle(pct), mid = tgAngle(100);
+  const [hx, hy] = tgPoint(a, 46);
+  const k = $("#tgKnob"), f = $("#tgFill"), t = $("#tgPct"), say = $("#tgSay");
+  if(k){ k.setAttribute("cx", hx.toFixed(2)); k.setAttribute("cy", hy.toFixed(2)); }
+  if(f) f.setAttribute("d", tgArc(Math.min(mid, a), Math.max(mid, a), 46));
+  if(t) t.textContent = pct;
+  if(say) say.textContent = tgScaleSay(pct);
+  d.setAttribute("aria-valuenow", pct);
+  d.setAttribute("aria-valuetext", pct + "% of the published figures");
+  d.classList.toggle("is-off", pct === 100);
+}
+/* Where a touch lands, as a value. The bottom of the dial is a gap rather than a
+   position — it is where the two ends of the range sit — so a finger there resolves to
+   whichever end it is nearer rather than jumping the value across the whole scale. */
+function tgValueAt(el, clientX, clientY){
+  const r = el.getBoundingClientRect();
+  const dx = clientX - (r.left + r.width / 2);
+  const dy = clientY - (r.top + r.height / 2);
+  let a = Math.atan2(dy, dx) * 180 / Math.PI;
+  if(a < 0) a += 360;
+  let t;
+  if(a >= TG_A0) t = a;
+  else if(a <= 45) t = a + 360;
+  else t = (a < 90) ? TG_A0 + TG_SWEEP : TG_A0;
+  const v = TG_MIN + (t - TG_A0) / TG_SWEEP * (TG_MAX - TG_MIN);
+  return Math.max(TG_MIN, Math.min(TG_MAX, Math.round(v / TG_STEP) * TG_STEP));
+}
+function tgCommit(pct, was){
+  if(pct === was) return;
+  S.lmScale = pct / 100;
+  logPlanChange("rule", null, "Volume targets",
+    [was + "% → " + pct + "% of the published figures"],
+    {note: "You scaled every muscle's targets from Settings."});
+  save(); queueSync(); render();
+}
 function targetsScreenHTML(){
   const A = bodyAnalysis();
   const sc = lmScale();
   const pct = Math.round(sc * 100);
   const nOwn = Object.keys(S.lmFloor || {}).filter(k=> GROUPS[k]).length;
-  let h = setBlock("All of them at once",
-    "Element 26's floors come from published figures, scaled to your experience, how often you train each group and how long your cycle actually ran. If you think the whole scale is high or low for you, move it here rather than arguing with them one at a time.",
-    `<div class="tg-scale">
-      <div class="fx-step" style="margin-top:0">
-        <button type="button" data-tgscale="down" aria-label="Lower every target">−</button>
-        <b class="num">${pct}%</b>
-        <button type="button" data-tgscale="up" aria-label="Raise every target">+</button>
-      </div>
-      <div class="set-says num">${pct === 100
-        ? "The figures as published. Nothing of yours is applied."
-        : (pct < 100 ? "Every target runs " + (100 - pct) + "% lower than the figures."
-                     : "Every target runs " + (pct - 100) + "% higher than the figures.")}</div>
+  /* PLAIN ENGLISH FIRST. Everything under this point is the app arguing with itself about
+     published figures, scaling factors and landmarks, and none of it means anything until
+     somebody knows what the numbers ARE. Four short sentences, no jargon, before the
+     controls — and specifically including what these numbers do NOT do, because a screen
+     where you can move every target in the app is a screen where "will this change my
+     workouts?" is the first question anybody has. */
+  let h = setBlock("What these numbers are",
+    "Every muscle has a number of hard sets it needs before it grows. Element 26 works one "
+    + "out for each one from published research, then adjusts it for how experienced you are, "
+    + "how often you train that muscle, and how long your cycle actually ran.",
+    `<div class="tg-plain">
+      <p><b>They are only used to tell you things.</b> The Body tab reads them to say when a
+        muscle is behind. They never change your plan, your sets or your loads on their own —
+        nothing on this screen touches a workout.</p>
+      <p><b>Each row below reads “what you are doing / what it asks for”.</b>
+        So <span class="num">8 / 10</span> means eight sets against a floor of ten, and you are
+        two short. A muscle at or above its number is not mentioned on the Body tab at all.</p>
+      <p><b>Change them if they are wrong for you.</b> If the whole scale feels off, move the
+        dial below and every muscle moves together. If it is one muscle, open that row. Anything
+        you set is marked as yours and can be put back.</p>
+    </div>`);
+  h += setBlock("All of them at once",
+    "One dial for every muscle. Use it if you think the figures run high or low for you generally, rather than arguing with them one at a time.",
+    `<div class="tg-scale">${tgDialHTML(pct)}
+      <div class="set-says num" id="tgSay">${tgScaleSay(pct)}</div>
     </div>`
     + (pct !== 100 ? `<div class="btn-row" style="margin-top:9px"><button class="btn ghost small" id="tgScaleReset" style="flex:1">Back to the published figures</button></div>` : ""));
 
@@ -23747,9 +23889,7 @@ function targetsScreenHTML(){
      are actually doing against it, and a control that only appears once you open it —
      a screen of twenty-one steppers is a screen daring you to fiddle. */
   h += `<div class="set-block"><div class="set-name">Each one on its own</div>
-    <div class="set-says">Tap a muscle to change just that floor. Anything you set here replaces
-      the app's figure for that group and nothing else — its productive range and its ceiling
-      still move with your training.</div>`;
+    <div class="set-says">Tap a muscle to change just that one.</div>`;
   AREA_ORDER.forEach(area=>{
     const rows = GKEYS.filter(g=> AREA_OF[g] === area);
     if(!rows.length) return;
@@ -23792,12 +23932,11 @@ function targetsScreenHTML(){
       <button class="btn ghost small" id="tgClearAll" style="flex:1">Clear all ${nOwn} floor${nOwn===1?"":"s"} I set</button>
     </div>`;
   }
-  h += `<div class="set-block"><div class="set-says">${
-    term("mev","MEV")} is the floor these rows show — the least work that still grows the
-    muscle. The productive range above it and the ceiling above that are not editable:
-    they move with how often you train, how long your cycle ran and what the log says you
-    recover from, and a number you cannot justify against your own training is not one
-    worth typing in.</div></div>`;
+  h += `<div class="set-block"><div class="set-says">The number each row shows is the
+    ${term("mev","MEV")}. There are two more above it — the productive range, and the point
+    past which you stop recovering — and those are not editable: they move with how often
+    you train, how long your cycle ran and what your log says you recover from. A number
+    you cannot justify against your own training is not one worth typing in.</div></div>`;
   return h;
 }
 /* What the floor WOULD be if this group had no override — so the row can say what it is
@@ -24943,16 +25082,76 @@ function bind(){
     TG_OPEN = (TG_OPEN === b.dataset.tgopen) ? null : b.dataset.tgopen;
     render();
   });
-  document.querySelectorAll("[data-tgscale]").forEach(b=> b.onclick = ()=>{
-    const was = lmScale();
-    const v = Math.round((was + (b.dataset.tgscale === "up" ? 0.05 : -0.05)) * 100) / 100;
-    S.lmScale = Math.max(LM_SCALE_MIN, Math.min(LM_SCALE_MAX, v));
-    if(lmScale() === was) return;                 // already at the end of the range
-    logPlanChange("rule", null, "Volume targets",
-      [Math.round(was*100) + "% \u2192 " + Math.round(lmScale()*100) + "% of the published figures"],
-      {note: "You scaled every muscle's targets from Settings."});
-    save(); queueSync(); render();
-  });
+  const dial = $("#tgDial");
+  if(dial){
+    let live = Math.round(lmScale() * 100), dragging = false, commitT = null;
+    /* WHAT IT WAS IS READ AT COMMIT TIME, NOT AT WIRING TIME. This element is rebuilt on
+       every render, so a baseline captured when the handlers were attached goes stale the
+       moment anything else on the screen changes, and the log would then record a move
+       from a number nobody was ever on. */
+    const commitNow = ()=>{
+      if(commitT){ clearTimeout(commitT); commitT = null; }
+      tgCommit(live, Math.round(lmScale() * 100));
+    };
+    /* POINTER EVENTS, AND THE CAPTURE IS THE POINT. Without it a drag that leaves the
+       dial — which every drag does, because your thumb is bigger than the arc — stops
+       being delivered and the knob is left wherever it was abandoned. touch-action:none
+       in the CSS is the other half: it tells the browser this gesture is ours before it
+       has decided to scroll the page with it. */
+    const move = e=>{
+      if(!dragging) return;
+      const v = tgValueAt(dial, e.clientX, e.clientY);
+      if(v !== live){ live = v; tgDialPaint(v); }
+      e.preventDefault();
+    };
+    const up = e=>{
+      if(!dragging) return;
+      dragging = false;
+      dial.classList.remove("is-live");
+      try{ dial.releasePointerCapture(e.pointerId); }catch(err){}
+      commitNow();
+    };
+    dial.addEventListener("pointerdown", e=>{
+      dragging = true;
+      dial.classList.add("is-live");
+      try{ dial.setPointerCapture(e.pointerId); }catch(err){}
+      const v = tgValueAt(dial, e.clientX, e.clientY);
+      live = v; tgDialPaint(v);
+      e.preventDefault();
+    });
+    dial.addEventListener("pointermove", move);
+    dial.addEventListener("pointerup", up);
+    dial.addEventListener("pointercancel", up);
+    /* A dial you can only drag is a dial somebody cannot use. Arrows step it, Home and
+       End take it to the ends, and each keypress commits on its own because there is no
+       release to wait for. */
+    dial.addEventListener("keydown", e=>{
+      const k = e.key;
+      let v = null;
+      if(k === "ArrowRight" || k === "ArrowUp")   v = live + TG_STEP;
+      else if(k === "ArrowLeft" || k === "ArrowDown") v = live - TG_STEP;
+      else if(k === "Home") v = TG_MIN;
+      else if(k === "End")  v = TG_MAX;
+      else if(k === "Enter" || k === " ") v = 100;
+      else return;
+      e.preventDefault();
+      v = Math.max(TG_MIN, Math.min(TG_MAX, v));
+      if(v === live) return;
+      live = v; tgDialPaint(v);
+      /* HELD BACK A MOMENT, because committing re-renders the screen — the twenty-one
+         rows below show floors that move with this — and a render replaces the very
+         element the key event came from. Pressing the arrow twice used to work once and
+         then land on an element that no longer existed. Repaint now, write once the
+         keypresses stop, and hand focus back to the dial that replaces this one. */
+      if(commitT) clearTimeout(commitT);
+      commitT = setTimeout(()=>{
+        commitT = null;
+        tgCommit(live, Math.round(lmScale() * 100));
+        const again = $("#tgDial");
+        if(again) again.focus();
+      }, 450);
+    });
+  }
   const tgr = $("#tgScaleReset");
   if(tgr) tgr.onclick = ()=>{
     const was = Math.round(lmScale()*100);
