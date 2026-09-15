@@ -5356,7 +5356,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "21.6";
+const APP_VERSION = "21.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6433,6 +6433,18 @@ function ex(name,sets,reps,rpe,weight,note){ return {name,sets,reps,rpe,weight,n
    The result is that renaming an exercise is now cosmetic. Its whole past comes with it.
    ===================================================================== */
 const EX_ALIASES = {
+  /* TWO NAMES FOR ONE MOVEMENT, both of which the catalogue happened to carry. These
+     showed up side by side in the same shortlist — "Decline Dumbbell Bench Press" above
+     "Decline Dumbbell Press" — which makes the app look like it cannot count. The rule
+     for putting a pair in here is that a gym would call them the same lift; a bench dip
+     and a machine dip are NOT one movement and are deliberately absent. */
+  "decline dumbbell press":"decline dumbbell bench press",
+  "shoulder press machine":"machine shoulder press",
+  "assisted pull-up machine":"assisted pull-up",
+  "machine hack squat":"hack squat",
+  "back extension machine":"back extension",
+  "tricep dip machine":"tricep dip",
+  "barbell wrist curl":"wrist curl",
   // spelling and abbreviation variants of the built-in program
   "triceps pushdown":"tricep pushdown", "tricep pressdown":"tricep pushdown",
   "triceps pressdown":"tricep pushdown", "cable pushdown":"tricep pushdown",
@@ -10414,7 +10426,26 @@ function spreadPlan(A, m, need, avoid, pin){
       left -= sets * pf;
     });
   } else if(daysTrained.length < 2 && DAYS.length > 1){
-    const pick = fixCandidates(m, ents.map(x=> x.e.name), avoid)[0];
+    /* WHAT GOES ON THE SECOND DAY SHOULD BE SOMETHING YOU ALREADY DO.
+
+       This asked fixCandidates() for the movement, and fixCandidates() excludes
+       everything already in the programme — so raising a muscle's frequency always
+       introduced a movement you had never done. If your obliques work is a Russian Twist
+       on Upper A, the answer to "train them on two days" is a Russian Twist on the other
+       day, not a Cable Woodchop you have to learn, buy a handle for, and find room in the
+       session for. Same stimulus, nothing new to think about.
+
+       Your own movements are scored the way the new ones are — the fraction they pay into
+       the muscle, less what they cost any muscle that is already full — and one is used
+       whenever it genuinely does the job. Below half a set per set it does not, and a new
+       movement is the honest answer; that is also what happens when the plan has nothing
+       for this muscle at all, which is the case the second-day branch exists for. */
+    const cost = nm2 => (avoid || []).reduce((t, k)=> t + ((musclesFor(nm2) || {})[k] || 0), 0);
+    const mine = ents
+      .map(x=>({name: x.e.name, frac: x.frac, score: x.frac - cost(x.e.name) * 0.8, mine: true}))
+      .filter(c=> c.frac >= 0.5)
+      .sort((a,b)=> b.score - a.score || b.frac - a.frac)[0];
+    const pick = mine || fixCandidates(m, ents.map(x=> x.e.name), avoid)[0];
     const fits = pick ? (musclesFor(pick.name) || {}) : {};
     const kinship = wid=> (S.program[wid] || []).reduce((t, e)=>{
       const mm = musclesFor(e.name) || {};
@@ -10438,7 +10469,7 @@ function spreadPlan(A, m, need, avoid, pin){
       /* About half the shortfall goes to the new day, so the second session is worth
          showing up for without the first one being gutted to pay for it. */
       const want = Math.max(2, Math.min(3, Math.ceil((left / 2) / Math.max(0.1, pick.frac))));
-      newExs.push({wid: free[0], name: pick.name, sets: want, frac: pick.frac});
+      newExs.push({wid: free[0], name: pick.name, sets: want, frac: pick.frac, mine: !!pick.mine});
       left -= want * pick.frac;
     }
   }
@@ -10498,8 +10529,11 @@ function spreadPlan(A, m, need, avoid, pin){
 function nmUp(x){ return String(x || "").replace(/^./, c=> c.toUpperCase()); }
 function spreadList(plan){
   const out = plan.adds.map(a=> widName(a.wid) + " · " + a.name + ": " + a.from + " → " + a.to + " sets");
-  (plan.newExs || []).forEach(n=> out.push(widName(n.wid) + " · " + n.name + ": new, " +
-    n.sets + " set" + (n.sets === 1 ? "" : "s")));
+  /* "new" is about the DAY, and for a movement lifted off another day of your own plan
+     that reads as though the app has invented something. Two words, and the diff says
+     which of the two it is. */
+  (plan.newExs || []).forEach(n=> out.push(widName(n.wid) + " · " + n.name + ": " +
+    (n.mine ? "added here" : "new") + ", " + n.sets + " set" + (n.sets === 1 ? "" : "s")));
   return out;
 }
 function findingPlan(w, A){
@@ -10549,13 +10583,22 @@ function findingPlan(w, A){
     if(!plan) return null;
     const slots = plan.adds.length + (plan.newExs || []).length;
     const freq = plan.freqAfter > plan.freqBefore;
+    /* Whether the extra day is filled by something of yours changes what this sentence
+       should promise. "One new movement" is a thing to learn and find room for; a second
+       day of a lift you already run is neither. */
+    const nx = (plan.newExs || [])[0];
+    const freqSay = !freq ? ""
+      : nx && nx.mine
+        ? ", putting a second day of " + nx.name + " — which you already do — on " +
+          widName(nx.wid) + ", so " + name + " is trained on " + plan.freqAfter +
+          " days instead of " + plan.freqBefore
+        : ", including one new movement so " + name + " is trained on " + plan.freqAfter +
+          " days instead of " + plan.freqBefore;
     return {mode:"spread", plan,
       label:"Add " + plan.gained + " set" + (plan.gained === 1 ? "" : "s"),
       does:"Adds about " + plan.gained + " set" + (plan.gained === 1 ? "" : "s") + " of direct " + name +
            " work, dealt across " + plan.daysTouched + " day" + (plan.daysTouched === 1 ? "" : "s") +
-           " of your cycle rather than piled onto one" +
-           (freq ? ", including one new movement so " + name + " is trained on " + plan.freqAfter +
-                   " days instead of " + plan.freqBefore : "") +
+           " of your cycle rather than piled onto one" + freqSay +
            ". Fractions count: a set of a movement that is half " + name + " is half a set of it. " +
            "This one sticks until you change it.",
       list: spreadList(plan)};
@@ -10853,7 +10896,19 @@ function applyFinding(idx){
     if(plan.mode === "spread"){
       (plan.plan.newExs || []).forEach(n=>{
         if(!Array.isArray(S.program[n.wid])) S.program[n.wid] = [];
-        S.program[n.wid].push({name: n.name, sets: n.sets, reps: "8-12", rest: REST_SECOND});
+        /* A movement you already run somewhere else arrives on the new day the way you
+           run it, not on the generic 8-12. Copying the reps and the rest off your own
+           entry is the difference between "the same lift, on Thursday too" and a second
+           version of it with different instructions. */
+        let reps = "8-12", rest = REST_SECOND;
+        DAYS.concat(["finisher"]).some(wid=>
+          (S.program[wid] || []).some(e=>{
+            if(nrm(e.name) !== nrm(n.name)) return false;
+            if(e.reps) reps = e.reps;
+            if(e.rest != null) rest = e.rest;
+            return true;
+          }));
+        S.program[n.wid].push({name: n.name, sets: n.sets, reps, rest});
       });
     }
     logPlanChange("programme", null, M.name, plan.list, {note:"Applied from the Body tab."});
@@ -22620,6 +22675,13 @@ function openOwnFix(idx){
         <div class="fx-list">
           <button type="button" class="fx-c${chosen ? "" : " on"}" data-fxspex="">
             <b>Let Element 26 choose</b><span class="num">recommended</span></button>
+          ${/* Yours first here too. Naming one you already run is the common case — it is
+                what the app itself now reaches for — and spreadPlan's pin branch raises the
+                set count on a day that already runs it rather than filing a second copy,
+                so picking one of these is safe wherever you point it. */
+            ents2.slice(0, 5).map(e=>
+            `<button type="button" class="fx-c${nrm(e.e.name)===nrm(chosen)?" on":""}" data-fxspex="${esc(e.e.name)}">
+              <b>${esc(e.e.name)}</b><span class="num">${Math.round(e.frac*100)}% \u00b7 in your plan</span></button>`).join("")}
           ${cands2.map((c, ci)=>
             `<button type="button" class="fx-c${nrm(c.name)===nrm(chosen)?" on":""}" data-fxspex="${esc(c.name)}">
               <b>${esc(c.name)}</b><span class="num">${Math.round(c.frac*100)}%${
