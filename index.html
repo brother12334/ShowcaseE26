@@ -664,6 +664,34 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .set-list{
   border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--card);
 }
+/* THE SETTINGS GRID. Two across, each a button rather than a div: it is the only thing
+   on the screen you can press, and it should answer to a keyboard and a screen reader as
+   one thing. 112px rather than the old 130 — most tiles no longer carry a graphic, and
+   the height was set by the ones that did. */
+.set-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:6px}
+.set-tile{
+  margin:0;padding:13px 14px;min-height:112px;text-align:left;cursor:pointer;
+  display:flex;flex-direction:column;justify-content:space-between;gap:10px;
+  font:inherit;color:var(--text);
+  transition:border-color .15s, background .15s;
+}
+.set-tile:active{border-color:var(--acc-line);background:var(--card2)}
+/* Help is one line and an icon, so it takes the full width rather than leaving a hole
+   beside it at the bottom of the screen. */
+.set-wide{grid-column:1 / -1;min-height:0;flex-direction:row;align-items:center;gap:12px}
+.set-tile-i{display:flex;color:var(--acc)}
+.set-tile-i .ico{width:20px;height:20px}
+.set-tile-b{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
+.set-tile-n{font-size:13.5px;font-weight:600;color:var(--text)}
+.set-tile-v{font-family:var(--mono);font-size:11.5px;color:var(--dim);margin-top:3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.set-wide .set-tile-v{margin-top:2px}
+/* The three gauges that survived, each a count of something real. */
+.g-dots{display:flex;gap:5px;margin-top:9px}
+.g-dots i{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.g-split{display:flex;gap:4px;margin-top:9px}
+.g-split i{flex:1 1 0;height:7px;border-radius:2px}
+@media (prefers-reduced-motion:reduce){ .set-tile{transition:none} }
 .set-row{
   display:flex;align-items:center;gap:11px;width:100%;
   padding:13px 12px;background:none;border:0;cursor:pointer;color:var(--text);
@@ -5296,7 +5324,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "20.3";
+const APP_VERSION = "20.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23556,10 +23584,68 @@ function setGroupRowHTML(g){
    as a wall and hunted. Three short sections give the hunt a first step: is this about
    training, about the day around it, or about the app itself. */
 const SET_SECTIONS = [
-  {t:"Training",   keys:["sess", "screen", "plan", "gym"]},
+  {t:"Training",   keys:["sess", "screen", "plan", "targets", "gym"]},
   {t:"Day to day", keys:["day", "remind", "where"]},
   {t:"The app",    keys:["acct", "data", "help"]}
 ];
+/* THE BOXES ARE BACK, WITHOUT THE THREE GAUGES THAT MEANT NOTHING.
+
+   The list that replaced them was more compact and less pleasant, and compactness was
+   never the problem with the old grid — the graphics at the bottom of each card were.
+   Three of the four were decoration wearing the clothes of data: the plate ladder drew
+   the same nine bars whether the smallest plate in the gym was 1.25 or 10, the account
+   bar sat at 34% of nothing, and the data bar measured your session count against an
+   invented ceiling of thirty.
+
+   So the tiles return and the gauges are earned rather than assumed. Three survive
+   because each is a real count of a real thing: the rotation in its own day colours, how
+   many gyms the app knows, and how many reminders are actually on. Everything else shows
+   its value in words, which is what the row was right about. */
+function gaugeDots(on, of, colour){
+  const n = Math.max(0, Math.min(of, on || 0));
+  let h = `<span class="g-dots" aria-hidden="true">`;
+  for(let i = 0; i < of; i++){
+    h += `<i style="background:${i < n ? (colour || "var(--acc)") : "var(--line)"}"></i>`;
+  }
+  return h + `</span>`;
+}
+/* The rotation, in the same hues the strip on Today uses. Through dayMeta() rather than
+   the colour table directly — a custom split's days are not the six built-in ids, and
+   reading the table straight painted every one of them grey. */
+function gaugeSplit(){
+  const list = (CYCLE_LAYOUT || []).slice(0, 8);
+  if(!list.length) return "";
+  return `<span class="g-split" aria-hidden="true">` + list.map(slot=>{
+    const rest = slot === "rest" || slot == null;
+    return `<i style="background:${rest ? "var(--line)" : (dayMeta(slot).color || "var(--dim)")}"></i>`;
+  }).join("") + `</span>`;
+}
+function setGaugeFor(k){
+  if(k === "plan")   return gaugeSplit();
+  if(k === "where")  return gaugeDots(S.geo === "on" ? Math.min(4, gymList().length) : 0, 4, "var(--back)");
+  if(k === "remind"){
+    const on = [S.remindAt, S.remindBed, S.remindWake].filter(Boolean).length;
+    return gaugeDots(S.pushOn ? on : 0, 3);
+  }
+  return "";
+}
+/* AN ODD SECTION ENDS WITH A WIDE TILE rather than with a hole. Two across leaves the
+   last one of a three or a five sitting alone beside an empty half-row, which reads as
+   the grid having run out rather than as a deliberate end — and two of the three
+   sections are odd. Full width there fills the row and looks like the end of a section,
+   which is what it is. */
+function setTileHTML(g, wide){
+  const gauge = setGaugeFor(g.k);
+  return `<button type="button" class="card set-tile${wide ? " set-wide" : ""}" data-setopen="${esc(g.k)}"
+    aria-label="${esc(g.title)}, ${esc(g.val)}">
+    <span class="set-tile-i">${ICON[g.icon] || ""}</span>
+    <span class="set-tile-b">
+      <span class="set-tile-n">${esc(g.title)}</span>
+      <span class="set-tile-v num">${esc(g.val)}</span>
+      ${gauge}
+    </span>
+  </button>`;
+}
 function viewSync(){
   const LIVE = liveStripHTML();
   const groups = setGroups();
@@ -23576,13 +23662,14 @@ function viewSync(){
   SET_SECTIONS.forEach(sec=>{
     const rows = sec.keys.map(k=> by[k]).filter(Boolean);
     if(!rows.length) return;
-    h += `<div class="set-sec">${esc(sec.t)}</div><div class="set-list">${
-      rows.map(setGroupRowHTML).join("")}</div>`;
+    h += `<div class="set-sec">${esc(sec.t)}</div><div class="set-grid">${
+      rows.map((g, i)=> setTileHTML(g, rows.length % 2 === 1 && i === rows.length - 1)).join("")}</div>`;
   });
   /* Anything a future group forgets to file still has to appear. */
   const filed = new Set(SET_SECTIONS.reduce((a,s2)=> a.concat(s2.keys), []));
   const rest = groups.filter(g=> !filed.has(g.k));
-  if(rest.length) h += `<div class="set-list">${rest.map(setGroupRowHTML).join("")}</div>`;
+  if(rest.length) h += `<div class="set-grid">${
+    rest.map((g, i)=> setTileHTML(g, rest.length % 2 === 1 && i === rest.length - 1)).join("")}</div>`;
   return h;
 }
 // The Help group's body, which is two buttons and the version rather than a set of controls.
