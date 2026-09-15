@@ -5147,7 +5147,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "19.5";
+const APP_VERSION = "19.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -17136,7 +17136,20 @@ function plateStrip(){
      the date. The strip kept marking the rest plate as current in that case, so the
      plate strip said Rest and the card underneath it said "Start Upper B". Both now
      read the same question. */
-  const restNow = !restsFloat() && schedStatus.some(x=> x.due) && isRestToday();
+  /* TODAY IS A REST DAY OR IT IS NOT, and neither extra condition here was asking that.
+
+     `some(x => x.due)` asks whether a rest is still OWED. The moment today's rest is
+     written down it is no longer owed — so on the very day you are resting, as soon as
+     the tap is recorded, this went false, the ring came back on the next workout, and the
+     footer stopped saying "rest day today". Two plates were ringed at once: the rest you
+     are taking and the session you are not.
+
+     `!restsFloat()` excluded floating rests outright, so a floating rest spent today
+     never suppressed the training ring at all — same symptom, permanently.
+
+     isRestToday() already answers the actual question: a rest recorded today, or one the
+     schedule puts here on a day you have not trained through or opted out of. */
+  const restNow = isRestToday();
   let html = '<div class="plates-wrap"><div class="plates">';
   let restSeen = 0;
   CYCLE_LAYOUT.forEach((key, slot)=>{
@@ -17162,11 +17175,18 @@ function plateStrip(){
       const resting = !!date || (due && scheduledRestToday());
       // Due at its position, but today only if today is genuinely being spent on it.
       const isToday = date === todayStr() || (due && restNow);
+      /* DUE IS NOT TODAY. `due` means this is the next rest owed; it says nothing about
+         when. Train on the day it falls and it is owed TOMORROW — and the plate still
+         printed "today" on it, directly under a card reading "your rest lands tomorrow".
+         Only a rest that is genuinely being spent now says today. */
       html += `<button class="plate rest${isToday?" cur":""}${resting?" done":""}${fixed&&!due?" past":""}"
         data-rest="${idx}" data-restsched="${fixed ? layoutRestSlot[idx] : -1}"
         aria-label="Rest ${idx+1} of ${REST_CREDITS}, ${wd}${
-          date ? ", taken " + date : due ? ", due today" : fixed ? ", scheduled" : ", available"}"
-        >${esc(fixed && !date ? (due ? "today" : wd) : wd)}${
+          date ? ", taken " + date
+               : isToday ? ", today"
+               : due ? (restDueNotToday() ? ", due tomorrow" : ", due next")
+               : fixed ? ", scheduled" : ", available"}"
+        >${esc(fixed && !date ? (isToday ? "today" : wd) : wd)}${
         resting?'<span class="pcheck">&#10003;</span>':""}</button>`;
       return;
     }
