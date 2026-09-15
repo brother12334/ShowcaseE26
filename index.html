@@ -5006,7 +5006,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "19.1";
+const APP_VERSION = "19.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8176,6 +8176,58 @@ function migrate(){
   if(!Array.isArray(S.planLog)) S.planLog = [];
   delete S.volWindow;                       // the window is no longer a stored choice
   if(S.askWhy === undefined) S.askWhy = true;   // ask what happened when a set collapses
+
+  /* ---- THE ARROW THAT NEVER APPEARED ON LOADS THE APP HAD ALREADY MOVED ----
+
+     applyProgression() stamps e.byApp so the Program tab and the set row can mark a
+     number the app chose rather than one you did. Everything it moved BEFORE that stamp
+     existed carries no mark at all, which is the one case where the absence of a flag is
+     actively misleading: the weight really was changed by the app, and the plan says
+     nothing. Every one of those changes is in the plan log, because applyProgression has
+     always written a "weight" record shaped "<from> → <to>".
+
+     So the stamp is reconstructed from the log. The guards are what keep it honest:
+
+       - only where the entry has no byApp of its own, so nothing already stamped moves;
+       - only from a "<from> → <to>" record, which is applyProgression's shape alone. A
+         calibration writes "calibrated to X" and is your number, not ours;
+       - only where the entry STILL sits at that record's "to" value, so a load you have
+         since edited by hand is not credited to the app;
+       - the most recent qualifying record wins, and its real timestamp is kept, so a
+         change from three months ago stays three months old and the 30-day chip stays
+         quiet rather than every old change announcing itself at once.
+
+     Runs once; the marker is stored so a later hand-edit is not re-stamped on next load. */
+  if(!S.byAppBackfill){
+    try{
+      const arrow = /^\s*([\d.]+)\s*[^\d.]*\s*\u2192\s*([\d.]+)/;
+      const best = {};
+      (S.planLog || []).forEach(c=>{
+        if(!c || c.kind !== "weight" || !c.at) return;
+        const m = arrow.exec(String((c.changes || [])[0] || ""));
+        if(!m) return;
+        const from = parseFloat(m[1]), to = parseFloat(m[2]);
+        if(!isFinite(to) || from === to) return;
+        const k = nrm(c.name);
+        if(!best[k] || c.at > best[k].at) best[k] = {at: c.at, from, to, note: c.note || null};
+      });
+      /* Object.keys, not DAYS: applySplit() runs AFTER migrate() on every boot path, so
+         DAYS is still the empty array it was declared as and a loop over it would find
+         nothing to stamp. The program's own keys are always there. */
+      Object.keys(S.program || {}).forEach(wid=>{
+        (Array.isArray(S.program[wid]) ? S.program[wid] : []).forEach(e=>{
+          if(!e || e.byApp) return;
+          const r = best[nrm(e.name)];
+          if(!r || e.weight == null) return;
+          if(Math.abs(parseFloat(e.weight) - r.to) > 0.01) return;   // edited since: not ours
+          const down = r.from != null && r.to < r.from;
+          e.byApp = {at: r.at, what: (down ? "load cut to " : "load raised to ") + fmtLoad(r.to),
+                     from: r.from, to: r.to, why: r.note || null};
+        });
+      });
+    }catch(e){}
+    S.byAppBackfill = 1;
+  }
 
   /* ---- Spider Curl is bilateral ----
      It was classified as one-limb-at-a-time, which stamped an L/R chip on every set,
@@ -27740,7 +27792,16 @@ function impossibleLoadCheck(target, entry, sess){
   if(!range || !target || target.weight == null) return null;
   const key = nrm(target.name);
   const bottom = range[0];
-  // A set only proves the point if it was taken to failure AND still fell short.
+  const rx = parseFloat(target.weight);
+  /* RULE 4, AND THE ONE THAT WAS MISSING.
+
+     A set only speaks about the PRESCRIBED load if it was taken at that load or under
+     it. Failing 9 reps at 162.5 lb says nothing whatever about whether 150 lb can be
+     taken to 10 — it says you went heavier than the plan asked for that day, which is
+     a different fact and not this card's business. Without this the guard fired on
+     every overshoot, and the recommendation it built off the overshoot came back ABOVE
+     the programme number: "150 lb is not reachable, drop to about 152.5 lb, down from
+     150 lb", which is an increase wearing the word drop. */
   const proves = (st, add, i)=>{
     const reps = parseFloat(st && st.reps) || 0;
     const rpe  = parseFloat(st && st.rpe)  || 0;
@@ -27748,6 +27809,7 @@ function impossibleLoadCheck(target, entry, sess){
     if(!(reps > 0) || !(raw > 0)) return null;
     if(rpe < 9.5) return null;                 // not taken to failure, proves nothing
     if(reps >= bottom) return null;            // reached the range, so it is possible
+    if(isFinite(rx) && raw > rx + 0.01) return null;   // heavier than asked: a different fact
     return {load: setLoad(st, add), raw, reps, rpe, set: i + 1};
   };
   let cited = null;
@@ -27786,13 +27848,15 @@ function impossibleLoadCheck(target, entry, sess){
     });
   });
   if(beaten) return null;
-  /* Under the weight that was actually lifted, always. Two steps down where the step
-     allows it, one where it does not, and never a number that rounds back up to or past
-     the set being quoted. */
+  /* Under the weight that was actually lifted AND under the one in the plan, always.
+     Rule 4 above already guarantees the quoted set is the lower of the two, but a card
+     that tells you to drop has exactly one job and it is cheap to make it impossible to
+     get wrong. Two steps down where the step allows it, one where it does not. */
   const step = progressionStep(target);
-  let suggest = roundLoadable(cited.raw - step.amount * 2, target.name);
-  if(!(suggest < cited.raw)) suggest = roundLoadable(cited.raw - step.amount, target.name);
-  if(!(suggest < cited.raw)) suggest = Math.max(0, Math.round((cited.raw * 0.9) * 2) / 2);
+  const base = isFinite(rx) ? Math.min(cited.raw, rx) : cited.raw;
+  let suggest = roundLoadable(base - step.amount * 2, target.name);
+  if(!(suggest < base)) suggest = roundLoadable(base - step.amount, target.name);
+  if(!(suggest < base)) suggest = Math.max(0, Math.round((base * 0.9) * 2) / 2);
   suggest = Math.max(0, suggest);
   const when = cited.here ? "in this session" : "on " + fmtDate(cited.date);
   return {
@@ -28554,7 +28618,10 @@ function progressionHTML(list){
         h += `<div class="pg-row">
           <div class="pg-main"><b>${esc(p.name)}</b>
             <div class="pg-sub">Write ${esc(fmtLoad(to))} into your programme${
-              p.detail.from != null ? ", down from " + esc(fmtLoad(p.detail.from)) : ""}.</div>
+              p.detail.from != null
+                ? (parseFloat(to) > parseFloat(p.detail.from) ? ", up from " : ", down from ")
+                  + esc(fmtLoad(p.detail.from))
+                : ""}.</div>
           </div>
           <span class="pg-to">
             <input inputmode="decimal" data-progtoin="${esc(p.name)}" value="${to}"
