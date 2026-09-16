@@ -5376,7 +5376,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.0";
+const APP_VERSION = "22.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9296,6 +9296,10 @@ function bestEverFor(exName, upToEntry, upToSet){
     const add = entryBarAdd(en);
     en.sets.forEach(st=> consider(st, add));
   }));
+  /* WHAT THE HISTORY ALONE HELD, remembered before today's sets are folded in. `seen`
+     cannot answer "have you done this before" once the live session has contributed to
+     it, and that is the question a record depends on. See detectPR(). */
+  const seenPrior = seen;
   // plus sets already logged earlier in the live session, so a PR fires once (on the
   // set that breaks the record) rather than on every heavier set that follows
   if(S.active && upToEntry!=null){
@@ -9311,7 +9315,7 @@ function bestEverFor(exName, upToEntry, upToSet){
       });
     });
   }
-  return {maxW, repsAtMaxW, max1RM, maxRepsBw, seen};
+  return {maxW, repsAtMaxW, max1RM, maxRepsBw, seen, seenPrior};
 }
 function detectPR(exName, st, ei, si){
   // compared against records held as true loads, so this has to be one too
@@ -9319,7 +9323,18 @@ function detectPR(exName, st, ei, si){
   const reps = parseFloat(st.reps)||0;
   if(!(reps>0) && !(w>0)) return null;
   const b = bestEverFor(exName, ei, si);
-  if(!b.seen) return null;                 // nothing to beat yet, first time doing it
+  /* A FIRST DAY ON A MOVEMENT SETS NO RECORDS.
+
+     This asked `seen`, which by then includes the sets you have already logged TODAY —
+     so on an exercise you had never done, set one had nothing to beat and set two beat
+     set one. Working up 30 → 35 → 45 on something brand new awarded a WEIGHT PR twice,
+     and the whole first session of any swapped-in or newly added movement came back
+     covered in records that only meant "this set was heavier than the warm-up before it".
+
+     A record is a thing you break, and there is nothing to break until a previous
+     SESSION has put a number on the board. Everything still gets logged; it is only the
+     badge, the float and the credit in the workout grade that wait for a second day. */
+    if(!b.seenPrior) return null;
   if(w > 0){
     if(w > b.maxW) return "WEIGHT PR";                          // heavier than ever
     if(w === b.maxW && reps > b.repsAtMaxW) return "REP PR";     // same top weight, more reps
@@ -9415,11 +9430,16 @@ function sweepSessionPRs(sess){
       const oAdd = entryBarAdd(en);
       en.sets.forEach(st=> consider(st, oAdd));
     }));
+    /* The same rule the live check follows: no previous session with this movement on
+       it, no records today. `seen` goes true as soon as this session's own first set is
+       considered, which would let set two take a record off set one on a movement you
+       had never done before. Captured here, before that happens. */
+    const hadHistory = seen;
     e.sets.forEach(st=>{
       const w = setLoad(st, add), reps = parseFloat(st.reps)||0;
       if(!(reps>0) && !(w>0)){ delete st.pr; return; }
       let pr = null;
-      if(seen){
+      if(hadHistory){
         if(w > 0){
           if(w > maxW) pr = "WEIGHT PR";
           else if(w === maxW && reps > repsAtMaxW) pr = "REP PR";
