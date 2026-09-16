@@ -1262,10 +1262,31 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
   transition:transform .22s ease, color .22s ease;
 }
 .de-swipe.is-open .de-pull{transform:rotate(180deg);color:var(--acc)}
+/* HIDDEN, NOT MERELY COVERED.
+
+   This drawer used to be hidden by paint order alone: it sits at z-index 1 with the
+   face at z-index 2, and the face carries an opaque background, so the drawer is behind
+   something you cannot see through. Correct, and far too fragile.
+
+   The card animates itself in (opacity and transform), the face takes an inline
+   translateX mid-drag, and the whole row is an overflow:hidden box with a border radius.
+   That is four reasons for a browser to promote these to separate compositor layers, and
+   when iOS Safari gets the order wrong — or simply fails to repaint the face's tile —
+   what shows is the drawer: five equal bands down the right 168px of every card, drawn
+   over the exercise names. Reported as "huge rendering issue when trying to look at
+   plan", and it is exactly that shape.
+
+   So the drawer is invisible unless the row is open or being dragged. Nothing to show
+   through, whatever the compositor does with the layers. The delay on the way back holds
+   it visible until the face has finished sliding over it. */
 .de-acts{
   position:absolute;top:0;right:0;bottom:0;z-index:1;width:168px;
   display:flex;align-items:stretch;
+  visibility:hidden;
+  transition:visibility 0s linear .22s;
 }
+.de-swipe.is-open .de-acts,
+.de-swipe.de-dragging .de-acts{visibility:visible;transition-delay:0s}
 .de-acts button{
   flex:1 1 0;min-width:0;background:var(--card2);border:0;border-left:1px solid var(--line);
   color:var(--dim);font-size:13px;cursor:pointer;padding:0;
@@ -5376,7 +5397,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.2";
+const APP_VERSION = "22.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -26655,7 +26676,17 @@ function bind(){
     const rows = [...document.querySelectorAll(".de-swipe")];
     if(!rows.length) return;
     const OPEN_AT = 168;                        // width of the action drawer
-    const closeAll = except=> rows.forEach(r=>{ if(r !== except) r.classList.remove("is-open"); });
+    /* The drawer's markup is written aria-hidden, because closed is how it starts and
+       closed is what it is nearly all of the time. Opening it has to say so: five buttons
+       that are the only thing on screen, still announced as hidden, are five buttons a
+       screen reader user cannot reach. One helper, so the class and the a11y state cannot
+       drift apart. */
+    const setOpen = (row, open)=>{
+      row.classList.toggle("is-open", open);
+      const acts = row.querySelector(".de-acts");
+      if(acts) acts.setAttribute("aria-hidden", open ? "false" : "true");
+    };
+    const closeAll = except=> rows.forEach(r=>{ if(r !== except) setOpen(r, false); });
     rows.forEach(row=>{
       const slide = row.querySelector(".de-slide");
       let x0 = 0, y0 = 0, dx = 0, dragging = false, decided = false;
@@ -26673,6 +26704,9 @@ function bind(){
           // a mostly-vertical move is a scroll, and this row gives it up
           if(Math.abs(my) > Math.abs(mx)){ dragging = false; slide.style.transition = ""; return; }
           decided = true;
+          /* Revealed for the duration of the drag. is-open is only decided when the
+             gesture ENDS, so without this the face would slide aside onto nothing. */
+          row.classList.add("de-dragging");
           closeAll(row);
         }
         const base = row.classList.contains("is-open") ? -OPEN_AT : 0;
@@ -26685,7 +26719,8 @@ function bind(){
         dragging = false;
         slide.style.transition = "";
         setX(0);                                 // the class carries the resting position
-        if(decided) row.classList.toggle("is-open", dx < -OPEN_AT / 2);
+        row.classList.remove("de-dragging");
+        if(decided) setOpen(row, dx < -OPEN_AT / 2);
       };
       row.addEventListener("pointerup", end);
       row.addEventListener("pointercancel", end);
@@ -26695,7 +26730,7 @@ function bind(){
       row.querySelector(".de-main").addEventListener("click", ev=>{
         if(row.classList.contains("is-open")){
           ev.preventDefault(); ev.stopPropagation();
-          row.classList.remove("is-open");
+          setOpen(row, false);
         }
       }, true);
     });
@@ -26705,7 +26740,7 @@ function bind(){
       const row = b.closest(".de-swipe");
       const was = row.classList.contains("is-open");
       closeAll(row);
-      row.classList.toggle("is-open", !was);
+      setOpen(row, !was);
     });
   })();
   document.querySelectorAll("[data-exup]").forEach(b=> b.onclick=()=>{
