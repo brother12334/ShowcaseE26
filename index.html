@@ -5376,7 +5376,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "21.8";
+const APP_VERSION = "21.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8027,7 +8027,13 @@ function libraryGearFor(name){
 
    Three sources, in order of how much they know: what the plan itself prescribed for
    this slot, what the library says the movement uses, and failing both, the name. */
-const BODYWEIGHT_RE = /\b(push[- ]?up|pull[- ]?up|chin[- ]?up|dip|plank|hanging|knee raise|leg raise|sit[- ]?up|crunch|bodyweight|inverted row|nordic|glute bridge|superman|mountain climber|burpee|muscle[- ]?up|handstand|pistol|hyperextension|back extension|calf raise \(bodyweight\))\b/i;
+/* PLURALS COUNT. This closed with \b, so "Push-Up" matched and "Push-Ups" did not — and
+   a name that matches nothing here AND nothing in the library is treated as loaded. The
+   result was that a set of "Push-Ups", "Pull-Ups", "Dips", "Sit-Ups" or "Planks" could
+   not be banked at all: the tick demanded a weight, and the way past the demand is itself
+   gated on this regex, so there was no way past. Singular worked, plural was a dead end.
+   (?:e?s)? takes the plural of every form here, including "crunches". */
+const BODYWEIGHT_RE = /\b(?:push[- ]?up|pull[- ]?up|chin[- ]?up|dip|plank|hanging|knee raise|leg raise|sit[- ]?up|crunch|bodyweight|inverted row|nordic|glute bridge|superman|mountain climber|burpee|muscle[- ]?up|handstand|pistol|hyperextension|back extension|calf raise \(bodyweight\))(?:e?s)?\b/i;
 function loadNeededFor(en){
   if(!en || !en.name) return false;
   // a load written as a percentage is still a load the plan expects on the bar
@@ -8036,8 +8042,18 @@ function loadNeededFor(en){
   // (planWeight on a live session entry, weight on a programme one — see planLoadFor)
   if(en.planWeight != null && en.planWeight !== "") return true;
   if(en.weight != null && en.weight !== "") return true;
-  // "Weighted Dip" says what it is in its own name, and the belt is the point of it
-  if(/\bweighted\b/i.test(en.name)) return true;
+  /* "WEIGHTED DIP" USED TO MEAN "THE BELT IS THE POINT OF IT", AND IT DOES NOT.
+
+     Nobody arrives at weighted dips already able to do them. You do them at bodyweight
+     until you can do enough of them, then you hang five kilos off a belt, and for weeks
+     after that some sets have the belt on and some do not. A name is an intention, not a
+     promise about today — so a movement that CAN be done at bodyweight is never blocked
+     for want of a number, whatever it is called. The box is still there and still takes
+     one the day you start adding load.
+
+     Movements that genuinely cannot happen without a load keep asking, because a bench
+     press logged with no weight is not a record of anything. */
+  if(/\bweighted\b/i.test(en.name) && !BODYWEIGHT_RE.test(en.name)) return true;
   const gear = libraryGearFor(en.name);
   if(gear === "bodyweight" || gear === "band") return false;
   /* A band has no weight to write down. It is not bodyweight either — the box stays, as
