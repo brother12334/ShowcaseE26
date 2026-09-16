@@ -2339,6 +2339,19 @@ body.onboarding #app{padding:0}
 /* One reminder per row: a name, its switch, what it will say, and when. The preview is
    the whole point of the layout — a reminder somebody cannot read before agreeing to it
    is a reminder they find out about at 6am. */
+/* THE DIAGNOSTIC. Deliberately plain and deliberately not alarming: most of these rows
+   read "yes" most of the time, and a panel that shouts is one you stop reading. Only the
+   line that is actually wrong takes a colour. */
+.rem-diag{
+  border:1px solid var(--line);border-radius:11px;background:var(--card2);
+  padding:11px 12px;margin:14px 0 0;
+}
+.rd-h{font:10.5px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--faint);margin:0 0 8px}
+.rd-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:3px 0}
+.rd-k{font-size:13px;color:var(--dim)}
+.rd-v{font:11.5px var(--mono);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd-v.is-ok{color:var(--dim)}
+.rd-v.is-no{color:var(--bad)}
 .rem-row{border-top:1px solid var(--line);padding:13px 0 0;margin:13px 0 0}
 .rem-row:first-of-type{border-top:0;padding-top:0;margin-top:0}
 .rem-head{display:flex;align-items:center;gap:12px;justify-content:space-between;margin:0 0 5px}
@@ -5397,7 +5410,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.3";
+const APP_VERSION = "22.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14616,6 +14629,122 @@ const PUSH_WHY = {
   failed: "Couldn't set that up. Check your connection and try again."
 };
 let PUSH_BUSY = false, PUSH_ERR = "";
+
+/* =====================================================================
+   WHY THIS SCREEN ANSWERS "IT DOESN'T WORK"
+
+   A reminder crosses five things before it reaches a lock screen: this browser has to
+   support notifications, you have to have granted permission, a service worker has to be
+   registered, a push subscription has to exist, and a server has to be awake to send it.
+   When nothing arrives, every one of those looks identical from the sofa — and the app
+   was saying nothing about any of them.
+
+   ANDROID HAS A SIXTH, AND IT IS INVISIBLE TO THE WEB. A notification CHANNEL, per app,
+   in the operating system's own settings. Turn the channel off and Notification.permission
+   still reads "granted" — the page is told everything is fine and the notification is
+   dropped by the OS on its way to the shade. There is no API that can see this, which is
+   why the only honest test is to send one and look. Hence the button.
+
+   Nothing here is collected or sent anywhere. It is read off this device, shown on this
+   device, and thrown away when the sheet closes. */
+let PUSH_DIAG = null;
+async function refreshPushDiag(){
+  /* EVERY PROBE ON ITS OWN. One shared try/catch meant the first thing to throw took the
+     rest of the panel with it — asking for a service worker on a file:// origin left the
+     row below reading "undefined reminders", which is the diagnostic needing a diagnostic.
+     A panel whose whole job is to report a broken device has to survive one. */
+  const d = {at: Date.now(), support:false, perm:"unavailable", installed:false,
+             account:false, android:false, sw:false, scope:"", sub:false, host:"", sched:0};
+  const probe = (k, fn)=>{ try{ d[k] = fn(); }catch(e){ d[k + "Err"] = String((e && e.message) || e); } };
+  probe("support", ()=> pushSupported());
+  probe("perm", ()=> (typeof Notification !== "undefined" && Notification.permission) || "unavailable");
+  probe("installed", ()=> pushInstalled());
+  probe("account", ()=> !!(accountCloudOn() && accountAuth()));
+  probe("android", ()=> /Android/i.test(navigator.userAgent || ""));
+  probe("sched", ()=> plannedReminders().length);
+  try{
+    const reg = await navigator.serviceWorker.getRegistration();
+    d.sw = !!reg;
+    d.scope = reg ? reg.scope : "";
+    if(reg){
+      const sub = await reg.pushManager.getSubscription();
+      d.sub = !!sub;
+      try{ d.host = sub ? new URL(sub.endpoint).hostname : ""; }catch(e){}
+    }
+  }catch(e){ d.swErr = String((e && e.message) || e); }
+  /* AND WHAT THE SERVER SAW, which is the half of the story the device cannot tell. A
+     404 here means the account service has not been redeployed with the status route
+     yet, and that is not a fault worth reporting to somebody trying to fix their
+     notifications — the row simply stays quiet. */
+  if(d.account){
+    try{
+      const res = await apiFetch("/push/status", {headers:{"Authorization": accountAuth()}});
+      if(res.ok){
+        const j = await res.json();
+        if(j && j.ok){ d.serverSub = !!j.subscribed; d.serverHost = j.host || ""; d.last = j.last || null; }
+      }
+    }catch(e){}
+  }
+  PUSH_DIAG = d;
+}
+/* THE ONLY TEST THAT PROVES ANYTHING ON ANDROID. It goes through the service worker's
+   own showNotification — the same call the push handler ends at — so a notification that
+   appears here proves everything except the server, and one that does not, with
+   permission granted, is the operating system dropping it. */
+async function pushTestLocal(){
+  try{
+    if(typeof Notification === "undefined"){ toast("This browser has no notifications at all"); return; }
+    if(Notification.permission !== "granted"){
+      let perm = "denied";
+      try{ perm = await Notification.requestPermission(); }catch(e){}
+      if(perm !== "granted"){ toast("Permission refused, so nothing can be shown"); return; }
+    }
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification("Element 26 can reach you", {
+      body: "This is the test from Settings. Reminders use this exact path.",
+      tag: "e26-test", icon: "./icon192v2.png", badge: "./icon192v2.png",
+      data: {url: "./"}
+    });
+    toast("Sent. If nothing appeared, your phone is blocking it \u2014 see below", "warn");
+  }catch(e){
+    toast("The device refused it: " + ((e && e.message) || "unknown"), "warn");
+  }
+}
+function pushDiagHTML(){
+  const d = PUSH_DIAG;
+  if(!d) return `<div class="rem-diag"><div class="sub">Checking this device\u2026</div></div>`;
+  const row = (k, ok, v)=> `<div class="rd-row"><span class="rd-k">${esc(k)}</span>
+    <span class="rd-v ${ok ? "is-ok" : "is-no"}">${esc(v)}</span></div>`;
+  let h = `<div class="rem-diag">
+    <div class="rd-h">What this device reports</div>
+    ${row("Notifications", d.support, d.support ? "supported" : "not supported")}
+    ${row("Permission", d.perm === "granted", d.perm)}
+    ${row("Background worker", !!d.sw, d.sw ? "registered" : "missing")}
+    ${row("Push subscription", !!d.sub, d.sub ? (d.host || "yes") : "none")}
+    ${row("Account", !!d.account, d.account ? "connected" : "not connected")}
+    ${row("Scheduled", d.sched > 0, d.sched + (d.sched === 1 ? " reminder" : " reminders"))}
+    ${d.installed ? row("Installed", true, "added to the home screen") : ""}
+    ${d.serverSub === false ? row("Known to the server", false, "no") : ""}
+    ${d.last ? row("Last send", d.last.status >= 200 && d.last.status < 300,
+        (d.last.status ? d.last.status : "failed") + " \u00b7 " + fmtWhen(d.last.at).toLowerCase()) : ""}
+    <div class="btn-row" style="margin-top:11px">
+      <button class="btn ghost small" id="pushTestBtn" style="flex:1">Send a test notification</button>
+    </div>`;
+  /* The advice is written for the failure in front of them, in the order it bites. */
+  h += `<div class="sub" style="margin-top:9px">`;
+  if(!d.support) h += `This browser cannot show notifications at all. On Android, Chrome and Firefox can; some in-app browsers cannot.`;
+  else if(d.perm === "denied") h += `Permission is blocked. On Android that is <b>App info \u203a Notifications</b>, or the padlock beside the address bar.`;
+  else if(!d.sw) h += `The background worker is missing, so nothing can wake the app. Reload the page once and check again.`;
+  else if(!d.account) h += `Reminders are sent by the account service, so the account has to be connected \u2014 nothing else can wake your phone while the app is closed.`;
+  else if(!d.sub) h += `Permission is granted but no subscription exists yet. Turn reminders off and on again.`;
+  else if(d.serverSub === false) h += `This phone has a subscription but the account service does not know about it, so nothing will ever be sent to it. Turn reminders off and on again to re-register it.`;
+  else if(d.last && !(d.last.status >= 200 && d.last.status < 300)) h += `The account service tried to send one and the push service refused it${
+    d.last.status ? " with a " + d.last.status : ""}. That is a fault on the sending side, not on your phone \u2014 nothing you change here will fix it.`;
+  else h += `Everything the web can see is in order. <b>If the test above does not appear, the phone is dropping it, not the app.</b>${
+    d.android ? ` On Android, open <b>Settings \u203a Apps \u203a Element 26 \u203a Notifications</b> (or, if you are in a browser tab, <b>Chrome \u203a Settings \u203a Notifications</b>) and make sure the channel for this app is on. A channel switched off there still reports as granted to the page, which is why the app cannot warn you about it itself.` : ""}`;
+  h += `</div></div>`;
+  return h;
+}
 function pushCardHTML(){
   if(!VAPID_PUBLIC) return "";
   const why = pushBlocker();
@@ -14625,13 +14754,16 @@ function pushCardHTML(){
     return h + `<div class="ai-busy"><span class="ai-spin"></span><span>Setting that up…</span></div>`;
   }
   if(why && !(why === "denied" && !S.pushOn)){
-    return h + `<div class="sync-warn">${PUSH_WHY[why] || PUSH_WHY.failed}</div>`;
+    /* The diagnostic goes UNDER the blocker, not instead of it. The sentence says what is
+       wrong; the panel is how you check you have fixed it without turning the whole
+       feature on and waiting until six o'clock to find out. */
+    return h + `<div class="sync-warn">${PUSH_WHY[why] || PUSH_WHY.failed}</div>` + pushDiagHTML();
   }
   if(!S.pushOn){
     if(PUSH_ERR) h += `<div class="sync-warn">${PUSH_WHY[PUSH_ERR] || PUSH_WHY.failed}</div>`;
     return h + `<div class="btn-row" style="margin-top:0">
       <button class="btn small" id="pushOnBtn" style="flex:1">Turn on reminders</button>
-    </div>`;
+    </div>` + pushDiagHTML();
   }
   const seg = (attr, on)=> `<div class="seg">
     <button class="${on?"on":""}" ${attr}="on">On</button>
@@ -14687,7 +14819,7 @@ function pushCardHTML(){
   }
   h += `</div>`;
 
-  return h + `<div class="btn-row" style="margin-top:12px">
+  return h + pushDiagHTML() + `<div class="btn-row" style="margin-top:12px">
       <button class="btn ghost small" id="pushOffBtn" style="flex:1">Turn off all reminders</button>
     </div>`;
 }
@@ -27632,6 +27764,18 @@ function bind(){
     render();
     toast(err ? "Reminders not turned on" : "Reminders on \u2014 " + (nextReminder() ? fmtWhen(nextReminder().at).toLowerCase() : "pick a time"));
   };
+  /* The diagnostic reads the device asynchronously, so the card paints "Checking…" first
+     and fills itself in once. Re-read every time the sheet is opened, because the whole
+     point is to reflect a permission or a channel that was just changed elsewhere. */
+  const ptb = $("#pushTestBtn");
+  if(ptb){
+    ptb.onclick = ()=> pushTestLocal();
+    if(!PUSH_DIAG || Date.now() - PUSH_DIAG.at > 4000){
+      refreshPushDiag().then(()=>{ if($("#pushTestBtn")) render(); });
+    }
+  } else if(SET_PAGE === "remind" && !PUSH_DIAG){
+    refreshPushDiag().then(()=>{ if(SET_PAGE === "remind") render(); });
+  }
   const poff = $("#pushOffBtn");
   if(poff) poff.onclick = async ()=>{
     PUSH_BUSY = true; render();

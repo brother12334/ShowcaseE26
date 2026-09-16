@@ -238,17 +238,34 @@ function endpointAllowed(endpoint) {
 /* Returns true if the subscription is gone and should be forgotten. 404 and 410 are the
    push services' way of saying the app was deleted or the permission revoked; anything
    else is a bad afternoon and the subscription is kept. */
+/* WHAT THE PUSH SERVICE SAID, KEPT. The status was computed, compared against two
+   numbers and thrown away, so a service rejecting every send — a malformed JWT, a key
+   the service will not accept, a quota — looked exactly like a service delivering every
+   send: silence at both ends. "Notifications don't work on Android" is unanswerable
+   without this, because Apple and FCM fail differently and neither says so out loud.
+
+   One key, overwritten each send, expiring in a week. It holds a status code and a
+   timestamp: nothing about the person, nothing about the notification. */
+async function notePushResult(env, id, status, note) {
+  try {
+    await env.E26_ACCOUNTS.put("psend:" + id,
+      JSON.stringify({ at: Date.now(), status: status, note: note || "" }),
+      { expirationTtl: 604800 });
+  } catch (e) {}
+}
 async function sendPush(env, endpoint) {
+  /* Content-Length is a forbidden header name: fetch() is required to ignore whatever is
+     set here, so it was never reaching the push service and was only ever documentation
+     of an intent. A bodyless POST already sends no body. */
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Authorization": await vapidAuth(env, endpoint),
       "TTL": VAPID_TTL,
       "Urgency": "normal",
-      "Content-Length": "0",
     },
   });
-  return res.status === 404 || res.status === 410;
+  return { gone: res.status === 404 || res.status === 410, status: res.status };
 }
 async function forgetPush(env, id) {
   const raw = await env.E26_ACCOUNTS.get("push:" + id);
@@ -305,10 +322,13 @@ async function fireDue(env, id, items) {
      dead endpoint should stop the rest rather than being retried three times. */
   for (let i = 0; i < msgs.length; i++) {
     try {
-      if (await sendPush(env, sub.endpoint)) { await forgetPush(env, id); return; }
+      const r = await sendPush(env, sub.endpoint);
+      await notePushResult(env, id, r.status, "");
+      if (r.gone) { await forgetPush(env, id); return; }
     } catch (e) {
       /* A send that throws leaves the queue in place; it expires within the hour and the
          app will have posted a fresh schedule long before that matters. */
+      await notePushResult(env, id, 0, String((e && e.message) || e).slice(0, 120));
       return;
     }
   }
@@ -493,6 +513,21 @@ export default {
       }));
       await env.E26_ACCOUNTS.put("ptok:" + token, who.id);
       return json({ ok: true, token }, 200, origin);
+    }
+
+    /* WHAT HAPPENED TO THE LAST ONE. Read-only, authenticated, and it answers the only
+       question the device cannot answer for itself: did this service try, and what did
+       the push service say. A 201 with nothing on the lock screen is the phone dropping
+       it; a 403 is this service's problem and the app can say so. */
+    if (path === "/push/status" && request.method === "GET") {
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+      let last = null;
+      try { last = JSON.parse(await env.E26_ACCOUNTS.get("psend:" + who.id) || "null"); } catch (e) {}
+      const sub = await env.E26_ACCOUNTS.get("push:" + who.id);
+      let host = "";
+      try { host = sub ? new URL(JSON.parse(sub).endpoint).hostname : ""; } catch (e) {}
+      return json({ ok: true, subscribed: !!sub, host, last }, 200, origin);
     }
 
     if (path === "/push/unsubscribe" && request.method === "POST") {
