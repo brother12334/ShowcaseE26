@@ -4826,6 +4826,26 @@ body.cele-open{overflow:hidden}
 .tg-body{padding:2px 12px 13px}
 .tg-body .fx-step{margin:0 0 9px}
 .tg-body .nb-link{margin-top:8px;display:inline-block}
+/* The typed way in, beside the stepper rather than instead of it: the buttons are for
+   nudging a number you can see, this is for going somewhere else entirely. */
+.tg-type{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.tg-type label,.tg-type span{
+  font:10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+}
+.tg-type input{
+  width:74px;flex:0 0 auto;padding:7px 9px;border-radius:9px;
+  border:1px solid var(--line);background:var(--card2);color:var(--text);
+  font-family:var(--disp);font-size:16px;text-align:center;
+}
+.tg-type input:focus{outline:none;border-color:var(--acc-line);background:var(--acc-soft)}
+/* Chrome and Safari put spinners on number inputs that fight the buttons next to them. */
+.tg-type input::-webkit-outer-spin-button,
+.tg-type input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.tg-type input{-moz-appearance:textfield;appearance:textfield}
+/* A press-and-hold that repeats needs to look pressed, and must not raise the text
+   selection callout or the double-tap zoom on the way. */
+.fx-step button{touch-action:manipulation;-webkit-user-select:none;user-select:none}
+.fx-step button:active{background:var(--acc-soft);border-color:var(--acc-line)}
 @media (prefers-reduced-motion: reduce){ .fx-bar i{transition:none} }
 /* ================= THE FULL-SCREEN FINISH =================
    The grade takes the whole display. `dvh` rather than `vh` so a phone's shrinking
@@ -5356,7 +5376,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "21.7";
+const APP_VERSION = "21.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -25569,9 +25589,16 @@ function targetsScreenHTML(){
         const base = r1(adjustedFloorWithout(A, g));
         h += `<div class="tg-body">
           <div class="fx-step">
-            <button type="button" data-tgstep="${g}:down" aria-label="Lower the ${esc(gName(g))} floor">−</button>
+            <button type="button" data-tgstep="${g}:down" aria-label="Lower the ${esc(gName(g))} floor by a tenth of a set">−</button>
             <b class="num">${floor}</b>
-            <button type="button" data-tgstep="${g}:up" aria-label="Raise the ${esc(gName(g))} floor">+</button>
+            <button type="button" data-tgstep="${g}:up" aria-label="Raise the ${esc(gName(g))} floor by a tenth of a set">+</button>
+          </div>
+          <div class="tg-type">
+            <label for="tgT_${g}">or type it</label>
+            <input id="tgT_${g}" data-tgtype="${g}" type="number" inputmode="decimal"
+              step="0.1" min="0.1" max="40" value="${floor}"
+              aria-label="${esc(gName(g))} floor, in sets">
+            <span>sets</span>
           </div>
           <div class="set-says">${mine
             ? "Yours. Element 26 would put it at <b>" + (base > 0 ? base : "no floor at all") + "</b>."
@@ -25591,8 +25618,9 @@ function targetsScreenHTML(){
       <button class="btn ghost small" id="tgClearAll" style="flex:1">Clear all ${nOwn} floor${nOwn===1?"":"s"} I set</button>
     </div>`;
   }
-  h += `<div class="set-block"><div class="set-says">The number each row shows is the
-    ${term("mev","MEV")}. There are two more above it — the productive range, and the point
+  h += `<div class="set-block"><div class="set-says">Floors move a tenth of a set at a
+    time \u2014 hold either button to run, or type the number straight in. The figure each row
+    shows is the ${term("mev","MEV")}. There are two more above it — the productive range, and the point
     past which you stop recovering — and those are not editable: they move with how often
     you train, how long your cycle ran and what your log says you recover from. A number
     you cannot justify against your own training is not one worth typing in.</div></div>`;
@@ -26862,18 +26890,37 @@ function bind(){
     save(); queueSync(); render();
     toast("Targets back to the published figures");
   };
-  document.querySelectorAll("[data-tgstep]").forEach(b=> b.onclick = ()=>{
-    const [g, dir] = b.dataset.tgstep.split(":");
-    if(!GROUPS[g]) return;
+  /* A TENTH OF A SET A PRESS, WHICH ONLY WORKS BECAUSE OF THE TWO THINGS AROUND IT.
+
+     This stepped half a set, on the reasoning that a whole set is coarse on the small
+     groups and a tenth is a fiddle on the big ones. The fiddle was real: at a tenth a
+     press, moving a chest floor from 4 to 10 is sixty taps, and nobody does that twice.
+
+     So the tenth comes with a way not to tap sixty times. Holding either button repeats,
+     slowly at first and then in half-sets once you have clearly committed to a journey,
+     and the box between them takes a typed number so any value is one entry away. The
+     repeat patches the digits in place and only writes and re-renders when you let go —
+     re-rendering per tick would destroy the button under your finger, which is the same
+     trap the targets dial fell into when every keypress rebuilt the element that had
+     focus. */
+  const tgFloorNow = g =>{
     const A = bodyAnalysis();
     const L = (A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g];
-    const was = Math.round(L.mev * 10) / 10;
-    /* Stepping up from a group the app gives no floor to starts at half a set rather than
-       at 0.5 above nothing, so the first press produces a usable number instead of one
-       that still reads as "no floor". */
-    /* Half a set a press. The floors run from about 2 to about 12, so a whole set is a
-       coarse instrument on the small groups and a tenth is a fiddle on the big ones. */
-    const v = Math.max(0.5, Math.min(40, Math.round((was + (dir === "up" ? 0.5 : -0.5)) * 10) / 10));
+    return Math.round(L.mev * 10) / 10;
+  };
+  const tgClamp = v => Math.max(0.1, Math.min(40, Math.round(v * 10) / 10));
+  /* THE FIRST PRESS ON A GROUP WITH NO FLOOR IS NOT A TENTH. Neck and inner thigh are
+     published at zero, and "0.1 sets of neck work" is not a target anybody meant to set —
+     it would take twenty more presses to reach a number that means anything. The first
+     press puts it at 2, which is the smallest floor worth holding somebody to, and the
+     tenths take over from there. Pressing DOWN from nothing does nothing at all. */
+  const tgNext = (was, sign, step)=> was > 0 ? tgClamp(was + sign * step)
+                                  : sign > 0 ? 2 : 0;
+  /* NOT tgCommit. That name is taken by the SCALE dial's commit — tgCommit(pct, was) at
+     the top of this file — and a `const` of the same name in this scope shadowed it, so
+     every arrow key on the dial called this instead and threw on gName(a number). The
+     same collision that cost an afternoon over EX_LIBRARY. One floor, one name. */
+  const tgFloorCommit = (g, was, v)=>{
     if(v === was) return;
     if(!S.lmFloor) S.lmFloor = {};
     S.lmFloor[g] = v;
@@ -26881,6 +26928,64 @@ function bind(){
       [gName(g) + " floor " + was + " \u2192 " + v + " sets"],
       {note: "You set this floor yourself in Settings."});
     save(); queueSync(); render();
+  };
+  document.querySelectorAll("[data-tgstep]").forEach(b=>{
+    const [g, dir] = b.dataset.tgstep.split(":");
+    if(!GROUPS[g]) return;
+    const sign = dir === "up" ? 1 : -1;
+    const readout = b.parentNode && b.parentNode.querySelector("b.num");
+    let held = null, ticks = 0, was = 0, cur = 0;
+    const paint = ()=>{ if(readout) readout.textContent = r1(cur); };
+    const bump = ()=>{
+      /* A tenth while you are aiming, a half once the hold says you are travelling. */
+      cur = tgNext(cur, sign, ticks > 8 ? 0.5 : 0.1);
+      ticks++;
+      paint();
+    };
+    const stop = ()=>{
+      if(held == null) return;
+      clearInterval(held); held = null;
+      tgFloorCommit(g, was, cur);
+    };
+    const start = ev=>{
+      if(held != null) return;
+      if(ev && ev.button > 0) return;
+      was = tgFloorNow(g); cur = was; ticks = 0;
+      bump();                               // the press itself is the first tenth
+      held = setInterval(bump, 110);
+      if(ev && ev.pointerId != null && b.setPointerCapture){
+        try{ b.setPointerCapture(ev.pointerId); }catch(e){}
+      }
+    };
+    b.onpointerdown = start;
+    b.onpointerup = stop;
+    b.onpointercancel = stop;
+    b.onpointerleave = stop;
+    /* Keyboards and assistive tech send click without ever sending pointerdown. */
+    b.onclick = ev=>{
+      if(ev && (ev.detail > 0 || held != null)) return;   // a real press already handled it
+      const from = tgFloorNow(g);
+      tgFloorCommit(g, from, tgNext(from, sign, 0.1));
+    };
+  });
+  /* THE SAME NUMBER, TYPED. Committed on blur and on Enter rather than per keystroke,
+     because committing per keystroke re-renders the screen and takes the field you are
+     typing into with it. */
+  document.querySelectorAll("[data-tgtype]").forEach(inp=>{
+    const g = inp.dataset.tgtype;
+    if(!GROUPS[g]) return;
+    const go = ()=>{
+      const raw = parseFloat(String(inp.value).replace(",", "."));
+      const was = tgFloorNow(g);
+      if(!isFinite(raw) || raw <= 0){ inp.value = r1(was); return; }
+      tgFloorCommit(g, was, tgClamp(raw));
+    };
+    inp.onblur = go;
+    /* change fires where blur does not — a phone keyboard's Done, a spinner, the
+       arrow keys. Committing twice is harmless: the second pass reads the value it
+       just wrote and stops. */
+    inp.onchange = go;
+    inp.onkeydown = ev=>{ if(ev.key === "Enter"){ ev.preventDefault(); inp.blur(); } };
   });
   document.querySelectorAll("[data-tgclear]").forEach(b=> b.onclick = ()=>{
     const g = b.dataset.tgclear;
