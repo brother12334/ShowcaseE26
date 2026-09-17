@@ -3370,8 +3370,6 @@ nav .nav-ic.catch{animation:navCatch .52s cubic-bezier(.34,1.32,.5,1) both}
 .mn-rows{margin-top:26px;border-top:1px solid var(--line)}
 .mn-row label{font-size:13.5px;color:var(--dim)}
 .mn-row .timein{width:auto;min-width:118px}
-.mn-row .ci-wrow{flex:0 0 auto}
-.mn-row .ci-w{width:104px;min-height:44px;font-size:17px}
 /* The bell keeps its own sizing: it is a 24px line icon rather than the horizon artwork,
    and without this it arrives as a speck on a screen built for something 196px wide. */
 .sl-bell svg{width:clamp(52px,15vw,68px);height:auto;color:var(--acc);stroke-width:1.3}
@@ -3403,7 +3401,6 @@ nav .nav-ic.catch{animation:navCatch .52s cubic-bezier(.34,1.32,.5,1) both}
 .ci-sub{margin-top:7px;color:var(--dim);font-size:13.5px;line-height:1.5}
 .ci-q{margin-top:20px}
 .ci-k{font:11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
-.ci-opt{color:var(--faint);opacity:.7;letter-spacing:.08em}
 .ci-foot{margin-top:7px;font:11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);min-height:15px}
 .ci-foot b{color:var(--acc);font-weight:600}
 
@@ -3438,13 +3435,6 @@ nav .nav-ic.catch{animation:navCatch .52s cubic-bezier(.34,1.32,.5,1) both}
 .ci-dot.on span{color:var(--acc)}
 .ci-dot:active i{transform:scaleY(.9)}
 
-.ci-wrow{display:flex;align-items:center;gap:10px}
-.ci-w{flex:1 1 0;min-width:0;min-height:50px;padding:12px 14px;border-radius:11px;
-  border:1px solid var(--line);background:var(--card2);color:var(--text);
-  font-family:var(--mono);font-size:19px;text-align:center}
-.ci-w::placeholder{color:var(--faint)}
-.ci-w:focus{outline:none;border-color:var(--acc)}
-.ci-unit{font:12px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
 
 .ci-save{margin-top:22px}
 .ci-alt{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:12px}
@@ -5448,7 +5438,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "24.1";
+const APP_VERSION = "24.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8578,6 +8568,27 @@ function migrate(){
   if(!S.exMuscles || typeof S.exMuscles !== "object") S.exMuscles = {};
   // which movements have had the RPE-ramp suggestion turned down, so it stays down
   if(!S.rpeSugSkip || typeof S.rpeSugSkip !== "object") S.rpeSugSkip = {};
+  /* THE MORNING WEIGH-IN MOVES HOUSE, IT DOES NOT EVAPORATE.
+
+     The morning screen used to carry an optional bodyweight box, written into that day's
+     check-in. The body log is where weight lives now, so asking for it in two places was
+     one place too many and the field is gone — but the numbers people already typed are
+     theirs. Every check-in weight is folded into the body log under its own date, unless
+     a real weigh-in already exists for that date, and then removed from the check-in so
+     this runs exactly once per record. */
+  if(S.checkins && typeof S.checkins === "object"){
+    if(!S.bodyLog || typeof S.bodyLog !== "object") S.bodyLog = {};
+    Object.keys(S.checkins).forEach(d=>{
+      const rec = S.checkins[d];
+      if(!rec || rec.weight == null || rec.weight === "") return;
+      const w = parseFloat(rec.weight);
+      delete rec.weight;
+      if(!(isFinite(w) && w > 0)) return;
+      const have = S.bodyLog[d];
+      if(have && have.w > 0) return;
+      S.bodyLog[d] = Object.assign({}, have || {}, {w: Math.round(w * 10) / 10});
+    });
+  }
   if(!Array.isArray(S.gyms)) S.gyms = [];
   S.gyms = S.gyms.filter(g=> g && g.id && Array.isArray(g.spots));
   if(S.geo !== "on" && S.geo !== "off") S.geo = null;
@@ -19718,8 +19729,7 @@ function openPushSheet(then){
    comparable to yesterday's: same hour, same state, before anything has been eaten. */
 let MORN = null;              // {wokeAt, weight} while the sheet is open
 function openMorningSheet(pend){
-  const rec = (S.checkins||{})[todayStr()] || {};
-  MORN = {wokeAt: Date.now(), weight: rec.weight == null ? "" : String(rec.weight)};
+  MORN = {wokeAt: Date.now()};
   drawMorningSheet(pend || null, true);
 }
 function hhmm(ms){
@@ -19748,14 +19758,6 @@ function drawMorningSheet(pend, fresh){
         <label for="mnWoke">Woke up at</label>
         <input type="time" class="timein" id="mnWoke" value="${esc(hhmm(woke))}">
       </div>
-      <div class="mn-row">
-        <label for="mnW">Bodyweight <span class="ci-opt">optional</span></label>
-        <div class="ci-wrow" style="margin:0">
-          <input id="mnW" class="ci-w" inputmode="decimal" value="${esc(MORN.weight)}" placeholder="—"
-            aria-label="Bodyweight in ${esc(unitWord())}">
-          <span class="ci-unit">${unitWord()}</span>
-        </div>
-      </div>
     </div>
     <button class="btn sl-go" id="mnSave" style="--d:260ms">${bad ? "Fix the time first" : "Save"}</button>
     <div class="ci-alt" style="--d:300ms">
@@ -19764,12 +19766,8 @@ function drawMorningSheet(pend, fresh){
   </div>`, "sl-full");
   const m = $("#modal");
   if(fresh) m.classList.add("mn-open");
-  const wIn = m.querySelector("#mnW");
   const tIn = m.querySelector("#mnWoke");
-  const readWeight = ()=>{ if(wIn) MORN.weight = wIn.value.trim(); };
-  if(wIn) wIn.oninput = readWeight;
   tIn.onchange = ()=>{
-    readWeight();
     const mt = /^(\d{1,2}):(\d{2})$/.exec(tIn.value || "");
     if(!mt) return;
     /* Anchored to TODAY, and never allowed into the future: a mistyped 19:00 at eight in
@@ -19781,7 +19779,6 @@ function drawMorningSheet(pend, fresh){
     drawMorningSheet(pend, false);
   };
   m.querySelector("#mnSave").onclick = ()=>{
-    readWeight();
     const hours = pend ? (MORN.wokeAt - pend.startedAt)/3600e3 : null;
     if(hours != null && hours <= 0){ toast("That's before you went to bed"); return; }
     const d = todayStr();
@@ -19794,7 +19791,6 @@ function drawMorningSheet(pend, fresh){
       rec.bedAt = pend.startedAt;
       rec.sleep = String(Math.round(hours*10)/10);
     }
-    if(MORN.weight) rec.weight = MORN.weight; else delete rec.weight;
     if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt) delete S.checkins[d];
     delete S.sleepPend;
     MORN = null;
