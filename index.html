@@ -3127,6 +3127,20 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
   border-radius:11px;border:1px solid var(--line);background:var(--card2)}
 .mi-sides-l{font-size:13.5px;line-height:1.4;color:var(--text);margin-top:3px}
 .mi-sides .linklike{margin-left:auto;white-space:nowrap}
+/* ---------- somewhere else today ---------- */
+.tv-presets{display:flex;flex-wrap:wrap;gap:7px}
+.tv-p{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:8px 13px;
+  color:var(--dim);font:12.5px var(--sans);cursor:pointer}
+.tv-p.on{border-color:var(--acc-line);background:var(--acc-soft);color:var(--text)}
+.tv-list{background:var(--card2);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.tv-r{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}
+.tv-r:first-child{border-top:0}
+.tv-n{flex:1;min-width:0;font-size:13.5px;line-height:1.4}
+.tv-n s{color:var(--faint);text-decoration-color:var(--faint)}
+.tv-s{flex-shrink:0;font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.tv-go{border-left:2px solid var(--acc);padding-left:10px}
+.tv-go .tv-s{color:var(--acc)}
+.tv-stuck{border-left:2px solid var(--warn);padding-left:10px}
 /* ---------- niggles ---------- */
 .hu-k{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
 .hu-areas{display:flex;flex-wrap:wrap;gap:7px}
@@ -5631,7 +5645,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "23.8";
+const APP_VERSION = "23.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20832,6 +20846,7 @@ function viewActiveSession(){
       time's numbers, and tapping <span class="rpe-help">RPE</span> anywhere says what it means.</div>
     <div class="ws-tools">
       <button class="ws-tool" id="timeBoxBtn" aria-label="Short on time" title="Short on time?">${ICON.rest}</button>
+      <button class="ws-tool" id="travelBtn" aria-label="Training somewhere else" title="Somewhere else today?">${ICON.pin}</button>
       ${voiceSupported() ? `<button class="ws-tool" id="voiceBtn" aria-label="Log a set by voice"
         title="Say the set">${ICON.mic}</button>` : ""}
     </div>
@@ -20843,11 +20858,12 @@ function viewActiveSession(){
   </div>`;
   if(a.gymPlan && a.gymPlan.swaps.length){
     h += `<div class="card tb-card">
-      <div class="lc-k"><i></i>Rebuilt for ${esc(a.gymPlan.gymName)}</div>
+      <div class="lc-k"><i></i>${a.gymPlan.travel ? "Rebuilt for what is here" : "Rebuilt for " + esc(a.gymPlan.gymName)}</div>
       <div class="sub" style="margin:0">${a.gymPlan.swaps.map(sw=>
         `<b>${esc(sw.from)}</b> → ${esc(sw.to)}`).join("<br>")}<br>
-        Your plan is untouched — this is what this room has, remembered from the last time
-        you said so.</div>
+        Your plan is untouched — ${a.gymPlan.travel
+          ? "this is what you said this room has."
+          : "this is what this room has, remembered from the last time you said so."}</div>
       <div style="text-align:center;margin-top:10px"><button class="nb-link" id="gymPlanUndo">Put these back</button></div>
     </div>`;
   }
@@ -24820,6 +24836,204 @@ function undoTimeBox(){
   toast("Session put back as written", "good");
 }
 /* =====================================================================
+   TRAINING SOMEWHERE ELSE TODAY
+
+   The app already rebuilds a session for a gym — applyGymPlan() — but only by replaying
+   swaps you have ALREADY made there and it has remembered. The first time you walk into a
+   hotel gym with two dumbbells and a mat, it knows nothing and you swap six exercises by
+   hand, one sheet at a time, while standing up.
+
+   Everything needed to do it for you was already here and never joined up: the library
+   knows what every movement in it is done with, exSlotFor() knows which movements are
+   interchangeable, and GEAR_TIERS knows what a room of each kind contains. So: say what
+   this place has, and the session rebuilds against it.
+
+   Two rules keep it honest. It only touches exercises you have not started — a set with
+   numbers in it is a record of something that happened and is never rewritten. And it
+   never touches your programme: this is one session in one room, and tomorrow's plan is
+   the plan. */
+const TRAVEL_GEAR = [
+  {k:"barbell",   t:"Barbell & rack"},
+  {k:"dumbbell",  t:"Dumbbells"},
+  {k:"machine",   t:"Machines"},
+  {k:"cable",     t:"Cables"},
+  {k:"smith",     t:"Smith machine"},
+  {k:"plate",     t:"Loose plates"},
+  {k:"band",      t:"Bands"},
+  {k:"bodyweight",t:"Just me and the floor"}
+];
+/* Bodyweight is in every preset because a room you can train in is a room with a floor,
+   and leaving it out means "dumbbells only" cannot offer you a push-up. */
+const TRAVEL_PRESETS = [
+  {k:"full",      t:"A full gym",        g:["barbell","dumbbell","machine","cable","smith","plate","band","bodyweight"]},
+  {k:"home",      t:"Barbell and plates",g:["barbell","plate","bodyweight","band"]},
+  {k:"dumbbell",  t:"Dumbbells only",    g:["dumbbell","bodyweight","band"]},
+  {k:"hotel",     t:"Hotel gym",         g:["dumbbell","machine","cable","bodyweight"]},
+  {k:"bodyweight",t:"Nothing at all",    g:["bodyweight"]}
+];
+let TRAVEL = null;              // {gear:[...], preset} while the sheet is open
+/* What this movement needs. The library's answer first, because it was written by hand
+   for this exact purpose; the name only when the library has never heard of it. */
+function travelGearOf(name){
+  return libraryGearFor(name) || equipmentOf(name);
+}
+/* The best replacement for one movement out of the same slot, given what is here. Slot
+   first, because a movement out of the same slot trains the same thing — that is what a
+   slot IS — and a "chest exercise" chosen by muscle alone can be a fly standing in for a
+   press. Ordered by how close the substitute is to the original: the same implement if
+   the room happens to have another version of it, then free weights, then a station. */
+function travelSwapFor(name, gear){
+  const here = swapSquash(name);
+  const rank = g=>{
+    const i = SWAP_PREFERENCE.indexOf(g);
+    return i > -1 ? i : SWAP_PREFERENCE.length + SWAP_STATION_GEAR.indexOf(g);
+  };
+  const hit = exSlotFor(name);
+  if(hit){
+    const pool = (EX_LIBRARY[hit.key] || []).filter(x=>
+      swapSquash(x.name) !== here && gear.indexOf(x.gear) > -1);
+    if(pool.length) return pool.slice().sort((a,b)=> rank(a.gear) - rank(b.gear))[0];
+  }
+  /* NO SLOT, SO FALL BACK TO THE MUSCLE — BUT ONLY FOR ISOLATION WORK.
+
+     The slot index is built from the library's own names, and a plan can perfectly well
+     say "Cable Triceps Pushdown" where the library says something else. Without a slot
+     there is nothing to substitute from, and the person is left swapping by hand in the
+     one room where that is most tedious.
+
+     Matching on muscle instead is the obvious fallback and is dangerous for a COMPOUND:
+     "something else that trains chest" will cheerfully offer a fly in place of a press,
+     which is not the same session. For a movement that trains one muscle it is exactly
+     right — one triceps exercise is a fair stand-in for another. So the fallback is
+     allowed only when the original has a single primary muscle. */
+  // musclesFor() returns a flat {muscle: share} map; one key in it IS an isolation
+  const mine = Object.keys(musclesFor(name) || {});
+  if(mine.length !== 1) return null;
+  const want = mine[0];
+  const pool = [];
+  Object.keys(EX_LIBRARY).forEach(k=> (EX_LIBRARY[k] || []).forEach(x=>{
+    if(swapSquash(x.name) === here || gear.indexOf(x.gear) < 0) return;
+    const pk = Object.keys(musclesFor(x.name) || {});
+    if(pk.length === 1 && pk[0] === want) pool.push(x);
+  }));
+  if(!pool.length) return null;
+  return pool.sort((a,b)=> rank(a.gear) - rank(b.gear))[0];
+}
+/* The whole session, worked out but not yet applied — so the sheet can show what WOULD
+   happen before anything does. A plan you cannot read before agreeing to it is a plan
+   you have to undo to find out about. */
+function travelPlan(gear){
+  const a = S.active;
+  if(!a) return [];
+  return (a.entries || []).map((en, i)=>{
+    if(!en || !en.name) return null;
+    const started = (en.sets || []).some(st=> st.done || st.reps || st.weight);
+    const need = travelGearOf(en.name);
+    if(gear.indexOf(need) > -1) return {i, en, keep: true, need};
+    if(started) return {i, en, keep: true, started: true, need};
+    const to = travelSwapFor(en.name, gear);
+    return {i, en, need, to: to || null, stuck: !to};
+  }).filter(Boolean);
+}
+function applyTravel(gear, rows){
+  const a = S.active;
+  if(!a) return [];
+  const done = [];
+  rows.forEach(r=>{
+    if(r.keep || !r.to) return;
+    const en = a.entries[r.i];
+    if(!en) return;
+    const from = en.name;
+    en.swapFrom = from;
+    en.swapWhy = {code: "nogym", text: null};
+    en.name = r.to.name;
+    en.note = libraryCueFor(r.to.name) || undefined;
+    /* The plan's starting load belonged to the movement that is no longer here, and a
+       warm-up ramp built off it is a ramp to the wrong number. Same clearing applyGymPlan
+       does, for the same reason. */
+    en.planWeight = undefined; en.warmups = undefined; en.warm = undefined; en.warmupNote = undefined;
+    delete en.rpes; delete en.rebuild;
+    applySwapSides(en);
+    done.push({i: r.i, from, to: r.to.name});
+  });
+  if(done.length){
+    a.gymPlan = {gymId: null, gymName: (a.gymName || "somewhere else"), at: Date.now(),
+                 swaps: done, travel: true, gear: gear.slice()};
+  }
+  a.travelGear = gear.slice();
+  save(); queueSync();
+  return done;
+}
+function openTravel(){
+  const a = S.active;
+  if(!a){ toast("Start the session first, then tell it what the room has"); return; }
+  if(!TRAVEL) TRAVEL = {gear: (a.travelGear || GEAR_TIERS[trainPrefs().gear] || GEAR_TIERS.full).slice(), preset: null};
+  const draw = ()=>{
+    const rows = travelPlan(TRAVEL.gear);
+    const changing = rows.filter(r=> !r.keep && r.to);
+    const stuck = rows.filter(r=> r.stuck);
+    const frozen = rows.filter(r=> r.started && r.keep && TRAVEL.gear.indexOf(r.need) < 0);
+    const h = `<h3>What has this place got?</h3>
+      <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">Today only.
+        Your programme is not touched, and anything you have already logged stays exactly as it is.</div>
+      <div class="tv-presets">${TRAVEL_PRESETS.map(pr=>
+        `<button type="button" class="tv-p${TRAVEL.preset === pr.k ? " on" : ""}" data-tvp="${pr.k}">${esc(pr.t)}</button>`).join("")}</div>
+      <div class="hu-k" style="margin-top:14px">Or pick what is there</div>
+      <div class="hu-areas">${TRAVEL_GEAR.map(g=>
+        `<button type="button" class="hu-a${TRAVEL.gear.indexOf(g.k) > -1 ? " on" : ""}" data-tvg="${g.k}">${esc(g.t)}</button>`).join("")}</div>
+      <div class="rev-head" style="margin-top:18px">Today's session${
+        changing.length ? ", " + changing.length + " change" + (changing.length === 1 ? "" : "s") : " — nothing to change"}</div>
+      <div class="tv-list">${rows.map(r=> r.keep
+        ? `<div class="tv-r"><span class="tv-n">${esc(r.en.name)}</span>
+            <span class="tv-s">${r.started ? "already started" : "stays"}</span></div>`
+        : r.to
+          ? `<div class="tv-r tv-go"><span class="tv-n"><s>${esc(r.en.name)}</s><br>${esc(r.to.name)}</span>
+              <span class="tv-s">${esc(r.to.gear)}</span></div>`
+          : `<div class="tv-r tv-stuck"><span class="tv-n">${esc(r.en.name)}</span>
+              <span class="tv-s">nothing here for it</span></div>`).join("")}</div>
+      ${stuck.length ? `<div class="set-says">${stuck.length === 1 ? "One movement has" : stuck.length + " movements have"}
+        nothing in this room that trains the same thing. ${stuck.length === 1 ? "It is" : "They are"} left alone —
+        skip ${stuck.length === 1 ? "it" : "them"} on the session screen, or do what you can.</div>` : ""}
+      ${frozen.length ? `<div class="set-says">${frozen.length === 1
+        ? "One exercise you have already logged sets on is left as it is"
+        : frozen.length + " exercises you have already logged sets on are left as they are"}. A set with
+        numbers in it is a record of something that happened.</div>` : ""}
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn small" id="tvGo" style="flex:1"${changing.length ? "" : " disabled"}>${
+          changing.length ? "Rebuild today's session" : "Nothing to rebuild"}</button>
+      </div>
+      ${a.gymPlan ? `<div class="btn-row" style="margin-top:8px">
+        <button class="btn ghost small" id="tvUndo" style="flex:1">Put the original session back</button></div>` : ""}`;
+    showModal(h);
+    MODAL_REOPEN = openTravel;
+    const m = $("#modal");
+    m.querySelectorAll("[data-tvp]").forEach(b=> b.onclick = ()=>{
+      const pr = TRAVEL_PRESETS.filter(x=> x.k === b.dataset.tvp)[0];
+      if(!pr) return;
+      TRAVEL = {gear: pr.g.slice(), preset: pr.k};
+      draw();
+    });
+    m.querySelectorAll("[data-tvg]").forEach(b=> b.onclick = ()=>{
+      const k = b.dataset.tvg;
+      const at = TRAVEL.gear.indexOf(k);
+      if(at > -1) TRAVEL.gear.splice(at, 1); else TRAVEL.gear.push(k);
+      TRAVEL.preset = null;                      // it is no longer any of the presets
+      draw();
+    });
+    const go = m.querySelector("#tvGo");
+    if(go) go.onclick = ()=>{
+      const done = applyTravel(TRAVEL.gear, travelPlan(TRAVEL.gear));
+      TRAVEL = null;
+      hideModal(); render();
+      toast(done.length === 1 ? "One movement swapped for what is here"
+                              : done.length + " movements swapped for what is here", "good");
+    };
+    const un = m.querySelector("#tvUndo");
+    if(un) un.onclick = ()=>{ TRAVEL = null; undoGymPlan(); hideModal(); };
+  };
+  draw();
+}
+/* =====================================================================
    SOMETHING HURT
 
    The app already has an injury number. It is computed entirely from LOAD — this week's
@@ -28472,6 +28686,8 @@ function bind(){
   if(tbBtn) tbBtn.onclick = openTimeBox;
   const tbU = $("#tbUndo");
   if(tbU) tbU.onclick = undoTimeBox;
+  const tvB = $("#travelBtn");
+  if(tvB) tvB.onclick = ()=>{ TRAVEL = null; openTravel(); };
   const gpU = $("#gymPlanUndo");
   if(gpU) gpU.onclick = undoGymPlan;
   document.querySelectorAll("[data-exhurt]").forEach(b=> b.onclick = ()=>{
