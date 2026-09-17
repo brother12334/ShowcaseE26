@@ -5410,7 +5410,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.4";
+const APP_VERSION = "22.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -31502,12 +31502,28 @@ function repDropOffs(sess){
   (sess.entries || []).forEach(e=>{
     const ws = (e.sets || []).filter(isWorkingSet);
     if(ws.length < 2) return;
-    const first = parseFloat(ws[0].reps) || 0;
-    const last  = parseFloat(ws[ws.length-1].reps) || 0;
+    /* LIKE FOR LIKE MEANS THE SAME WEIGHT, NOT "NOT MUCH LIGHTER".
+
+       The old guard only rejected a LAST set that came in under the first — a drop set —
+       and let a session that went UP straight through. 100x21 @8, then 110x16, then
+       110x12 was read as 21 reps collapsing to 12, a 43% fade, and answered with "start
+       about 5 lb lighter and hold the reps". The reps fell because ten more pounds went
+       on the stack, which is the opposite of a collapse; and the message printed under it
+       said "at the same load", which was not true of the two sets it compared.
+
+       So the comparison runs over the sets at the top load only, which is the weight the
+       exercise was actually worked at. On that session it compares 16 against 12 — a real
+       25% and under the bar for a finding, which is the right answer. A movement logged
+       with no weight at all still compares every set, because for those the reps ARE the
+       load. */
+    const loads = ws.map(x=> parseFloat(x.weight) || 0);
+    const top = Math.max.apply(null, loads);
+    const same = top > 0 ? ws.filter((x, i)=> Math.abs(loads[i] - top) <= top * 0.02) : ws;
+    if(same.length < 2) return;
+    const first = parseFloat(same[0].reps) || 0;
+    const last  = parseFloat(same[same.length - 1].reps) || 0;
     if(!first) return;
-    const w0 = parseFloat(ws[0].weight)||0, wN = parseFloat(ws[ws.length-1].weight)||0;
-    if(wN < w0*0.95) return;                 // compare like for like
-    drops.push({name:e.name, drop:(first-last)/first, first, last, weight:w0});
+    drops.push({name:e.name, drop:(first-last)/first, first, last, weight: top || (parseFloat(ws[0].weight) || 0)});
   });
   const avgDrop = drops.length ? drops.reduce((t,d)=>t+d.drop,0)/drops.length : 0;
   return {drops, avgDrop, bad: drops.filter(d=>d.drop > FADE_BAD).sort((a,b)=>b.drop-a.drop)};
@@ -33862,7 +33878,20 @@ function planChangeLineHTML(en){
   const cut = p.setsCut && p.setsCut.until && Date.now() < p.setsCut.until;
   const b = p.byApp;
   // the set cut says all of this in its own chip below; two of them is the app repeating itself
-  if(b && !(cut && /^cut to /.test(b.what || ""))
+  /* AND IT STOPS BEING NEWS THE MOMENT YOU HAVE TRAINED IT.
+
+     Thirty days was the only thing retiring this chip, so a raise made on 18 August was
+     still announcing itself on 16 September — on a card whose own history panel showed
+     the movement trained on 7 September, at a heavier weight than the raise. The chip
+     exists to tell you the app changed a number while you were not looking. Once you have
+     done the exercise since, you have seen it, worked to it, and moved past it; repeating
+     it for another fortnight is the app telling you something you knew three sessions
+     ago. The thirty days stay as a backstop for a movement you have not come back to. */
+  const actedOn = b && b.at && (S.sessions || []).some(sn=>
+    (sn.finishedAt || sn.startedAt || 0) > b.at &&
+    (sn.entries || []).some(en=> nrm(en.name) === nrm(p.name)
+      && (en.sets || []).some(isWorkingSet)));
+  if(b && !actedOn && !(cut && /^cut to /.test(b.what || ""))
      && b.at && Date.now() - b.at < PLAN_CHANGE_SHOW_DAYS * DAY_MS
      && (b.to == null || (p.weight != null && parseFloat(p.weight) === parseFloat(b.to)))){
     const from = b.from == null || b.from === "" ? null : parseFloat(b.from);
