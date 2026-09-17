@@ -3127,6 +3127,26 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
   border-radius:11px;border:1px solid var(--line);background:var(--card2)}
 .mi-sides-l{font-size:13.5px;line-height:1.4;color:var(--text);margin-top:3px}
 .mi-sides .linklike{margin-left:auto;white-space:nowrap}
+/* ---------- niggles ---------- */
+.hu-k{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+.hu-areas{display:flex;flex-wrap:wrap;gap:7px}
+.hu-a{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:8px 12px;
+  color:var(--dim);font:12.5px var(--sans);cursor:pointer}
+.hu-a.on{border-color:var(--acc-line);background:var(--acc-soft);color:var(--text)}
+.icon-btns .hu-on{color:var(--bad);border-color:var(--bad)}
+.nb-hurt{margin-top:14px}
+.hu-row{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--warn);
+  border-radius:var(--r);padding:12px 13px;margin-bottom:9px}
+.hu-row.sev1{border-left-color:var(--dim)}
+.hu-row.sev3{border-left-color:var(--bad)}
+.hu-row-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.hu-row-t{font-weight:600;font-size:14.5px}
+.hu-row-d{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.hu-row-x{font-size:12.5px;color:var(--dim);margin-top:3px}
+.hu-row-n{font-size:12.5px;color:var(--faint);font-style:italic;margin-top:4px}
+.hu-row-b{display:flex;gap:8px;margin-top:10px}
+.hu-row-b .btn{flex:1}
+.hu-foot{margin:4px 2px 0;font-size:11.5px;color:var(--faint);line-height:1.55}
 /* ---------- the body log: what you weigh, and what shape you are ---------- */
 .nb-body{margin-top:14px}
 .bl-empty p{font-size:13px;color:var(--dim);line-height:1.55;margin:0 0 12px}
@@ -5611,7 +5631,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "23.7";
+const APP_VERSION = "23.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8693,6 +8713,7 @@ function defaultState(){
     sessions: [],
     active: null,
     bodyLog: {},                 // date -> {w, chest, arm, waist, ...}
+    hurts: [],                   // open and settled niggles, newest activity first
     /* The token is PER PROFILE, falling back to the shared one only when this person
        has none of their own. Sharing a single token across everybody was the account
        bug: as soon as you used a second token for a second gist, the wrong key got
@@ -20877,6 +20898,7 @@ function viewActiveSession(){
           <button data-exdown="${ei}" aria-label="Move later"${off}>↓</button>`;
           })()}
           <button data-exnote="${ei}" aria-label="Add a note about ${esc(en.name)}">${exNoteMark(en)}</button>
+          <button data-exhurt="${ei}" class="${hurtFor(en.name)?"hu-on":""}" aria-label="Something hurt on ${esc(en.name)}">${ICON.pain}</button>
           ${canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">⇄</button>`:""}
           <button data-exskip="${ei}" aria-label="Skip today">✕</button>
         </span>
@@ -21752,7 +21774,8 @@ function viewFocusSession(){
     ${exNoteLineHTML(en)}
     <div class="ex-bar" style="margin:4px 0 10px">
       <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}${easeTagHTML(en)}</span>
-      <span class="icon-btns ex-ctl"><button data-exnote="${ei}" aria-label="Add a note about ${esc(en.name)}">${exNoteMark(en)}</button>${
+      <span class="icon-btns ex-ctl"><button data-exnote="${ei}" aria-label="Add a note about ${esc(en.name)}">${exNoteMark(en)}</button><button data-exhurt="${ei}" class="${
+        hurtFor(en.name)?"hu-on":""}" aria-label="Something hurt on ${esc(en.name)}">${ICON.pain}</button>${
         canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">⇄</button>`:""
       }<button data-exskip="${ei}" aria-label="Skip today">✕</button></span>
     </div>`;
@@ -23002,6 +23025,7 @@ function viewBody(){
 
   /* ---- 7b. THE BODY ITSELF ------------------------------------------------------
      Everything above this line is about training. This is the thing training is for. */
+  h += hurtsHTML();
   h += bodyLogHTML();
 
   /* ---- 4b. WHAT YOUR SESSIONS HAVE TOLD YOU ------------------------------------
@@ -24794,6 +24818,185 @@ function undoTimeBox(){
   delete a.timeBoxBackup; delete a.timeBox;
   save(); render();
   toast("Session put back as written", "good");
+}
+/* =====================================================================
+   SOMETHING HURT
+
+   The app already has an injury number. It is computed entirely from LOAD — this week's
+   work over the four-week average, volume past MRV — and the glossary entry for it says,
+   in the app's own words: "Actual pain beats anything on this screen: if something hurts,
+   treat that as the signal." There was no way to tell it.
+
+   There was one narrow exception. When a set collapses far enough to trigger the "what
+   happened" prompt, "Pain, or something felt off" is one of the answers. That covers the
+   case where pain ruined the set, and misses the far more common one: the set was fine,
+   the reps were there, and your shoulder has been complaining for a fortnight.
+
+   So: a niggle can be logged on any exercise at any time, with where it is and how bad.
+   It persists past the session — that is the whole point, since a thing that hurts on
+   Tuesday matters most on Friday — and it does three things rather than just sitting in a
+   list. It holds the weight on that movement, it shows up on the Body tab where you can
+   say it has settled, and it puts a mark on the exercise so you meet it again next time
+   you are standing in front of that bar.
+
+   It is not a diagnosis and does not pretend to be. Element 26 cannot see your joints. */
+const HURT_AREAS = [
+  {k:"shoulder", t:"Shoulder"}, {k:"elbow",   t:"Elbow"},    {k:"wrist", t:"Wrist"},
+  {k:"neck",     t:"Neck"},     {k:"upback",  t:"Upper back"},{k:"lowback",t:"Lower back"},
+  {k:"hip",      t:"Hip"},      {k:"knee",    t:"Knee"},     {k:"ankle", t:"Ankle"},
+  {k:"hamstring",t:"Hamstring"},{k:"groin",   t:"Groin"},    {k:"other", t:"Somewhere else"}
+];
+const HURT_AREA_BY = HURT_AREAS.reduce((o,a)=>{ o[a.k]=a; return o; }, {});
+/* Three levels, described by what you would DO about them rather than by a number out of
+   ten. "6/10" means nothing consistent between two people or between one person on two
+   days; "I finished the set but I noticed it" means the same thing to everybody. */
+const HURT_LEVELS = [
+  {k:"niggle", t:"Noticed it",   d:"Finished the set. It is there but it is not stopping me.", sev:1},
+  {k:"sore",   t:"Held me back", d:"I changed what I did — lighter, fewer, or a different angle.", sev:2},
+  {k:"sharp",  t:"Sharp",        d:"It stopped me. Or it is the kind of pain you do not train through.", sev:3}
+];
+const HURT_LEVEL_BY = HURT_LEVELS.reduce((o,l)=>{ o[l.k]=l; return o; }, {});
+const HURT_STALE_MS = 28 * DAY_MS;      // after four weeks with nothing said, it has gone quiet
+function hurtLog(){
+  if(!Array.isArray(S.hurts)) S.hurts = [];
+  return S.hurts;
+}
+/* Open means: logged, not marked settled, and mentioned inside the last four weeks. The
+   staleness rule is there so a niggle from March is not still holding a weight down in
+   June because nobody remembered to tick it off. */
+function activeHurts(){
+  const cut = Date.now() - HURT_STALE_MS;
+  return hurtLog().filter(h=> h && !h.settled && (h.at || 0) >= cut)
+    .sort((a,b)=> (b.at || 0) - (a.at || 0));
+}
+// The worst open niggle logged against this movement, if any.
+function hurtFor(name){
+  const k = nrm(name);
+  const on = activeHurts().filter(h=> h.exKey === k);
+  if(!on.length) return null;
+  return on.sort((a,b)=> (HURT_LEVEL_BY[b.level] || {sev:0}).sev - (HURT_LEVEL_BY[a.level] || {sev:0}).sev)[0];
+}
+function hurtAdd(exName, where, level, note){
+  const k = nrm(exName);
+  const open = activeHurts().filter(h=> h.exKey === k && h.where === where)[0];
+  if(open){
+    /* THE SAME NIGGLE, SAID AGAIN, IS NOT A SECOND NIGGLE. Otherwise a shoulder that has
+       been grumbling for a month becomes thirty entries and the list is useless. It is
+       one entry that knows how many sessions it has spanned and how bad it has been. */
+    open.level = level;
+    open.at = Date.now();
+    open.date = todayStr();
+    open.times = (open.times || 1) + 1;
+    if(note) open.note = note;
+    return open;
+  }
+  const h = {id: "h" + Date.now().toString(36), ex: exName, exKey: k, where, level,
+             note: note || "", at: Date.now(), date: todayStr(), first: todayStr(), times: 1};
+  hurtLog().push(h);
+  return h;
+}
+function openHurt(exName, backTo){
+  const cur = hurtFor(exName);
+  let where = (cur && cur.where) || null;
+  let level = (cur && cur.level) || null;
+  const draw = ()=>{
+    const h = `<h3>Something hurt</h3>
+      <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">On
+        <b>${esc(exName)}</b>.${cur ? " You already have this logged — saying it again updates it."
+          : " Element 26 will hold the weight here until you say it has settled."}</div>
+      <div class="hu-k">Where</div>
+      <div class="hu-areas">${HURT_AREAS.map(a=>
+        `<button type="button" class="hu-a${where === a.k ? " on" : ""}" data-huw="${a.k}">${esc(a.t)}</button>`).join("")}</div>
+      <div class="hu-k" style="margin-top:16px">How bad</div>
+      <div class="ch-list">${HURT_LEVELS.map(l=>
+        `<button type="button" class="ch${level === l.k ? " on" : ""}" data-hul="${l.k}" aria-pressed="${level === l.k}">
+          <span class="ch-tick" aria-hidden="true">✓</span>
+          <span class="ch-tx"><b>${esc(l.t)}</b><span>${esc(l.d)}</span></span>
+        </button>`).join("")}</div>
+      <div class="field" style="margin:14px 0 0"><label>Anything to add? Optional</label>
+        <input id="huNote" value="${esc((cur && cur.note) || "")}" placeholder="e.g. only on the way down"
+          autocomplete="off"></div>
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn small" id="huSave" style="flex:1"${where && level ? "" : " disabled"}>Log it</button>
+      </div>
+      <div class="sub" style="margin:10px 2px 0;font-size:12px;color:var(--faint)">Element 26 is a
+        training log, not a clinician. It can hold a weight down and remind you — it cannot tell
+        you what is wrong.</div>`;
+    showModal(h);
+    MODAL_REOPEN = ()=> openHurt(exName, backTo);
+    const m = $("#modal");
+    m.querySelectorAll("[data-huw]").forEach(b=> b.onclick = ()=>{ where = b.dataset.huw; draw(); });
+    m.querySelectorAll("[data-hul]").forEach(b=> b.onclick = ()=>{ level = b.dataset.hul; draw(); });
+    const sv = m.querySelector("#huSave");
+    if(sv) sv.onclick = ()=>{
+      if(!where || !level) return;
+      const note = (m.querySelector("#huNote") || {}).value || "";
+      const rec = hurtAdd(exName, where, level, note.trim());
+      /* On the entry too, so the session it happened in carries it — the grade card and
+         the history both read the session, not this log. */
+      if(S.active){
+        (S.active.entries || []).forEach(en=>{
+          if(en && nrm(en.name) === nrm(exName)) en.hurt = {where, level, at: rec.at};
+        });
+      }
+      save(); queueSync(); hideModal(); render();
+      toast(HURT_LEVEL_BY[level].t + " · " + HURT_AREA_BY[where].t.toLowerCase() + " logged",
+            level === "sharp" ? "bad" : "");
+    };
+  };
+  draw();
+}
+function hurtSettle(id){
+  const h = hurtLog().filter(x=> x && x.id === id)[0];
+  if(!h) return;
+  h.settled = Date.now();
+  save(); queueSync(); render();
+  toast("Good — " + HURT_AREA_BY[h.where].t.toLowerCase() + " marked settled");
+}
+function hurtAgain(id){
+  const h = hurtLog().filter(x=> x && x.id === id)[0];
+  if(!h) return;
+  h.at = Date.now(); h.date = todayStr(); h.times = (h.times || 1) + 1;
+  delete h.settled;
+  save(); queueSync(); render();
+  toast("Still noted");
+}
+function hurtDays(h){
+  const d = Math.max(0, Math.floor((Date.now() - new Date(h.first || h.date)) / DAY_MS));
+  return d < 1 ? "today" : d === 1 ? "since yesterday" : "for " + rbDays(d);
+}
+/* The Body tab's section. Open niggles, what they are attached to, and the two answers
+   worth having: it has settled, or it is still there. */
+function hurtsHTML(){
+  const open = activeHurts();
+  const recent = hurtLog().filter(h=> h && h.settled && h.settled >= Date.now() - 28 * DAY_MS);
+  if(!open.length && !recent.length) return "";
+  let h = `<div class="nb-hurt nb-in" style="--d:580ms">
+    <div class="nb-sec-k">Niggles${open.length ? `<span class="nb-count">${open.length}</span>` : ""}</div>`;
+  if(!open.length){
+    h += `<div class="nb-none nb-ok">Nothing open. ${recent.length} settled in the last month.</div>`;
+    return h + `</div>`;
+  }
+  open.forEach(x=>{
+    const lv = HURT_LEVEL_BY[x.level] || HURT_LEVELS[0];
+    h += `<div class="hu-row sev${lv.sev}">
+      <div class="hu-row-h">
+        <span class="hu-row-t">${esc((HURT_AREA_BY[x.where] || {t:"Somewhere"}).t)}</span>
+        <span class="hu-row-d">${esc(lv.t.toLowerCase())}</span>
+      </div>
+      <div class="hu-row-x">${esc(x.ex)} · ${esc(hurtDays(x))}${
+        x.times > 1 ? " · said " + x.times + " times" : ""}</div>
+      ${x.note ? `<div class="hu-row-n">“${esc(x.note)}”</div>` : ""}
+      <div class="hu-row-b">
+        <button class="btn ghost small" data-husettle="${esc(x.id)}">It has settled</button>
+        <button class="btn ghost small" data-huagain="${esc(x.id)}">Still there</button>
+      </div>
+    </div>`;
+  });
+  h += `<div class="hu-foot">While a niggle is open the app will not add weight to that movement,
+    and it stops counting after four weeks with nothing said about it. Pain that is not settling is
+    worth showing somebody — this app cannot see your joints.</div>`;
+  return h + `</div>`;
 }
 /* =====================================================================
    THE BODY LOG — WHAT YOU WEIGH, AND WHAT SHAPE YOU ARE
@@ -28271,6 +28474,12 @@ function bind(){
   if(tbU) tbU.onclick = undoTimeBox;
   const gpU = $("#gymPlanUndo");
   if(gpU) gpU.onclick = undoGymPlan;
+  document.querySelectorAll("[data-exhurt]").forEach(b=> b.onclick = ()=>{
+    const en = (S.active && S.active.entries[parseInt(b.dataset.exhurt, 10)]) || null;
+    if(en) openHurt(en.name);
+  });
+  document.querySelectorAll("[data-husettle]").forEach(b=> b.onclick = ()=> hurtSettle(b.dataset.husettle));
+  document.querySelectorAll("[data-huagain]").forEach(b=> b.onclick = ()=> hurtAgain(b.dataset.huagain));
   const blA = $("#blAdd");
   if(blA) blA.onclick = ()=> openBodyLog();
   const rbOpen = $("#recordsBtn");
@@ -32312,6 +32521,17 @@ function progressionFor(sess, entry){
   const atTarget = (tRpe == null || !rpe) ? true : rpe <= tRpe + RPE_TOL;
   const clearedTop = reps >= range[1];
 
+  /* A NIGGLE HOLDS THE WEIGHT. You cleared the top of the range and you did it at the
+     prescribed effort, and normally that is the whole case for adding load — but you have
+     also told the app that this movement is bothering you, and "you earned more weight" is
+     the wrong answer to that. The set still counts for everything else; it just does not
+     buy a raise until the niggle is marked settled. */
+  const ache = hurtFor(entry.name);
+  if(clearedTop && atTarget && ache){
+    return {name: entry.name, kind: "held", hurt: ache,
+            why: "You have a " + (HURT_AREA_BY[ache.where] || {t:"niggle"}).t.toLowerCase() +
+                 " niggle logged on this. The weight stays where it is until you mark it settled."};
+  }
   if(clearedTop && atTarget){
     const from = isNaN(load) ? (target.weight == null ? null : target.weight) : load;
     const to = step.bodyweight && from == null ? step.amount
@@ -33067,6 +33287,22 @@ function progressionHTML(list){
     hardDone.forEach(p=>{
       h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">${
         toohardTarget(p) == null ? "applied" : "now " + esc(fmtLoad(toohardTarget(p)))} \u2713</span></div>`;
+    });
+  }
+  /* A RAISE THAT IS BEING WITHHELD HAS TO SAY SO. Without this the set that earned more
+     weight simply produces nothing on the card, which is indistinguishable from the app
+     not having noticed — and the person adds the weight themselves, which is the one
+     outcome the hold exists to prevent. */
+  const held = list.filter(p=> p.kind === "held");
+  if(held.length){
+    h += `<div class="rev-head">Held back, ${held.length}</div>`;
+    held.forEach(p=>{
+      h += `<div class="pg-row" style="cursor:default">
+        <div class="pg-main"><b>${esc(p.name)}</b>
+          <div class="pg-sub">${esc(p.why)}</div>
+        </div>
+        <button class="pg-apply ghost" data-husettle="${esc(p.hurt.id)}">Settled</button>
+      </div>`;
     });
   }
   /* "I'll manage the loads myself" means exactly that: the grade still tells you how the
@@ -35822,7 +36058,7 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","declined","prefs","importMeta","experience","sex","logFixUndo",
-  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","sessions","savedAt",
+  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
      pushOn is whether you have reminders turned on. It was not carried, so a restore in
