@@ -5496,7 +5496,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "23.3";
+const APP_VERSION = "23.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -18694,7 +18694,12 @@ function prefsGymHTML(){
     + (p.barMode === "total" ? `<div class="set-block"><div class="field" style="margin:0"><label>Your bar weighs</label>
       <input id="prefBarW" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
         placeholder="e.g. ${barDefault()} \u2014 blank if you'd rather not say"></div></div>` : "");
-  return h + gymGearHTML();
+  /* The plates and the dumbbells used to be asked for again here. They are facts about a
+     ROOM, not about you, and "Where you train" already asks them per gym — so the same
+     two questions were on two screens, and the answer on this one was the one the other
+     screen called "your usual". They are asked once now, on that page, with the usual at
+     the top and each gym's exceptions under it. */
+  return h;
 }
 /* TEN SETTINGS IN ONE BIN, AND THEY WERE NOT THE SAME KIND OF THING. "How sessions work"
    held the workout screen's layout next to the rule that decides when a weight goes up:
@@ -18884,6 +18889,14 @@ function openGymKit(id){
     toast(g.name + " uses your usual kit");
   };
 }
+/* YOUR USUAL KIT \u2014 the top of "Where you train", above the rooms that differ from it.
+
+   These are answers about a building: the smallest plate on the tree, the gap between
+   dumbbells, what the carriage weighs. They sat under "In the gym" as a single global
+   figure while each saved gym could override them, which meant the same question was
+   asked on two screens and only one of them said which gym it meant. They live here now,
+   where the exceptions live, and the sentence under the heading says plainly that this is
+   the fallback anything left blank on a gym comes back to. */
 function gymGearHTML(){
   const p = trainPrefs();
   const kg = inKg();
@@ -25290,12 +25303,19 @@ let SHOW_KEY = false;      // the recovery key is hidden until asked for, every 
    you can check. */
 function gymsCardHTML(){
   const gs = gymList();
+  const kit = `<div class="set-block" style="padding-bottom:2px">
+      <div class="set-name">Your usual kit</div>
+      <div class="set-help">What the room you normally lift in has. Element 26 only ever suggests a
+        weight you could actually load with it${gs.length
+          ? ", and any gym below that is different overrides it \u2014 tap that gym's equipment button."
+          : "."}</div>
+    </div>` + gymGearHTML();
   /* NO DEAD END. This used to return "" when the device had no geolocation and no gym
      had ever been saved, and the settings row opened onto a 78px card with nothing in
      it — a whole entry in the list leading nowhere. The page now always says what the
      feature is and either offers the switch or explains why there isn't one. */
   if(!geoReady() && !gs.length){
-    return `<div class="set-block">
+    return kit + `<div class="set-block">
       <div class="set-name">Filing sessions by gym</div>
       <div class="set-help">Element 26 can take one location reading when you tap Start and compare it
         only with gyms you have saved. Train somewhere new and it asks, so the session is filed under the
@@ -25305,11 +25325,14 @@ function gymsCardHTML(){
     </div>`;
   }
   const on = S.geo === "on";
-  let h = `<div class="sub" style="margin:0 0 10px">Element 26 takes one location reading when you tap Start, and
+  let h = kit + `<div class="set-block">
+      <div class="set-name">Filing sessions by gym</div>
+      <div class="set-help" style="margin-bottom:0">Element 26 takes one location reading when you tap Start, and
       compares it only with the gyms below. Same place as usual and nothing happens \u2014 it just puts back the
       bar and carriage weights you set there. Somewhere else and it asks, so that session is filed under the
       right gym instead of being compared to a bar that weighs something different.
-      ${on ? "Nothing is sent anywhere; it lives in your log like everything else." : ""}</div>`;
+      ${on ? "Nothing is sent anywhere; it lives in your log like everything else." : ""}</div>
+    </div>`;
   if(gs.length){
     h += `<div class="gym-list">` + gs.map(g=>{
       const bits = [];
@@ -25363,8 +25386,8 @@ let SYNC_BUSY = false;
    dumbbells it stocks \u2014 used to be a prompt card sitting on the front of Setup. It was
    the first thing anybody saw there and the least urgent thing on the screen, written in
    language ("smallest plate, one side") that made people guess at what was being asked.
-   It now lives once, in Advanced, next to every other fact about how you train, asked in
-   buttons instead of vocabulary. See gymGearHTML(). */
+   It now lives once, at the top of "Where you train" with the gyms that differ from it,
+   asked in buttons instead of vocabulary. See gymGearHTML(). */
 function syncCardHTML(){
   const st = syncStatus();
   if(st.k === "off") return "";
@@ -25444,10 +25467,10 @@ function setGroups(){
     {k:"remind", icon:"bell", title:"Reminders", sub:"Notifications for training, bedtime and the morning.",
      val: S.pushOn ? rem + " of 3 on" : "off",
      body: ()=> pushCardHTML() || `<div class="sub">Reminders aren't available in this build.</div>`},
-    {k:"gym", icon:"barbell", title:"In the gym", sub:"Pounds or kilos, your bar, and the plates and dumbbells you have.",
+    {k:"gym", icon:"barbell", title:"In the gym", sub:"Pounds or kilos, and what the number you write for a barbell means.",
      val: unitWord() + (p.barWeight ? " · " + fmtLoad(p.barWeight) + " bar" : ""),
      body: prefsGymHTML},
-    {k:"where", icon:"pin", title:"Where you train", sub:"The gyms Element 26 knows about, and whether it checks.",
+    {k:"where", icon:"pin", title:"Where you train", sub:"The plates and dumbbells you have, the gyms Element 26 knows about, and whether it checks.",
      val: S.geo === "on" ? (gyms === 1 ? "1 gym" : gyms + " gyms")
         : (S.geo === "off" ? "off" : geoReady() ? "not set up" : "not available"),
      body: gymsCardHTML},
