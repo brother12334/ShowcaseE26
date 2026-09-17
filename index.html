@@ -5410,7 +5410,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.6";
+const APP_VERSION = "22.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -32119,12 +32119,66 @@ function addRestToExercise(name, seconds){
   toast(e.name + ": rest now " + fmtClock(next[0]) + "\u2013" + fmtClock(next[1]));
   return true;
 }
+/* THE HEAVIEST THING YOU HAVE ACTUALLY LIFTED HERE, in the same convention the plan's
+   own number is written in — the raw logged weight, not the true load, because that is
+   what goes into e.weight. */
+/* Was this weight ever actually on the bar before a given moment? Within one progression
+   step, because a plan number and the set logged against it are not always typed to the
+   same decimal. */
+function everLiftedNear(name, w, before){
+  const k = nrm(name), target = parseFloat(w);
+  if(!isFinite(target)) return false;
+  const tol = Math.max(stepInUnits(2.5), target * 0.05);
+  return (S.sessions || []).some(sn=>{
+    if(before && (sn.finishedAt || sn.startedAt || 0) >= before) return false;
+    return (sn.entries || []).some(en=> nrm(en.name) === k
+      && (en.sets || []).some(st=> Math.abs((parseFloat(st && st.weight) || 0) - target) <= tol
+                                   && (parseFloat(st.reps) || 0) > 0));
+  });
+}
+function heaviestLogged(name){
+  const k = nrm(name);
+  let top = 0;
+  (S.sessions || []).forEach(sn=> (sn.entries || []).forEach(en=>{
+    if(nrm(en.name) !== k) return;
+    (en.sets || []).forEach(st=>{
+      const w = parseFloat(st && st.weight) || 0;
+      if(w > top && (parseFloat(st.reps) || 0) > 0) top = w;
+    });
+  }));
+  return top;
+}
+/* A TYPO IN THE APPLY BOX IS A SILENT REWRITE OF YOUR PROGRAMME.
+
+   The number beside APPLY is editable, which it should be — the app's suggestion is a
+   suggestion. It was validated for "is a number" and "is not negative" and nothing else,
+   so 450 typed for 45 went straight into the plan. Nothing noticed until the next
+   session, when the impossible-load guard began telling you to drop to a weight you had
+   never lifted, and the card spent a fortnight arguing with itself.
+
+   This does not refuse. Somebody who has changed gyms, or gone from dumbbells to a
+   machine, can legitimately double a number and has every right to. It asks once, and
+   only when the value is genuinely out of keeping: more than two and a half times the
+   heavier of what the plan says now and the most you have ever logged here, AND more
+   than about twenty pounds clear of it, so a small movement going 5 to 15 is not
+   interrogated over ten pounds. Every app-computed raise is one step, so this can never
+   fire on the automatic path. */
+function loadSanityWhy(name, from, v){
+  const ref = Math.max(parseFloat(from) || 0, heaviestLogged(name));
+  if(!(ref > 0)) return "";                       // nothing to measure it against
+  if(v <= ref * 2.5) return "";
+  if(v - ref <= stepInUnits(20)) return "";
+  return fmtLoad(v) + " is a long way past anything on record for " + name +
+    ".\n\nThe most you have logged is " + fmtLoad(ref) + ".";
+}
 function applyProgression(name, to, why, reason){
   const e = findProgramEntry(name);
   if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
   const from = e.weight;
   const v = parseFloat(to);
   if(isNaN(v)) return false;
+  const odd = loadSanityWhy(name, from, v);
+  if(odd && !confirm(odd + "\n\nWrite it into your programme anyway?")) return false;
   /* Adding weight during the week you took off to shed fatigue defeats the deload. Taking
      it OFF does not: a load the prescription cannot reach is wrong in a deload week too,
      and refusing the correction leaves you deloading against a number you cannot lift. */
@@ -33949,11 +34003,29 @@ function planChangeLineHTML(en){
     const to   = b.to   == null || b.to   === "" ? null : parseFloat(b.to);
     const d    = (from != null && to != null && isFinite(from) && isFinite(to)) ? to - from : null;
     const up   = d != null ? d > 0 : !/\bcut\b|\blower/i.test(b.what || "");
-    chips.push({up, text: d != null
-      ? (up ? "\u25b2 +" : "\u25bc \u2212") + fmtLoad(Math.abs(d))
-      : (up ? "\u25b2 " : "\u25bc ") + esc(b.what)});
-    subs.push((up ? "raised" : "cut") + " to " + fmtLoad(p.weight)
-      + " by Element 26 \u00b7 " + fmtDateShort(dayStr(b.at)) + " grade");
+    /* A DIFFERENCE MEASURED FROM A NUMBER NOBODY EVER LIFTED IS NOT A RAISE.
+
+       When a plan arrives without loads, fillStartingLoads() guesses one and marks the
+       entry startEst. The first real grade then replaces that guess with what you
+       actually did — and this read the two numbers, subtracted them, and announced
+       "\u25b2 +75 lb raised by Element 26", as though the app had decided to add seventy-five
+       pounds to a face pull. What happened is that its opening guess of 20 was wrong and
+       your first session settled it.
+
+       So a `from` that was never on the bar does not get to be half of a subtraction. The
+       test is whether anything logged BEFORE the change was within a step of it: if
+       nothing was, that number was the estimate, and the chip says so instead. */
+    const guessed = !!p.startEst && from != null && isFinite(from)
+      && !everLiftedNear(p.name, from, b.at);
+    chips.push({up, text: guessed ? "\u2713 " + fmtLoad(to)
+      : d != null
+        ? (up ? "\u25b2 +" : "\u25bc \u2212") + fmtLoad(Math.abs(d))
+        : (up ? "\u25b2 " : "\u25bc ") + esc(b.what)});
+    subs.push(guessed
+      ? "set from your own sets \u00b7 " + fmtDateShort(dayStr(b.at))
+        + " grade, replacing the opening estimate of " + fmtLoad(from)
+      : (up ? "raised" : "cut") + " to " + fmtLoad(p.weight)
+        + " by Element 26 \u00b7 " + fmtDateShort(dayStr(b.at)) + " grade");
     if(b.why) whys.push(b.why);
   }
   /* A LOAD THE APP WORKED OUT, WHICH IS NOT THE SAME AS ONE IT CHANGED — and until now
@@ -34646,7 +34718,23 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","declined","prefs","importMeta","experience","sex","logFixUndo",
-  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt"
+  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt",
+  /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
+
+     pushOn is whether you have reminders turned on. It was not carried, so a restore in
+     replace mode reset it to off while the account service still held the subscription
+     and the schedule — the app then said "off" about a phone that was still being sent
+     reminders, and turning it back "on" re-subscribed a device already subscribed.
+
+     The other four are questions you have already answered: whether the reminder prompt
+     has been offered, whether you said never, whether the check-in prompt has been shown,
+     and the sleep prompt's guard. Restoring a backup asked all of them again.
+
+     NOT included, deliberately: byAppBackfill, fixLimbNoteV1 and fixSpiderV1 are
+     one-shot migration markers and SHOULD re-run against restored data; active, fresh and
+     override are this-moment state; and sync carries the old gist token, which
+     syncSafeState() strips on purpose and must never travel in a file. */
+  "pushOn","pushAsked","pushNever","ciAsked","sleepGuard"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
