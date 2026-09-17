@@ -3127,6 +3127,38 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
   border-radius:11px;border:1px solid var(--line);background:var(--card2)}
 .mi-sides-l{font-size:13.5px;line-height:1.4;color:var(--text);margin-top:3px}
 .mi-sides .linklike{margin-left:auto;white-space:nowrap}
+/* ---------- the body log: what you weigh, and what shape you are ---------- */
+.nb-body{margin-top:14px}
+.bl-empty p{font-size:13px;color:var(--dim);line-height:1.55;margin:0 0 12px}
+.bl-hero{display:flex;align-items:center;gap:12px;width:100%;text-align:left;cursor:pointer;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:13px 14px;color:var(--text);margin-bottom:10px}
+.bl-hero:active{background:var(--card2)}
+.bl-hero-b{flex:1;min-width:0}
+.bl-hero-b>*{display:block}
+.bl-hero-v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:24px;line-height:1.1}
+.bl-hero-k{font:11px var(--mono);color:var(--faint);margin-top:3px}
+.bl-hero-t{display:flex;align-items:center;gap:8px;flex-shrink:0;font:11px var(--mono);color:var(--dim)}
+.bl-hero-go{color:var(--faint);font-size:17px;flex-shrink:0}
+.bl-meas{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.bl-m{display:flex;align-items:baseline;gap:10px;padding:9px 13px;border-top:1px solid var(--line)}
+.bl-m:first-child{border-top:0}
+.bl-m-k{flex:1;min-width:0;font-size:13px;color:var(--dim)}
+.bl-m-v{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:14px;flex-shrink:0}
+.bl-m-d{font:10px var(--mono);color:var(--faint);flex:0 0 96px;text-align:right;white-space:nowrap}
+.bl-foot{margin:9px 2px 0;font:10.5px var(--mono);letter-spacing:.04em;color:var(--faint);line-height:1.5}
+/* Nine fields behind a fold, because a nine-field form is what stops somebody logging the
+   one figure that actually matters. */
+.bl-tape{margin-top:12px;border-top:1px solid var(--line)}
+.bl-tape>summary{list-style:none;cursor:pointer;padding:12px 2px;font-size:13.5px;color:var(--dim);
+  display:flex;justify-content:space-between;align-items:center}
+.bl-tape>summary::-webkit-details-marker{display:none}
+.bl-tape>summary span{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.bl-tape>summary::after{content:"\203a";color:var(--faint);font-size:16px;margin-left:8px;
+  transition:transform .22s ease}
+.bl-tape[open]>summary::after{transform:rotate(90deg)}
+.bl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+@media (max-width:359px){ .bl-grid{grid-template-columns:1fr} }
 /* THE RECORD BOOK.
 
    One list, two row weights. A movement that has just set a record gets the accented row
@@ -3194,6 +3226,7 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .rb-hero-v{font-size:clamp(32px,10vw,42px);line-height:1.05}
 .rb-hero-k{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--acc);margin-top:9px}
 .rb-hero-w{font-size:12.5px;color:var(--dim);margin-top:5px}
+.rb-hero-bw{font:11px var(--mono);color:var(--faint);margin-top:4px}
 .rb-hero-w s{color:var(--faint);text-decoration-color:var(--faint)}
 .rb-mv{display:flex;align-items:center;justify-content:center;gap:11px;padding:15px 6px;
   border-bottom:1px solid var(--line);flex-wrap:wrap}
@@ -5578,7 +5611,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "23.6";
+const APP_VERSION = "23.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8659,6 +8692,7 @@ function defaultState(){
     override: null,
     sessions: [],
     active: null,
+    bodyLog: {},                 // date -> {w, chest, arm, waist, ...}
     /* The token is PER PROFILE, falling back to the shared one only when this person
        has none of their own. Sharing a single token across everybody was the account
        bug: as soon as you used a second token for a second gist, the wrong key got
@@ -22966,6 +23000,10 @@ function viewBody(){
     </button>
   </div>`;
 
+  /* ---- 7b. THE BODY ITSELF ------------------------------------------------------
+     Everything above this line is about training. This is the thing training is for. */
+  h += bodyLogHTML();
+
   /* ---- 4b. WHAT YOUR SESSIONS HAVE TOLD YOU ------------------------------------
      The grade card's conclusions, kept. They used to be read once on the night and then
      gone; this is the standing record, and the buttons here make the same edits the
@@ -24758,6 +24796,200 @@ function undoTimeBox(){
   toast("Session put back as written", "good");
 }
 /* =====================================================================
+   THE BODY LOG — WHAT YOU WEIGH, AND WHAT SHAPE YOU ARE
+
+   Everything else in this app measures TRAINING: what you lifted, how much of it, how
+   recovered the muscle is. None of it measured the body the training is for, and for a
+   goal of "build muscle" that is the actual outcome. "Bench up 25 lb since July" means
+   one thing if you gained two pounds and something else entirely if you gained twelve,
+   and until now nothing here could tell the difference.
+
+   One record per date, holding a weigh-in and — optionally — a tape measure. They share a
+   record because they are taken the same way on the same morning, and splitting them into
+   two logs would mean two prompts and two histories of the same event.
+
+   Nothing here is required and nothing nags. A log with three weigh-ins in it is still
+   more than the app knew before. */
+const MEAS_FIELDS = [
+  {k:"neck",      t:"Neck"},
+  {k:"shoulders", t:"Shoulders"},
+  {k:"chest",     t:"Chest"},
+  {k:"arm",       t:"Upper arm"},
+  {k:"forearm",   t:"Forearm"},
+  {k:"waist",     t:"Waist"},
+  {k:"hips",      t:"Hips"},
+  {k:"thigh",     t:"Thigh"},
+  {k:"calf",      t:"Calf"}
+];
+/* Inches with pounds, centimetres with kilos. Nobody measures their arm in centimetres
+   and their bench in pounds, and asking which would be a question with one sensible
+   answer. */
+function lenWord(){ return inKg() ? "cm" : "in"; }
+function fmtLen(v){
+  if(v == null || !isFinite(v)) return "—";
+  return (Math.round(v * 10) / 10) + " " + lenWord();
+}
+function bodyLog(){
+  if(!S.bodyLog || typeof S.bodyLog !== "object") S.bodyLog = {};
+  return S.bodyLog;
+}
+// Newest first, which is the order every screen that reads it wants.
+function bodyLogList(){
+  const L = bodyLog();
+  return Object.keys(L).filter(d=> L[d] && (L[d].w > 0 || MEAS_FIELDS.some(f=> L[d][f.k] > 0)))
+    .sort((a,b)=> a < b ? 1 : -1).map(d=> Object.assign({d}, L[d]));
+}
+function latestWeighIn(){
+  const l = bodyLogList().filter(x=> x.w > 0);
+  return l.length ? l[0] : null;
+}
+/* WHAT YOU WEIGHED WHEN THAT SET HAPPENED — the nearest weigh-in at or before the date,
+   because a pull-up in July was done at July's bodyweight and comparing it against
+   today's is the same mistake as comparing a 45 lb bar against a 55 lb one. */
+function weightOn(dateStr){
+  if(!dateStr) return null;
+  const l = bodyLogList().filter(x=> x.w > 0 && x.d <= dateStr);
+  return l.length ? l[0] : null;
+}
+/* The change over a window, as a figure and a direction. Deliberately not a verdict: the
+   app does not know whether you are trying to gain or lose, and a green arrow on a number
+   that is going the wrong way for you is worse than no arrow. */
+function bodyTrend(key, days){
+  const l = bodyLogList().filter(x=> x[key] > 0);
+  if(l.length < 2) return null;
+  const cut = dayStr(Date.now() - (days || 84) * DAY_MS);
+  const win = l.filter(x=> x.d >= cut);
+  const use = win.length >= 2 ? win : l.slice(0, 6);
+  const now = use[0], then = use[use.length - 1];
+  const wk = Math.max(1, Math.round((new Date(now.d) - new Date(then.d)) / (7 * DAY_MS)));
+  return {delta: Math.round((now[key] - then[key]) * 10) / 10, weeks: wk,
+          from: then, to: now, points: use.map(x=> x[key]).reverse()};
+}
+function bodyDelta(key, compact){
+  const t = bodyTrend(key);
+  if(!t || !t.delta) return "";
+  const amt = key === "w" ? fmtLoad(Math.abs(t.delta)) : fmtLen(Math.abs(t.delta));
+  // the tape rows have a 96px column for this; "over" wraps it and "\u00b7" does not
+  return (t.delta > 0 ? "+" : "−") + amt + (compact ? " · " : " over ") + t.weeks + " wk";
+}
+/* THE SHEET. One number is the point of it; the tape is nine more and stays folded until
+   somebody wants it, because a nine-field form is what stops people logging the one
+   figure that matters. */
+let BODYLOG_TAPE = false;
+function openBodyLog(dateStr){
+  const d = dateStr || todayStr();
+  const rec = bodyLog()[d] || {};
+  const has = MEAS_FIELDS.some(f=> rec[f.k] > 0);
+  const open = BODYLOG_TAPE || has;
+  const last = latestWeighIn();
+  const num = (k, ph)=> `value="${esc(rec[k] == null ? "" : rec[k])}" placeholder="${esc(ph)}"`;
+  const h = `<h3>Weigh-in</h3>
+    <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">For
+      ${esc(fmtDate(d))}. ${last && last.d !== d
+        ? "You were <b>" + esc(fmtLoad(last.w)) + "</b> on " + esc(fmtDateShort(last.d)) + "."
+        : "Same scale, same time of day, and the number is worth something."}</div>
+    <div class="field"><label>Bodyweight (${esc(unitWord())})</label>
+      <input id="blW" inputmode="decimal" ${num("w", last ? String(last.w) : "e.g. 180")}></div>
+    <details class="bl-tape"${open ? " open" : ""}>
+      <summary>Tape measurements <span>${has ? "filled in" : "optional"}</span></summary>
+      <div class="bl-grid">${MEAS_FIELDS.map(f=>
+        `<div class="field"><label>${esc(f.t)} (${esc(lenWord())})</label>
+          <input id="bl_${f.k}" inputmode="decimal" ${num(f.k, "")}></div>`).join("")}</div>
+      <div class="set-says">Measure the same side and the same spot every time — a tape moved an
+        inch up your arm is worth more than a month of training, and the app cannot see that it
+        moved.</div>
+    </details>
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn small" id="blSave" style="flex:1">Save</button>
+    </div>
+    ${(rec.w > 0 || has) ? `<div class="btn-row" style="margin-top:8px">
+      <button class="btn ghost small" id="blDel" style="flex:1">Delete this entry</button></div>` : ""}`;
+  showModal(h);
+  MODAL_REOPEN = ()=> openBodyLog(d);
+  const m = $("#modal");
+  const tape = m.querySelector(".bl-tape");
+  if(tape) tape.ontoggle = ()=>{ BODYLOG_TAPE = tape.open; };
+  const read = id=>{
+    const el = m.querySelector("#" + id);
+    const raw = el ? String(el.value).trim() : "";
+    if(!raw) return null;
+    const v = parseFloat(raw.replace(",", "."));
+    return isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : null;
+  };
+  const sv = m.querySelector("#blSave");
+  if(sv) sv.onclick = ()=>{
+    const out = {};
+    const w = read("blW");
+    if(w != null) out.w = w;
+    MEAS_FIELDS.forEach(f=>{ const v = read("bl_" + f.k); if(v != null) out[f.k] = v; });
+    if(!Object.keys(out).length){
+      delete bodyLog()[d];
+      save(); queueSync(); hideModal(); render();
+      toast("Nothing to save");
+      return;
+    }
+    bodyLog()[d] = out;
+    save(); queueSync(); hideModal(); render();
+    toast(out.w != null ? fmtLoad(out.w) + " logged" : "Measurements logged", "good");
+  };
+  const del = m.querySelector("#blDel");
+  if(del) del.onclick = ()=>{
+    if(!confirm("Delete the entry for " + fmtDate(d) + "?")) return;
+    delete bodyLog()[d];
+    save(); queueSync(); hideModal(); render();
+    toast("Entry deleted");
+  };
+}
+/* The Body tab's section. Weight leads because it is the one most people will keep, the
+   tape follows only if there is any, and both say what has changed rather than only what
+   the number is today. */
+function bodyLogHTML(){
+  const list = bodyLogList();
+  const w = latestWeighIn();
+  const t = w ? bodyTrend("w") : null;
+  let h = `<div class="nb-body nb-in" style="--d:560ms">
+    <div class="nb-sec-k">You</div>`;
+  if(!list.length){
+    h += `<div class="bl-empty">
+      <p>Element 26 measures your training and nothing about the body doing it. A weight
+      every week or two is enough to tell whether the strength you are adding is coming with
+      you — and it is what turns "0 lb moved" on a session of pull-ups into a real number.</p>
+      <button class="btn ghost small" id="blAdd" style="width:100%">Log a weigh-in</button>
+    </div></div>`;
+    return h;
+  }
+  if(w){
+    h += `<button class="bl-hero" id="blAdd">
+      <span class="bl-hero-b">
+        <span class="bl-hero-v num">${esc(fmtLoad(w.w))}</span>
+        <span class="bl-hero-k">${esc(fmtDate(w.d))}${w.d === todayStr() ? " · today" : ""}</span>
+      </span>
+      ${t && t.delta ? `<span class="bl-hero-t">
+        ${sparkHTML(t.points, 56, 24, "var(--dim)")}
+        <span class="num">${esc(bodyDelta("w"))}</span></span>` : ""}
+      <span class="bl-hero-go">›</span>
+    </button>`;
+  } else {
+    h += `<button class="btn ghost small" id="blAdd" style="width:100%;margin-bottom:10px">Log a weigh-in</button>`;
+  }
+  const taped = MEAS_FIELDS.filter(f=> list.some(x=> x[f.k] > 0));
+  if(taped.length){
+    h += `<div class="bl-meas">${taped.map(f=>{
+      const cur = list.filter(x=> x[f.k] > 0)[0];
+      const tr = bodyTrend(f.k);
+      return `<div class="bl-m">
+        <span class="bl-m-k">${esc(f.t)}</span>
+        <span class="bl-m-v num">${esc(fmtLen(cur[f.k]))}</span>
+        <span class="bl-m-d num">${tr && tr.delta ? esc(bodyDelta(f.k, true)) : ""}</span>
+      </div>`;
+    }).join("")}</div>`;
+  }
+  h += `<div class="bl-foot">${list.length} entr${list.length === 1 ? "y" : "ies"}${
+    list.length > 1 ? " · since " + esc(fmtDate(list[list.length-1].d)) : ""
+  }${taped.length ? "" : " · tape measurements are optional, inside the weigh-in"}</div>`;
+  return h + `</div>`;
+}
+/* =====================================================================
    THE RECORD BOOK
 
    The first version of this screen was a table of lifetime maxima, and it had three
@@ -24798,6 +25030,12 @@ const REP_BANDS = [
   {k:"b3", lo:11, hi:15,  t:"11–15"},
   {k:"b4", lo:16, hi:999, t:"16+"}
 ];
+/* A SET WITH NO WEIGHT ON IT IS NOT BANDED. Rep bands exist so that a heavy triple
+   cannot erase the set of twelve that was the real work; on a bodyweight movement the
+   reps are the record and banding them would split one lift into three. A weighted
+   pull-up still bands normally, because it is a different lift from a bodyweight one —
+   the same reasoning that keeps two bar weights apart. */
+const BW_BAND = {k:"bw", lo:1, hi:999, t:"reps"};
 function bandFor(reps){
   for(let i = 0; i < REP_BANDS.length; i++){
     if(reps >= REP_BANDS[i].lo && reps <= REP_BANDS[i].hi) return REP_BANDS[i];
@@ -24850,7 +25088,7 @@ function buildRecordBook(){
         r.sets++; r.reps += reps; r.vol += w * reps;
         if(w > 0) r.bw = false;
         if(!(reps > 0)) return;
-        const band = bandFor(reps);
+        const band = w > 0 ? bandFor(reps) : BW_BAND;
         if(!band) return;
         const rpe = parseFloat(st && st.rpe);
         const hit = {w, reps, at: s.startedAt, date: s.date, gym: s.gymName || "", add,
@@ -24886,9 +25124,9 @@ function buildRecordBook(){
   return Object.keys(by).map(k=> by[k]).filter(r=> r.sets > 0).map(r=>{
     // the band you actually train this lift in is the one with the most sets in it
     let main = null;
-    REP_BANDS.forEach(bd=>{
-      const b = r.bands[bd.k];
-      if(b && (!main || b.sets > r.bands[main.k].sets)) main = bd;
+    Object.keys(r.bands).forEach(k=>{
+      const b = r.bands[k];
+      if(!main || b.sets > r.bands[main.k].sets) main = b.band;
     });
     r.mainBand = main;
     const hist = (main && r.hist[main.k]) || [];
@@ -25024,6 +25262,8 @@ function viewRecordOne(r){
     <div class="rb-hero">
       <div class="rb-hero-v num">${esc(rbVal(r, best))}</div>
       <div class="rb-hero-k">Your best · ${esc(r.bw ? "bodyweight" : main.t + " reps")}</div>
+      ${r.bw && weightOn(best.date) ? `<div class="rb-hero-bw">at ${
+        esc(fmtLoad(weightOn(best.date).w))} bodyweight</div>` : ""}
       <div class="rb-hero-w">${isRec
         ? esc(fmtDate(best.date)) + " — beat <s>" + esc(rbVal(r, newest.beat)) + "</s>, which stood "
           + esc(rbDays(newest.stood))
@@ -25032,11 +25272,12 @@ function viewRecordOne(r){
   if(r.trend && r.trend.delta){
     h += `<div class="rb-mv">${sparkHTML(r.spark, 74, 28, rbSparkCol(r))}
       <b class="${t.cls}">${esc((r.trend.delta > 0 ? "+" : "−") +
-        (r.bw ? Math.abs(r.trend.delta) + " reps" : fmtLoad(Math.abs(r.trend.delta))))}</b>
-      <span>in the ${esc(r.bw ? "set" : main.t)} range over ${r.trend.weeks} week${
+        (r.bw ? Math.abs(r.trend.delta) + " rep" + (Math.abs(r.trend.delta) === 1 ? "" : "s")
+              : fmtLoad(Math.abs(r.trend.delta))))}</b>
+      <span>${r.bw ? "" : "in the " + esc(main.t) + " range "}over ${r.trend.weeks} week${
         r.trend.weeks === 1 ? "" : "s"}</span></div>`;
   }
-  REP_BANDS.forEach(bd=>{
+  REP_BANDS.concat([BW_BAND]).forEach(bd=>{
     const o = r.bands[bd.k];
     if(!o || !o.best || bd.k === main.k) return;
     h += `<div class="rb-alt"><span class="rb-alt-k">${esc(bd.t)}</span>
@@ -25047,6 +25288,18 @@ function viewRecordOne(r){
   const mw = mx && parseFloat(mx.w);
   const hasMax = isFinite(mw) && mw > 0;
   const est = Math.round(est1RM(best.w, repsToFailure({reps: best.reps, rpe: best.rpe})));
+  /* A BODYWEIGHT LIFT IS NOT WEIGHTLESS. Fourteen pull-ups at 175 and fourteen at 195
+     are not the same set, and until there was a weigh-in log there was no way to say so.
+     Stated, not silently folded into the number: the record is still the reps. */
+  if(r.bw){
+    const w0 = weightOn(best.date), wN = latestWeighIn();
+    if(w0 && wN && Math.abs(wN.w - w0.w) >= 1){
+      h += `<div class="rb-foot">You were <b>${esc(fmtLoad(w0.w))}</b> when you set it and are
+        <b>${esc(fmtLoad(wN.w))}</b> now — ${wN.w > w0.w
+          ? "the same reps today would be more work."
+          : "the same reps today would be less work."}</div>`;
+    }
+  }
   h += `<div class="rb-foot">${best.add > 0
       ? "Every figure here includes the " + esc(fmtLoad(best.add)) + " bar. A set on a different bar or a Smith carriage is kept apart, and never compared.<br>"
       : ""}${r.bw || !(best.w > 0) ? "" : (hasMax
@@ -28018,6 +28271,8 @@ function bind(){
   if(tbU) tbU.onclick = undoTimeBox;
   const gpU = $("#gymPlanUndo");
   if(gpU) gpU.onclick = undoGymPlan;
+  const blA = $("#blAdd");
+  if(blA) blA.onclick = ()=> openBodyLog();
   const rbOpen = $("#recordsBtn");
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
@@ -35567,7 +35822,7 @@ const BACKUP_FIELDS = [
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","declined","prefs","importMeta","experience","sex","logFixUndo",
-  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","sessions","savedAt",
+  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
      pushOn is whether you have reminders turned on. It was not carried, so a restore in
@@ -36597,7 +36852,7 @@ function mergeBackup(into, d){
   ["restDays","restLog","skipLog","restDeleted","restAuto","deleted","planLog"].forEach(k=>{
     if(d[k]) into[k] = uniqDates(into[k], d[k]);
   });
-  ["checkins","exAliases","stalls","asymRetired","prefs","exMuscles","rpeSugSkip","maxes"].forEach(k=>{
+  ["checkins","exAliases","stalls","asymRetired","prefs","exMuscles","rpeSugSkip","maxes","bodyLog"].forEach(k=>{
     if(d[k] && typeof d[k] === "object") into[k] = Object.assign({}, into[k]||{}, d[k]);
   });
   /* The plan and everything that describes it comes across whole or not at all: half of
