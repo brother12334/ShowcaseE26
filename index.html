@@ -2345,6 +2345,15 @@ body.onboarding #app{padding:0}
 /* THE DIAGNOSTIC. Deliberately plain and deliberately not alarming: most of these rows
    read "yes" most of the time, and a panel that shouts is one you stop reading. Only the
    line that is actually wrong takes a colour. */
+/* The plate tree, as a row of sizes you tap on and off. Monospace and right-sized to the
+   numbers, so 2.5 and 45 sit in columns rather than jittering. */
+.gk-plates{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 0}
+.gk-pl{
+  flex:0 0 auto;min-width:46px;padding:8px 9px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--line);background:var(--card2);color:var(--dim);
+  font:13px var(--mono);text-align:center;
+}
+.gk-pl.on{background:var(--acc-soft);border-color:var(--acc-line);color:var(--acc)}
 .rem-diag{
   border:1px solid var(--line);border-radius:11px;background:var(--card2);
   padding:11px 12px;margin:14px 0 0;
@@ -5413,7 +5422,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.8";
+const APP_VERSION = "22.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6842,6 +6851,15 @@ const PREF_DEFAULTS = {
      point telling somebody to add 2.5 lb a hand when the rack goes 10, 15, 20. */
   dbStep: null,      // smallest gap between two of your dumbbells, per hand
   plateStep: null,   // smallest plate you own — a bar changes by twice this
+  /* WHERE THE RACK STOPS. A rack that ends at 50 makes every suggestion above 50 a
+     weight that does not exist in the building, and the app was happy to print them.
+     Null is "nobody has said", and then it behaves exactly as it always did. */
+  dbMax: null,       // the heaviest dumbbell on the rack, per hand
+  /* WHICH PLATES ARE ACTUALLY THERE. Until now the plate maths assumed the full standard
+     set filtered by the smallest one you own, which is right for most gyms and wrong for
+     the ones missing a 35, or with nothing between a 10 and a 45. Null keeps the old
+     assumption; an array names exactly what is on the rack. */
+  plates: null,      // e.g. [45,25,10,5,2.5] — one side, heaviest first
   /* POUNDS OR KILOS, AND NOTHING IS CONVERTED. This is a label, not a conversion.
      Every number in your log is the number you typed, which is the number written on
      the plate in front of you; the app only has to know what to CALL it, and what a
@@ -18599,6 +18617,98 @@ function stepChoiceHTML(key, attr, opts, cur){
       <input id="pref${key === "plateStep" ? "PlateStep" : "DbStep"}" inputmode="decimal"
         value="${esc(cur == null ? "" : cur)}" placeholder="in ${unitWord()}"></div>` : "");
 }
+/* ONE GYM'S KIT, EDITED WHERE THE GYM LIVES.
+
+   The bar and the carriage already travelled with the building — set them on the workout
+   screen and rememberGymGear() files them under wherever you were. The rack and the plate
+   tree could not be set at all: they were one global figure for every room you train in,
+   which is wrong the moment you use two. A 2.5 lb jump exists in one gym and not the
+   other; a rack stops at 50 here and 120 there.
+
+   Saving writes straight onto the gym AND, if that is where you are right now, into the
+   live preferences — otherwise the numbers would be correct in Settings and stale in the
+   session you are in the middle of. Everything is optional: blank means "my usual", and
+   applyGymGear() puts the usual back on the way in. */
+const PLATE_PICK = {lb: [45, 35, 25, 10, 5, 2.5, 1.25], kg: [25, 20, 15, 10, 5, 2.5, 1.25]};
+let GYM_KIT = null;                      // {id, plates:[...]} while the sheet is open
+function openGymKit(id){
+  const g = gymById(id);
+  if(!g) return;
+  const kg = inKg(), p = trainPrefs();
+  if(!GYM_KIT || GYM_KIT.id !== id){
+    GYM_KIT = {id, plates: Array.isArray(g.plates) ? g.plates.slice() : null};
+  }
+  const num = (v, ph)=> `value="${esc(v == null ? "" : v)}" placeholder="${esc(ph)}"`;
+  const usual = v => v == null ? "your usual" : fmtLoad(v);
+  const chosen = GYM_KIT.plates;
+  const h = `<h3>Kit at ${esc(g.name)}</h3>
+    <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">Only what is
+      different about this room. Leave anything blank and Element 26 uses your usual setting, and puts
+      it back when you train somewhere else.</div>
+
+    <div class="rev-head">Dumbbells</div>
+    <div class="field"><label>Gap from one to the next</label>
+      <input id="gkDbStep" inputmode="decimal" ${num(g.dbStep, usual(p.dbStep))}></div>
+    <div class="field" style="margin-top:9px"><label>Heaviest on the rack</label>
+      <input id="gkDbMax" inputmode="decimal" ${num(g.dbMax, usual(p.dbMax))}></div>
+    <div class="set-says">A rack that ends at ${esc(fmtLoad(g.dbMax != null ? g.dbMax : (p.dbMax != null ? p.dbMax : (kg ? 40 : 100))))}
+      makes every suggestion past it a weight that is not in the building. Told, Element 26 stops there.</div>
+
+    <div class="rev-head" style="margin-top:16px">Plates</div>
+    <div class="field"><label>Smallest plate, one side</label>
+      <input id="gkPlStep" inputmode="decimal" ${num(g.plateStep, usual(p.plateStep))}></div>
+    <div class="k-lab" style="margin-top:12px">Which sizes this gym has</div>
+    <div class="gk-plates">${PLATE_PICK[kg ? "kg" : "lb"].map(v=>
+      `<button type="button" class="gk-pl${chosen && chosen.indexOf(v) > -1 ? " on" : ""}"
+        data-gkpl="${v}">${stepNum(v)}</button>`).join("")}</div>
+    <div class="set-says">${chosen && chosen.length
+      ? "The plate line will use exactly these."
+      : "None picked, so it assumes the usual set down to your smallest plate \u2014 which is right in most gyms."}</div>
+
+    <div class="btn-row" style="margin-top:18px">
+      <button class="btn small" id="gkSave" style="flex:1">Save</button>
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn ghost small" id="gkClear" style="flex:1">Use my usual for everything here</button>
+    </div>`;
+  showModal(h);
+  MODAL_REOPEN = ()=> openGymKit(id);
+  const m = $("#modal");
+  m.querySelectorAll("[data-gkpl]").forEach(b=> b.onclick = ()=>{
+    const v = parseFloat(b.dataset.gkpl);
+    const list = Array.isArray(GYM_KIT.plates) ? GYM_KIT.plates.slice() : [];
+    const at = list.indexOf(v);
+    if(at > -1) list.splice(at, 1); else list.push(v);
+    GYM_KIT.plates = list.length ? list.sort((a,b)=> b - a) : null;
+    openGymKit(id);
+  });
+  const readNum = sel =>{
+    const el = m.querySelector(sel);
+    const raw = el ? String(el.value).trim() : "";
+    if(!raw) return null;
+    const v = parseFloat(raw.replace(",", "."));
+    return isFinite(v) && v > 0 ? v : null;
+  };
+  const sv = m.querySelector("#gkSave");
+  if(sv) sv.onclick = ()=>{
+    g.dbStep = readNum("#gkDbStep");
+    g.dbMax = readNum("#gkDbMax");
+    g.plateStep = readNum("#gkPlStep");
+    g.plates = GYM_KIT.plates ? GYM_KIT.plates.slice() : null;
+    /* If this is the gym you are standing in, the session has to agree with it now. */
+    if(S.active && S.active.gymId === g.id) applyGymGear(g);
+    GYM_KIT = null;
+    save(); queueSync(); hideModal(); render();
+    toast("Kit saved for " + g.name, "good");
+  };
+  const cl = m.querySelector("#gkClear");
+  if(cl) cl.onclick = ()=>{
+    ["dbStep","dbMax","plateStep","plates"].forEach(k=> delete g[k]);
+    GYM_KIT = null;
+    save(); queueSync(); hideModal(); render();
+    toast(g.name + " uses your usual kit");
+  };
+}
 function gymGearHTML(){
   const p = trainPrefs();
   const kg = inKg();
@@ -25022,12 +25132,17 @@ function gymsCardHTML(){
       if(g.n) bits.push(g.n + " session" + (g.n === 1 ? "" : "s"));
       if(g.bar != null) bits.push("bar " + fmtLoad(g.bar));
       if(g.smith != null) bits.push("carriage " + fmtLoad(g.smith));
+      if(g.dbStep != null) bits.push("db " + fmtLoad(g.dbStep) + " steps");
+      if(g.dbMax != null) bits.push("rack to " + fmtLoad(g.dbMax));
+      if(g.plateStep != null) bits.push("plate " + fmtLoad(g.plateStep));
+      if(Array.isArray(g.plates) && g.plates.length) bits.push(g.plates.length + " plate sizes");
       return `<div class="gym-row">
         <div style="min-width:0">
           <b>${esc(g.name)}</b>
           <span class="sub" style="display:block;margin-top:2px">${bits.length ? esc(bits.join(" \u00b7 ")) : "not trained at yet"}</span>
         </div>
         <span class="icon-btns">
+          <button data-gymkit="${esc(g.id)}" aria-label="Equipment at ${esc(g.name)}" title="Equipment">${ICON.barbell || "\u2696"}</button>
           <button data-gymren="${esc(g.id)}" aria-label="Rename ${esc(g.name)}">\u270e</button>
           <button data-gymdel="${esc(g.id)}" aria-label="Forget ${esc(g.name)}">\u2715</button>
         </span>
@@ -27258,6 +27373,9 @@ function bind(){
     save(); queueSync(); render();
     toast("Forgotten — that one runs as written here now", "good");
   });
+  document.querySelectorAll("#app [data-gymkit]").forEach(b=> b.onclick = ()=>{
+    GYM_KIT = null; openGymKit(b.dataset.gymkit);
+  });
   document.querySelectorAll("#app [data-gymren]").forEach(b=> b.onclick = ()=>{
     const g = gymById(b.dataset.gymren);
     if(!g) return;
@@ -28215,12 +28333,35 @@ function setSessionGym(g){
    from the workout screen while a gym session is open, applied on the way back in. This
    is the whole point of knowing where you are: the number that was wrong is the number
    every warm-up and every comparison is computed from. */
+/* EVERYTHING ABOUT A BUILDING THAT CHANGES THE ARITHMETIC. The bar and the carriage were
+   here first; the dumbbell rack and the plate tree belong with them for the same reason.
+   A 2.5 lb jump is available in one gym and imaginary in another, and a rack that stops
+   at 50 makes every suggestion past it a weight that does not exist in the room.
+
+   One list, read by both directions, so adding a fifth thing later cannot be done to the
+   saving half and forgotten in the restoring half. `plates` is an array, so it is
+   compared and copied by value — sharing the reference would let an edit in Settings
+   reach into a gym that was only ever supposed to remember it. */
+const GYM_GEAR = [
+  {k:"bar",       p:"barWeight",  say: v=> v == null ? "no bar weight set" : "bar " + fmtLoad(v)},
+  {k:"smith",     p:"smithWeight",say: v=> v == null ? "carriage back to standard" : "carriage " + fmtLoad(v)},
+  {k:"dbStep",    p:"dbStep",     say: v=> v == null ? "dumbbell steps unset" : "dumbbells every " + fmtLoad(v)},
+  {k:"dbMax",     p:"dbMax",      say: v=> v == null ? "no rack limit" : "rack to " + fmtLoad(v)},
+  {k:"plateStep", p:"plateStep",  say: v=> v == null ? "plate steps unset" : "smallest plate " + fmtLoad(v)},
+  {k:"plates",    p:"plates",     arr:true,
+   say: v=> v == null ? "the usual plates" : v.length + " plate sizes"}
+];
+const sameGear = (a, b)=> Array.isArray(a) || Array.isArray(b)
+  ? JSON.stringify(Array.isArray(a) ? a : null) === JSON.stringify(Array.isArray(b) ? b : null)
+  : a === b;
 function rememberGymGear(){
   const g = S.active && S.active.gymId ? gymById(S.active.gymId) : null;
   if(!g) return;
   const p = trainPrefs();
-  g.bar = p.barWeight == null ? null : p.barWeight;
-  g.smith = p.smithWeight == null ? null : p.smithWeight;
+  GYM_GEAR.forEach(f=>{
+    const v = p[f.p];
+    g[f.k] = v == null ? null : (f.arr ? (Array.isArray(v) ? v.slice() : null) : v);
+  });
 }
 function applyGymGear(g){
   if(!g) return "";
@@ -28228,14 +28369,11 @@ function applyGymGear(g){
   /* `undefined` is "never recorded" and null is "deliberately not set" \u2014 the second one
      has to be applied too, or coming home from a gym with a heavier carriage leaves the
      heavier carriage in place. */
-  if(g.bar !== undefined && g.bar !== p.barWeight){
-    p.barWeight = g.bar;
-    said.push(g.bar == null ? "no bar weight set" : "bar " + fmtLoad(g.bar));
-  }
-  if(g.smith !== undefined && g.smith !== p.smithWeight){
-    p.smithWeight = g.smith;
-    said.push(g.smith == null ? "carriage back to standard" : "carriage " + fmtLoad(g.smith));
-  }
+  GYM_GEAR.forEach(f=>{
+    if(g[f.k] === undefined || sameGear(g[f.k], p[f.p])) return;
+    p[f.p] = f.arr && Array.isArray(g[f.k]) ? g[f.k].slice() : g[f.k];
+    said.push(f.say(g[f.k]));
+  });
   if(said.length){ save(); queueSync(); render(); }
   return said.join(" \u00b7 ");
 }
@@ -32897,7 +33035,20 @@ function roundLoadable(w, name){
   const bar = barWeightFor(name);
   const plates = w - bar;
   if(plates <= 0) return w;
-  return bar + Math.max(st, Math.round(plates / st) * st);
+  return capToRack(bar + Math.max(st, Math.round(plates / st) * st), name);
+}
+/* WHERE THE RACK STOPS. Suggesting 55 to somebody whose dumbbells end at 50 is an
+   instruction they cannot follow, and the app had no idea the ceiling existed. Told, it
+   stops at the top of the rack; untold, it behaves exactly as it always did.
+
+   Only for the movements a rack limits: a cable stack and a leg press have their own
+   ends and this number says nothing about them. */
+function capToRack(w, name){
+  const p = trainPrefs();
+  const eq = equipmentOf(name);
+  if(eq !== "dumbbell" && eq !== "kettlebell") return w;
+  const max = parseFloat(p.dbMax);
+  return isFinite(max) && max > 0 && w > max ? max : w;
 }
 /* =====================================================================
    WHAT TO ACTUALLY PUT ON THE BAR
@@ -32937,7 +33088,15 @@ function plateBreakdown(total, name){
   if(perSide === 0) return {bar: barW, plates: [], perSide: 0, exact: true};
   const step = p.plateStep > 0 ? p.plateStep : 0;
   if(!step) return null;                        // no plate collection named
-  const avail = (inKg() ? PLATE_SETS_KG : PLATE_SETS_LB).filter(x=> x >= step);
+  /* WHAT IS ACTUALLY ON THE TREE. The standard set filtered by the smallest plate you own
+     is right for most gyms and wrong for the ones missing a 35, or with nothing between a
+     10 and a 45 — and being wrong here is worse than saying nothing, because the whole
+     point of the line is that you can walk to the rack and follow it. Named, the list is
+     used exactly as given; unnamed, the old assumption stands. */
+  const owned = Array.isArray(p.plates) && p.plates.length
+    ? p.plates.map(Number).filter(x=> x > 0).sort((a,b)=> b - a)
+    : null;
+  const avail = owned || (inKg() ? PLATE_SETS_KG : PLATE_SETS_LB).filter(x=> x >= step);
   const plates = [];
   let left = perSide;
   avail.forEach(pl=>{
