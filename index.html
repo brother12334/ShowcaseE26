@@ -952,6 +952,9 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   border-radius:11px;
 }
 .ex-insight{display:flex;gap:9px;align-items:baseline;font-size:13.5px;color:var(--text);margin:-6px 0 12px;line-height:1.4}
+/* The correction, offered inline in the sentence that explains it rather than as a
+   separate row: it is the answer to the line above it, not a second thing to consider. */
+.ex-catch{display:inline;margin-left:4px;font-size:13px;white-space:nowrap}
 .ins-tag{
   flex-shrink:0;font-family:var(--disp);font-size:11.5px;font-weight:700;
   text-transform:uppercase;letter-spacing:.09em;color:var(--acc);
@@ -5410,7 +5413,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.7";
+const APP_VERSION = "22.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -27777,6 +27780,35 @@ function bind(){
   } else if(SET_PAGE === "remind" && !PUSH_DIAG){
     refreshPushDiag().then(()=>{ if(SET_PAGE === "remind") render(); });
   }
+  /* Catching the plan up to what you are already lifting. Same path as every other
+     accept, so the change is written, logged, and any open load flag for the movement is
+     closed — see applyProgression(). */
+  document.querySelectorAll("[data-plancatch]").forEach(btn=> btn.onclick = ev=>{
+    ev.preventDefault(); ev.stopPropagation();
+    const name = btn.dataset.plancatch;
+    const to = parseFloat(btn.dataset.plancatchto);
+    if(!isFinite(to)) return;
+    if(applyProgression(name, to, "You set the plan to the load you had already been working at.",
+                        "plan caught up to your log")){
+      /* AND THE SESSION IN FRONT OF YOU HAS TO AGREE WITH IT.
+
+         A live entry carries planWeight, frozen at Start so the warm-up ramp is built
+         from one number and stays built from it. That freeze is right, and it meant the
+         boxes went on offering the OLD plan for every set the last session did not reach:
+         press "set my plan to 32.5" and rows two and three still read 25, which is the
+         number you had just corrected. You asked for this one explicitly, so the open
+         session follows it. The warm-up is left alone — it was performed against what it
+         was performed against. */
+      if(S.active){
+        (S.active.entries || []).forEach(en=>{
+          if(nrm(en.name) === nrm(name)) en.planWeight = to;
+        });
+        save();
+      }
+      toast(name + " set to " + fmtLoad(to) + " in your programme", "good");
+      render();
+    }
+  });
   const poff = $("#pushOffBtn");
   if(poff) poff.onclick = async ()=>{
     PUSH_BUSY = true; render();
@@ -33810,10 +33842,28 @@ function planBehindLineHTML(en){
     if(w > top) top = w;
   });
   if(!(top > plan + 0.01)) return "";
+  /* IS THERE ACTUALLY A RAISE WAITING? The first version of this line said "the grade
+     card offers the raise" unconditionally, and that is only true when the last session
+     EARNED one. Work above your plan without clearing the top of the rep range — which
+     is the ordinary case, and the reason the plan fell behind in the first place — and
+     the progression rule has nothing to offer, no button appears anywhere, and the line
+     was describing a way out that did not exist.
+
+     The rule is right to say nothing: you lifted more, but you have not earned another
+     jump. "Your plan should say what you are actually lifting" is a different statement
+     and a true one, and the app had no way to make it. Hence the button. It is a
+     CORRECTION, not a progression — it moves the plan to the load you are already using
+     and adds nothing on top — and it goes through applyProgression() like every other
+     accept, so it lands in the plan and the plan history identically, and closes any
+     open load flag for the movement on the way. */
+  const raiseWaiting = openFlags().some(f=> f && f.kind === "up" && nrm(f.ex || "") === nrm(p.name));
   return `<div class="ex-insight"><span class="ins-tag">plan is behind</span><span>Your
     programme says ${esc(fmtLoad(plan))}; you last worked at <b>${esc(fmtLoad(top))}</b>, so the
-    boxes suggest that. The grade card offers the raise \u2014 it is not written until you take
-    it.</span></div>`;
+    boxes suggest that. ${raiseWaiting
+      ? "The grade card has a raise waiting \u2014 or put the plan on what you are already doing."
+      : "Nothing has earned a raise yet, so this is just the plan being out of date."}
+    <button type="button" class="nb-link ex-catch" data-plancatch="${esc(p.name)}"
+      data-plancatchto="${esc(String(top))}">Set my plan to ${esc(fmtLoad(top))}</button></span></div>`;
 }
 function setRowHTML(en, ei, si, last, idxLabel){
   const st = en.sets[si];
