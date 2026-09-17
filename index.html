@@ -5523,7 +5523,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "23.1";
+const APP_VERSION = "23.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13070,14 +13070,32 @@ function volWindowInfo(now){
   const days = Math.min(21, lived);        // a stalled cycle shouldn't inflate targets forever
   const off = Math.max(0, raw - lived);    // calendar time excluded as time away
   const prev = S.lastCycle;
+  /* THE SAME POINT LAST CYCLE, NOT THE WHOLE OF IT.
+
+     This compared however far into the cycle you are — eight days, say — against the
+     ENTIRE previous cycle, start to end. On the last day of a rotation with the session
+     still to do, that reads "89 sets, down 18% on last cycle", and of course it does:
+     you are being measured against a finished fortnight with a workout still in hand.
+     Every cycle would look like a decline until the moment it ended.
+
+     So the previous window is truncated to the same elapsed span. Eight days in gets
+     compared with the first eight days of last cycle, which is the only version of the
+     sentence that can be either true or false. Capped at that cycle's real end, because
+     a previous cycle shorter than this one has no more days to offer — and when that
+     happens the label says what it actually measured rather than claiming a full cycle. */
+  const prevSpan = prev ? Math.min(days * DAY_MS, prev.end - prev.start) : 0;
+  const prevDays = prevSpan / DAY_MS;
+  const partial = prev && prevSpan < (prev.end - prev.start) - 0.5 * DAY_MS;
   return {
     mode:"cycle", from:start, to: now + 1, days, scale: days/7, off,
     label:"this cycle, "+Math.round(days)+" day"+(Math.round(days)===1?"":"s")+" so far"
       + (off >= 2 ? " (+"+Math.round(off)+" off)" : ""),
     short:"this cycle", unit:"this cycle",
     prevFrom: prev ? prev.start : (start - days*DAY_MS),
-    prevTo:   prev ? prev.end   : start,
-    prevLabel: prev ? "last cycle" : "the period before"
+    prevTo:   prev ? prev.start + prevSpan : start,
+    prevLabel: !prev ? "the period before"
+      : partial ? "the same " + Math.round(prevDays) + " days last cycle"
+      : "last cycle"
   };
 }
 /* ---------- WHERE YOU ARE IN THE CYCLE ----------
@@ -22736,7 +22754,7 @@ function viewBody(){
     ${BODY_OPEN.nbwhy?`<div class="nb-why">
       <div><b>Recovery ${t.rec}%</b> is how far your muscles have got through the rest they need since you last worked them.</div>
       <div><b>Tiredness ${t.fat}%</b> is how much fatigue is still sitting in them from recent sets.</div>
-      <div><b>${t.setsWk} working sets</b> ${esc(win.short)}${t.setsPrev>0?`, ${t.setsWk>=t.setsPrev?"up":"down"} from ${t.setsPrev} ${esc(win.prevLabel)}`:""}.</div>
+      <div><b>${t.setsWk} working sets</b> ${esc(win.short)}${t.setsPrev>0?`, ${t.setsWk>=t.setsPrev?"up":"down"} from ${t.setsPrev} over ${esc(win.prevLabel)}`:""}.</div>
       ${t.acwr!=null?`<div><b>Load change ${t.acwr.toFixed(2)}\u00d7</b> compares this week against your last four. Over 1.5\u00d7 is a jump big enough to be worth noticing.</div>`:""}
       ${A.modInfo.why.length
         ? `<div>Your recovery number is adjusted for what you've logged: ${esc(A.modInfo.why.join("; "))}.</div>`
@@ -22817,8 +22835,12 @@ function viewBody(){
   const topFat = MKEYS.slice().sort((a,b)=>A.fat[b]-A.fat[a])[0];
   const loadRows = [
     {k:"Sets this week", v:String(t.setsWk),
+     /* "The same as last week" was hardcoded, so a cycle-mode window that happened to
+        land level reported a week it was not measuring. And once the previous window is
+        truncated to the same span, its label is "the same 8 days last cycle" — which
+        after "The same as" reads "the same as the same". "Level with" fixes both. */
      s: t.setsPrev>0
-        ? (t.setsWk===t.setsPrev ? "The same as last week."
+        ? (t.setsWk===t.setsPrev ? "Level with "+win.prevLabel+"."
            : (t.setsWk>t.setsPrev?"Up ":"Down ")+Math.abs(Math.round((t.setsWk-t.setsPrev)/t.setsPrev*100))+"% on "+win.prevLabel+".")
         : "Your first "+win.short.replace(/^this /,"")+" on record.",
      c:"var(--text)"},
