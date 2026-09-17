@@ -5410,7 +5410,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.5";
+const APP_VERSION = "22.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20469,6 +20469,7 @@ function viewActiveSession(){
     h += lpLineHTML(en);
     h += pctLineHTML(en);
     h += planChangeLineHTML(en);
+    h += planBehindLineHTML(en);
     h += exNoteLineHTML(en);
     h += supersetNoteHTML(supersetInfo(a.entries, ei));
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
@@ -33704,11 +33705,61 @@ function planLoadFor(en){
   const net = w - entryBarAdd(en);
   return net > 0 ? String(r1(net)) : "";
 }
+/* WHAT THE EMPTY BOX SHOULD SUGGEST, WHICH IS NOT ALWAYS WHAT THE PLAN SAYS.
+
+   The plan's number won outright, so a programme still reading 45 lb went on suggesting
+   45 for every set of a movement that had been worked at 50 a fortnight earlier. The
+   default progression setting is "ask": the app proposes a raise on the grade card and
+   writes nothing until you tap it, which is the right behaviour and leaves the
+   prescription quietly behind the log every time the card is closed. The box then argues
+   with the panel directly above it, which says LAST SEP 7 · 50x11, 50x14.
+
+   A placeholder is a suggestion, not a prescription. The heavier of the two wins, taken
+   from the matching set last time — side-aligned already, so a single-arm row suggests
+   what THAT arm did. Typing over it costs one tap, and nothing here writes to the plan:
+   the raise is still the grade card's to offer and yours to accept. */
+function lastWorkedPh(last, si){
+  const l = last && last[si];
+  const w = l && l.weight != null && l.weight !== "" ? parseFloat(l.weight) : NaN;
+  return isFinite(w) && w > 0 && (parseFloat(l.reps) || 0) > 0 ? w : NaN;
+}
 function planLoadPh(en, last, si){
   const plan = planLoadFor(en);
-  if(plan !== "") return plan;
+  const did = lastWorkedPh(last, si);
+  if(plan !== ""){
+    const p = parseFloat(plan);
+    return (isFinite(did) && isFinite(p) && did > p) ? String(r1(did)) : plan;
+  }
   const l = last && last[si];
   return (l && l.weight != null && l.weight !== "") ? l.weight : unitWord();
+}
+/* AND IT SAYS SO, rather than quietly showing a number the programme does not contain.
+   Only when the gap is real: the last session's top working load above the prescription,
+   with reps that reached the bottom of the range, so one mistyped set cannot make the
+   app announce a raise nobody earned. */
+function planBehindLineHTML(en){
+  if(!en || !en.name) return "";
+  const p = findProgramEntry(en.name);
+  if(!p || p.weight == null || p.weight === "") return "";
+  const plan = parseFloat(p.weight);
+  if(!isFinite(plan) || plan <= 0) return "";
+  const l = lastEntryFor((S.active && S.active.workoutId) || null, en.name,
+                         sharedAcrossDays(en.name), null);
+  if(!l || !Array.isArray(l.sets)) return "";
+  const rr = repRange(p.reps);
+  let top = 0;
+  l.sets.forEach(st=>{
+    if(!isWorkingSet(st)) return;
+    const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
+    if(!(w > 0) || !(r > 0)) return;
+    if(rr && r < rr[0]) return;            // it did not reach the range, so it proves nothing
+    if(w > top) top = w;
+  });
+  if(!(top > plan + 0.01)) return "";
+  return `<div class="ex-insight"><span class="ins-tag">plan is behind</span><span>Your
+    programme says ${esc(fmtLoad(plan))}; you last worked at <b>${esc(fmtLoad(top))}</b>, so the
+    boxes suggest that. The grade card offers the raise \u2014 it is not written until you take
+    it.</span></div>`;
 }
 function setRowHTML(en, ei, si, last, idxLabel){
   const st = en.sets[si];
@@ -34161,6 +34212,7 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
       ${lpLineHTML(p.en)}
       ${pctLineHTML(p.en)}
       ${planChangeLineHTML(p.en)}
+      ${planBehindLineHTML(p.en)}
       ${exNoteLineHTML(p.en)}
       ${p.en.warm ? warmupHTML(p.en, p.en.warm, meta[k].ctx) : ""}
       ${meta[k].box || ""}
