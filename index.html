@@ -1462,6 +1462,25 @@ button.side-chip.sc-set::after{
   background:var(--card2);color:var(--text);font-family:var(--mono);font-size:17px;text-align:center;
 }
 .set input::placeholder{color:var(--faint)}
+/* THE REP TARGET, CAPTIONED. The caption is absolutely positioned inside the cell so it
+   cannot change the row's height — a rep box that grew when a load went up would shove
+   every set below it down the screen — and the input gains the room for it in padding
+   instead, so the number you type stays centred above the words. */
+.reps-cell{position:relative;display:block}
+.set input.has-aim{padding-bottom:20px}
+.reps-aim{
+  position:absolute;left:0;right:0;bottom:5px;text-align:center;pointer-events:none;
+  font:9.5px var(--mono);letter-spacing:.06em;color:var(--acc);
+}
+/* And the reason, once, under the sets. Same dot the set strip uses, so it reads as the
+   same family of note rather than a new kind of thing. */
+.rb-line{
+  display:flex;gap:7px;align-items:baseline;margin:9px 2px 0;
+  font:11.5px var(--sans);line-height:1.45;color:var(--dim);
+}
+.rb-line::before{content:"";flex:none;width:5px;height:5px;border-radius:50%;
+  background:var(--acc);transform:translateY(-1px)}
+.rb-line b{color:var(--acc);font-weight:600}
 .set select{
   width:100%;padding:13px 2px;border-radius:11px;border:1px solid var(--line);
   background:var(--card2);color:var(--text);font-family:var(--mono);font-size:16px;text-align:center;appearance:none;
@@ -5422,7 +5441,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "22.9";
+const APP_VERSION = "23.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20592,6 +20611,7 @@ function viewActiveSession(){
     h += asymHintHTML(en);
     h += setLabelsHTML();
     en.sets.forEach((st,si)=>{ h += setRowHTML(en, ei, si, last); });
+    h += rebuildLineHTML(en);
     h += `<div style="display:flex;gap:8px;margin-top:4px">
       <button class="btn ghost small" data-addset="${ei}">+ set</button>
       <button class="btn ghost small" data-rmset="${ei}">− set</button>
@@ -20888,7 +20908,11 @@ function setPrescription(entry, si){
   if(rb && !past){
     out.reps = String(rb.from);
     out.rebuild = rb;
-    out.why = "new load \u00b7 rebuild from " + rb.from;
+    /* NO SENTENCE PER SET. This used to set out.why, which setTagHTML() prints above the
+       row — so one fact about the EXERCISE ("the load went up, so start at the bottom of
+       the range") was printed once per set, three identical lines deep. The same mistake
+       the technique label had, and the same fix: the number carries it in its own box
+       (see setRowHTML) and the reason is said once under the sets (rebuildLineHTML). */
   }
 
   /* Then the weaker-side rule, which overrides both, because it is a cap on the set
@@ -34060,8 +34084,15 @@ function setRowHTML(en, ei, si, last, idxLabel){
     })()}${sideChip(en, si)}</span>
     <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(String(planLoadPh(en, last, si)))}"${
       planLoadPh(en, last, si) === planLoadFor(en) && planLoadFor(en) !== "" ? ` class="ph-plan"` : ""}>
-    <input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}"${
-      lock ? ` readonly class="is-locked" title="${esc(LOCK_WHY)}"` : ""}>
+    ${rx.rebuild && rx.rebuild.top != null && !st.done
+      /* THE TARGET, IN THE BOX THAT ASKS FOR IT. "10" alone never said what 10 was for.
+         Absolutely positioned so the caption cannot change the row's height — a rep box
+         that grows when a load goes up would push every set below it down the screen. */
+      ? `<span class="reps-cell"><input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" class="has-aim${
+          lock ? " is-locked" : ""}" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}"${
+          lock ? ` readonly title="${esc(LOCK_WHY)}"` : ""}><i class="reps-aim">of ${esc(String(rx.rebuild.top))}</i></span>`
+      : `<input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}"${
+      lock ? ` readonly class="is-locked" title="${esc(LOCK_WHY)}"` : ""}>`}
     ${rpeOn ? `<span class="rpe-cell${lock?" is-locked":""}"${lock?` title="${esc(LOCK_WHY)}"`:""}>${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-f="rpe"${lock?" disabled":""}>${rpeOptions(st.rpe)}</select></span>` : ""}
     <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-f="done"
       aria-label="Mark set ${idx} done">${ICON.check}</button>
@@ -34268,6 +34299,20 @@ function planChangeLineHTML(en){
       `<span class="chg-chip ${x.est ? "est" : x.up ? "up" : "dn"}">${x.text}</span>`).join("")}</div>
     <div class="chg-sub">${subs.map(x=> esc(x)).join(" \u00b7 ")}</div>${
     whys.length ? `<div class="chg-why">${whys.map(x=> esc(x)).join(" ")}</div>` : ""}`;
+}
+/* THE REASON, ONCE, UNDER THE SETS RATHER THAN OVER EACH OF THEM.
+
+   "of 16" tells you the target and never tells you WHY it dropped, and that is the actual
+   question the first time a load moves — you did sixteen last week and the app is asking
+   for ten. So the sentence still exists; it just exists once, at the bottom, where it is
+   available without being the first thing you read three times on the way down the card. */
+function rebuildLineHTML(en){
+  const rb = rebuildFor(en);
+  if(!rb || rb.top == null) return "";
+  const w = rb.weight == null ? null : rb.weight;
+  return `<div class="rb-line"><span><b>${esc(w == null ? "The new load" : fmtLoad(w) + " is new")}</b>
+    \u2014 reps restart at ${esc(String(rb.from))} and climb to ${esc(String(rb.top))}, then the weight
+    goes up again.</span></div>`;
 }
 /* The strip that sits ON the set, naming what kind of set it is. A technique the plan
    asked for is useless if you have to infer it from a cue three rows down — if this is a
