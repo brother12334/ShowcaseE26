@@ -5499,7 +5499,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "24.7";
+const APP_VERSION = "24.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -22859,6 +22859,50 @@ function nbMapPickHTML(A, metric, advanced){
    dictionary of the same entries was a second, worse way to reach them). "How your
    targets are set" moved to Settings, where the rest of the configuration lives.
    ===================================================================== */
+/* =====================================================================
+   THE BODY TAB'S ORDER, IN ONE PLACE
+
+   Eleven sections, numbered in the source 1, 2, 3, 4, 5, 6, 7, 7b, 4b, 7b, 8 — two of
+   them both "7b". That is not a layout, it is the order they were built in, and it shows:
+   the three things you can act on sat at positions four, nine and ten with a muscle map,
+   your bodyweight and a chart in between.
+
+   Rather than move nine blocks of markup around and re-thread every `h +=` through them,
+   each section prints an invisible marker before itself and the finished string is cut on
+   those markers and reassembled. The sections keep their code exactly where it is; the
+   ORDER lives here, as a list of names, which is the only place anybody should have to
+   look to answer "why is my weight there".
+
+   A section whose name is not in the list still renders, at the end, so adding one and
+   forgetting this list costs you its position and never its existence. */
+function SECM(k){ return "<!--SEC:" + k + "-->"; }
+/* THE ORDER AS IT STANDS, WHICH IS THE ORDER IT WAS BUILT IN. Listing it changes
+   nothing on screen — that is the point of this commit. The machinery to re-sort the tab
+   is in place and the sort itself is still the old one, so the refactor can be proved
+   safe before anything moves. Rewriting this array is now the whole job. */
+const BODY_SECTIONS = [
+  "verdict", "tiles", "cycle", "weak", "trend", "load", "map",
+  "niggles", "you", "flags", "sides", "notes", "patterns"
+];
+function bodySectionOrder(h){
+  const at = h.indexOf("<!--SEC:");
+  if(at < 0) return h;
+  const head = h.slice(0, at);
+  const parts = {}, order = [];
+  h.slice(at).split("<!--SEC:").forEach(chunk=>{
+    if(!chunk) return;
+    const end = chunk.indexOf("-->");
+    if(end < 0) return;
+    const k = chunk.slice(0, end);
+    parts[k] = chunk.slice(end + 3);
+    order.push(k);
+  });
+  const used = {};
+  let out = "";
+  BODY_SECTIONS.forEach(k=>{ if(parts[k] != null){ out += parts[k]; used[k] = 1; } });
+  order.forEach(k=>{ if(!used[k]) out += parts[k]; });
+  return head + out;
+}
 function viewBody(){
   const LIVE = liveStripHTML();
   const metric = BODY_METRIC;
@@ -22877,9 +22921,10 @@ function viewBody(){
   const t = A.totals;
   const st = bodyStatus(A);
 
+  h += `<div class="nb" style="--nb-accent:${st.dot}">`;
   /* ---- 1. AM I OK? ------------------------------------------------------------- */
-  h += `<div class="nb" style="--nb-accent:${st.dot}">
-    <div class="nb-hero nb-in" style="--d:0ms">
+  h += SECM("verdict");
+  h += `<div class="nb-hero nb-in" style="--d:0ms">
       <div class="nb-hero-k">Your body</div>
       <div class="nb-hero-row">
         <span class="nb-pulse" style="background:${st.dot}"></span>
@@ -22889,6 +22934,7 @@ function viewBody(){
     </div>`;
 
   /* ---- 2. THE NUMBERS, EACH ANSWERING ITSELF ----------------------------------- */
+  h += SECM("tiles");
   h += `<div class="nb-tiles">${bodyTiles(A).map((x,i)=>`
     <div class="nb-tile nb-in" style="--d:${60+i*55}ms">
       <div class="nb-tile-k">${x.term?term(x.term, x.label):esc(x.label)}</div>
@@ -22899,6 +22945,7 @@ function viewBody(){
     </div>`).join("")}</div>`;
 
   /* ---- 3. SO WHAT? ------------------------------------------------------------- */
+  h += SECM("cycle");
   const cycLine = cyc.complete
     ? `You've finished all ${cyc.total} workouts in this cycle.`
     : `You're ${cyc.done} of ${cyc.total} workouts through this cycle, with ${esc(dayList(cyc.names))} still to come.`;
@@ -22937,6 +22984,7 @@ function viewBody(){
   /* ---- 4. ANYTHING TO FIX? ------------------------------------------------------
      Above the charts, deliberately: this is the only part of the screen that asks you to
      do something, and a thing to do outranks a thing to look at. */
+  h += SECM("weak");
   const spanDays = (Date.now() - S.sessions[0].startedAt)/DAY_MS;
   const enoughWP = S.sessions.length >= 4 && spanDays >= 6;
   h += `<div class="nb-fix nb-in" style="--d:360ms">
@@ -22968,6 +23016,7 @@ function viewBody(){
   h += tgSuggestHTML(A);
 
   /* ---- 5. WHICH WAY AM I GOING? ------------------------------------------------ */
+  h += SECM("trend");
   const tr = bodyTrends();
   const maxSets = Math.max(6, ...tr.map(d=>d.sets));
   const series = [
@@ -22999,6 +23048,7 @@ function viewBody(){
      It used to be a grid of four jargon tiles inside a collapsed section, which is a
      strange place to keep the answer to "am I doing too much". The same four facts, as
      sentences, in the main flow. */
+  h += SECM("load");
   const topFat = MKEYS.slice().sort((a,b)=>A.fat[b]-A.fat[a])[0];
   const loadRows = [
     {k:"Sets this week", v:String(t.setsWk),
@@ -23044,6 +23094,7 @@ function viewBody(){
      decode. Everything that made it a control panel is behind Advanced, and Advanced is
      itself lighter than what it replaced: the picker and the drill controls, and no
      eighteen-row table at all. */
+  h += SECM("map");
   const advanced = !!BODY_OPEN.nbadv;
   const shownMetric = advanced ? metric : "fatigue";
   h += `<div class="nb-map nb-in" style="--d:520ms">
@@ -23066,14 +23117,15 @@ function viewBody(){
 
   /* ---- 7b. THE BODY ITSELF ------------------------------------------------------
      Everything above this line is about training. This is the thing training is for. */
-  h += hurtsHTML();
-  h += bodyLogHTML();
+  h += SECM("niggles"); h += hurtsHTML();
+  h += SECM("you");     h += bodyLogHTML();
 
   /* ---- 4b. WHAT YOUR SESSIONS HAVE TOLD YOU ------------------------------------
      The grade card's conclusions, kept. They used to be read once on the night and then
      gone; this is the standing record, and the buttons here make the same edits the
      card's own buttons make. Above the charts for the same reason section 4 is: a thing
      to do outranks a thing to look at. */
+  h += SECM("flags");
   const flags = openFlags();
   const doneFlags = flagLog().filter(f=> f && f.applied).sort((a,b)=> b.at - a.at);
   if(flags.length || doneFlags.length){
@@ -23161,6 +23213,7 @@ function viewBody(){
      it was silently raising: is it on, what has it actually measured, and what do I do
      about it. Only shown when the plan HAS single-limb work, because with none there is
      nothing for the rule to be a rule about. */
+  h += SECM("sides");
   const uni = unilateralInPlan();
   if(uni.length){
     const ruleOn = trainPrefs().sides === "matchWeaker";
@@ -23219,6 +23272,7 @@ function viewBody(){
      session note on the finish screen. It lives here because this is the tab that
      answers "how am I doing", and because the next grade reads exactly these records
      when it decides whether a down week needs explaining. */
+  h += SECM("notes");
   const recent = exNotes().slice(-40).reverse();
   h += `<div class="nb-notes nb-in" style="--d:570ms">
     <div class="nb-sec-k">What you've said${recent.length?`<span class="nb-count">${recent.length}</span>`:""}</div>`;
@@ -23247,8 +23301,10 @@ function viewBody(){
   /* WHAT THE NUMBERS ABOVE ARE WORTH. The tiles say what your training looks like; this
      says which of the things you have been recording actually separates a good session
      from a bad one — and, just as often, that nothing does yet. */
+  h += SECM("patterns");
   h += patternsCardHTML();
 
+  h = bodySectionOrder(h);
   h += `<div class="bm-credit">Anatomy from <a href="https://github.com/melihcolpan/MuscleMap" target="_blank" rel="noopener">MuscleMap</a> by Melih Colpan, MIT licence</div>`;
   h += `</div>`;
   return h;
