@@ -3012,6 +3012,19 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .bl-hero-k{font:11px var(--mono);color:var(--faint);margin-top:3px}
 .bl-hero-t{display:flex;align-items:center;gap:8px;flex-shrink:0;font:11px var(--mono);color:var(--dim)}
 .bl-hero-go{color:var(--faint);font-size:17px;flex-shrink:0}
+/* Due today, on Today. A line the width of the screen rather than a card: the job it
+   points at takes two seconds, and a card would dress it up as a decision. */
+.wd-line{display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;
+  background:var(--card);border:1px solid var(--line);border-left:2px solid var(--acc);
+  border-radius:var(--r);padding:11px 13px;margin:0 0 12px;color:var(--text)}
+.wd-line:active{background:var(--card2)}
+.wd-k{flex:1;min-width:0;font-size:13.5px;font-weight:600}
+.wd-t{font:10.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--acc);flex-shrink:0}
+.wd-go{color:var(--faint);font-size:16px;flex-shrink:0}
+.bl-due{border-color:var(--acc-line)}
+.bl-tag{flex-shrink:0;font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--acc);border:1px solid var(--acc-line);border-radius:999px;padding:4px 9px}
+.bl-due-say{margin:-2px 2px 10px;font-size:12px;color:var(--faint);line-height:1.5}
 .bl-meas{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
 .bl-m{display:flex;align-items:baseline;gap:10px;padding:9px 13px;border-top:1px solid var(--line)}
 .bl-m:first-child{border-top:0}
@@ -5457,7 +5470,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "24.4";
+const APP_VERSION = "24.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20364,6 +20377,7 @@ function viewToday(){
   let h = `<div class="hdr"><h1>${brandMark()}</h1><span class="hdr-r">${moonBtn}<span class="date num">${fmtDate(todayStr())}</span></span></div>`;
 
   h += plateStrip();
+  h += weighDueHTML();
   h += planWeekStripHTML();
 
   /* THE SESSION LIVES IN ITS OWN TAB NOW. What Today has to say while one is running is
@@ -25162,6 +25176,64 @@ function bodyDelta(key, compact){
   // the tape rows have a 96px column for this; "over" wraps it and "\u00b7" does not
   return (t.delta > 0 ? "+" : "−") + amt + (compact ? " · " : " over ") + t.weeks + " wk";
 }
+/* WHEN THE NEXT ONE IS DUE.
+
+   A log nobody is reminded to keep is a log with four entries in it from the fortnight
+   somebody was enthusiastic. But a fixed weekly nag is wrong too: people weigh in on
+   their own rhythm and an app insisting on Sundays is an app being ignored by Tuesday.
+
+   So the cadence is LEARNED. Three weigh-ins or more and the interval is the median gap
+   between them, which is that person's own habit read back to them; below that it is a
+   week, which is the interval that suits almost everybody starting out. Clamped at both
+   ends so one forgotten month cannot teach it to ask once a quarter.
+
+   The tape is only ever mentioned to somebody who has used it. Asking for a measurement
+   nobody has ever taken is asking them to start a feature, not to keep one up. */
+const WEIGH_EVERY_DEFAULT = 7, WEIGH_MIN = 3, WEIGH_MAX = 21;
+const TAPE_EVERY_DEFAULT = 28, TAPE_MIN = 14, TAPE_MAX = 60;
+function medianGapDays(list){
+  if(!list || list.length < 3) return null;
+  const gaps = [];
+  for(let i = 1; i < list.length; i++){
+    const a = new Date(list[i-1].d + "T12:00:00").getTime();
+    const b = new Date(list[i].d + "T12:00:00").getTime();
+    const g = Math.round(Math.abs(a - b) / DAY_MS);
+    if(g > 0) gaps.push(g);
+  }
+  if(!gaps.length) return null;
+  gaps.sort((x,y)=> x - y);
+  const mid = Math.floor(gaps.length / 2);
+  return gaps.length % 2 ? gaps[mid] : Math.round((gaps[mid-1] + gaps[mid]) / 2);
+}
+/* One answer for both, because they are the same question asked of two fields. `kind`
+   is "weight" or "tape"; null when there is nothing to say. */
+function bodyLogDue(kind){
+  if(!tracksWeight()) return null;
+  const tape = kind === "tape";
+  const list = bodyLogList().filter(x=> tape ? MEAS_FIELDS.some(f=> x[f.k] > 0) : x.w > 0);
+  if(tape && !list.length) return null;          // never used it, so never asked about it
+  const def = tape ? TAPE_EVERY_DEFAULT : WEIGH_EVERY_DEFAULT;
+  const lo = tape ? TAPE_MIN : WEIGH_MIN, hi = tape ? TAPE_MAX : WEIGH_MAX;
+  const learned = medianGapDays(list);
+  const every = Math.max(lo, Math.min(hi, learned || def));
+  if(!list.length) return {kind: "weight", every, first: true, due: true, over: 0};
+  const since = Math.max(0, Math.round(
+    (Date.now() - new Date(list[0].d + "T12:00:00").getTime()) / DAY_MS));
+  return {kind: tape ? "tape" : "weight", every, since, last: list[0],
+          due: since >= every, over: Math.max(0, since - every), learned: !!learned};
+}
+/* The sentence, once, wherever it is shown. It leans on the weigh-in TIME the log now
+   keeps: being told you are due is more use with the hour you normally do it attached. */
+function bodyDueLine(d){
+  if(!d) return "";
+  if(d.first) return "No weigh-in yet. One now is the line everything later is measured from.";
+  const uw = d.kind === "weight" ? usualWeighTime() : null;
+  const when = uw ? " You usually do it around " + fmtHm(uw.hm) + "." : "";
+  const what = d.kind === "tape" ? "tape measurements" : "weigh-in";
+  if(d.over > 0) return "Your last " + what + " was " + rbDays(d.since) + " ago, and you normally go about "
+    + rbDays(d.every) + "." + when;
+  return "Due today \u2014 it has been " + rbDays(d.since) + "." + when;
+}
 /* THE SHEET. One number is the point of it; the tape is nine more and stays folded until
    somebody wants it, because a nine-field form is what stops people logging the one
    figure that matters. */
@@ -25266,6 +25338,7 @@ function openBodyLog(dateStr){
       return;
     }
     bodyLog()[d] = out;
+    WEIGH_SNOOZE = null;
     save(); queueSync(); hideModal(); render();
     toast(out.w != null ? fmtLoad(out.w) + " logged" : "Measurements logged", "good");
   };
@@ -25280,6 +25353,24 @@ function openBodyLog(dateStr){
 /* The Body tab's section. Weight leads because it is the one most people will keep, the
    tape follows only if there is any, and both say what has changed rather than only what
    the number is today. */
+/* TODAY'S LINE. One line, not a card, and only when something is actually due — the
+   weigh-in is a two-second job and a card would make it look like a decision. It takes
+   you straight to the sheet, and "not today" silences it until tomorrow rather than
+   forever, because the honest state tomorrow is still that it is due. */
+let WEIGH_SNOOZE = null;
+function weighDueHTML(){
+  if(!tracksWeight()) return "";
+  if(WEIGH_SNOOZE === todayStr()) return "";
+  const d = bodyLogDue("weight") || null;
+  const t = bodyLogDue("tape") || null;
+  const use = (d && d.due) ? d : (t && t.due) ? t : null;
+  if(!use || use.first) return "";                 // the first one is offered on the Body tab, not here
+  return `<button class="wd-line" id="weighDue">
+    <span class="wd-k">${use.kind === "tape" ? "Tape measurements" : "Weigh-in"}</span>
+    <span class="wd-t">${use.over > 0 ? esc(rbDays(use.over)) + " overdue" : "due today"}</span>
+    <span class="wd-go">\u203a</span>
+  </button>`;
+}
 function bodyLogHTML(){
   if(!tracksWeight()) return "";
   const list = bodyLogList();
@@ -25296,17 +25387,22 @@ function bodyLogHTML(){
     </div></div>`;
     return h;
   }
+  const dueW = bodyLogDue("weight"), dueT = bodyLogDue("tape");
   if(w){
-    h += `<button class="bl-hero" id="blAdd">
+    h += `<button class="bl-hero${dueW && dueW.due ? " bl-due" : ""}" id="blAdd">
       <span class="bl-hero-b">
         <span class="bl-hero-v num">${esc(fmtLoad(w.w))}</span>
         <span class="bl-hero-k">${esc(fmtDate(w.d))}${w.d === todayStr() ? " · today" : ""}</span>
       </span>
-      ${t && t.delta ? `<span class="bl-hero-t">
+      ${dueW && dueW.due
+        ? `<span class="bl-tag">${dueW.over > 0 ? esc(rbDays(dueW.over)) + " late" : "due"}</span>`
+        : t && t.delta ? `<span class="bl-hero-t">
         ${sparkHTML(t.points, 56, 24, "var(--dim)")}
         <span class="num">${esc(bodyDelta("w"))}</span></span>` : ""}
       <span class="bl-hero-go">›</span>
     </button>`;
+    if(dueW && dueW.due) h += `<div class="bl-due-say">${esc(bodyDueLine(dueW))}</div>`;
+    else if(dueT && dueT.due) h += `<div class="bl-due-say">${esc(bodyDueLine(dueT))}</div>`;
   } else {
     h += `<button class="btn ghost small" id="blAdd" style="width:100%;margin-bottom:10px">Log a weigh-in</button>`;
   }
@@ -28719,6 +28815,8 @@ function bind(){
   document.querySelectorAll("[data-huagain]").forEach(b=> b.onclick = ()=> hurtAgain(b.dataset.huagain));
   const blA = $("#blAdd");
   if(blA) blA.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
+  const wdL = $("#weighDue");
+  if(wdL) wdL.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
   const rbOpen = $("#recordsBtn");
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
