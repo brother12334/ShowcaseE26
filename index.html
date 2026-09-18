@@ -5499,7 +5499,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "24.6";
+const APP_VERSION = "24.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20452,6 +20452,24 @@ function ruleNotes(){
   }
   return out;
 }
+/* LAST SESSION'S GRADE — AND NOT ITS ADVICE TWICE.
+
+   This row used to print advice[0] in full. But focusTipsFor() already puts EVERY
+   exercise-specific finding inline above the exercise it names, on this same screen, and
+   advice[0] is usually exercise-specific — so "Dumbbell RDL, move it up about 5 lb" was
+   printed here and again forty pixels lower, above the Dumbbell RDL. Two copies of one
+   sentence, and the lower one is in the better place: next to the bar you are about to
+   load. The same finding is also a flag on the Body tab with an Apply button, and it is
+   in the grade card it came from.
+
+   So the row says it when nowhere else on this screen will, and otherwise gets out of the
+   way. An exercise-specific note about a movement that is in today's plan is already
+   below; a general finding, or one about a movement not on today's card, has nowhere else
+   to appear and is still printed here.
+
+   Either way the row keeps the grade and the way into the breakdown, because Today is the
+   only place that offers them. When it is only carrying those, it is not asking anything
+   of you and stops being marked as though it were. */
 function focusNote(wid){
   const s = lastGradedFor(wid);
   if(!s || !s.quality) return null;
@@ -20460,14 +20478,21 @@ function focusNote(wid){
   const col = gradeColor(q.pct);
   const d = new Date(s.date + "T12:00:00").toLocaleDateString(undefined, {month:"short", day:"numeric"});
   const nPr = (q.prs || []).length;
+  const inPlan = a && a.ex && (resolvedProgram(wid) || []).some(x=>
+    x && x.chosen && nrm(x.chosen.name) === nrm(a.ex));
   const sub = [];
   if(nPr) sub.push(nPr + " personal record" + (nPr > 1 ? "s" : "") + " that day.");
   if(a && !a.na && a.lost >= 1) sub.push("Cost you " + r1(a.lost) + " point" + (a.lost === 1 ? "" : "s") + " on that grade.");
   else if(a && a.na) sub.push("That section couldn't be graded at all last time.");
-  return {k:"focus", act:true,
+
+  return {k:"focus", act: !inPlan && !!a,
     label:"Last " + widName(wid).toLowerCase(),
     tag:`<span class="fc-grade" style="color:${col};background:${col}22">${esc(d)} · ${esc(q.grade)}</span>`,
-    line: a ? (a.ex ? "<b>" + esc(a.ex) + "</b> — " + esc(a.text) : esc(a.text))
+    /* The chip beside the label already carries the date and the grade, so the line does
+       not say them again — the row would be repeating itself inside the fix for a row
+       that repeated the screen. */
+    line: inPlan ? "What to change is on <b>" + esc(a.ex) + "</b>, below."
+        : a ? (a.ex ? "<b>" + esc(a.ex) + "</b> \u2014 " + esc(a.text) : esc(a.text))
             : "Nothing needs fixing. Repeat it, one small step heavier.",
     raw:true,
     body:`${sub.length ? `<div class="nt-p">${esc(sub.join(" "))}</div>` : ""}
