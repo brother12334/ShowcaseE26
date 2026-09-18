@@ -2999,6 +2999,35 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .hu-row-b{display:flex;gap:8px;margin-top:10px}
 .hu-row-b .btn{flex:1}
 .hu-foot{margin:4px 2px 0;font-size:11.5px;color:var(--faint);line-height:1.55}
+/* ---------- before you start: one stack, one colour ---------- */
+.nt-list{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden;margin-bottom:12px}
+.nt-h{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 13px;
+  font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--faint);
+  background:var(--card2);border-bottom:1px solid var(--line)}
+.nt-r{border-top:1px solid var(--line)}
+.nt-r:first-of-type{border-top:0}
+.nt-r>summary{display:flex;align-items:stretch;gap:11px;padding:12px 13px;cursor:pointer;list-style:none}
+.nt-r>summary::-webkit-details-marker{display:none}
+.nt-r>summary:active{background:var(--card2)}
+/* The bar is the only mark of consequence on the row: copper when the note wants an
+   answer, grey when it is describing something the app is already doing. */
+.nt-bar{flex:0 0 5px;border-radius:3px;background:var(--line)}
+.nt-act>summary .nt-bar{background:var(--acc)}
+.nt-b{flex:1;min-width:0}
+.nt-b>*{display:block}
+.nt-k{font:10px var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--faint);
+  margin-bottom:3px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.nt-t{font-size:13.5px;line-height:1.45;color:var(--text)}
+.nt-t b{font-weight:600}
+.nt-go{flex:0 0 auto;align-self:center;color:var(--faint);font-size:16px;line-height:1;
+  transition:transform .22s ease}
+.nt-r[open]>summary .nt-go{transform:rotate(90deg)}
+.nt-body{padding:0 13px 13px 29px}
+.nt-p{font-size:12.5px;color:var(--dim);line-height:1.55;margin-bottom:10px}
+.nt-p b{color:var(--text)}
+.nt-body .fc-btn{margin-top:2px}
+.nt-body .asym-row{margin-bottom:10px}
 /* ---------- the body log: what you weigh, and what shape you are ---------- */
 .nb-body{margin-top:14px}
 .bl-empty p{font-size:13px;color:var(--dim);line-height:1.55;margin:0 0 12px}
@@ -5470,7 +5499,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "24.5";
+const APP_VERSION = "24.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20307,29 +20336,162 @@ function lastGradedFor(wid){
   }
   return null;
 }
-function focusCardHTML(wid){
+/* =====================================================================
+   BEFORE YOU START — ONE STACK, NOT FIVE CARDS
+
+   Between the Start button and the first exercise, Today could put five separate blocks
+   on the screen: the deload banner, the session's timing, the four-week asymmetry
+   re-test, the rules currently in force, and last session's finding. Each was built at a
+   different time, each got its own card, and each picked its own accent to key itself —
+   blue for the deload, red for a late start, amber for the grade, arms-yellow for the
+   re-test. Three of them firing at once put the workout below the fold and painted three
+   competing colours down a screen whose palette rule is that there is only ever one.
+
+   They are rows in one box now. Label, one line, and the rest behind a tap, with the
+   accent bar marking only the rows that want an answer from you — the informational ones
+   sit grey, which is what they always were. A day with nothing to say has no box at all
+   rather than an empty one.
+
+   Nothing was cut. Every sentence these cards carried is still here, one tap further in,
+   and every button they owned keeps its id so the handlers that bind them are untouched. */
+function deloadNote(){
+  if(deloadActive()){
+    const d = S.deload;
+    const daysIn = Math.floor((Date.now() - d.startedAt) / DAY_MS) + 1;
+    return {k:"deload", act:true, label:"Deload week, day " + daysIn + " of 7",
+      line:"Every exercise cut to " + DELOAD_SETS + " sets, capped at RPE " + DELOAD_RPE_CAP + ".",
+      body:`<div class="nt-p">Loads stay exactly where they are. Keeping the weight is what preserves
+        the stimulus; cutting the sets is what buys the recovery. Load increases are blocked this week,
+        and next week resumes at full sets without making up what you missed.</div>
+        <button class="fc-btn" id="endDeloadBtn">End the deload now</button>`};
+  }
+  const due = deloadDue();
+  if(!due) return null;
+  return {k:"deload", act:true,
+    label:"Deload " + (due.reason === "early" ? "worth pulling forward" : "due"),
+    line: due.msg,
+    body:`${due.signals.length ? `<div class="nt-p">Signs showing: ${esc(due.signals.join("; "))}.</div>` : ""}
+      <button class="fc-btn" id="startDeloadBtn">Start a deload week</button>`};
+}
+/* The timing. When the session fits, this is a FACT ABOUT THE BUTTON above it — how long
+   it takes and when you would be asleep — so it belongs on that card and never in this
+   queue. It only becomes a note when it is telling you something you might act on. */
+function sleepNote(wid){
+  if(S.sleepGuard === "off") return null;
+  if(!hasWakeTime()) return null;                     // handled on the day card
+  const win = sleepWindow(wid);
+  if(win.fits) return null;                           // ditto
+  const t = trimForSleep(wid, win);
+  return {k:"sleep", act:true, label:"Too late for the full session",
+    line:"You are " + win.overBy + " min past the latest start.",
+    body:`<div class="nt-p">This one runs to ${esc(fmtTimeOfDay(Date.now() + win.dur * 60000))}, and you
+      need to be asleep by ${esc(fmtTimeOfDay(win.bedtime))} to get ${r1(sleepNeedH())} h before a
+      ${esc(wakeTime())} wake.</div>
+      ${t.drop.length ? `<div class="nt-p">Cut from the end, in this order:
+        <b>${esc(t.drop.map(e=>e.name).join(", "))}</b>. The compounds at the front are the ones that
+        matter; sleep is the constraint everything else is competing with.</div>`
+        : `<div class="nt-p">Even trimmed this will not fit. Train tomorrow rather than borrowing the
+        hours from sleep.</div>`}`};
+}
+// The one line the day card carries when the session does fit, or "" when it cannot say.
+function sleepLineFor(wid){
+  if(S.sleepGuard === "off") return "";
+  if(!hasWakeTime()){
+    if(!S.sleepTarget) return "";
+    const pr = sleepProjection(wid);
+    return "about " + pr.dur + " min, done by " + fmtTimeOfDay(pr.end);
+  }
+  const win = sleepWindow(wid);
+  return win.fits ? "start by " + fmtTimeOfDay(win.latestStart) + ", out by " + fmtTimeOfDay(win.latestEnd) : "";
+}
+function asymNote(){
+  if(!asymRetestDue()) return null;
+  const rows = unilateralInPlan().map(e=>({e, st: sideStats(e.name)}));
+  return {k:"asym", act:true, label:"Four-week asymmetry re-test",
+    line:"The rep-matching rule has run its four weeks.",
+    body:`<div class="nt-p">Here is where each side actually sits.</div>
+      ${rows.map(({e, st})=>`<div class="asym-row">
+        <b>${esc(e.name)}</b>
+        <div class="asym-gap">${esc(asymGapText(st))}</div>
+        ${st.ok ? `<div class="asym-sample">${esc(asymSampleText(st))}</div>` : ""}
+        ${st.ok ? `<div class="asym-verdict ${st.gap <= ASYM_CLOSED_GAP ? "ok" : "keep"}">${
+          st.gap <= ASYM_CLOSED_GAP
+            ? "Inside " + ASYM_CLOSED_GAP + " reps &mdash; rule retires for this movement"
+            : "Still outside " + ASYM_CLOSED_GAP + " reps &mdash; keep matching the weaker side"
+        }</div>` : ""}
+      </div>`).join("")}
+      <button class="fc-btn" id="asymRetestBtn">Apply and close the re-test</button>`};
+}
+/* The rules in force. Informational by definition — they describe what the app is already
+   doing to the numbers in front of you, and there is nothing to press. */
+function ruleNotes(){
+  const out = [];
+  const ramped = rampInActive() ? countRampedMovements() : 0;
+  if(ramped > 0){
+    const left = Math.max(0, RAMP_IN_WEEKS - weeksSince(planStartAt()));
+    out.push({k:"ramp", act:false, label:"Easing in",
+      line: ramped + " movement" + (ramped === 1 ? " is" : "s are") + " running reduced sets.",
+      body:`<div class="nt-p">For another ${left < 1 ? Math.round(left * 7) + " days" : r1(left) + " weeks"},
+        then they step up to the full count. Tendon adapts more slowly than muscle, and a new plan is
+        when that gap bites.</div>`});
+  }
+  if(unilateralInPlan().length && S.sessions.length){
+    const capping = unilateralInPlan()
+      .map(e=>({name:e.name, e, st:sideStats(e.name)}))
+      .filter(x=> x.st.ok && x.st.weaker && asymActiveFor(x.e))
+      .sort((a,b)=> b.st.gap - a.st.gap);
+    if(capping.length){
+      out.push({k:"asymrule", act:false, label:"Asymmetry",
+        line:"Your stronger side is being held to the weaker one on " + capping.length +
+          " movement" + (capping.length === 1 ? "" : "s") + ".",
+        body:`<div class="nt-p">Widest gap: ${esc(capping.slice(0,2).map(x=> x.name + " " +
+          r1(x.st.gap) + " rep" + (r1(x.st.gap) === 1 ? "" : "s") +
+          (x.st.confident ? "" : ", provisional")).join(", "))}. Side balance in the Body tab has the
+          rest.</div>`});
+    }
+  }
+  return out;
+}
+function focusNote(wid){
   const s = lastGradedFor(wid);
-  if(!s || !s.quality) return "";
+  if(!s || !s.quality) return null;
   const q = s.quality;
-  const a = (q.advice||[])[0];
+  const a = (q.advice || [])[0];
   const col = gradeColor(q.pct);
-  const d = new Date(s.date+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
-  const nPr = (q.prs||[]).length;
-  // A near-perfect session has nothing worth changing. Say so, rather than inventing
-  // a criticism to fill the card, which is how advice stops being believed.
-  const body = a
-    ? `<div class="fc-do">${a.ex?`<b>${esc(a.ex)}</b> — `:""}${esc(a.text)}</div>`
-    : `<div class="fc-do">Nothing needs fixing. Repeat it, one small step heavier.</div>`;
+  const d = new Date(s.date + "T12:00:00").toLocaleDateString(undefined, {month:"short", day:"numeric"});
+  const nPr = (q.prs || []).length;
   const sub = [];
-  if(nPr) sub.push(`${nPr} personal record${nPr>1?"s":""} that day.`);
-  if(a && !a.na && a.lost >= 1) sub.push(`Cost you ${r1(a.lost)} point${a.lost===1?"":"s"} on that grade.`);
-  else if(a && a.na) sub.push(`That section couldn't be graded at all last time.`);
-  return `<div class="card fc-card">
-    <div class="fc-k">Since your last ${esc(widName(wid).toLowerCase())} day
-      <span class="fc-grade" style="color:${col};background:${col}22">${esc(d)} · ${esc(q.grade)}</span></div>
-    ${body}
-    ${sub.length?`<div class="fc-sub">${sub.join(" ")}</div>`:""}
-    <button class="fc-btn" data-fullgrade="${esc(s.id)}">See the full breakdown</button>
+  if(nPr) sub.push(nPr + " personal record" + (nPr > 1 ? "s" : "") + " that day.");
+  if(a && !a.na && a.lost >= 1) sub.push("Cost you " + r1(a.lost) + " point" + (a.lost === 1 ? "" : "s") + " on that grade.");
+  else if(a && a.na) sub.push("That section couldn't be graded at all last time.");
+  return {k:"focus", act:true,
+    label:"Last " + widName(wid).toLowerCase(),
+    tag:`<span class="fc-grade" style="color:${col};background:${col}22">${esc(d)} · ${esc(q.grade)}</span>`,
+    line: a ? (a.ex ? "<b>" + esc(a.ex) + "</b> — " + esc(a.text) : esc(a.text))
+            : "Nothing needs fixing. Repeat it, one small step heavier.",
+    raw:true,
+    body:`${sub.length ? `<div class="nt-p">${esc(sub.join(" "))}</div>` : ""}
+      <button class="fc-btn" data-fullgrade="${esc(s.id)}">See the full breakdown</button>`};
+}
+function todayNotes(wid){
+  return [deloadNote(), sleepNote(wid), asymNote(), focusNote(wid)]
+    .concat(ruleNotes()).filter(Boolean);
+}
+function noteStackHTML(notes){
+  if(!notes || !notes.length) return "";
+  return `<div class="nt-list">
+    <div class="nt-h"><span>Before you start</span><span>${notes.length}</span></div>
+    ${notes.map(n=> `<details class="nt-r${n.act ? " nt-act" : ""}">
+      <summary>
+        <span class="nt-bar" aria-hidden="true"></span>
+        <span class="nt-b">
+          <span class="nt-k">${esc(n.label)}${n.tag || ""}</span>
+          <span class="nt-t">${n.raw ? n.line : esc(n.line)}</span>
+        </span>
+        <span class="nt-go" aria-hidden="true">›</span>
+      </summary>
+      <div class="nt-body">${n.body || ""}</div>
+    </details>`).join("")}
   </div>`;
 }
 /* Advice that names an exercise, keyed by canonical name, so the note about your squat
@@ -20510,7 +20672,8 @@ function viewToday(){
       <span class="dot" style="background:${m.color};width:17px;height:17px"></span>
       <h3 style="font-size:26px">${esc(m.name)} day</h3>
     </div>
-    <div class="day-open-n">${exCount} exercise${exCount === 1 ? "" : "s"} \u00b7 ${setCount} sets</div>
+    <div class="day-open-n">${exCount} exercise${exCount === 1 ? "" : "s"} \u00b7 ${setCount} sets${
+      (()=>{ const t = sleepLineFor(wid); return t ? " \u00b7 " + esc(t) : ""; })()}</div>
     <button class="btn day-open-go ants" id="startBtn">
       <svg class="ants-svg" aria-hidden="true" focusable="false"><rect width="100%" height="100%" rx="7"/></svg>
       Start ${esc(m.name)} workout</button>
@@ -20518,13 +20681,9 @@ function viewToday(){
       ? "Next up in your rotation. Your plan lets the days be done in any order, so you can tap any day the cycle still has left \u2014 just not one it has already spent."
       : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them.", "day-open-sub")}
   </div>`;
-  h += deloadBannerHTML();
-  h += sleepWindowHTML(wid);
-  h += asymRetestHTML();
-  h += ruleBannerHTML();
+  h += noteStackHTML(todayNotes(wid));
   // The one thing worth changing today, taken from the grade of your last session of
   // THIS day. Sits above the exercise list, while there is still time to act on it.
-  h += focusCardHTML(wid);
 
   h += `<div class="card">`;
   let finLabeled = false;
@@ -34183,99 +34342,7 @@ function asymNoteFor(e){
   if(altStyle(e) !== "side") return null;
   return "Match the weaker side: do the same rep count on both sides, set by the weaker one.";
 }
-function ruleBannerHTML(){
-  const bits = [];
-  /* COUNT WHAT IS ACTUALLY RAMPED, rather than announcing a number. A banner that says
-     "five movements are running reduced sets" when the plan has none is worse than no
-     banner: it is the app describing somebody else's programme back at you. */
-  const ramped = rampInActive() ? countRampedMovements() : 0;
-  if(ramped > 0){
-    const left = Math.max(0, RAMP_IN_WEEKS - weeksSince(planStartAt()));
-    bits.push({k:"Easing in", v:ramped + " movement" + (ramped===1?" is":"s are") +
-      " running reduced sets for another " +
-      (left < 1 ? Math.round(left * 7) + " days" : r1(left) + " weeks") +
-      ", then step up to the full count. Tendon adapts more slowly than muscle, and a new plan is when that gap bites."});
-  }
-  // The asymmetry rule is about single-limb work. With none in the plan, or nothing
-  // logged yet, there is nothing for it to be a rule ABOUT.
-  /* ONLY WHEN IT IS ACTUALLY CAPPING SOMETHING. This used to announce the rule the
-     moment the plan contained single-limb work, and then admit in its closing sentence
-     that it had measured nothing — "no balanced reading yet, so no gap to report",
-     which is a banner describing its own inability to say anything. Worse, it was the
-     only surface the rule had: no state, no numbers, nothing to press.
-
-     The Body tab's Side balance section owns all of that now — what each movement has
-     measured, what it still needs, and the switch. What is left here is the one thing
-     Today should carry: this rule is changing the reps in front of you right now, on
-     these movements. */
-  if(unilateralInPlan().length && S.sessions.length){
-    const capping = unilateralInPlan()
-      .map(e=>({name:e.name, e, st:sideStats(e.name)}))
-      .filter(x=> x.st.ok && x.st.weaker && asymActiveFor(x.e))
-      .sort((a,b)=> b.st.gap - a.st.gap);
-    if(capping.length){
-      bits.push({k:"Asymmetry", v:"Your stronger side is being held to the weaker one on " +
-        capping.length + " movement" + (capping.length===1?"":"s") + ". Widest gap: " +
-        capping.slice(0,2).map(x=> x.name + " " + r1(x.st.gap) + " rep" +
-          (r1(x.st.gap)===1?"":"s") + (x.st.confident ? "" : ", provisional")).join(", ") +
-        ". Side balance in the Body tab has the rest."});
-    }
-  }
-  if(!bits.length) return "";
-  return `<div class="card rule-card">` + bits.map(b=>
-    `<div class="rule-row"><span class="rule-k">${esc(b.k)}</span><span>${esc(b.v)}</span></div>`).join("") + `</div>`;
-}
-
 /* ---------- the banners these rules put on Today ---------- */
-function deloadBannerHTML(){
-  if(deloadActive()){
-    const d = S.deload;
-    const daysIn = Math.floor((Date.now() - d.startedAt) / DAY_MS) + 1;
-    return `<div class="card deload-card">
-      <div class="fc-k" style="color:var(--back)">Deload week, day ${daysIn} of 7</div>
-      <div class="fc-do">Every exercise is cut to ${DELOAD_SETS} sets and capped at RPE ${DELOAD_RPE_CAP}. Loads stay exactly where they are.</div>
-      <div class="fc-sub">Keeping the weight is what preserves the stimulus; cutting the sets is what buys the recovery. Load increases are blocked this week, and next week resumes at full sets without making up what you missed.</div>
-      <button class="fc-btn" id="endDeloadBtn">End the deload now</button>
-    </div>`;
-  }
-  const due = deloadDue();
-  if(!due) return "";
-  return `<div class="card deload-card">
-    <div class="fc-k" style="color:var(--back)">Deload ${due.reason === "early" ? "worth pulling forward" : "due"}</div>
-    <div class="fc-do">${esc(due.msg)}</div>
-    ${due.signals.length ? `<div class="fc-sub">Signs showing: ${esc(due.signals.join("; "))}.</div>` : ""}
-    <button class="fc-btn" id="startDeloadBtn">Start a deload week</button>
-  </div>`;
-}
-function sleepWindowHTML(wid){
-  if(S.sleepGuard === "off") return "";
-  /* No fixed wake time? Then there is nothing to be late FOR, and pretending otherwise
-     would be inventing a deadline. Show the consequence instead of a verdict. */
-  if(!hasWakeTime()){
-    if(!S.sleepTarget) return "";        // nothing to project from either, stay quiet
-    const pr = sleepProjection(wid);
-    return `<div class="sleep-ok">Starting now, this runs about <b>${pr.dur} min</b> and finishes
-      <b>${fmtTimeOfDay(pr.end)}</b> &middot; asleep around <b>${fmtTimeOfDay(pr.asleep)}</b> after winding down,
-      up <b>${fmtTimeOfDay(pr.wake)}</b> on ${r1(sleepNeedH())} h.</div>`;
-  }
-  const win = sleepWindow(wid);
-  if(win.fits){
-    return `<div class="sleep-ok">Fits your sleep window: start by <b>${fmtTimeOfDay(win.latestStart)}</b>,
-      out by <b>${fmtTimeOfDay(win.latestEnd)}</b>, asleep by <b>${fmtTimeOfDay(win.bedtime)}</b>.</div>`;
-  }
-  const t = trimForSleep(wid, win);
-  return `<div class="card sleep-card">
-    <div class="fc-k" style="color:var(--bad)">Too late for the full session</div>
-    <div class="fc-do">You are ${win.overBy} min past the latest start. This one runs to
-      ${esc(fmtTimeOfDay(Date.now() + win.dur * 60000))}, and you need to be asleep by
-      ${esc(fmtTimeOfDay(win.bedtime))} to get ${r1(sleepNeedH())} h before a ${esc(wakeTime())} wake.</div>
-    ${t.drop.length ? `<div class="fc-sub">Cut from the end, in this order:
-      <b>${esc(t.drop.map(e=>e.name).join(", "))}</b>. The compounds at the front are the ones that matter;
-      sleep is the constraint everything else is competing with.</div>`
-      : `<div class="fc-sub">Even trimmed this will not fit. Train tomorrow rather than borrowing the hours from sleep.</div>`}
-  </div>`;
-}
-
 /* =====================================================================
    WARM-UPS
 
@@ -34958,25 +35025,6 @@ function asymRetestDue(){
     });
   }
   return unilateralInPlan().some(e=>sideStats(e.name).ok);
-}
-function asymRetestHTML(){
-  if(!asymRetestDue()) return "";
-  const rows = unilateralInPlan().map(e=>({e, st: sideStats(e.name)}));
-  return `<div class="card asym-card">
-    <div class="fc-k" style="color:var(--arms)">Four-week asymmetry re-test</div>
-    <div class="fc-do">The rep-matching rule has run its four weeks. Here is where each side actually sits.</div>
-    ${rows.map(({e, st})=>`<div class="asym-row">
-      <b>${esc(e.name)}</b>
-      <div class="asym-gap">${esc(asymGapText(st))}</div>
-      ${st.ok ? `<div class="asym-sample">${esc(asymSampleText(st))}</div>` : ""}
-      ${st.ok ? `<div class="asym-verdict ${st.gap <= ASYM_CLOSED_GAP ? "ok" : "keep"}">${
-        st.gap <= ASYM_CLOSED_GAP
-          ? "Inside "+ASYM_CLOSED_GAP+" reps &mdash; rule retires for this movement"
-          : "Still outside "+ASYM_CLOSED_GAP+" reps &mdash; keep matching the weaker side"
-      }</div>` : ""}
-    </div>`).join("")}
-    <button class="fc-btn" id="asymRetestBtn">Apply and close the re-test</button>
-  </div>`;
 }
 function applyAsymRetest(){
   if(!S.asymRetired || typeof S.asymRetired !== "object") S.asymRetired = {};
