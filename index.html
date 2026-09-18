@@ -2999,6 +2999,32 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .hu-row-b{display:flex;gap:8px;margin-top:10px}
 .hu-row-b .btn{flex:1}
 .hu-foot{margin:4px 2px 0;font-size:11.5px;color:var(--faint);line-height:1.55}
+/* ---------- fix it your way ---------- */
+/* The shortfall, stated before anything is offered. Two figures and an arrow: what you
+   do, and where the useful range begins. */
+.fx-gap{background:var(--card2);border:1px solid var(--line);border-radius:var(--r);
+  padding:13px;margin:4px 0 12px}
+.fx-gap-row{display:flex;align-items:center;gap:14px}
+.fx-gap-row>span{display:flex;flex-direction:column;gap:2px}
+.fx-gap-row b{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:26px;line-height:1}
+.fx-gap-row i{font-style:normal;font:9.5px var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--faint)}
+.fx-arrow{color:var(--faint);font-size:18px}
+.fx-gap-say{font-size:12.5px;color:var(--dim);line-height:1.55;margin-top:10px}
+.fx-gap-say b{color:var(--text);font-family:var(--mono);font-weight:500}
+/* One recommendation, one button. Most people are here to be told. */
+.fx-rec{border:1px solid var(--acc-line);background:var(--acc-soft);border-radius:var(--r);
+  padding:13px;margin-bottom:12px}
+.fx-rec-k{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acc);margin-bottom:9px}
+.fx-rec-list div{font-size:13.5px;line-height:1.5;padding:3px 0}
+.fx-rec-why{font-size:12px;color:var(--dim);line-height:1.5;margin:8px 0 12px}
+.fx-rec .btn{width:100%}
+/* The four ways, folded away until asked for. */
+.fx-open{display:flex;width:100%;justify-content:space-between;align-items:center;
+  background:none;border:1px dashed var(--line);border-radius:var(--r);padding:12px 13px;
+  color:var(--dim);font:12.5px var(--sans);cursor:pointer;margin-bottom:12px}
+.fx-open-x{color:var(--faint);font-family:var(--mono)}
+/* "Cable Crossover 100%" was the muscle fraction out of the app's own tables. */
+.fx-frac{font:10.5px var(--mono);color:var(--faint);text-align:right;flex-shrink:0}
 /* ---------- before you start: one stack, one colour ---------- */
 .nt-list{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
   overflow:hidden;margin-bottom:12px}
@@ -5499,7 +5525,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "24.8";
+const APP_VERSION = "24.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23325,6 +23351,117 @@ function viewBody(){
    other edit, so a change made from the Body tab is as visible in the plan's history as
    one made on the Program tab. */
 let FIX = null;
+/* =====================================================================
+   FIX IT YOUR WAY, WITHOUT HAVING TO KNOW HOW
+
+   The sheet opened on four strategies — Add a movement, Add sets to one, Spread it out,
+   Swap one out — presented as equals, above a paragraph explaining that a number
+   underneath would tell you what each would do. To use it you had to understand four ways
+   of editing a programme before you could do the one thing you came for, and the muscle's
+   actual shortfall was never stated anywhere on the screen.
+
+   It leads with the problem now, in the numbers the rest of the app uses: what you are
+   doing, what the range is, and how far off. Then ONE recommendation with one button,
+   worked out the same way the four modes would have worked it out. The four ways survive,
+   demoted to "or do it another way", for the times you want to choose.
+
+   And the percentages are gone. A row reading "Cable Crossover 100%" is the muscle
+   fraction, which is a number out of the app's own tables and means nothing standing on a
+   button; "all chest" is the same fact in words anybody has. */
+/* WHAT IT DID, AND WHY, IN ONE SENTENCE.
+
+   "Across 1 day of your cycle, poorest-served first" was the whole explanation, and under
+   a heading reading "Spread it out" it read as a contradiction: the mode says spread and
+   the caption reports one day. It was not wrong. Chest sat on two days, seven sets on one
+   and three on the other, so putting all three new sets on the lighter day is exactly the
+   balancing the rule describes — it just never said so, and "spread" is the wrong word for
+   what balancing looks like when one day is already well ahead.
+
+   So the sentence names the days and their counts. A plan somebody can check is a plan
+   somebody can trust. */
+function spreadWhy(sp, m, M){
+  if(!sp) return "";
+  const mn = M.name.toLowerCase();
+  if(sp.freqAfter > sp.freqBefore){
+    return mn.charAt(0).toUpperCase() + mn.slice(1) + " goes from " + sp.freqBefore + " day" +
+      (sp.freqBefore === 1 ? "" : "s") + " a cycle to " + sp.freqAfter +
+      ", which is the change with the most behind it.";
+  }
+  const byDay = {};
+  (sp.adds || []).forEach(a=>{ byDay[a.wid] = (byDay[a.wid] || 0) + (a.to - a.from); });
+  const days = Object.keys(byDay);
+  if(days.length > 1){
+    return "Split across " + days.length + " days, the lighter one first, and nothing goes past " +
+      SPREAD_MAX_PER_EX + " sets of one movement.";
+  }
+  if(days.length === 1){
+    const wid = days[0];
+    /* How much of the muscle each day already does, so "all of it on one day" can show
+       its working instead of looking like the mode failing to spread. */
+    const load = {};
+    planEntriesForMuscle(m).forEach(x=>{
+      load[x.wid] = (load[x.wid] || 0) + (parseInt(x.e.sets, 10) || 1) * x.frac;
+    });
+    const others = Object.keys(load).filter(d=> d !== wid)
+      .sort((a,b)=> load[b] - load[a]);
+    if(others.length){
+      return "All of it on " + dayName(wid) + ", which does " + r1(load[wid] || 0) + " sets of " +
+        mn + " against " + dayName(others[0]) + "'s " + r1(load[others[0]]) + ". That evens them up.";
+    }
+    return dayName(wid) + " is the only day that trains " + mn + ", so it all lands there.";
+  }
+  return "";
+}
+function fracWords(f){
+  if(!(f > 0)) return "";
+  if(f >= 0.95) return "all of it";
+  if(f >= 0.7) return "mostly";
+  if(f >= 0.45) return "about half";
+  if(f >= 0.25) return "a third";
+  return "a little";
+}
+function fracWordsFor(f, mName){
+  if(!(f > 0)) return "";
+  const w = fracWords(f);
+  return w === "all of it" ? "all " + mName : w === "mostly" ? "mostly " + mName
+       : w + " " + mName;
+}
+/* THE SHORTFALL, SAID ONCE, IN THE UNITS ON THE REST OF THE SCREEN. */
+function fixGap(A, m, w){
+  const have = planCycleVolume(m);
+  const L = cycleLandmarks(A, m);
+  const floor = L.mev || 0, ceil = L.mrv || 0;
+  let need = Math.max(0, Math.round((floor - have) * 10) / 10);
+  const g = {have: Math.round(have * 10) / 10, floor: Math.round(floor * 10) / 10,
+             ceil: Math.round(ceil * 10) / 10, need,
+             room: Math.max(0, Math.round((ceil - have) * 10) / 10),
+             kind: (w && w.kind) || "under"};
+  /* NOT EVERY WEAK POINT IS A SHORTFALL AGAINST THE FLOOR, and the first version of this
+     header assumed it was — so a muscle flagged for being BEHIND ANOTHER ONE, which is
+     the commonest flag there is, opened on "you are inside the useful range already" and
+     offered nothing. The header has to answer the question that was actually asked. */
+  if(g.kind === "balance"){
+    /* A STEP, NOT THE WHOLE GAP. Asking the projection for the smallest addition that
+       levels the pair gave 12.8 sets a cycle on the test log — arithmetically right and
+       terrible advice: nobody adds thirteen sets of chest in one edit, and a button
+       offering it is a button that gets ignored or, worse, pressed. The offer is capped
+       at four, the sentence says where that actually lands, and closing the rest of the
+       gap is next cycle's edit. */
+    const step = Math.max(1, Math.min(4, Math.round(g.room)));
+    g.need = step;
+    const b0 = balanceProjection(A, m, 0), bN = balanceProjection(A, m, step);
+    if(b0 && b0.R){
+      g.ratio = b0.now;
+      g.ratioFloor = b0.R.lo;
+      g.pair = b0.R.an + " to " + b0.R.bn;
+    }
+    if(bN){ g.ratioAfter = bN.after; g.levels = !!bN.ok; }
+  } else if(g.kind === "none"){
+    g.need = Math.max(2, Math.ceil(floor / 2));
+  }
+  g.need = Math.min(g.need, Math.max(1, g.room || g.need));
+  return g;
+}
 function openOwnFix(idx){
   const A = bodyAnalysis();
   const w = A.weak[idx];
@@ -23334,24 +23471,66 @@ function openOwnFix(idx){
   buildExSpellings();
   const ents = planEntriesForMuscle(m);
   if(!FIX || FIX.idx !== idx){
-    FIX = {idx, mode:"own", ex:"", sets:3, wid: DAYS[0] || "", pick:null,
+    FIX = {idx, mode:"one", open:false, ex:"", sets:3, wid: DAYS[0] || "", pick:null,
            swapFrom:null, swapTo:null, spEx:"", spDays:[], spSets:2};
   }
   const draw = ()=>{
     const MODES = [
-      {k:"own",    t:"Add a movement"},
-      {k:"one",    t:"Add sets to one"},
-      {k:"spread", t:"Spread it out"},
-      {k:"swap",   t:"Swap one out"}
+      {k:"one",    t:"More sets on one movement"},
+      {k:"spread", t:"Even it out across days"},
+      {k:"own",    t:"Add a new movement"},
+      {k:"swap",   t:"Swap a movement out"}
     ];
-    let h = `<h3>Fix it your way</h3>
-      <div class="sub" style="margin:6px 0 13px;text-transform:none;letter-spacing:0">Whatever
-        you pick, the number underneath says what it would actually do to your ${esc(M.name.toLowerCase())}
-        volume before anything is written.</div>
-      <div class="fx-modes">${MODES.map(x=>
+    const g = fixGap(A, m, w);
+    const mn = M.name.toLowerCase();
+    /* The recommendation is the spread plan, because that is the one the app would make
+       on its own — the same call the "Do it for me" panel makes. Stated as a sentence
+       with one button, so the common case is read-and-tap. */
+    const rec = g.need > 0 ? spreadPlan(A, m, g.need, w.avoid, null) : null;
+    FIX.recNeed = g.need;
+    let h = `<h3>More ${esc(mn)}</h3>
+      <div class="fx-gap">
+        <div class="fx-gap-row">${g.kind === "balance" && g.ratio != null
+          ? `<span><b class="num">${esc(r1(g.ratio))}</b><i>${esc(g.pair || "now")}</i></span>
+             <span class="fx-arrow">\u2192</span>
+             <span><b class="num">${esc(r1(g.ratioFloor || 0))}</b><i>level starts at</i></span>`
+          : `<span><b class="num">${esc(String(g.have))}</b><i>sets you do</i></span>
+             <span class="fx-arrow">\u2192</span>
+             <span><b class="num">${esc(String(g.floor))}</b><i>useful range starts</i></span>`}</div>
+        <div class="fx-gap-say">${
+          g.kind === "balance"
+            ? esc(w.title) + ". <b>" + esc(String(g.need)) + " more set"
+              + (g.need === 1 ? "" : "s") + "</b> of " + esc(mn) + " a cycle takes it to <b>"
+              + esc(r1(g.ratioAfter == null ? g.ratio : g.ratioAfter)) + "</b>"
+              + (g.levels ? ", which is level." : " \u2014 closer. Do it again next cycle rather than all at once.")
+          : g.kind === "none"
+            ? "Nothing in your programme trains " + esc(mn) + " at all. <b>"
+              + esc(String(g.need)) + " sets</b> a cycle is a sensible place to start."
+          : g.need > 0
+            ? "You are <b>" + esc(String(g.need)) + " set" + (g.need === 1 ? "" : "s")
+              + "</b> a cycle short of where " + esc(mn) + " starts paying off. It tops out around <b>"
+              + esc(String(g.ceil)) + "</b>."
+            : "You are inside the useful range already. Anything below adds on top of that."}</div>
+      </div>`;
+    if(rec && rec.adds && (rec.adds.length || (rec.newExs || []).length)){
+      h += `<div class="fx-rec">
+        <div class="fx-rec-k">What Element 26 would do</div>
+        <div class="fx-rec-list">${spreadList(rec).map(x=> `<div>${esc(x)}</div>`).join("")}</div>
+        <div class="fx-rec-why">${esc(spreadWhy(rec, m, M))}</div>
+        <button class="btn small" id="fxRecGo">Do this</button>
+      </div>`;
+    }
+    h += `<button type="button" class="fx-open" id="fxOpen" aria-expanded="${FIX.open ? "true" : "false"}">
+        <span>Or do it another way</span><span class="fx-open-x">${FIX.open ? "\u2212" : "+"}</span>
+      </button>`;
+    if(FIX.open){
+      h += `<div class="fx-modes">${MODES.map(x=>
         `<button type="button" class="fx-m${FIX.mode===x.k?" on":""}" data-fxm="${x.k}"
           aria-pressed="${FIX.mode===x.k}">${esc(x.t)}</button>`).join("")}</div>
-      <div id="fxBody"></div>`;
+        <div id="fxBody"></div>`;
+    } else {
+      h += `<div id="fxBody" hidden></div>`;
+    }
     return h;
   };
 
@@ -23380,7 +23559,7 @@ function openOwnFix(idx){
             `<button type="button" class="fx-c fx-have" data-fxuse="${i}">
               <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} \u2192 ${(e.e.sets||1)+1} sets${
                 i === 0 ? " \u00b7 best fit" : ""}</span>
-              <span class="fx-have-s">${esc(widName(e.wid))} \u00b7 ${Math.round(e.frac*100)}% ${esc(M.name.toLowerCase())}</span>
+              <span class="fx-have-s">${esc(widName(e.wid))} \u00b7 ${esc(fracWordsFor(e.frac, M.name.toLowerCase()))}</span>
             </button>`).join("")}</div>
           <div class="set-says" style="margin:7px 2px 0">A set added to one of these costs you
             nothing but the set \u2014 the day already exists and you are already warm. Tapping one
@@ -23390,7 +23569,7 @@ function openOwnFix(idx){
           ents.length ? "Or something new" : "The movement"}</div>
         <div class="fx-list">${cands.slice(0,14).map(c=>
           `<button type="button" class="fx-c${nrm(c.name)===nrm(FIX.ex)?" on":""}" data-fxex="${esc(c.name)}">
-            <b>${esc(c.name)}</b><span class="num">${Math.round(c.frac*100)}%</span></button>`).join("")}</div>
+            <b>${esc(c.name)}</b><span class="fx-frac">${esc(fracWordsFor(c.frac, M.name.toLowerCase()))}</span></button>`).join("")}</div>
         <div class="field" style="margin:10px 0 4px"><label>Or type one</label>
           <input id="fxEx" placeholder="e.g. Chest Supported Row" autocomplete="off" value="${esc(FIX.ex)}"></div>
         <div class="k-lab" style="margin-top:12px">How many sets</div>
@@ -23456,8 +23635,8 @@ function openOwnFix(idx){
               <b>${esc(e.e.name)}</b><span class="num">${Math.round(e.frac*100)}% \u00b7 in your plan</span></button>`).join("")}
           ${cands2.map((c, ci)=>
             `<button type="button" class="fx-c${nrm(c.name)===nrm(chosen)?" on":""}" data-fxspex="${esc(c.name)}">
-              <b>${esc(c.name)}</b><span class="num">${Math.round(c.frac*100)}%${
-                ci === 0 && (w.avoid||[]).length ? " · best fit" : ""}</span></button>`).join("")}
+              <b>${esc(c.name)}</b><span class="fx-frac">${esc(fracWordsFor(c.frac, M.name.toLowerCase()))}${
+                ci === 0 && (w.avoid||[]).length ? " \u00b7 best fit" : ""}</span></button>`).join("")}
         </div>
         <div class="field" style="margin:10px 0 4px"><label>Or type one</label>
           <input id="fxSpEx" placeholder="e.g. Chest Supported Row" autocomplete="off" value="${esc(chosen)}"></div>`;
@@ -23516,14 +23695,7 @@ function openOwnFix(idx){
       } else {
         h += `<div class="k-lab" style="margin-top:14px">Where it lands</div>
           <div class="fx-plan">${spreadList(sp).map(x=>`<div>${esc(x)}</div>`).join("")}</div>
-          <div class="set-says" style="margin-top:7px">${
-            sp.freqAfter > sp.freqBefore
-              ? "Across <b>" + sp.daysTouched + "</b> day" + (sp.daysTouched===1?"":"s") + ", and "
-                + esc(M.name.toLowerCase()) + " goes from <b>" + sp.freqBefore + "</b> day"
-                + (sp.freqBefore===1?"":"s") + " a cycle to <b>" + sp.freqAfter + "</b>."
-              : "Across <b>" + sp.daysTouched + "</b> day" + (sp.daysTouched===1?"":"s")
-                + " of your cycle, poorest-served first, and nothing goes past "
-                + SPREAD_MAX_PER_EX + " sets of one movement."}</div>`;
+          <div class="set-says" style="margin-top:7px">${esc(spreadWhy(sp, m, M))}</div>`;
       }
     } else if(FIX.mode === "swap"){
       const weakest = ents.slice().sort((a,b)=> a.frac - b.frac);
@@ -23543,7 +23715,7 @@ function openOwnFix(idx){
           ${cands.length
             ? `<div class="fx-list">${cands.slice(0,12).map(c=>
                 `<button type="button" class="fx-c${nrm(c.name)===nrm(FIX.swapTo||"")?" on":""}" data-fxswt="${esc(c.name)}">
-                  <b>${esc(c.name)}</b><span class="num">${Math.round(c.frac*100)}%</span></button>`).join("")}</div>
+                  <b>${esc(c.name)}</b><span class="fx-frac">${esc(fracWordsFor(c.frac, M.name.toLowerCase()))}</span></button>`).join("")}</div>
                <div class="sub" style="margin:7px 2px 0">Keeps ${from.e.sets||1} sets — the same amount of work, aimed better.</div>`
             : `<div class="wd-none">Nothing the app knows hits ${esc(M.name.toLowerCase())} harder than ${esc(from.e.name)} does, so a swap here would cost you volume rather than gain it.</div>`}`;
         if(!cands.length) ok = false;
@@ -23643,8 +23815,29 @@ function openOwnFix(idx){
     const ap = m2.querySelector("#fxApply");
     if(ap && !ap.disabled) ap.onclick = ()=> applyOwnFix(idx);
   };
+  /* The gap, the recommendation and the fold sit ABOVE #fxBody, so they are outside what
+     redraw() replaces. Their handlers are bound here, against the whole sheet. */
+  const wireHead = ()=>{
+    const m2 = $("#modal");
+    const op = m2.querySelector("#fxOpen");
+    if(op) op.onclick = ()=>{ FIX.open = !FIX.open; reopen(); };
+    const go = m2.querySelector("#fxRecGo");
+    if(go) go.onclick = ()=>{
+      /* The recommendation IS the spread plan, so taking it is taking that mode with the
+         numbers it proposed. One path through applyOwnFix, not a second copy of it. */
+      FIX.mode = "spread";
+      FIX.spEx = ""; FIX.spDays = [];
+      /* FIX.spread is the mode's TOTAL; FIX.spSets is how many sets a pinned movement
+         takes. Setting the wrong one left the total at its default of 3, so the card
+         promised four sets across two movements and wrote three onto one. */
+      FIX.spread = FIX.recNeed > 0 ? FIX.recNeed : FIX.spread;
+      applyOwnFix(idx);
+    };
+  };
+  const reopen = ()=>{ showModal(draw()); redraw(); wireHead(); };
   showModal(draw());
   redraw();
+  wireHead();
   MODAL_REOPEN = ()=> openOwnFix(idx);
 }
 /* A number you nudge, because a keyboard for "3" is a keyboard too many between sets. */
