@@ -3021,6 +3021,13 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .bl-foot{margin:9px 2px 0;font:10.5px var(--mono);letter-spacing:.04em;color:var(--faint);line-height:1.5}
 /* Nine fields behind a fold, because a nine-field form is what stops somebody logging the
    one figure that actually matters. */
+/* What time you weigh in, and what it costs to move it. Plain by default because it is
+   information; accented only when today's reading is a long way off the usual one. */
+.bl-when{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--card2);font-size:12px;color:var(--faint);line-height:1.55}
+.bl-when b{color:var(--dim);font-weight:500}
+.bl-drift{border-color:var(--acc-line);background:var(--acc-soft);color:var(--dim)}
+.bl-drift b{color:var(--text)}
 .bl-tape{margin-top:12px;border-top:1px solid var(--line)}
 .bl-tape>summary{list-style:none;cursor:pointer;padding:12px 2px;font-size:13.5px;color:var(--dim);
   display:flex;justify-content:space-between;align-items:center}
@@ -5438,7 +5445,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "24.2";
+const APP_VERSION = "24.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -25013,6 +25020,52 @@ function bodyLogList(){
   return Object.keys(L).filter(d=> L[d] && (L[d].w > 0 || MEAS_FIELDS.some(f=> L[d][f.k] > 0)))
     .sort((a,b)=> a < b ? 1 : -1).map(d=> Object.assign({d}, L[d]));
 }
+/* WHAT TIME YOU USUALLY DO IT, AND WHY IT MATTERS.
+
+   Bodyweight moves three or four pounds across a day on food and water alone, which is
+   larger than a fortnight of real change. A log that mixes a fasted Tuesday morning with
+   a Friday evening after dinner is not measuring you, it is measuring your last meal —
+   and the trend, which is the entire reason for keeping the log, is the first thing to go.
+
+   So the weigh-in records the clock time, offers it back next time, and says something
+   when today's is a long way off it. It does not refuse: a weigh-in at the wrong hour is
+   still worth more than no weigh-in, and an app that argues with you is an app you stop
+   opening. It tells you what it will do to the number and gets out of the way.
+
+   The usual time is the MEDIAN of the recent ones, not the last one — a single odd
+   evening should not move the target it is being measured against. */
+const WEIGH_DRIFT_MIN = 90;                 // how far off before it is worth saying anything
+function hmToMin(t){
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ""));
+  if(!m) return null;
+  const v = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  return v >= 0 && v < 1440 ? v : null;
+}
+function minToHm(v){
+  const x = ((Math.round(v) % 1440) + 1440) % 1440;
+  return String(Math.floor(x / 60)).padStart(2, "0") + ":" + String(x % 60).padStart(2, "0");
+}
+function fmtHm(t){
+  const v = hmToMin(t);
+  if(v == null) return "";
+  const d = new Date();
+  d.setHours(Math.floor(v / 60), v % 60, 0, 0);
+  return fmtClockShort(d.getTime());
+}
+function usualWeighTime(){
+  const mins = bodyLogList().filter(x=> x.w > 0).slice(0, 10)
+    .map(x=> hmToMin(x.t)).filter(v=> v != null).sort((a,b)=> a - b);
+  if(!mins.length) return null;
+  const mid = Math.floor(mins.length / 2);
+  const med = mins.length % 2 ? mins[mid] : Math.round((mins[mid-1] + mins[mid]) / 2);
+  return {min: med, hm: minToHm(med), n: mins.length};
+}
+/* How far apart two clock times are, the short way round: 23:30 and 00:30 are an hour
+   apart, not twenty-three. */
+function clockGap(a, b){
+  const d = Math.abs(a - b) % 1440;
+  return Math.min(d, 1440 - d);
+}
 function latestWeighIn(){
   const l = bodyLogList().filter(x=> x.w > 0);
   return l.length ? l[0] : null;
@@ -25050,12 +25103,23 @@ function bodyDelta(key, compact){
    somebody wants it, because a nine-field form is what stops people logging the one
    figure that matters. */
 let BODYLOG_TAPE = false;
+let BODYLOG_T = null;                       // the time on the open sheet, while it is open
 function openBodyLog(dateStr){
   const d = dateStr || todayStr();
   const rec = bodyLog()[d] || {};
   const has = MEAS_FIELDS.some(f=> rec[f.k] > 0);
   const open = BODYLOG_TAPE || has;
   const last = latestWeighIn();
+  const usual = usualWeighTime();
+  /* Today's entry keeps its own time; a new one opens at the clock, because that is when
+     you are standing on the scale. The usual time is offered as a sentence, not prefilled
+     over the truth. */
+  if(BODYLOG_T == null){
+    BODYLOG_T = rec.t || minToHm(new Date().getHours() * 60 + new Date().getMinutes());
+  }
+  const mine = hmToMin(BODYLOG_T);
+  const off = usual && mine != null ? clockGap(mine, usual.min) : 0;
+  const drift = usual && off > WEIGH_DRIFT_MIN;
   const num = (k, ph)=> `value="${esc(rec[k] == null ? "" : rec[k])}" placeholder="${esc(ph)}"`;
   const h = `<h3>Weigh-in</h3>
     <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">For
@@ -25064,6 +25128,20 @@ function openBodyLog(dateStr){
         : "Same scale, same time of day, and the number is worth something."}</div>
     <div class="field"><label>Bodyweight (${esc(unitWord())})</label>
       <input id="blW" inputmode="decimal" ${num("w", last ? String(last.w) : "e.g. 180")}></div>
+    <div class="field" style="margin-top:10px"><label>Time of day</label>
+      <input type="time" class="timein" id="blT" value="${esc(BODYLOG_T)}"></div>
+    ${usual
+      ? `<div class="bl-when${drift ? " bl-drift" : ""}">${drift
+          ? `<b>You usually weigh in at ${esc(fmtHm(usual.hm))}</b>, and this one is
+             ${esc(fmtHm(BODYLOG_T))} \u2014 about ${Math.round(off / 60 * 10) / 10} hours off.
+             Bodyweight swings three or four pounds across a day on food and water alone, which is
+             more than a fortnight of real change, so a reading taken at a different hour will move
+             the line without anything having happened. Save it if you like; it is still worth more
+             than a gap.`
+          : `You usually weigh in around <b>${esc(fmtHm(usual.hm))}</b>${
+             usual.n > 2 ? "" : ", going on " + usual.n + " so far"}. This one matches.`}</div>`
+      : `<div class="bl-when">Element 26 will remember this time and ask you to weigh in around it
+          from now on \u2014 the same hour every time is what makes the trend mean anything.</div>`}
     <details class="bl-tape"${open ? " open" : ""}>
       <summary>Tape measurements <span>${has ? "filled in" : "optional"}</span></summary>
       <div class="bl-grid">${MEAS_FIELDS.map(f=>
@@ -25083,6 +25161,25 @@ function openBodyLog(dateStr){
   const m = $("#modal");
   const tape = m.querySelector(".bl-tape");
   if(tape) tape.ontoggle = ()=>{ BODYLOG_TAPE = tape.open; };
+  /* THE WARNING HAS TO ANSWER THE FIELD, so the sheet is redrawn when the time changes —
+     and every typed value is carried across first, or correcting the hour would silently
+     empty the box above it. */
+  const tIn = m.querySelector("#blT");
+  if(tIn) tIn.onchange = ()=>{
+    const keep = {};
+    const wEl = m.querySelector("#blW");
+    if(wEl) keep.w = wEl.value;
+    MEAS_FIELDS.forEach(f=>{ const el = m.querySelector("#bl_" + f.k); if(el) keep[f.k] = el.value; });
+    if(hmToMin(tIn.value) != null) BODYLOG_T = tIn.value;
+    openBodyLog(d);
+    const m2 = $("#modal");
+    const w2 = m2.querySelector("#blW");
+    if(w2 && keep.w) w2.value = keep.w;
+    MEAS_FIELDS.forEach(f=>{
+      const el = m2.querySelector("#bl_" + f.k);
+      if(el && keep[f.k]) el.value = keep[f.k];
+    });
+  };
   const read = id=>{
     const el = m.querySelector("#" + id);
     const raw = el ? String(el.value).trim() : "";
@@ -25096,6 +25193,8 @@ function openBodyLog(dateStr){
     const w = read("blW");
     if(w != null) out.w = w;
     MEAS_FIELDS.forEach(f=>{ const v = read("bl_" + f.k); if(v != null) out[f.k] = v; });
+    const tEl = m.querySelector("#blT");
+    if(w != null && tEl && hmToMin(tEl.value) != null) out.t = tEl.value;
     if(!Object.keys(out).length){
       delete bodyLog()[d];
       save(); queueSync(); hideModal(); render();
@@ -25158,9 +25257,11 @@ function bodyLogHTML(){
       </div>`;
     }).join("")}</div>`;
   }
+  const uw = usualWeighTime();
   h += `<div class="bl-foot">${list.length} entr${list.length === 1 ? "y" : "ies"}${
     list.length > 1 ? " · since " + esc(fmtDate(list[list.length-1].d)) : ""
-  }${taped.length ? "" : " · tape measurements are optional, inside the weigh-in"}</div>`;
+  }${uw ? " · usually around " + esc(fmtHm(uw.hm)) : ""}${
+    taped.length ? "" : " · tape measurements are optional, inside the weigh-in"}</div>`;
   return h + `</div>`;
 }
 /* =====================================================================
@@ -28547,7 +28648,7 @@ function bind(){
   document.querySelectorAll("[data-husettle]").forEach(b=> b.onclick = ()=> hurtSettle(b.dataset.husettle));
   document.querySelectorAll("[data-huagain]").forEach(b=> b.onclick = ()=> hurtAgain(b.dataset.huagain));
   const blA = $("#blAdd");
-  if(blA) blA.onclick = ()=> openBodyLog();
+  if(blA) blA.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
   const rbOpen = $("#recordsBtn");
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
