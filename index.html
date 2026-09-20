@@ -5525,7 +5525,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.2";
+const APP_VERSION = "25.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10864,9 +10864,18 @@ function spreadPlan(A, m, need, avoid, pin){
     if(!adds.length && !newExs.length) return null;
     const gained = adds.reduce((t,a)=> t + (a.to - a.from) * a.frac, 0)
                  + newExs.reduce((t,n)=> t + n.sets * n.frac, 0);
+    /* TWO HONEST COUNTS OF THE SAME EDIT, AND THE CALLER HAS TO SAY WHICH IT MEANS.
+       `gained` is in sets OF THE MUSCLE, which is the unit the floor and the ceiling are
+       in and the only unit the projection can use. `rawSets` is sets on the page: what
+       the diff underneath shows, and what you will actually perform. They are the same
+       number only when every movement involved is entirely that muscle, and when they
+       are not, printing one beside the other without saying so reads as an error —
+       "Add 1.4 sets" over a line that says 2 -> 6. */
+    const rawSets = adds.reduce((t,a)=> t + (a.to - a.from), 0)
+                  + newExs.reduce((t,n)=> t + n.sets, 0);
     const newDays = newExs.map(n=> n.wid);
     const daysAfter = new Set(adds.map(a=> a.wid).concat(newDays)).size;
-    return {adds, newExs, gained: r1(gained), daysTouched: daysAfter,
+    return {adds, newExs, gained: r1(gained), rawSets, daysTouched: daysAfter,
             freqBefore: daysTrained.length,
             freqAfter: new Set(daysTrained.concat(newDays)).size,
             wantFreq, atCeiling: room <= 0.001, pinned: !!(pin && pin.name)};
@@ -10939,11 +10948,18 @@ function findingPlan(w, A){
        arguing with itself. spreadWhy() is the one explanation now, so the panel and the
        sheet behind it say the same thing about the same plan. */
     return {mode:"spread", plan,
-      label:"Add " + plan.gained + " set" + (plan.gained === 1 ? "" : "s"),
-      does:"Adds about " + plan.gained + " set" + (plan.gained === 1 ? "" : "s") + " of direct " +
-           name + " work. " + spreadWhy(plan, m, M) +
-           " Fractions count: a set of a movement that is half " + name + " is half a set of it. " +
-           "This one sticks until you change it.",
+      /* THE BUTTON COUNTS WHAT YOU WILL DO, not what the muscle collects. It said "Add
+         1.4 sets" above a diff reading 2 -> 6, which is four sets: both numbers were
+         right and nothing on the screen said they were measuring different things. The
+         sets on the page lead, and the muscle's share follows as the explanation. */
+      label:"Add " + plan.rawSets + " set" + (plan.rawSets === 1 ? "" : "s"),
+      does:"Adds " + plan.rawSets + " set" + (plan.rawSets === 1 ? "" : "s") +
+           " to your programme. " + spreadWhy(plan, m, M) +
+           (Math.abs(plan.rawSets - plan.gained) < 0.05 ? ""
+             : " Those count as " + plan.gained + " set" + (plan.gained === 1 ? "" : "s") + " of " +
+               name + ", because a set of a movement that is half " + name +
+               " is half a set of it — and that is the number the target is in.") +
+           " This one sticks until you change it.",
       list: spreadList(plan)};
   }
   if(w.kind === "stall"){
@@ -24037,8 +24053,10 @@ function applyOwnFix(idx){
     logPlanChange("programme", null, M.name, spreadList(sp),
       {note: "Spread across " + sp.daysTouched + " day" + (sp.daysTouched===1?"":"s") +
              " from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
-    toast("About " + sp.gained + " sets of " + M.name.toLowerCase() + " added across " +
-          sp.daysTouched + " day" + (sp.daysTouched===1?"":"s"));
+    toast(sp.rawSets + " set" + (sp.rawSets === 1 ? "" : "s") + " added across " +
+          sp.daysTouched + " day" + (sp.daysTouched===1?"":"s") +
+          (Math.abs(sp.rawSets - sp.gained) < 0.05 ? ""
+            : " — " + sp.gained + " of " + M.name.toLowerCase()));
   } else if(FIX.mode === "swap"){
     const weakest = ents.slice().sort((a,b)=> a.frac - b.frac);
     const from = weakest[Math.min(FIX.swapFrom || 0, weakest.length-1)];
