@@ -5525,7 +5525,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.0";
+const APP_VERSION = "25.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10762,9 +10762,17 @@ function spreadPlan(A, m, need, avoid, pin){
        movement is the honest answer; that is also what happens when the plan has nothing
        for this muscle at all, which is the case the second-day branch exists for. */
     const cost = nm2 => (avoid || []).reduce((t, k)=> t + ((musclesFor(nm2) || {})[k] || 0), 0);
+    /* ANY movement of yours beats a new one, not just one that is half the muscle or
+       more. The bar used to be frac >= 0.5, which sounds reasonable and quietly fails on
+       the commonest case there is: a Captain's Chair Leg Raise is about a third side abs,
+       so it was rejected, and the app answered "train your obliques twice a week" with a
+       Cable Woodchop the user has never done. The extra day is worth having whatever
+       carries it, and a movement already in the programme costs nothing to start. A new
+       one is the answer only when the plan genuinely has nothing that trains the muscle
+       — the case the second-day branch also covers. */
     const mine = ents
       .map(x=>({name: x.e.name, frac: x.frac, score: x.frac - cost(x.e.name) * 0.8, mine: true}))
-      .filter(c=> c.frac >= 0.5)
+      .filter(c=> c.frac > 0)
       .sort((a,b)=> b.score - a.score || b.frac - a.frac)[0];
     const pick = mine || fixCandidates(m, ents.map(x=> x.e.name), avoid)[0];
     const fits = pick ? (musclesFor(pick.name) || {}) : {};
@@ -10780,13 +10788,19 @@ function spreadPlan(A, m, need, avoid, pin){
       return daySetCount(p) - daySetCount(q);            // then the shorter session
     });
     /* A day with nothing whatever in common is not a home for it. Better to add the sets
-       to the one day that does train it than to file a press under legs. */
-    if(free.length && pick && kinship(free[0]) < 0.5) return finish();
+       to the one day that does train it than to file a press under legs.
+
+       "Better to add the sets to the one day" is what the comment always said and not
+       what the code did: it RETURNED here, before the round-robin below had put a single
+       set anywhere, so a muscle whose one day had no sibling day produced no plan at all
+       and the panel said the app could not help. Declining the second day is a decision
+       about frequency, not about the whole fix. */
+    const noHome = !free.length || !pick || kinship(free[0]) < 0.5;
     /* A WHOLE NEW EXERCISE FOR ONE SET IS NOT A FIX, IT IS CLUTTER. The round-robin has
        already filled the days that train the muscle, so `left` here is what those days
        could not absorb. Under a set and a half that is not worth restructuring a session
        for — the shortfall is small enough that the existing days will do. */
-    if(free.length && pick && left >= 1.5){
+    if(!noHome && left >= 1.5){
       /* About half the shortfall goes to the new day, so the second session is worth
          showing up for without the first one being gutted to pay for it. */
       const want = Math.max(2, Math.min(3, Math.ceil((left / 2) / Math.max(0.1, pick.frac))));
@@ -10895,32 +10909,29 @@ function findingPlan(w, A){
        which is spent per cycle. Two sets short this week is not two sets a cycle, and the
        gap between them grows with the length of the rotation.
 
-       Asked per cycle on both sides: how much more must the programme prescribe, each
-       time round, to clear the floor. Pending does not appear because it is already in
-       what the programme prescribes. */
-    const cl = cycleLandmarks(A, m);
-    const need = Math.max(1, Math.ceil((cl.mev || 0) - planCycleVolume(m)));
-    const plan = spreadPlan(A, m, Math.min(8, need), w.avoid);
+       ONE NUMBER, ASKED IN ONE PLACE. This worked the shortfall out for itself and the
+       fix sheet worked it out again in fixGap(), and the two disagreed: a cycle 1.2 sets
+       short rounded UP to 2 here and stayed 1.2 there, which is enough to cross the
+       threshold that decides whether the plan opens a second day. The panel then offered
+       a new movement on Legs A while the sheet behind it offered four more sets of the
+       movement you already do — two answers to one question, both signed by the app.
+       fixGap() is now the only place the gap is measured, so the two cannot drift: it
+       also carries the four-set cap that keeps a ratio finding from proposing thirteen
+       sets, which this side never had. */
+    const gap = fixGap(A, m, w);
+    if(!(gap.need > 0)) return null;
+    const plan = spreadPlan(A, m, gap.need, w.avoid, null);
     if(!plan) return null;
-    const slots = plan.adds.length + (plan.newExs || []).length;
-    const freq = plan.freqAfter > plan.freqBefore;
-    /* Whether the extra day is filled by something of yours changes what this sentence
-       should promise. "One new movement" is a thing to learn and find room for; a second
-       day of a lift you already run is neither. */
-    const nx = (plan.newExs || [])[0];
-    const freqSay = !freq ? ""
-      : nx && nx.mine
-        ? ", putting a second day of " + nx.name + " — which you already do — on " +
-          widName(nx.wid) + ", so " + name + " is trained on " + plan.freqAfter +
-          " days instead of " + plan.freqBefore
-        : ", including one new movement so " + name + " is trained on " + plan.freqAfter +
-          " days instead of " + plan.freqBefore;
+    /* AND THE SAME REASON, IN THE SAME WORDS. This wrote its own account of the plan and
+       the fix sheet wrote another, and on a muscle that lives on one day this one came
+       out as "dealt across 1 day of your cycle rather than piled onto one" — a sentence
+       arguing with itself. spreadWhy() is the one explanation now, so the panel and the
+       sheet behind it say the same thing about the same plan. */
     return {mode:"spread", plan,
       label:"Add " + plan.gained + " set" + (plan.gained === 1 ? "" : "s"),
-      does:"Adds about " + plan.gained + " set" + (plan.gained === 1 ? "" : "s") + " of direct " + name +
-           " work, dealt across " + plan.daysTouched + " day" + (plan.daysTouched === 1 ? "" : "s") +
-           " of your cycle rather than piled onto one" + freqSay +
-           ". Fractions count: a set of a movement that is half " + name + " is half a set of it. " +
+      does:"Adds about " + plan.gained + " set" + (plan.gained === 1 ? "" : "s") + " of direct " +
+           name + " work. " + spreadWhy(plan, m, M) +
+           " Fractions count: a set of a movement that is half " + name + " is half a set of it. " +
            "This one sticks until you change it.",
       list: spreadList(plan)};
   }
