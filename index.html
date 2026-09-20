@@ -5525,7 +5525,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.1";
+const APP_VERSION = "25.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10743,9 +10743,20 @@ function spreadPlan(A, m, need, avoid, pin){
         }
         return;
       }
-      newExs.push({wid, name: pin.name, sets, frac: pf});
+      /* "new" is about the DAY. This movement is one of yours — it is on another day of
+         the same programme — and calling it new made the diff read as though the app had
+         invented an exercise for you. */
+      const owned = DAYS.some(d=> (S.program[d] || []).some(e=> nrm(e.name) === key));
+      newExs.push({wid, name: pin.name, sets, frac: pf, mine: owned});
       left -= sets * pf;
     });
+    /* A PIN IS AN INSTRUCTION, NOT A HINT. It used to be "your movement takes its share
+       first, the rest is spread around it", which meant asking for three sets a day and
+       getting four on one of them — the round-robin below topped up the very day you had
+       just specified. Two numbers, one of them quietly overriding the other. What you
+       pin is now exactly what is planned; spreading is what happens when you pin
+       nothing. */
+    left = 0;
   } else if(daysTrained.length < 2 && DAYS.length > 1){
     /* WHAT GOES ON THE SECOND DAY SHOULD BE SOMETHING YOU ALREADY DO.
 
@@ -23428,6 +23439,25 @@ let FIX = null;
 function spreadWhy(sp, m, M){
   if(!sp) return "";
   const mn = M.name.toLowerCase();
+  const Mn = mn.charAt(0).toUpperCase() + mn.slice(1);
+  /* A PLAN YOU DICTATED NEEDS NO JUSTIFYING, AND MUST NOT BE JUSTIFIED WRONGLY. Every
+     sentence below argues for a choice the app made — the lighter day first, evening two
+     days up — and none of them is true of a day you picked yourself. Asked to put two
+     more sets of bench on Upper A, it answered "which does 7 sets of chest against Upper
+     B's 3, that evens them up", which is the opposite of what adding to the heavier day
+     does. So when the movement and the days came from you, it says so and stops. */
+  if(sp.pinned){
+    const dn = Array.from(new Set((sp.adds || []).map(a=> a.wid)
+      .concat((sp.newExs || []).map(n=> n.wid)))).map(dayName);
+    let t = dn.length === 1
+      ? "All of it on " + dn[0] + ", the day you picked."
+      : "Split evenly across " + joinList(dn) + ", the days you picked.";
+    if(sp.freqAfter > sp.freqBefore){
+      t += " " + Mn + " goes from " + sp.freqBefore + " day" + (sp.freqBefore === 1 ? "" : "s") +
+           " a cycle to " + sp.freqAfter + ".";
+    }
+    return t;
+  }
   if(sp.freqAfter > sp.freqBefore){
     return mn.charAt(0).toUpperCase() + mn.slice(1) + " goes from " + sp.freqBefore + " day" +
       (sp.freqBefore === 1 ? "" : "s") + " a cycle to " + sp.freqAfter +
@@ -23655,47 +23685,51 @@ function openOwnFix(idx){
           <div class="sub" style="margin:6px 2px 0">Was ${from}.</div>`;
       }
     } else if(FIX.mode === "spread"){
-      /* THE SAME PLANNER THE APP'S OWN SUGGESTION USES, with the amount — and now the
-         movement and the days — in your hands. Left alone it decides everything; name a
-         movement and it puts that one on the days you pick and spreads the remainder
-         around it. Either way the readout underneath says what it does to the number. */
+      /* ONE NUMBER ON THE SCREEN AT A TIME.
+
+         This asked two questions that looked alike and were not: "how much work to add,
+         in total" — counted in sets OF THE MUSCLE, so a movement that is a third side abs
+         pays a third of a set — and, further down, "sets of it per day", counted in plain
+         sets of one exercise. Same stepper, same type, two different units, and the
+         second silently overrode the first: ask for 5 in total and 3 a day across two
+         days and what you got was neither.
+
+         So the movement is chosen first, and the question that follows depends on the
+         answer. Name a movement and you are telling the app exactly what to do — which
+         days, how many sets on each — and the total is the RESULT, printed underneath.
+         Leave it to Element 26 and the total is the only thing you set, because then the
+         movements and the days are its problem. Never both. */
       if(FIX.spread == null) FIX.spread = 3;
       if(FIX.spSets == null) FIX.spSets = 2;
       if(!Array.isArray(FIX.spDays)) FIX.spDays = [];
+      const mnl = M.name.toLowerCase();
       const pin = (FIX.spEx && FIX.spDays.length)
         ? {name: FIX.spEx, days: FIX.spDays.slice(), sets: FIX.spSets} : null;
-      const sp = spreadPlan(A, m, FIX.spread, w.avoid, pin);
+      const pinNeed = pin ? FIX.spDays.length * FIX.spSets * muscleFrac(FIX.spEx, m) : 0;
+      const sp = spreadPlan(A, m, pin ? Math.max(0.1, pinNeed) : FIX.spread, w.avoid, pin);
+      let noPlan = false;
       add = sp ? sp.gained : 0;
       ok = !!sp;
-      h += `<div class="k-lab">How much ${esc(M.name.toLowerCase())} work to add, in total</div>
-        ${stepRow("fxSpread", FIX.spread, 1, 10)}
-        <div class="set-says" style="margin-top:7px">Counted as sets of ${esc(M.name.toLowerCase())},
-          so a movement that is half ${esc(M.name.toLowerCase())} contributes half a set.${
-          pin ? " A movement you have pinned below takes its share of this first; the rest is spread around it." : ""}</div>`;
 
-      /* A MOVEMENT OF YOUR OWN, ON THE DAYS YOU PICK. The app's choice is the default and
-         it stays the default — "let it choose" is a real option, not an empty state — but
-         the moment you name one, the recommendation moves from WHAT to WHERE: every day
-         is scored on whether the movement belongs there, and the ones that fit are
-         marked. */
+      /* WHICH MOVEMENT COMES FIRST, because it decides what the rest of the panel asks. */
       const ents2 = planEntriesForMuscle(m);
       const cands2 = fixCandidates(m, ents2.map(x=> x.e.name), w.avoid).slice(0, 8);
       const chosen = FIX.spEx || "";
-      h += `<div class="k-lab" style="margin-top:16px">A movement of your own <i class="fx-opt">optional</i></div>
+      h += `<div class="k-lab">Which movement</div>
         <div class="fx-list">
           <button type="button" class="fx-c${chosen ? "" : " on"}" data-fxspex="">
             <b>Let Element 26 choose</b><span class="num">recommended</span></button>
-          ${/* Yours first here too. Naming one you already run is the common case — it is
-                what the app itself now reaches for — and spreadPlan's pin branch raises the
-                set count on a day that already runs it rather than filing a second copy,
-                so picking one of these is safe wherever you point it. */
+          ${/* Yours first. Naming one you already run is the common case — it is what the
+                app itself now reaches for — and spreadPlan's pin branch raises the set
+                count on a day that already runs it rather than filing a second copy, so
+                picking one of these is safe wherever you point it. */
             ents2.slice(0, 5).map(e=>
             `<button type="button" class="fx-c${nrm(e.e.name)===nrm(chosen)?" on":""}" data-fxspex="${esc(e.e.name)}">
-              <b>${esc(e.e.name)}</b><span class="fx-frac">${esc(fracWordsFor(e.frac, M.name.toLowerCase()))} \u00b7 in your plan</span></button>`).join("")}
+              <b>${esc(e.e.name)}</b><span class="fx-frac">${esc(fracWordsFor(e.frac, mnl))} · in your plan</span></button>`).join("")}
           ${cands2.map((c, ci)=>
             `<button type="button" class="fx-c${nrm(c.name)===nrm(chosen)?" on":""}" data-fxspex="${esc(c.name)}">
-              <b>${esc(c.name)}</b><span class="fx-frac">${esc(fracWordsFor(c.frac, M.name.toLowerCase()))}${
-                ci === 0 && (w.avoid||[]).length ? " \u00b7 best fit" : ""}</span></button>`).join("")}
+              <b>${esc(c.name)}</b><span class="fx-frac">${esc(fracWordsFor(c.frac, mnl))}${
+                ci === 0 && (w.avoid||[]).length ? " · best fit" : ""}</span></button>`).join("")}
         </div>
         <div class="field" style="margin:10px 0 4px"><label>Or type one</label>
           <input id="fxSpEx" placeholder="e.g. Chest Supported Row" autocomplete="off" value="${esc(chosen)}"></div>`;
@@ -23714,42 +23748,73 @@ function openOwnFix(idx){
         const best = Math.max(0.01, ...DAYS.map(kin));
         h += `<div class="k-lab" style="margin-top:14px">Which days</div>
           <div class="fx-days">${DAYS.map(d=>{
-            const fit = kin(d) / best;
-            const good = fit >= 0.5;
-            return `<button type="button" class="fx-d${FIX.spDays.indexOf(d) > -1 ? " on" : ""}${
-              good ? " fx-fits" : ""}" data-fxspday="${d}" aria-pressed="${FIX.spDays.indexOf(d) > -1}"
-              >${esc(dayName(d))}${FIX.spDays.indexOf(d) > -1 ? `<i>\u2713</i>`
-                : good ? `<i class="fx-fit-i">suits</i>` : ""}</button>`;
+            const good = kin(d) / best >= 0.5;
+            const on = FIX.spDays.indexOf(d) > -1;
+            return `<button type="button" class="fx-d${on ? " on" : ""}${good ? " fx-fits" : ""}"
+              data-fxspday="${d}" aria-pressed="${on}"
+              >${esc(dayName(d))}${on ? `<i>✓</i>` : good ? `<i class="fx-fit-i">suits</i>` : ""}</button>`;
           }).join("")}</div>
           <div class="set-says" style="margin-top:7px">${
+            /* THE CAPTION HAS TO SAY WHICH MARK IS WHICH. It used to name every day that
+               suits the movement — including the ticked ones — so a screen with two ticks
+               on it read "Legs A and Legs B are marked suits", which is not what was on
+               the screen. Ticked days and suggested-but-untaken days are now two
+               separate sentences, and a day can only be in one of them. */
             (()=> {
-              const marked = DAYS.filter(d=> kin(d) / best >= 0.5).map(dayName);
-              return marked.length
-                ? "Selected days are ticked. " + joinList(marked) + " already train what this "
-                  + "movement trains, so they are marked <i>suits</i> \u2014 tap any day to change it."
-                : "None of your days already train what this movement trains, so it will sit on its own wherever it goes.";
-            })()}</div>
-          <div class="k-lab" style="margin-top:14px">Sets of it per day</div>
-          ${stepRow("fxSpSets", FIX.spSets, 1, 6)}`;
-        if(!FIX.spDays.length){
-          h += `<div class="wd-none">Pick at least one day and it will be planned in. Until then the
-            spread below is Element 26's own.</div>`;
-        } else {
-          const pinned = FIX.spDays.length * FIX.spSets * muscleFrac(FIX.spEx, m);
-          if(pinned > FIX.spread + 0.01){
-            h += `<div class="sub" style="margin:8px 2px 0">That is ${r1(pinned)} sets of
-              ${esc(M.name.toLowerCase())} on its own, more than the ${FIX.spread} above — so the
-              total below is what you have pinned, and nothing extra is spread around it.</div>`;
-          }
+              const onNames = FIX.spDays.filter(d=> DAYS.indexOf(d) > -1).map(dayName);
+              const spare = DAYS.filter(d=> FIX.spDays.indexOf(d) < 0 && kin(d) / best >= 0.5).map(dayName);
+              const a1 = onNames.length
+                ? "Going on " + joinList(onNames) + ", ticked."
+                : "Nothing picked yet.";
+              const a2 = spare.length
+                ? " " + joinList(spare) + (spare.length === 1 ? " also suits" : " also suit")
+                  + " this movement — tap to add " + (spare.length === 1 ? "it" : "them") + "."
+                : onNames.length ? " Tap a day to change it." : " Tap the days you want it on.";
+              return a1 + a2;
+            })()}</div>`;
+        if(FIX.spDays.length && muscleFrac(FIX.spEx, m) <= 0){
+          /* A MOVEMENT THAT DOES NOT TRAIN THE MUSCLE CANNOT FIX THE MUSCLE, and the
+             arithmetic that follows says so in the ugliest possible way — "counts as 0
+             sets of chest — it is ." The other modes already refuse this case by name;
+             this one used to walk straight through it. */
+          ok = false; noPlan = true;
+          h += `<div class="wd-none">Element 26 doesn't have ${esc(FIX.spEx)} down as
+            ${esc(mnl)} work, so adding it here would not move the number. Pick one of the
+            movements above, or use <b>Add a new movement</b>.</div>`;
+        } else if(FIX.spDays.length){
+          h += `<div class="k-lab" style="margin-top:14px">Sets on each of those days</div>
+            ${stepRow("fxSpSets", FIX.spSets, 1, 6)}
+            <div class="set-says" style="margin-top:7px">${FIX.spDays.length * FIX.spSets} set${
+              FIX.spDays.length * FIX.spSets === 1 ? "" : "s"} of ${esc(FIX.spEx)} in all${
+              /* The conversion is only worth printing when there is one. A movement that is
+                 all of the muscle turns "2 sets" into "2 sets", and saying so twice makes a
+                 simple number look like arithmetic. */
+              muscleFrac(FIX.spEx, m) >= 0.995 ? "" :
+              `, which counts as <b>${r1(pinNeed)}</b> set${r1(pinNeed) === 1 ? "" : "s"} of ${
+                esc(mnl)} — it is ${esc(fracWordsFor(muscleFrac(FIX.spEx, m), mnl))}`
+            }. That is the whole change: naming a movement means the app plans that and nothing else.</div>`;
           const poor = FIX.spDays.filter(d=> kin(d) / best < 0.5).map(dayName);
           if(poor.length){
             h += `<div class="sub" style="margin:8px 2px 0;color:var(--acc)">${esc(joinList(poor))}
               ${poor.length === 1 ? "trains" : "train"} nothing this movement uses. It still counts
               toward the number — it is your plan — but it will be the odd exercise out in that session.</div>`;
           }
+        } else {
+          /* NO DAY MEANS NO PLAN. The panel used to fall back to Element 26's own spread
+             here, which is a plan built from a number that is no longer on the screen —
+             so the diff underneath described work on movements you had not asked for. */
+          ok = false; noPlan = true;
+          h += `<div class="wd-none">Pick at least one day and it will be planned in.</div>`;
         }
+      } else {
+        h += `<div class="k-lab" style="margin-top:16px">How much ${esc(mnl)} work to add</div>
+          ${stepRow("fxSpread", FIX.spread, 1, 10)}
+          <div class="set-says" style="margin-top:7px">Counted as sets of ${esc(mnl)}, so a movement
+            that is half ${esc(mnl)} contributes half a set. Element 26 picks the movements and the
+            days; name one above and you choose those yourself instead.</div>`;
       }
-      if(!sp){
+      if(noPlan){ add = 0; }
+      else if(!sp){
         h += `<div class="wd-none">${sp === null && planEntriesForMuscle(m).length === 0
           ? "Nothing in your plan trains " + esc(M.name.toLowerCase()) + " yet, so there is nowhere to spread it. Use <b>Add a movement</b>."
           : esc(M.name) + " is already at the top of what the app thinks you recover from, so there is no room to add anywhere."}</div>`;
@@ -23951,7 +24016,13 @@ function applyOwnFix(idx){
   } else if(FIX.mode === "spread"){
     const pin = (FIX.spEx && (FIX.spDays || []).length)
       ? {name: FIX.spEx, days: FIX.spDays.slice(), sets: FIX.spSets || 2} : null;
-    const sp = spreadPlan(A, m, FIX.spread || 3, w.avoid, pin);
+    /* THE SAME CALL THE PREVIEW MADE, ARGUMENT FOR ARGUMENT. This passed FIX.spread even
+       when a movement was pinned, while the panel above it passed the pinned amount — so
+       the plan you pressed the button on was not always the plan that got written. */
+    const need = pin
+      ? Math.max(0.1, (pin.days.length * pin.sets * muscleFrac(pin.name, m)))
+      : (FIX.spread || 3);
+    const sp = spreadPlan(A, m, need, w.avoid, pin);
     if(!sp) return;
     sp.adds.forEach(a=>{
       const e = (S.program[a.wid] || [])[a.i];
