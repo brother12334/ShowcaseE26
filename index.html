@@ -5525,7 +5525,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "24.9";
+const APP_VERSION = "25.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -19865,20 +19865,40 @@ function openPushSheet(then){
 
    Bodyweight rides along because this is the only moment in the day when the answer is
    comparable to yesterday's: same hour, same state, before anything has been eaten. */
-let MORN = null;              // {wokeAt, weight} while the sheet is open
+let MORN = null;              // {wokeAt, bedHm} while the sheet is open
 function openMorningSheet(pend){
-  MORN = {wokeAt: Date.now()};
+  MORN = {wokeAt: Date.now(), bedHm: ""};
   drawMorningSheet(pend || null, true);
 }
 function hhmm(ms){
   const t = new Date(ms);
   return String(t.getHours()).padStart(2,"0") + ":" + String(t.getMinutes()).padStart(2,"0");
 }
+/* A BEDTIME TYPED IN THE MORNING BELONGS TO LAST NIGHT.
+
+   Nobody starts the sleep clock every night, and a night with no bedtime is a night the
+   app can only count as missing. So when the clock wasn't running the morning sheet asks
+   for the one fact it lacks — and it asks for a clock face, not a date, because that is
+   how people hold the answer ("about half eleven").
+
+   Which day that clock face lands on is the app's problem, not yours: the same reading is
+   yesterday if it falls later than the time you got up. Re-derived from the stored text on
+   every draw, so correcting the wake time moves the bedtime with it rather than leaving a
+   stale pairing that says you slept minus twenty minutes. */
+function bedFromHm(hm, woke){
+  const mt = /^(\d{1,2}):(\d{2})$/.exec(hm || "");
+  if(!mt) return null;
+  const d = new Date(woke);
+  d.setHours(parseInt(mt[1],10), parseInt(mt[2],10), 0, 0);
+  if(d.getTime() >= woke) d.setDate(d.getDate() - 1);
+  return d.getTime();
+}
 function drawMorningSheet(pend, fresh){
   if(!MORN) return;
   const woke = MORN.wokeAt;
-  const hrs = pend ? (woke - pend.startedAt)/3600e3 : null;
-  const bad = hrs != null && hrs <= 0;
+  const bedAt = pend ? pend.startedAt : bedFromHm(MORN.bedHm, woke);
+  const hrs = bedAt ? (woke - bedAt)/3600e3 : null;
+  const bad = !!pend && hrs != null && hrs <= 0;
   showModal(`<div class="sl-sheet mn-sheet${fresh ? "" : " mn-still"}">
     <div class="sl-art" style="--d:0ms">${sunSVG()}</div>
     <div class="sl-t" style="--d:80ms">${esc(fmtClockShort(woke))}</div>
@@ -19889,13 +19909,22 @@ function drawMorningSheet(pend, fresh){
             ? `That's before you put the phone down at <b>${esc(fmtClockShort(pend.startedAt))}</b> — set a later time.`
             : `You put the phone down at <b>${esc(fmtClockShort(pend.startedAt))}</b>, so that's
                <b>${esc(fmtHours(hrs))}</b> of sleep.`)
-        : `Element 26 takes the first time you open the app as the time you got up. Change it if that's not right.`
+        : bedAt
+          ? `You went to sleep at <b>${esc(fmtClockShort(bedAt))}</b>, so that's
+             <b>${esc(fmtHours(hrs))}</b> of sleep.`
+          : `The sleep clock wasn't running last night, so Element 26 is taking the first time
+             you opened the app as the time you got up. Tell it when you went to sleep and it
+             can count the night.`
     }</div>
     <div class="mn-rows" style="--d:180ms">
       <div class="mn-row">
         <label for="mnWoke">Woke up at</label>
         <input type="time" class="timein" id="mnWoke" value="${esc(hhmm(woke))}">
       </div>
+      ${pend ? "" : `<div class="mn-row">
+        <label for="mnBed">Went to sleep at</label>
+        <input type="time" class="timein" id="mnBed" value="${esc(MORN.bedHm || "")}">
+      </div>`}
     </div>
     <button class="btn sl-go" id="mnSave" style="--d:260ms">${bad ? "Fix the time first" : "Save"}</button>
     <div class="ci-alt" style="--d:300ms">
@@ -19916,8 +19945,14 @@ function drawMorningSheet(pend, fresh){
     MORN.wokeAt = Math.min(d.getTime(), Date.now());
     drawMorningSheet(pend, false);
   };
+  const bIn = m.querySelector("#mnBed");
+  if(bIn) bIn.onchange = ()=>{
+    MORN.bedHm = bIn.value || "";
+    drawMorningSheet(pend, false);
+  };
   m.querySelector("#mnSave").onclick = ()=>{
-    const hours = pend ? (MORN.wokeAt - pend.startedAt)/3600e3 : null;
+    const bed = pend ? pend.startedAt : bedFromHm(MORN.bedHm, MORN.wokeAt);
+    const hours = bed ? (MORN.wokeAt - bed)/3600e3 : null;
     if(hours != null && hours <= 0){ toast("That's before you went to bed"); return; }
     const d = todayStr();
     const rec = (S.checkins[d] = S.checkins[d] || {});
@@ -19926,7 +19961,7 @@ function drawMorningSheet(pend, fresh){
        at — predictedWake() reads these measurements rather than guessing from a target. */
     rec.wokeAt = MORN.wokeAt;
     if(hours != null){
-      rec.bedAt = pend.startedAt;
+      rec.bedAt = bed;
       rec.sleep = String(Math.round(hours*10)/10);
     }
     if(!rec.sleep && !rec.energy && !rec.weight && !rec.wokeAt) delete S.checkins[d];
@@ -23412,6 +23447,19 @@ function spreadWhy(sp, m, M){
   }
   return "";
 }
+/* WHICH DAYS SUIT A MOVEMENT — one measure, used by the chips that show it and by the
+   pre-selection that acts on it, so the two can never disagree. */
+function suggestedDaysFor(name){
+  const fits = musclesFor(name) || {};
+  const kin = wid=> (S.program[wid] || []).reduce((t, e)=>{
+    const mm = musclesFor(e.name) || {};
+    let sh = 0;
+    Object.keys(fits).forEach(k=>{ if(mm[k]) sh += Math.min(fits[k], mm[k]); });
+    return t + sh * (parseInt(e.sets, 10) || 1);
+  }, 0);
+  const best = Math.max(0.01, ...DAYS.map(kin));
+  return DAYS.filter(d=> kin(d) / best >= 0.5);
+}
 function fracWords(f){
   if(!(f > 0)) return "";
   if(f >= 0.95) return "all of it";
@@ -23589,7 +23637,7 @@ function openOwnFix(idx){
         h += `<div class="k-lab">Which movement takes them</div>
           <div class="fx-list">${ents.map((e,i)=>
             `<button type="button" class="fx-c${i===FIX.pick?" on":""}" data-fxpick="${i}">
-              <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} sets · ${Math.round(e.frac*100)}%${
+              <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} sets · ${esc(fracWordsFor(e.frac, M.name.toLowerCase()))}${
                 i === 0 && ents.length > 1 ? " · best fit" : ""}</span></button>`).join("")}</div>
           <div class="k-lab" style="margin-top:12px">Sets on ${esc(x.e.name)}</div>
           ${stepRow("fxSetsOne", FIX.setsOne, 1, 8)}
@@ -23632,7 +23680,7 @@ function openOwnFix(idx){
                 so picking one of these is safe wherever you point it. */
             ents2.slice(0, 5).map(e=>
             `<button type="button" class="fx-c${nrm(e.e.name)===nrm(chosen)?" on":""}" data-fxspex="${esc(e.e.name)}">
-              <b>${esc(e.e.name)}</b><span class="num">${Math.round(e.frac*100)}% \u00b7 in your plan</span></button>`).join("")}
+              <b>${esc(e.e.name)}</b><span class="fx-frac">${esc(fracWordsFor(e.frac, M.name.toLowerCase()))} \u00b7 in your plan</span></button>`).join("")}
           ${cands2.map((c, ci)=>
             `<button type="button" class="fx-c${nrm(c.name)===nrm(chosen)?" on":""}" data-fxspex="${esc(c.name)}">
               <b>${esc(c.name)}</b><span class="fx-frac">${esc(fracWordsFor(c.frac, M.name.toLowerCase()))}${
@@ -23659,13 +23707,15 @@ function openOwnFix(idx){
             const good = fit >= 0.5;
             return `<button type="button" class="fx-d${FIX.spDays.indexOf(d) > -1 ? " on" : ""}${
               good ? " fx-fits" : ""}" data-fxspday="${d}" aria-pressed="${FIX.spDays.indexOf(d) > -1}"
-              >${esc(dayName(d))}${good ? `<i>✓</i>` : ""}</button>`;
+              >${esc(dayName(d))}${FIX.spDays.indexOf(d) > -1 ? `<i>\u2713</i>`
+                : good ? `<i class="fx-fit-i">suits</i>` : ""}</button>`;
           }).join("")}</div>
           <div class="set-says" style="margin-top:7px">${
             (()=> {
               const marked = DAYS.filter(d=> kin(d) / best >= 0.5).map(dayName);
               return marked.length
-                ? "Ticked days already train what this movement trains — " + joinList(marked) + "."
+                ? "Selected days are ticked. " + joinList(marked) + " already train what this "
+                  + "movement trains, so they are marked <i>suits</i> \u2014 tap any day to change it."
                 : "None of your days already train what this movement trains, so it will sit on its own wherever it goes.";
             })()}</div>
           <div class="k-lab" style="margin-top:14px">Sets of it per day</div>
@@ -23710,7 +23760,7 @@ function openOwnFix(idx){
         h += `<div class="k-lab">Take out</div>
           <div class="fx-list">${weakest.map((e,i)=>
             `<button type="button" class="fx-c${i===FIX.swapFrom?" on":""}" data-fxswf="${i}">
-              <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} sets · ${Math.round(e.frac*100)}%</span></button>`).join("")}</div>
+              <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} sets · ${esc(fracWordsFor(e.frac, M.name.toLowerCase()))}</span></button>`).join("")}</div>
           <div class="k-lab" style="margin-top:12px">Put in</div>
           ${cands.length
             ? `<div class="fx-list">${cands.slice(0,12).map(c=>
@@ -23788,7 +23838,12 @@ function openOwnFix(idx){
     m2.querySelectorAll("[data-fxswt]").forEach(b=> b.onclick = ()=>{ FIX.swapTo = b.dataset.fxswt; redraw(); });
     m2.querySelectorAll("[data-fxspex]").forEach(b=> b.onclick = ()=>{
       FIX.spEx = b.dataset.fxspex || "";
-      if(!FIX.spEx) FIX.spDays = [];
+      /* PICKING A MOVEMENT PICKS ITS DAYS. Without this the pin needs a day before it
+         counts, so choosing "Captain's Chair Leg Raise" and stopping there left the plan
+         below showing a Cable Woodchop — a different movement from the one highlighted on
+         the screen, which reads as the sheet ignoring you. The days that suit it are
+         selected, and they are yours to change. */
+      FIX.spDays = FIX.spEx ? suggestedDaysFor(FIX.spEx) : [];
       redraw();
     });
     m2.querySelectorAll("[data-fxspday]").forEach(b=> b.onclick = ()=>{
@@ -23799,7 +23854,13 @@ function openOwnFix(idx){
     const spx = m2.querySelector("#fxSpEx");
     if(spx){
       spx.oninput = ()=>{ FIX.spEx = spx.value.trim(); };
-      spx.onchange = ()=>{ FIX.spEx = spx.value.trim(); redraw(); };
+      spx.onchange = ()=>{
+        const was = FIX.spEx;
+        FIX.spEx = spx.value.trim();
+        if(FIX.spEx && nrm(FIX.spEx) !== nrm(was)) FIX.spDays = suggestedDaysFor(FIX.spEx);
+        if(!FIX.spEx) FIX.spDays = [];
+        redraw();
+      };
     }
     const ex = m2.querySelector("#fxEx");
     if(ex) ex.oninput = ()=>{ FIX.ex = ex.value.trim(); };
