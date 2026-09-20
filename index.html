@@ -5543,7 +5543,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.7";
+const APP_VERSION = "25.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10120,8 +10120,13 @@ const EX_NOTE_KINDS = [
      same and the numbers are not comparable, so a drop against last week is not a drop.
      It holds, like the other "this session is not evidence" notes, rather than merely
      being recorded. */
+  /* AND IT IS THE ONE NOTE THAT USUALLY OUTLIVES THE SESSION. "Wider grip", "chair on
+     6", "pause at the bottom" is not a report about today — it is how you run this
+     movement from now on, and it belongs on the plan's own line so it is in front of you
+     next time instead of in a log you would have to go looking for. `toPlan` is what
+     makes the sheet offer that; see offerPlanNote(). */
   {code:"variation", weight:"hold",  label:"Different form or technique", icon:ICON.swap,
-   grade:"you ran it with a different form or technique"},
+   toPlan:true, grade:"you ran it with a different form or technique"},
   /* RETIRED, NOT DELETED. "Felt good, nothing to report" was a button for saying nothing,
      which is what closing the sheet already does — and it took a slot in a six-item grid
      from notes that change how a session reads. It stays resolvable so notes already
@@ -21721,6 +21726,72 @@ function noteWords(o){
   if(o.unote && o.unote !== joined) bits.push(o.unote);
   return bits.join(" \u2014 ");
 }
+/* =====================================================================
+   A NOTE THAT OUTLIVES THE SESSION
+
+   "Different form or technique" is the one chip whose words are almost never about
+   today. Wider grip, chair on 6, paused at the bottom — that is how you run the
+   movement now, and written only into the session log it is gone the moment you close
+   the app: next week the card says what it always said and you have to remember the
+   change yourself.
+
+   So when that chip is picked AND there is something written to carry, the sheet asks
+   once whether it belongs on the plan. Asked, not assumed: the plan's note is the line
+   under the movement's name every time it comes up, and quietly editing somebody's
+   programme because they typed a sentence about one set would be the app deciding what
+   their plan says. Declining costs nothing — the note is already saved either way.
+
+   It appends rather than replaces, because the line it is joining is usually a coaching
+   cue from the plan itself and losing that to a setting number would be a bad trade. */
+function programEntryWithDay(name){
+  const k = nrm(name);
+  const lists = DAYS.map(d=> ({wid:d, list: S.program[d] || []}))
+    .concat([{wid:"finisher", list: S.program.finisher || []}]);
+  for(const L of lists){ for(const e of L.list){ if(nrm(e.name) === k) return {e, wid: L.wid}; } }
+  for(const L of lists){
+    for(const e of L.list){ if(e && e.alt && nrm(e.alt.name) === k) return {e: e.alt, wid: L.wid}; }
+  }
+  return null;
+}
+function planNoteWouldRead(cur, txt){
+  const now = String(cur || "").trim();
+  if(!now) return txt;
+  /* One sentence per line, so a cue and a setting do not run together into something
+     that reads as one instruction — and the joined half gets a capital, because
+     "no bounce. wider grip" reads as a typo in somebody's own plan. */
+  return now.replace(/[.\s]*$/, "") + ". " + nmUp(txt);
+}
+function offerPlanNote(exName, txt){
+  const t = String(txt || "").trim();
+  if(!t) return;
+  const pe = programEntryWithDay(exName);
+  if(!pe || !pe.e) return;
+  const cur = String(pe.e.note || "");
+  /* Already there, in whatever form. Asking again about a line the plan already carries
+     is the app failing to read its own programme. */
+  if(cur.toLowerCase().indexOf(t.toLowerCase()) > -1) return;
+  const after = planNoteWouldRead(cur, t);
+  showModal(`<h3>Keep this on the plan?</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">${
+      cur ? "It would be added to the line already under " + esc(exName) + "."
+          : "It would become the line under " + esc(exName) + ", every time it comes up."}</div>
+    <div class="ex-note" style="margin:0 0 14px">${esc(after)}</div>
+    <div class="sub" style="margin:0 0 14px;text-transform:none;letter-spacing:0">Your note on
+      this session is saved either way. This is only about whether the plan should say it
+      too, next week and the week after.</div>
+    <button class="btn" id="pnYes">Add it to the plan</button>
+    <button class="btn ghost small" id="pnNo" style="margin-top:9px">Just this session</button>`);
+  const m = $("#modal");
+  m.querySelector("#pnNo").onclick = ()=> hideModal();
+  m.querySelector("#pnYes").onclick = ()=>{
+    const before = Object.assign({}, pe.e);
+    pe.e.note = after;
+    logPlanChange("edit", pe.wid, pe.e.name, planDiff(before, pe.e),
+      {note: "Written from a session note about form or technique."});
+    save(); queueSync(); hideModal(); render();
+    toast("On the plan now \u2014 " + esc(exName), "good");
+  };
+}
 function exNoteLineHTML(en){
   if(!en) return "";
   let h = "";
@@ -21890,6 +21961,13 @@ function openExNote(ei, si){
             ? " — the same note came off " + absorbed + " set" + (absorbed === 1 ? "" : "s") : "")
         : nk + " on set" + (SC.length === 1 ? " " + (SC[0] + 1)
             : "s " + SC.map(x=> x + 1).join(", ")));
+      /* AND THEN THE ONE QUESTION THIS SHEET CANNOT ANSWER FOR YOU. Only for the chips
+         marked toPlan, only when there are words to carry — "Different form or
+         technique" on its own tells a plan nothing — and only after the note itself is
+         safely written, so declining is free. See offerPlanNote(). */
+      if(txt && picks.some(c=> EX_NOTE_BY_CODE[c] && EX_NOTE_BY_CODE[c].toPlan)){
+        offerPlanNote(en.name, txt);
+      }
     };
     const cl = m.querySelector("#exNoteClear");
     if(cl) cl.onclick = ()=>{
