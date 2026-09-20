@@ -5543,7 +5543,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "26.0";
+const APP_VERSION = "26.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13700,8 +13700,14 @@ function weakPoints(A){
           ? "Add "+gName(rm.lag).toLowerCase()+" work that misses "+joinList(rm.tight.map(x=>gName(x).toLowerCase()))+" — those are full, "+gName(rm.lag).toLowerCase()+" is not."
           : act,
         detail,
+        /* OVER A FULL CYCLE, AND IT HAS TO SAY SO. These two numbers come from
+           planCycleVolume() and the cycle landmarks, and they are printed on a card whose
+           bar counts the last seven days against thresholds scaled to match — so "12 of
+           a 13.7 ceiling" sat directly under a bar reading 10 against 12 and 13 and
+           looked like the app contradicting itself. Same muscle, different window, and
+           only one of them was labelled. */
         why + " " + nmUp(gName(rm.lag)) + " is at " + r1(rm.lagHave) + " of a " + r1(rm.lagCap) +
-        " productive ceiling, so there is room for more of it without taking anything away from what you already do.",
+        " productive ceiling across a full cycle, so there is room for more of it without taking anything away from what you already do.",
         rm.sideFull ? {avoid: rm.tight.slice()} : null);
     };
     if(ratio > R.hi){
@@ -24468,6 +24474,20 @@ function openWeakPoint(idx){
   h += `<div class="rev-head">Why this matters</div>
     <div class="bm-explain">${esc(w.detail)}</div>`;
 
+  /* ACTED ON, AND THE NUMBER HAS NOT CAUGHT UP YET. Said before the buttons, because the
+     first question somebody who already pressed one has is "why is this still here". */
+  const acted = planFixesFor(g);
+  if(acted.length){
+    h += `<div class="wd-apply">
+      <div class="wd-apply-k">You have already changed the plan</div>
+      <div class="wd-diff">${acted.slice(0, 3).map(c=>
+        `<div>${esc(planFixLine(c))}</div>`).join("")}</div>
+      <p>This reading counts sets you have <b>logged</b>, ${esc(A.win.short)}, so a change
+        to the plan does not move it until you have trained it. Run the days that carry
+        the new work and it falls away on its own.</p>
+    </div>`;
+  }
+
   /* THE FINDING, CARRIED OUT. Shown before the buttons because it is the answer to the
      question the whole panel is asking, and shown as a list of exact before-and-afters
      because an app that edits your training plan owes you the diff first. */
@@ -31188,6 +31208,56 @@ function planChangesFor(exName, fromAt, toAt){
     if(!(c.at > fromAt && c.at <= toAt)) return false;
     return nrm(c.name) === k || (c.prevName && nrm(c.prevName) === k);
   });
+}
+/* =====================================================================
+   WHAT YOU ALREADY DID ABOUT A FINDING
+
+   Every finding on the Body tab is measured on what you have LOGGED. That is the right
+   input — a plan is a promise and a log is a fact — but it leaves the card silent about
+   the one thing a person is most likely to have just done: acted on it. Add the quad work
+   the card asked for, reopen the card, and it says exactly what it said before, because
+   nothing has been trained yet. Nothing is broken and it reads as broken, which is worse
+   than a bug: it teaches people the findings do not respond.
+
+   So the card names the change and says why the number has not moved. It reads the plan
+   log rather than guessing, and only counts entries that actually ADDED work — a
+   rep-range edit or a weight correction on the same movement is not acting on a volume
+   shortfall and must not be dressed up as one. */
+const FIX_ACK_DAYS = 21;
+function planChangeAddedWork(c){
+  if(!c) return false;
+  if(c.kind === "add") return true;
+  // every Body-tab fix is a volume change by construction
+  if(c.kind === "programme") return true;
+  if(c.kind === "edit"){
+    return (c.changes || []).some(d=> d && d.key === "sets" &&
+      parseFloat(d.to) > parseFloat(d.from));
+  }
+  return false;
+}
+function planFixesFor(m){
+  const M = MUSCLES[m];
+  if(!M) return [];
+  const from = Date.now() - FIX_ACK_DAYS * DAY_MS;
+  const mn = nrm(M.name);
+  return (S.planLog || []).filter(c=>{
+    if(!c || !(c.at > from) || !planChangeAddedWork(c)) return false;
+    /* Two ways a change belongs to this muscle: the Body tab files its fixes under the
+       muscle's own name, and an edit to a single movement is filed under the movement,
+       so that one is matched by what the movement trains. */
+    if(nrm(c.name || "") === mn) return true;
+    return muscleFrac(c.name || "", m) > 0;
+  }).sort((a,b)=> b.at - a.at);
+}
+function planFixLine(c){
+  const ch = (c.changes || [])[0];
+  const txt = typeof ch === "string" ? ch
+            /* The field's own word, or "3 → 4" is a diff of nothing in particular. */
+            : (ch && ch.from != null) ? (c.name + ": " + ch.from + " → " + ch.to +
+                                         (ch.field ? " " + ch.field : ""))
+            : c.name;
+  const more = Math.max(0, (c.changes || []).length - 1);
+  return fmtDate(c.date) + " · " + txt + (more ? " (and " + more + " more)" : "");
 }
 // Did the prescription itself move, as opposed to a note or an RPE target?
 function prescriptionMoved(changes){
