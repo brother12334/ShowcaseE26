@@ -5543,7 +5543,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.9";
+const APP_VERSION = "26.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -19378,8 +19378,29 @@ function cycleAnchorDate(){
   const inCycle = S.sessions
     .filter(x=>x.startedAt >= S.cycleStart && DAYS.indexOf(x.workoutId) > -1)
     .sort((a,b)=>a.startedAt - b.startedAt);
+  // A cycle with a session in it is a RECORD: slot 0 happened, and it happened then.
   if(inCycle.length) return new Date(inCycle[0].startedAt);
-  return new Date(S.cycleStart);
+  /* WITH NOTHING LOGGED YET IT IS A FORECAST, AND A FORECAST MUST NOT START ON A DAY
+     THAT IS ALREADY SPOKEN FOR.
+
+     S.cycleStart is the moment the cycle opened, which is usually the moment the last
+     one closed — the evening of a session. Counting slot 0 from there put Push A on the
+     day you had just finished training, and every plate after it a day early, directly
+     under a card reading "your rest lands tomorrow, after that the rotation picks up
+     with Push A". Three surfaces, three different answers to "when is Push A".
+
+     So the first training slot lands on the first day nothing else has a claim on: not
+     today if today already has a session in it, and not tomorrow if tomorrow is the rest
+     the cycle still owes you. And never in the past — a cycle opened three days ago and
+     not started yet is a forecast about this week, not a record of last. */
+  const d = new Date(S.cycleStart);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if(d.getTime() < today.getTime()) d.setTime(today.getTime());
+  let skip = 0;
+  if((S.sessions || []).some(x=> x && x.date === todayStr())) skip++;
+  if(restDueNotToday()) skip++;      // implies a session today, so this lands on +2
+  d.setDate(d.getDate() + skip);
+  return d;
 }
 // Projected weekday for a slot, counting forward from the anchor.
 function slotWeekday(slotIndex){
@@ -19474,6 +19495,11 @@ function plateStrip(){
      isRestToday() already answers the actual question: a rest recorded today, or one the
      schedule puts here on a day you have not trained through or opted out of. */
   const restNow = isRestToday();
+  /* AND A REST OWED FOR TOMORROW IS STILL WHERE YOU ARE IN THE CYCLE. The highlight sat
+     on the training plate whenever today was not itself a rest, so a strip under the
+     words "that's the cycle done, take your rest day" put its one marker on Push A. The
+     next thing is the rest; the plate that says so should be the one carrying the mark. */
+  const restNext = restDueNotToday();
   let html = '<div class="plates-wrap"><div class="plates">';
   let restSeen = 0;
   CYCLE_LAYOUT.forEach((key, slot)=>{
@@ -19499,18 +19525,26 @@ function plateStrip(){
       const resting = !!date || (due && scheduledRestToday());
       // Due at its position, but today only if today is genuinely being spent on it.
       const isToday = date === todayStr() || (due && restNow);
+      // Where the cycle is, which includes a rest that is owed for tomorrow.
+      const isCur = isToday || (due && restNext);
       /* DUE IS NOT TODAY. `due` means this is the next rest owed; it says nothing about
          when. Train on the day it falls and it is owed TOMORROW — and the plate still
          printed "today" on it, directly under a card reading "your rest lands tomorrow".
          Only a rest that is genuinely being spent now says today. */
-      html += `<button class="plate rest${isToday?" cur":""}${resting?" done":""}${fixed&&!due?" past":""}"
+      html += `<button class="plate rest${isCur?" cur":""}${resting?" done":""}${fixed&&!due?" past":""}"
         data-rest="${idx}" data-restsched="${fixed ? layoutRestSlot[idx] : -1}"
-        aria-label="Rest ${idx+1} of ${REST_CREDITS}, ${wd}${
+        aria-label="Rest ${idx+1} of ${REST_CREDITS}${
+          /* The weekday this plate SITS on is not where it is being spent, and on the
+             one plate that says "due tomorrow" printing both was a contradiction read
+             aloud. */
+          (due && restNext) ? "" : ", " + wd}${
           date ? ", taken " + date
                : isToday ? ", today"
                : due ? (restDueNotToday() ? ", due tomorrow" : ", due next")
                : fixed ? ", scheduled" : ", available"}"
-        >${esc(fixed && !date ? (isToday ? "today" : wd) : wd)}${
+        >${esc(fixed && !date
+            ? (isToday ? "today" : (due && restNext) ? "tmrw" : wd)
+            : wd)}${
         resting?'<span class="pcheck">'+ICON.check+'</span>':""}</button>`;
       return;
     }
@@ -19522,7 +19556,7 @@ function plateStrip(){
        than as something you can jump back onto. See slotIsPast(). */
     const past = slotIsPast(i);
     const locked = slotIsLocked(i);
-    const cls = "plate" + (i===cur && !restNow ?" cur":"") + (done?" done":"")
+    const cls = "plate" + (i===cur && !restNow && !restNext ?" cur":"") + (done?" done":"")
               + (past?" past":"") + (locked?" locked":"");
     /* aria-disabled, not disabled: a past plate still has to take the tap so it can say
        WHY nothing happened. A hard-disabled button swallows the tap silently, and
