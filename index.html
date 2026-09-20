@@ -4523,6 +4523,18 @@ body.cele-open{overflow:hidden}
 .nb-w-t{font-size:14px;line-height:1.4;overflow-wrap:anywhere}
 .nb-w-s{font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
 .nb-w-c{color:var(--faint);font-size:18px;flex-shrink:0}
+/* PUT DOWN FOR NOW. The same row, deliberately quieter than the live ones: no severity
+   dot, dimmed text and a dashed edge, so the list of things you have set aside cannot be
+   mistaken at a glance for the list of things to do. */
+.nb-quiet{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.nb-q{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:transparent;
+  border:1px dashed var(--line);border-radius:12px;padding:11px 13px;color:var(--dim);font:inherit;
+  cursor:pointer;transition:border-color .16s ease,color .16s ease}
+.nb-q:hover,.nb-q:focus-visible{border-color:var(--acc);color:var(--text)}
+.nb-q-b{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 0}
+.nb-q-t{font-size:13.5px;line-height:1.4;overflow-wrap:anywhere}
+.nb-q-s{font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.nb-q-c{font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--acc);flex-shrink:0}
 
 /* 6. training load, as sentences */
 .nb-load{display:flex;flex-direction:column}
@@ -5525,7 +5537,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.3";
+const APP_VERSION = "25.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10541,6 +10553,63 @@ function declinedMap(){
   return S.declined;
 }
 function isDeclined(g){ return !!declinedMap()[g]; }
+/* =====================================================================
+   NOT NOW: A FINDING THAT IS RIGHT BUT NOT YET WORTH READING AGAIN
+
+   "Worth a look" ranks everything it finds, so the bottom of the list is always things
+   that are true and small — a muscle a set and a half under its floor, an optional group
+   you have not got round to. Told the same thing every time you open the tab, you stop
+   reading the tab. The existing answer was "Not for me", which is permanent and only
+   offered on the optional groups; there was nothing between "act on this now" and
+   "never mention it again".
+
+   So any finding can be put down until it MATTERS, and this is what that word means
+   here. Three ways back, whichever comes first:
+
+     1. IT GETS WORSE. Every finding carries a 0-100 urgency score and a band derived
+        from it — minor, worth doing, worth doing soon. Quieting one records the band it
+        was in. It returns the moment Element 26 puts it in a higher one. That is the
+        app's own idea of importance, not a second one invented for this feature, so the
+        line on the card can promise something the rest of the app already means.
+     2. TIME RUNS OUT. QUIET_DAYS is one training block. Nothing gets to stay quiet
+        forever on the strength of one tap months ago, however little has changed — "not
+        now" is not "never", and the one feature that could turn this app into something
+        that never tells you anything is this one.
+     3. YOU UNDO IT. Quieted findings are listed under the section they were hidden from,
+        with a count, so the thing you switched off is never something you cannot find.
+
+   Keyed by muscle AND kind: putting down "side abs is short of its floor" must not also
+   silence "side abs has stalled", which is a different claim about the same muscle. */
+const QUIET_DAYS = 56;
+function quietMap(){
+  if(!S.quiet || typeof S.quiet !== "object") S.quiet = {};
+  return S.quiet;
+}
+function quietKey(w){ return w.muscle + "|" + (w.kind || "?"); }
+/* PURE. Called from inside bodyAnalysis(), which runs on every render — an expiry that
+   deleted the record here would be a write on the render path, and a record that expired
+   during a redraw would take the undo list with it. An expired entry simply stops
+   hiding anything; quietClean() removes it when the Body tab is next drawn. */
+function isQuiet(w){
+  const r = quietMap()[quietKey(w)];
+  if(!r) return false;
+  if(Date.now() - (r.at || 0) >= QUIET_DAYS * DAY_MS) return false;   // its block is up
+  return (w.sev || 1) <= (r.band || 1);                               // no worse than when put down
+}
+/* Entries whose block has run out, cleared once, off the render path. */
+function quietClean(){
+  const q = quietMap();
+  let n = 0;
+  Object.keys(q).forEach(k=>{
+    if(Date.now() - (q[k].at || 0) >= QUIET_DAYS * DAY_MS){ delete q[k]; n++; }
+  });
+  if(n) saveQuiet();
+  return n;
+}
+function quietDaysLeft(r){
+  return Math.max(0, Math.ceil((QUIET_DAYS * DAY_MS - (Date.now() - (r.at || 0))) / DAY_MS));
+}
+const SEV_WORD = {1:"minor", 2:"worth doing", 3:"worth doing soon"};
 /* WHAT YOU ARE TURNING DOWN. Written per group rather than generically, because "this
    muscle is important too" is exactly the sentence people have learned to ignore. Each
    one is the specific reason this particular group is worth the four minutes. */
@@ -13562,10 +13631,18 @@ function weakPoints(A){
   // Most urgent first. One entry per muscle keeps the list readable, and the
   // highest-scoring finding for a muscle is the one worth acting on first anyway.
   const seen = new Set();
-  return out.sort((a,b)=>b.score-a.score).filter(w=>{
+  const ranked = out.sort((a,b)=>b.score-a.score).filter(w=>{
     if(seen.has(w.muscle)) return false;
     seen.add(w.muscle); return true;
   }).slice(0, 7);
+  /* PUT DOWN, NOT THROWN AWAY. The quieted ones ride along on the list they were taken
+     off so the Body tab can show a count and give them back — see isQuiet(). Splitting
+     here rather than earlier keeps the ranking, the one-per-muscle rule and the cut at
+     seven working on the findings as they actually are, so quieting one never promotes
+     something that would otherwise have missed the list. */
+  const vis = ranked.filter(w=> !isQuiet(w));
+  vis.quiet = ranked.filter(w=> isQuiet(w));
+  return vis;
 }
 
 /* ================= RENDER ================= */
@@ -23014,6 +23091,11 @@ function viewBody(){
       <button class="btn" data-goto="today">Start your first workout</button>
     </div>`;
   }
+  /* Once per draw of this tab, off the analysis path: a finding whose quiet block has run
+     out stops being hidden by isQuiet() on its own, and this is where the spent record is
+     swept up so the undo list below does not fill with entries that no longer do
+     anything. */
+  quietClean();
   const A = bodyAnalysis();
   const win = A.win;
   const cyc = A.cyc;
@@ -23104,6 +23186,26 @@ function viewBody(){
     </button>`).join("");
     if(A.weak.length > 3){
       h += `<button class="nb-link" data-sec="wpall">${BODY_OPEN.wpall?"Show fewer":"Show "+(A.weak.length-3)+" more"}</button>`;
+    }
+  }
+  /* WHAT YOU PUT DOWN, AND HOW TO PICK IT BACK UP. A quieted finding that cannot be
+     found again is not quiet, it is lost — so it is listed here, under the section it
+     came off, with the days left on it. Shown whether or not anything else is in the
+     list, because "nothing needs fixing" above three hidden lines would be a lie. */
+  const hushed = enoughWP ? ((A.weak.quiet || []).slice()) : [];
+  if(hushed.length){
+    h += `<button class="nb-link" data-sec="wpquiet">${
+      BODY_OPEN.wpquiet ? "Hide" : "Show"} ${hushed.length} put down for now</button>`;
+    if(BODY_OPEN.wpquiet){
+      h += `<div class="nb-quiet">${hushed.map(w=>{
+        const r = quietMap()[quietKey(w)] || {};
+        const left = quietDaysLeft(r);
+        return `<button class="nb-q" data-unquiet="${esc(quietKey(w))}">
+          <span class="nb-q-b"><span class="nb-q-t">${esc(w.act)}</span>
+            <span class="nb-q-s">${esc(gName(w.muscle))} · quiet for ${left} more day${
+              left === 1 ? "" : "s"}, or sooner if it gets worse</span></span>
+          <span class="nb-q-c">Bring back</span></button>`;
+      }).join("")}</div>`;
     }
   }
   h += `</div>`;
@@ -24206,6 +24308,26 @@ function openWeakPoint(idx){
      re-deriving it, so the button and the finding can never disagree about which ones are
      declinable. It does not delete anything: the group goes on being tracked, drawn and
      trainable, it just stops opening the findings list. */
+  /* NOT NOW. Offered on every finding, because "this is true and I am not doing anything
+     about it this month" is an honest answer to any of them, and the alternative people
+     actually use is ignoring the whole section. The card says exactly what brings it
+     back before you press it @@ a mute with undisclosed terms is a mute you stop
+     trusting. See isQuiet(). */
+  {
+    const band = w.sev || 1;
+    const backWhen = band >= 3
+      ? "There is nothing above <b>worth doing soon</b>, so this one stays down for the "
+        + QUIET_DAYS + " days and then says itself once more."
+      : "It comes back the moment Element 26 moves it past <b>" + esc(SEV_WORD[band]) +
+        "</b>, and in any case after " + QUIET_DAYS + " days.";
+    h += `<div class="wd-apply wd-own">
+      <div class="wd-apply-k">Not now?</div>
+      <p>Put this finding down until it matters more. ${backWhen} ${esc(gName(g))} carries on
+        being tracked, drawn and trained exactly as it is — this hides one line, nothing else.</p>
+      <button class="btn ghost small" id="wdQuiet">Don't flag this until it's important</button>
+    </div>`;
+  }
+
   const canDecline = !!w.optional;
   if(canDecline){
     h += `<div class="wd-apply wd-own">
@@ -24225,6 +24347,12 @@ function openWeakPoint(idx){
   MODAL_REOPEN = ()=> openWeakPoint(idx);
   const dc = $("#modal").querySelector("#wdDecline");
   if(dc) dc.onclick = ()=> openDeclineCase(g, idx);
+  const qb = $("#modal").querySelector("#wdQuiet");
+  if(qb) qb.onclick = ()=>{
+    quietMap()[quietKey(w)] = {band: w.sev || 1, score: w.score, at: Date.now(), act: w.act};
+    save(); queueSync(); hideModal(); render();
+    toast("Quiet until it matters — it is under Worth a look if you want it back");
+  };
   const ap = $("#modal").querySelector("#wdApply");
   if(ap) ap.onclick = ()=> applyFinding(idx);
   const ow = $("#modal").querySelector("#wdOwn");
@@ -29537,6 +29665,11 @@ function bind(){
   });
   // a "What to fix" row: show the exercises and numbers the finding came from
   document.querySelectorAll("#app [data-wp]").forEach(b=> b.onclick=()=> openWeakPoint(parseInt(b.dataset.wp,10)));
+  document.querySelectorAll("#app [data-unquiet]").forEach(b=> b.onclick=()=>{
+    delete quietMap()[b.dataset.unquiet];
+    save(); queueSync(); render();
+    toast("Back in the list");
+  });
   /* The asymmetry rule, switched from the section that shows its state. Writing the
      same preference the Settings segment writes, rather than a second flag that could
      drift out of step with it. */
@@ -37149,7 +37282,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","declined","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
