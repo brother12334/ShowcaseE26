@@ -5537,7 +5537,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.4";
+const APP_VERSION = "25.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7201,14 +7201,45 @@ function hasTech(e, k){ return techList(e).some(t=> t.k === k); }
    is. Called with total 0 (an exercise with no declared set count) it treats every set as
    the last, which is the honest reading of "finish with a drop set" when the app cannot
    tell you how many sets there are. */
+/* ONE SET OF PARTIALS, ADDED WHERE YOU ARE STANDING.
+
+   A plan can say "run this whole movement as lengthened partials", and the swap sheet can
+   turn that on mid-session. Neither answers the thing people actually do at the rack: the
+   last full set is done, there is something left in the tank, and what is left is the
+   bottom half of the range. That is ONE extra set, at the stretch, on top of what the plan
+   asked for — not a different prescription for the movement.
+
+   So it is marked on the SET rather than on the exercise. `e.sets` is a count in a plan
+   entry and an array of logged sets in a live one, which is why the array check comes
+   first: the same functions read both. The flag rides along inside the set object, so it
+   is written into the session with everything else and the grade months later still knows
+   those reps were partials. */
+function setFlagLP(e, idx){
+  return !!(e && Array.isArray(e.sets) && e.sets[idx] && e.sets[idx].lp);
+}
+/* Hidden when the whole movement is already running as partials — every set is one
+   then, and a button offering to add "a partials set" to a partials exercise is offering
+   nothing. The toast names where the stretch is on THIS lift, because it is the bottom of
+   a curl and the top of a pulldown. */
+function lpAddBtnHTML(en, ei){
+  if(!en || lpWholeExercise(en)) return "";
+  return `<button class="btn ghost small" data-addlp="${ei}"
+    title="Adds one set at the end, run through the stretched part of the range only">+ partials set</button>`;
+}
 function techFor(e, idx, total){
-  return techList(e).filter(t=>{
+  const out = techList(e).filter(t=>{
     const T = TECHNIQUES[t.k];
     // a technique the plan applies to the WHOLE exercise beats its own default scope
     if(t.all) return true;
     if(T.applies === "all") return true;
     return !total || idx === total - 1;
   });
+  /* Added rather than replacing, and only when the exercise is not already carrying it:
+     a set marked by hand on a movement whose last set is prescribed as partials anyway is
+     the same instruction twice, and two badges saying "partials" is the bug not the
+     feature. */
+  if(setFlagLP(e, idx) && !out.some(t=> t.k === "lengthened")) out.push({k:"lengthened", set:true});
+  return out;
 }
 function techSub(e, idx, total){
   return techFor(e, idx, total).find(t=> TECHNIQUES[t.k].sub) || null;
@@ -21136,9 +21167,10 @@ function viewActiveSession(){
     h += setLabelsHTML();
     en.sets.forEach((st,si)=>{ h += setRowHTML(en, ei, si, last); });
     h += rebuildLineHTML(en);
-    h += `<div style="display:flex;gap:8px;margin-top:4px">
+    h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
       <button class="btn ghost small" data-addset="${ei}">+ set</button>
       <button class="btn ghost small" data-rmset="${ei}">− set</button>
+      ${lpAddBtnHTML(en, ei)}
     </div></div>`;
   }
 
@@ -21377,7 +21409,7 @@ function setGovernor(entry, si){
      a rep range written for full ones marks you up for doing less. Stamped like every
      other rule that deliberately changes what a set is, so the session it happened in
      keeps the reading it was performed under. */
-  if(lpWholeExercise(entry)) return "lp";
+  if(lpWholeExercise(entry) || setFlagLP(entry, si)) return "lp";
   const rx = setPrescription(entry, si);
   if(rx && rx.match != null) return "weaker";
   if(deloadActive()) return "deload";
@@ -22004,9 +22036,10 @@ function viewFocusSession(){
   if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
   h += setLabelsHTML();
   en.sets.forEach((st,si)=>{ h += setRowHTML(en, ei, si, last); });
-  h += `<div style="display:flex;gap:8px;margin-top:4px">
+  h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
     <button class="btn ghost small" data-addset="${ei}">+ set</button>
     <button class="btn ghost small" data-rmset="${ei}">− set</button>
+    ${lpAddBtnHTML(en, ei)}
   </div></div>`;
   if(atEnd){
     h += `<div class="card">
@@ -28884,6 +28917,16 @@ function bind(){
   document.querySelectorAll("[data-addset]").forEach(b=> b.onclick=()=>{
     S.active.entries[b.dataset.addset].sets.push({weight:"",reps:"",rpe:"",done:false});
     save(); render();
+  });
+  document.querySelectorAll("[data-addlp]").forEach(b=> b.onclick=()=>{
+    const en = S.active.entries[b.dataset.addlp];
+    if(!en) return;
+    /* THE SAME SET AS ANY OTHER, PLUS ONE FACT ABOUT IT. Nothing is pre-filled: the load
+       is usually the one that just ran out and the app should not pretend to know that,
+       and a rep count typed before the set is a set nobody did. */
+    en.sets.push({weight:"", reps:"", rpe:"", done:false, lp:true});
+    save(); render();
+    toast("Partials set added — " + lengthenedWhere(en.name), "good");
   });
   document.querySelectorAll("[data-rmset]").forEach(b=> b.onclick=()=>{
     const sets = S.active.entries[b.dataset.rmset].sets;
