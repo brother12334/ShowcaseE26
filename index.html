@@ -5543,7 +5543,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.8";
+const APP_VERSION = "25.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -33420,7 +33420,7 @@ function openScoreCard(sess, onDone){
   const markApplied = name=>{
     const k = nrm(name);
     (sess.progression || []).forEach(p=>{
-      if((p.kind === "up" || p.kind === "toohard") && nrm(p.name) === k) p.applied = true;
+      if((p.kind === "up" || p.kind === "toohard" || p.kind === "catchup") && nrm(p.name) === k) p.applied = true;
     });
     save(); queueSync();
   };
@@ -33779,11 +33779,27 @@ function progressionFor(sess, entry){
             why: "You have a " + (HURT_AREA_BY[ache.where] || {t:"niggle"}).t.toLowerCase() +
                  " niggle logged on this. The weight stays where it is until you mark it settled."};
   }
+  /* What the programme prescribes, read once: two branches below need it. */
+  const planW = (planned && planned.weight != null && planned.weight !== "")
+    ? parseFloat(planned.weight) : NaN;
   if(clearedTop && atTarget){
     const from = isNaN(load) ? (target.weight == null ? null : target.weight) : load;
     const to = step.bodyweight && from == null ? step.amount
              : (from == null ? null : roundLoadable(from + step.amount, entry.name));
-    return {
+    /* AN INCREASE HAS TO BE AN INCREASE, AND A BACK-OFF SET IS NOT A WORKING SET.
+
+       This judges the LAST set, which is right for earning a raise and wrong when the
+       last set is deliberately lighter. Three sets of 75 followed by a back-off of 50
+       for 12 easy reps produced "add weight next time: 50 → 55" — and applying it
+       would have written 55 into a plan that said 65, after a session worked at 75. A
+       cut, filed under the one heading on this card that means the opposite.
+
+       So a proposed load at or below what the programme already prescribes is not a
+       raise, whatever the reps did. The session falls through to the catch-up branch
+       instead, which looks at the heaviest set that met the prescription rather than the
+       last one — and on that same session says the true thing: your plan is behind, you
+       have been working at 75. */
+    if(!(isFinite(planW) && to != null && parseFloat(to) <= planW)) return {
       name: entry.name, kind: "up", from, to, step,
       msg: step.bodyweight && from == null
         ? "Add " + fmtLoad(step.amount) + " next time"
@@ -33800,6 +33816,49 @@ function progressionFor(sess, entry){
       sub: "You reached " + reps + " reps but at RPE " + rpe + ", past the target of " + tRpe +
            ". Get the top of the range at the prescribed effort before adding weight."
     };
+  }
+  /* THE PLAN IS BEHIND WHAT YOU ARE ALREADY LIFTING, AND THAT IS ITS OWN FINDING.
+
+     Everything above judges the reps at whatever load was used. None of it looks at the
+     load itself against what the programme PRESCRIBES — so somebody who moved up on
+     their own, put in a solid session at the new weight and did not happen to clear the
+     top of the range got nothing at all. The plan sat at the old number, the boxes went
+     on suggesting the new one off last time's log, and the two disagreed indefinitely.
+
+     This is a CORRECTION, not a progression. It adds nothing: it writes the load you
+     have already chosen and proved into the line that is supposed to describe what you
+     do. The bar for "proved" is the one the rest of this function uses — reps inside the
+     prescribed range, at or under the effort the set asked for — because a heavy single
+     that went to RPE 10 is not a new working weight, it is a good set.
+
+     The heaviest QUALIFYING set, not the last one: the rest of this function judges the
+     last set because that is where a raise is earned, and this asks a different question
+     — what have you actually been working at successfully. A back-off set at the end
+     should not hide a plan that is 10 lb out of date.
+
+     It comes last because every branch above describes something that happened to the
+     reps, which is the more urgent story. If a raise was earned, "up" already writes a
+     load above this one and this never runs. */
+  if(isFinite(planW) && planW > 0){
+    let best = null;
+    ws.forEach(st=>{
+      const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
+      if(!(w > planW + 0.01) || !(r >= range[0])) return;
+      const t = rpeTargetFor(entry, entry.sets.indexOf(st));
+      const e = parseFloat(st.rpe) || 0;
+      if(t != null && e && e > t + RPE_TOL) return;     // no RPE logged counts as meeting it
+      if(!best || w > best.w) best = {w, r, rpe: e, t};
+    });
+    if(best){
+      return {
+        name: entry.name, kind: "catchup", from: planW, to: best.w,
+        msg: "Put your plan on " + fmtLoad(best.w) + ": " + fmtLoad(planW) + " → " + fmtLoad(best.w),
+        sub: "You worked at " + fmtLoad(best.w) + " for " + best.r + " rep" +
+             (best.r === 1 ? "" : "s") + ", inside " + range[0] + "-" + range[1] +
+             (best.rpe ? " and at RPE " + best.rpe + (best.t != null ? " against a target of " + best.t : "") : "") +
+             ". Your plan still says " + fmtLoad(planW) + ". This is the plan catching up, not another jump."
+      };
+    }
   }
   return {
     name: entry.name, kind: "hold",
@@ -34466,7 +34525,8 @@ function progressionApplied(p){
   if(!p) return false;
   // a cut is applied the same way an increase is, and is checked the same way
   const to = p.kind === "toohard" ? toohardTarget(p) : p.to;
-  if(p.kind !== "up" && p.kind !== "toohard") return false;
+  // a catch-up writes a load the same way, and is checked the same way
+  if(p.kind !== "up" && p.kind !== "toohard" && p.kind !== "catchup") return false;
   if(p.applied) return true;
   if(to == null) return false;
   const e = findProgramEntry(p.name);
@@ -34579,6 +34639,44 @@ function progressionHTML(list){
       </div>`;
     });
     h += `<button class="more-btn" id="progApplyAll">Apply all ${ups.length} to the programme</button>`;
+  }
+  /* THE PLAN CATCHING UP, KEPT APART FROM THE RAISES.
+
+     Filed under its own heading because it is a different claim: "add weight next time"
+     is the app proposing a load you have not lifted, and this is the app noticing that
+     the line in your programme no longer describes what you do. Mixing them would let a
+     correction read as a jump, which is the one way this feature could get somebody
+     hurt.
+
+     Shown whatever the progression preference says, unlike the raises above. "I'll
+     manage the loads myself" is a decision about who chooses the weights — you already
+     chose this one. */
+  const catchups = list.filter(p=> p.kind === "catchup" && !progressionApplied(p));
+  if(catchups.length){
+    h += `<div class="rev-head">Your plan is behind, ${catchups.length}</div>`;
+    catchups.forEach(p=>{
+      h += `<div class="pg-row">
+        <div class="pg-main">
+          <b>${esc(p.name)}</b>
+          <div class="pg-msg">${esc(p.msg)}</div>
+          <div class="pg-sub">${esc(p.sub)}</div>
+        </div>
+        <span class="pg-to">
+          <input inputmode="decimal" data-progtoin="${esc(p.name)}" value="${p.to == null ? "" : p.to}"
+            aria-label="Weight to write into your plan for ${esc(p.name)}">
+          <i>${esc(unitWord())}</i>
+        </span>
+        <button class="pg-apply" data-progapply="${esc(p.name)}" data-progto="${p.to == null ? "" : p.to}">Apply</button>
+      </div>`;
+    });
+  }
+  const caught = list.filter(p=> p.kind === "catchup" && progressionApplied(p));
+  if(caught.length){
+    h += `<div class="rev-head">Plan brought up to date, ${caught.length}</div>`;
+    caught.forEach(p=>{
+      h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">${
+        p.to == null ? "applied" : "now " + esc(fmtLoad(p.to))} ✓</span></div>`;
+    });
   }
   /* Applied increases drop out of the actionable list but not off the card: reopening a
      grade should still tell you what changed that day, just without a button offering to
