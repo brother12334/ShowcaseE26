@@ -1608,6 +1608,9 @@ button.side-chip.sc-set::after{
    is hidden while it runs (body.onboarding) because a half-configured app behind the
    wizard is just an invitation to wander into empty screens. */
 body.onboarding nav{display:none}
+/* Deep enough for the pill plus the gap it sits in, so the last control row in a
+   session can always be scrolled clear of it. */
+body.rest-up{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
 body.onboarding{padding-bottom:24px}
 .ob-wrap{max-width:560px;margin:0 auto;padding:calc(26px + env(safe-area-inset-top)) var(--gut) 40px}
 .ob-card{margin:0}
@@ -5537,7 +5540,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.5";
+const APP_VERSION = "25.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10313,11 +10316,18 @@ function showRestUI(min){
   const c0 = restClockNow();
   if(min){
     el.className = "rest-mini" + (c0.over ? " rest-over" : "");
+    /* THE PILL FLOATS OVER THE PAGE, SO THE PAGE HAS TO BE ABLE TO GET OUT FROM UNDER
+       IT. Fixed above the tab bar at the right-hand edge, it lands squarely on the
+       "+ set / − set / + partials set" row of whichever exercise happens to be there,
+       and at the bottom of the list there is nothing left to scroll: the row stays
+       covered. One class, and the page gains enough tail for the last row to clear. */
+    document.body.classList.add("rest-up");
     el.innerHTML = `<button class="rest-expand"><span class="rest-dot" style="background:${color}"></span><span class="rest-time num">${c0.text}</span></button><button class="rest-stop-mini" aria-label="Stop rest">■</button>`;
     el.querySelector(".rest-expand").onclick = ()=> showRestUI(false);
     el.querySelector(".rest-stop-mini").onclick = stopRest;
   } else {
     el.className = "rest-full" + (c0.over ? " rest-over" : "");
+    document.body.classList.remove("rest-up");     // full screen covers everything anyway
     el.innerHTML = `<button class="rest-x" aria-label="Minimize">✕</button>
       <div class="pf-wrap">
         <div class="pf-plate" style="background:${color}">
@@ -10377,6 +10387,7 @@ function showRestUI(min){
 function hideRestUI(){
   const el = document.getElementById("restUI");
   if(el) el.remove();
+  document.body.classList.remove("rest-up");
   if(restTick){ clearInterval(restTick); restTick = null; }
   applyRestLocks();                    // the clock stopped, so the next set opens up
   voiceSync();                         // and so does the microphone, if it was on
@@ -34645,7 +34656,21 @@ function rebuildFor(entry){
   const rb = src && src.rebuild;
   if(!rb || !rb.at || rb.from == null) return null;
   if(Date.now() - rb.at > REBUILD_MAX_DAYS * DAY_MS) return null;
-  const w = entry.weight == null ? null : parseFloat(entry.weight);
+  /* "THE LOAD MOVED SOMEWHERE ELSE" IS THE FIRST WAY THIS LAPSES, and it never fired
+     where it matters. A LIVE session entry has no `weight` — that field holds the loads
+     you type per set; the entry carries `planWeight`, frozen at Start. So `entry.weight`
+     was undefined on every workout screen, the guard skipped, and a rebuild written when
+     the movement was 45 lb went on announcing "45 lb is new — reps restart at 8" above
+     boxes suggesting 65, 65 and 70. Three numbers, three sources, one of them months out
+     of date, and it also held every rep target down to 8 of 12.
+
+     All three places the prescribed load can live are checked, same order as
+     planLoadFor(): what the programme entry says, what this session froze at Start, and
+     the programme's own row when neither is to hand. */
+  const src2 = (entry.weight != null && entry.weight !== "") ? entry.weight
+             : (entry.planWeight != null && entry.planWeight !== "") ? entry.planWeight
+             : (src && src !== entry ? src.weight : (findProgramEntry(entry.name) || {}).weight);
+  const w = (src2 == null || src2 === "") ? null : parseFloat(src2);
   if(w != null && !isNaN(w) && rb.weight != null && Math.abs(w - rb.weight) > 0.01) return null;
   return rb;
 }
@@ -35269,14 +35294,23 @@ function warmWorkingLoad(e, ctx){
     const l = lastEntryFor(ctx.workoutId, e.name, !!ctx.anyDay, ctx.occ || 0);
     if(l){
       const up = progressionUpFor(l.sess, e.name, ctx.occ || 0);
-      if(up != null) return {w: up, src: "next"};
       let top = 0;
       (l.sets || []).forEach(st=>{
         if(!st || st.reps === "" || st.reps == null) return;
         const w = parseFloat(st.weight);
         if(w > top) top = w;
       });
+      /* A RECORDED RAISE THAT IS BELOW WHAT YOU ACTUALLY LIFTED IS NOT A RAISE. This
+         took the stored verdict outright, and a stale one — written when the movement
+         was lighter, still sitting on the last session — aimed the whole ramp at it:
+         one light set of 25 lb before three working sets of 65 and 70. The order above
+         already says why the verdict wins when it is a step UP; there is no reading on
+         which it should win when it is a step down from the same session's own top set.
+         "A warm-up rung 10 lb high costs less than one 10 lb low" is the rule, and this
+         is the case that broke it. */
+      if(up != null && up >= top) return {w: up, src: "next"};
       if(top > 0) return {w: top, src: "last"};
+      if(up != null) return {w: up, src: "next"};
     }
   }
   // programme entries carry `weight`; live session entries carry `planWeight`
