@@ -4309,6 +4309,9 @@ body.cele-open{overflow:hidden}
    the badge's own ink. */
 .pr-badge .ico,.pr-badge .ico-pr{color:currentColor;width:1.15em;height:1.15em;vertical-align:0}
 .set.is-pr input{border-color:rgba(201,154,52,.55)}
+/* The evidence, in the row's own quiet voice: the badge is the claim and this is the
+   number behind it, so it must not compete with it for attention. */
+.pr-note{font:10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
 .pr-row{margin:-3px 0 7px;padding-left:47px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
 .pr-row:empty{display:none}
 
@@ -5540,7 +5543,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "25.6";
+const APP_VERSION = "25.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9588,6 +9591,11 @@ function e1rmOfSet(st, add){
    the record it is — and one set on a lighter one cannot quietly out-rank it. */
 function bestEverFor(exName, upToEntry, upToSet){
   let maxW = 0, repsAtMaxW = 0, max1RM = 0, maxRepsBw = 0, seen = false;
+  /* WHICH SET HELD THE RECORD, not just what it was worth. A "strength PR" is the only
+     one of the three whose meaning you cannot read off the row — it says a weight and a
+     rep count beat SOMETHING, without saying what. Keeping the set behind max1RM costs
+     two fields and lets the badge name it. */
+  let best1RM = null;
   const key = nrm(exName);
   const consider = (st, add)=>{
     const w = setLoad(st, add);
@@ -9597,7 +9605,7 @@ function bestEverFor(exName, upToEntry, upToSet){
     if(w > maxW){ maxW = w; repsAtMaxW = reps; }
     else if(w === maxW && reps > repsAtMaxW){ repsAtMaxW = reps; }
     const e1 = est1RM(w, reps);
-    if(e1 > max1RM) max1RM = e1;
+    if(e1 > max1RM){ max1RM = e1; best1RM = {w, reps}; }
     if(!(w>0) && reps > maxRepsBw) maxRepsBw = reps;   // bodyweight rep record
   };
   // all finished history, name-normalised, so trailing spaces or a change of
@@ -9626,7 +9634,7 @@ function bestEverFor(exName, upToEntry, upToSet){
       });
     });
   }
-  return {maxW, repsAtMaxW, max1RM, maxRepsBw, seen, seenPrior};
+  return {maxW, repsAtMaxW, max1RM, maxRepsBw, best1RM, seen, seenPrior};
 }
 function detectPR(exName, st, ei, si){
   // compared against records held as true loads, so this has to be one too
@@ -9694,17 +9702,59 @@ function refreshPRs(ei){
 function prBadgeHTML(st){
   return (st && st.pr) ? `<span class="pr-badge">${ICON.pr} ${esc(st.pr)}</span>` : "";
 }
+/* WHAT THE RECORD ACTUALLY BEAT, said next to the badge.
+
+   "STRENGTH PR" over a set of 160x12 on a movement you last did at 160 reads as the app
+   claiming the weight is a record, which it is not — it is the weight-and-reps TOGETHER
+   that are. Three words of amber with nothing to check them against is the kind of praise
+   people stop believing, and the number it beat is right there in the history.
+
+   Re-derived rather than stored: bestEverFor(exName, ei, si) counts history plus the sets
+   logged BEFORE this one, which is the same baseline detectPR() judged it against, so the
+   note can never describe a different comparison from the one that awarded the badge. */
+function prNoteFor(exName, st, ei, si){
+  if(!st || !st.pr) return "";
+  const w = setLoad(st, barAddendFor(exName));
+  const reps = parseFloat(st.reps) || 0;
+  const b = bestEverFor(exName, ei, si);
+  if(st.pr === "WEIGHT PR"){
+    return b.maxW > 0 ? "past your " + fmtLoad(b.maxW) : "your first load on this";
+  }
+  if(st.pr === "REP PR"){
+    if(!(w > 0)) return b.maxRepsBw > 0 ? "past your " + b.maxRepsBw : "";
+    return b.repsAtMaxW > 0 ? reps + " at " + fmtLoad(w) + ", past your " + b.repsAtMaxW : "";
+  }
+  if(st.pr === "STRENGTH PR"){
+    /* Named for the set it displaced, because "a better weight and rep count than before"
+       is only convincing when you can see the set it is better than. */
+    /* The unit once. "160 lb×12 beats 160 lb×11" is the same fact said twice as
+       heavily as it needs to be, and the second load is being read as a comparison, not
+       loaded onto a bar. */
+    return b.best1RM
+      ? fmtLoad(w) + "×" + reps + ", past " + r1(b.best1RM.w) + "×" + b.best1RM.reps
+      : "";
+  }
+  return "";
+}
 /* Always emitted (empty when there's nothing to show) so the node exists to fill
    in-place. It carries both the PR badge and the "what went wrong" chip, since a set
    can't be both and the two never need to be told apart by position. */
+function prRowInner(name, st, ei, si){
+  const note = name ? prNoteFor(name, st, ei, si) : "";
+  return prBadgeHTML(st) + (note ? `<span class="pr-note">${esc(note)}</span>` : "") + whyBadgeHTML(st);
+}
 function prBadgeRow(st, ei, si){
-  return `<div class="pr-row" data-prrow="${ei}-${si}">${prBadgeHTML(st)}${whyBadgeHTML(st)}</div>`;
+  const name = (S.active && S.active.entries[ei] && S.active.entries[ei].name) || "";
+  return `<div class="pr-row" data-prrow="${ei}-${si}">${prRowInner(name, st, ei, si)}</div>`;
 }
 function drawPRBadges(ei){
   if(!S.active || !S.active.entries[ei]) return;
   S.active.entries[ei].sets.forEach((st,j)=>{
     const row = document.querySelector(`[data-prrow="${ei}-${j}"]`);
-    if(row) row.innerHTML = prBadgeHTML(st) + whyBadgeHTML(st);
+    /* The same three pieces prBadgeRow() builds. Leaving the note out of the in-place
+       redraws meant it appeared on a full render and vanished the moment a set was
+       ticked. */
+    if(row) row.innerHTML = prRowInner(S.active.entries[ei].name, st, ei, j);
     const chk = document.querySelector(`.set .chk[data-e="${ei}"][data-s="${j}"]`);
     if(chk && chk.parentElement) chk.parentElement.classList.toggle("is-pr", !!st.pr);
   });
@@ -10288,7 +10338,10 @@ function drawWhyBadges(ei){
   if(!S.active || !S.active.entries[ei]) return;
   S.active.entries[ei].sets.forEach((st,j)=>{
     const row = document.querySelector(`[data-prrow="${ei}-${j}"]`);
-    if(row) row.innerHTML = prBadgeHTML(st) + whyBadgeHTML(st);
+    /* The same three pieces prBadgeRow() builds. Leaving the note out of the in-place
+       redraws meant it appeared on a full render and vanished the moment a set was
+       ticked. */
+    if(row) row.innerHTML = prRowInner(S.active.entries[ei].name, st, ei, j);
   });
 }
 // Every flagged set in a session, for the score card and the report.
