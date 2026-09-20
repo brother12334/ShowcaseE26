@@ -5543,7 +5543,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "26.1";
+const APP_VERSION = "26.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13746,8 +13746,14 @@ function weakPoints(A){
      here rather than earlier keeps the ranking, the one-per-muscle rule and the cut at
      seven working on the findings as they actually are, so quieting one never promotes
      something that would otherwise have missed the list. */
-  const vis = ranked.filter(w=> !isQuiet(w));
-  vis.quiet = ranked.filter(w=> isQuiet(w));
+  /* ANSWERED, SO IT GOES. A finding you have already fixed in the programme is not a
+     thing to do, and leaving it on the list with an explanation attached still leaves it
+     on the list. It comes off entirely once the plan clears the threshold it was judged
+     by — and comes back on its own if a full rotation goes by without the log agreeing.
+     See planFixAnswers(). */
+  const live = ranked.filter(w=> !planFixAnswers(A, w));
+  const vis = live.filter(w=> !isQuiet(w));
+  vis.quiet = live.filter(w=> isQuiet(w));
   return vis;
 }
 
@@ -24482,9 +24488,22 @@ function openWeakPoint(idx){
       <div class="wd-apply-k">You have already changed the plan</div>
       <div class="wd-diff">${acted.slice(0, 3).map(c=>
         `<div>${esc(planFixLine(c))}</div>`).join("")}</div>
-      <p>This reading counts sets you have <b>logged</b>, ${esc(A.win.short)}, so a change
-        to the plan does not move it until you have trained it. Run the days that carry
-        the new work and it falls away on its own.</p>
+      <p>${
+        /* A FILLED FINDING IS NOT ON THE SCREEN AT ALL — planFixAnswers() takes it off
+           the list the moment the programme clears the threshold. So by the time this
+           block renders, one of two things is true, and they need different sentences:
+           the change did not close the gap on paper, or this is not the kind of finding
+           a plan edit closes. Saying "it will fall away once you train it" in the first
+           case would be a promise the arithmetic does not support. */
+        (w.kind === "under" || w.kind === "balance" || w.kind === "none") && !planAnswersFinding(A, w)
+          ? "Your programme is closer and still short of this on paper, so the finding "
+            + "stands. Element 26 caps one edit at a sensible step rather than closing a "
+            + "gap like this in a single jump — open the fix again next cycle and it takes "
+            + "the next one."
+          : "This reading counts sets you have <b>logged</b>, " + esc(A.win.short) + ", so a "
+            + "change to the plan does not move it until you have trained it. Run the days "
+            + "that carry the new work and it falls away on its own."
+      }</p>
     </div>`;
   }
 
@@ -31248,6 +31267,52 @@ function planFixesFor(m){
     if(nrm(c.name || "") === mn) return true;
     return muscleFrac(c.name || "", m) > 0;
   }).sort((a,b)=> b.at - a.at);
+}
+/* DOES THE PROGRAMME, AS IT NOW STANDS, ACTUALLY ANSWER THIS FINDING?
+
+   Measured per cycle on both sides, because that is the only comparison that means
+   anything: what the plan prescribes each time round, against the same threshold the
+   finding is judged by, converted to a cycle. A shortfall answered by the plan is a
+   statement about the past; one the plan does not answer is still a thing to do.
+
+   Only the shortfall kinds. "You are over your ceiling" and "this has stalled" are not
+   questions a plan edit closes — they are about what the training did to you, and no
+   amount of prescribing changes what already happened. */
+function planAnswersFinding(A, w){
+  if(!w) return false;
+  const m = w.muscle;
+  if(w.kind === "under" || w.kind === "none"){
+    const mev = (cycleLandmarks(A, m) || {}).mev || 0;
+    return mev > 0 && planCycleVolume(m) >= mev - 0.01;
+  }
+  if(w.kind === "balance"){
+    const R = ratioPairFor(m);
+    if(!R) return false;
+    const va = R.a.reduce((t,x)=> t + planCycleVolume(x), 0);
+    const vb = R.b.reduce((t,x)=> t + planCycleVolume(x), 0);
+    if(!(vb > 0)) return false;
+    /* Which side lags is which list the finding is filed under: fire() is called with
+       R.a when the ratio is below its floor and R.b when it is above its ceiling. */
+    return R.a.indexOf(m) > -1 ? (va / vb) >= R.lo : (va / vb) <= R.hi;
+  }
+  return false;
+}
+/* AND HAS IT HAD ITS CHANCE YET?
+
+   The suppression above cannot be open-ended. A plan that prescribes plenty and never
+   gets trained is exactly the situation a shortfall finding exists to catch, and hiding
+   it forever because the prescription looks right on paper would turn the Body tab into
+   a description of your intentions. So the finding is held back only until the change
+   has been round the rotation once. After a full pass, the log is the truth: if the
+   number is still short, the plan is not being performed and the finding says so again. */
+function planFixAnswers(A, w){
+  if(!w) return false;
+  if(w.kind !== "under" && w.kind !== "balance" && w.kind !== "none") return false;
+  const fixes = planFixesFor(w.muscle);
+  if(!fixes.length) return false;
+  const since = (S.sessions || []).filter(x=> x && x.startedAt > fixes[0].at).length;
+  if(since >= ROTATION.length) return false;
+  return planAnswersFinding(A, w);
 }
 function planFixLine(c){
   const ch = (c.changes || [])[0];
