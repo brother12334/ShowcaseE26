@@ -327,9 +327,8 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .ph-lines{margin-top:3px;font:12px var(--mono);color:var(--dim);line-height:1.5;overflow-wrap:anywhere}
 .ph-why{margin-top:5px;font-size:12.5px;color:var(--faint);line-height:1.45}
 .ph-undo{flex:0 0 auto;white-space:nowrap}
-.ph-done,.ph-none{flex:0 0 auto;font:10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;
-  color:var(--faint);padding-top:4px}
-.ph-done{color:var(--ok)}
+.ph-done{flex:0 0 auto;font:10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ok);padding-top:4px}
 .ph-row.is-undone .ph-main{opacity:.55}
 .rest-note{margin:2px 0 12px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card2);font-size:13px;color:var(--dim);text-align:center}
 /* padding, not font-size: these read as inline links and should keep doing so, but a
@@ -5580,7 +5579,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "26.6";
+const APP_VERSION = "26.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -27369,7 +27368,8 @@ function viewProgram(){
   <div class="btn-row" style="margin-bottom:16px">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
     <button class="btn ghost small" id="planHistBtn" style="flex:1">What changed${
-      (S.planLog || []).length ? ' <span class="nb-count">' + (S.planLog || []).length + '</span>' : ""}</button>
+      (()=>{ const n = (S.planLog || []).filter(planChangeBig).length;
+             return n ? ' <span class="nb-count">' + n + '</span>' : ""; })()}</button>
   </div>
   <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
   // Anything an imported document said about running the programme — phases, deloads,
@@ -31551,18 +31551,40 @@ function planChangeSentence(c){
    log holds every edit including the ones you made by hand in the Program tab — those
    are shown too, because "what has happened to my plan" is one question, and answering
    half of it would be its own kind of lie. Only the ones carrying a snapshot can be
-   undone, and the rest say so rather than offering a button that does nothing. */
+   undone; the rest are simply rows without a button. */
 const PLAN_HIST_MAX = 40;
+/* WHICH CHANGES ARE WORTH A SCREEN.
+
+   The log records everything, including every load the double-progression rule nudges up
+   after a good session. That is most of it by volume and none of it by interest: a weight
+   going 60 → 65 is the programme working exactly as designed, it happens most weeks, and
+   listing them buries the three edits a year that actually restructured your training.
+
+   So this screen is the structural stuff — a movement added, swapped or removed, a rep
+   range changed, volume spread across days, an ease-off — plus your own hand edits when
+   they moved something other than the load. Ordinary load changes keep the record they
+   already had: the grade card that proposed them, and the mark on the set row. */
+function planChangeBig(c){
+  if(!c) return false;
+  if(c.kind === "weight") return false;        // the progression rule doing its job
+  if(c.kind === "move") return false;          // reordering a day is not a change of plan
+  if(c.kind === "edit"){
+    return (c.changes || []).some(d=> d && d.key && d.key !== "weight");
+  }
+  return true;
+}
 function planChangeLine(c){
   const strs = (c.changes || []).filter(x=> typeof x === "string");
   if(strs.length) return strs;
   return [planChangeSentence(c).replace(/<[^>]+>/g, "")];
 }
 function planHistoryHTML(){
-  const all = (S.planLog || []).slice().sort((a,b)=> b.at - a.at).slice(0, PLAN_HIST_MAX);
+  const all = (S.planLog || []).filter(planChangeBig)
+    .sort((a,b)=> b.at - a.at).slice(0, PLAN_HIST_MAX);
   if(!all.length){
-    return `<div class="wd-none">Nothing has changed your programme yet. Every edit from
-      here on — yours and Element 26's — is listed here with a way back.</div>`;
+    return `<div class="wd-none">Nothing has restructured your programme yet. Movements
+      added, swapped or removed, rep ranges changed, volume spread across days — those
+      land here, with a way back.</div>`;
   }
   let h = "", day = null;
   all.forEach(c=>{
@@ -31578,10 +31600,15 @@ function planHistoryHTML(){
           `<div>${esc(x)}</div>`).join("")}</div>
         ${c.note ? `<div class="ph-why">${esc(c.note)}</div>` : ""}
       </div>
-      ${c.reverted
+      ${/* NOTHING WHERE THERE IS NOTHING TO OFFER. This said "no way back", which is a
+            verdict on the entry rather than a fact about it — true of every edit made
+            before snapshots existed, and of the ones you typed yourself in the day
+            editor, neither of which is a failure worth labelling. An entry with no
+            button is simply an entry with no button. */
+        c.reverted
         ? `<span class="ph-done">put back</span>`
         : can ? `<button class="btn ghost small ph-undo" data-planrevert="${c.at}">Put back</button>`
-              : `<span class="ph-none">${c.kind === "revert" ? "" : "no way back"}</span>`}
+              : ""}
     </div>`;
   });
   return h;
@@ -31589,8 +31616,8 @@ function planHistoryHTML(){
 function openPlanHistory(){
   showModal(`<h3>What changed your plan</h3>
     <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Newest
-      first. Anything Element 26 wrote from a finding can be put back exactly as it was;
-      your own edits are listed so the record is complete.</div>
+      first. Anything Element 26 wrote from a finding can be put back exactly as it was.
+      Ordinary load changes are left out \u2014 this is the structural stuff.</div>
     ${planHistoryHTML()}
     <button class="btn ghost small" id="closeModal" style="margin-top:14px">Done</button>`);
   const m = $("#modal");
