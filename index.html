@@ -5579,7 +5579,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "26.8";
+const APP_VERSION = "26.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -36843,12 +36843,46 @@ function lastWorkedPh(last, si){
   const w = l && l.weight != null && l.weight !== "" ? parseFloat(l.weight) : NaN;
   return isFinite(w) && w > 0 && (parseFloat(l.reps) || 0) > 0 ? w : NaN;
 }
+/* The heaviest load you actually worked with last time, across the whole exercise rather
+   than at one row: set 1 of a session can be a back-off, and "what do you lift here" is a
+   question about the movement. */
+function topWorkedLast(last){
+  let top = 0;
+  (last || []).forEach(l=>{
+    if(!l) return;
+    const w = parseFloat(l.weight) || 0, r = parseFloat(l.reps) || 0;
+    if(w > top && r > 0) top = w;
+  });
+  return top;
+}
 function planLoadPh(en, last, si){
   const plan = planLoadFor(en);
   const did = lastWorkedPh(last, si);
   if(plan !== ""){
     const p = parseFloat(plan);
-    return (isFinite(did) && isFinite(p) && did > p) ? String(r1(did)) : plan;
+    if(isFinite(did) && isFinite(p) && did > p) return String(r1(did));
+    /* A PRESCRIPTION FAR ABOVE ANYTHING YOU HAVE LIFTED IS NOT A SUGGESTION, IT IS A
+       HAZARD.
+
+       The rule above is "the heavier of the two wins", written for the ordinary case
+       where the log has moved on and the programme has not. Run it the other way and it
+       has no floor at all: a Smith bench whose last session was 100, 90, 90, 90 showed a
+       box reading 205, because something in the plan said 230 and 230 is heavier than
+       100. One tick copies a placeholder into the set, and the warm-up three inches above
+       it was ramping 40 / 65 / 90 off the load actually being lifted — the same screen
+       disagreeing with itself about what goes on the bar, in the direction that hurts.
+
+       So the suggestion is capped at what you have actually performed plus one honest
+       jump. A real planned step still shows; a number nobody has been near does not. The
+       plan's own figure is not hidden — planBehindLineHTML() and the rebuild line both
+       name it, in sentences, where it can be read rather than lifted. */
+    const top = topWorkedLast(last);
+    if(isFinite(p) && top > 0){
+      const step = progressionStep(findProgramEntry(en.name) || en);
+      const room = Math.max((step && step.amount) || 0, top * 0.1);
+      if(p > top + room + 0.01) return String(r1(top));
+    }
+    return plan;
   }
   const l = last && last[si];
   return (l && l.weight != null && l.weight !== "") ? l.weight : unitWord();
