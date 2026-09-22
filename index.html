@@ -5579,7 +5579,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "26.7";
+const APP_VERSION = "26.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -30204,7 +30204,8 @@ function bind(){
     const copy = JSON.parse(JSON.stringify(src));
     delete copy.superset;
     list.splice(i + 1, 0, copy);
-    logPlanChange("added", wid, copy.name, ["Duplicated from the same day"], {});
+    logPlanChange("added", wid, copy.name, ["Duplicated from the same day"],
+      {undo: [planSnapAdd(wid, copy.name)]});
     save(); queueSync(); render();
     toast("Duplicated");
   });
@@ -31333,14 +31334,38 @@ function planDiff(a, b){
    Absence is recorded as well as value. A swap deletes the load, because the old load
    meant something on the old movement — a snapshot that only stored fields it found
    would restore the movement and leave the new load sitting under it. */
-const PLAN_UNDO_FIELDS = ["name","sets","reps","weight","rest"];
+/* EVERYTHING A SWITCH TOUCHES, not just the obvious three. Changing the movement in a
+   slot clears the coaching cue, the load, the per-set ramp and the rebuild flag as well
+   as the name, all of them correctly — those belonged to the old lift. A snapshot that
+   stopped at name, sets and reps would put the movement back and leave another lift's
+   ramp and cue sitting under it, which is a worse state than either version. */
+const PLAN_UNDO_FIELDS = ["name","sets","reps","rpe","rpes","weight","rest","note","rebuild"];
 function planSnapOne(wid, e, keyAfter){
   const row = {wid, key: keyAfter || e.name, f: {}};
-  PLAN_UNDO_FIELDS.forEach(k=>{ row.f[k] = (e[k] === undefined ? null : e[k]); });
+  PLAN_UNDO_FIELDS.forEach(k=>{
+    const v = e[k];
+    if(v === undefined){ row.f[k] = null; return; }
+    /* Copied, not referenced: the ramp array and the rebuild object are mutated in
+       place by the very edits this is a photograph of. */
+    if(v && typeof v === "object"){
+      try{ row.f[k] = JSON.parse(JSON.stringify(v)); }catch(err){ row.f[k] = null; }
+      return;
+    }
+    row.f[k] = v;
+  });
   return row;
 }
 // A movement that is about to be ADDED: there is nothing to photograph, only to remove.
 function planSnapAdd(wid, name){ return {wid, key: name, added: true}; }
+/* And the mirror: a movement about to be REMOVED, which has to come back whole and in
+   the place it was. Deep-copied, because the object it points at is about to be spliced
+   out of the programme and anything left holding a reference would be putting back a
+   thing that went on changing. */
+function planSnapGone(wid, e, i){
+  let copy = null;
+  try{ copy = JSON.parse(JSON.stringify(e)); }catch(err){ copy = null; }
+  return copy ? {wid, gone: copy, at: i} : null;
+}
 function planRevert(at){
   const c = (S.planLog || []).find(x=> x && x.at === at);
   if(!c || c.reverted) return {ok:false, why:"gone"};
@@ -31349,10 +31374,19 @@ function planRevert(at){
      — so it is undone where it lives rather than through the snapshot. */
   if(c.easeKey && easeMap()[c.easeKey]){ delete easeMap()[c.easeKey]; done++; }
   (c.undo || []).forEach(row=>{
+    if(!row) return;
     const list = S.program[row.wid] || [];
     const i = list.findIndex(x=> x && nrm(x.name) === nrm(row.key));
     if(row.added){
       if(i > -1){ list.splice(i, 1); done++; } else missing++;
+      return;
+    }
+    if(row.gone){
+      const back = S.program[row.wid] = S.program[row.wid] || [];
+      // already there, by hand or by an earlier undo: putting it back twice is worse
+      if(back.some(x=> x && nrm(x.name) === nrm(row.gone.name))){ missing++; return; }
+      back.splice(Math.min(row.at == null ? back.length : row.at, back.length), 0, row.gone);
+      done++;
       return;
     }
     if(i < 0){ missing++; return; }
@@ -31360,10 +31394,13 @@ function planRevert(at){
       const v = (row.f || {})[k];
       if(v === null || v === undefined) delete list[i][k]; else list[i][k] = v;
     });
-    /* The per-set ramp follows the set count or the two disagree about how many sets
-       this movement has. */
+    /* THE RAMP FOLLOWS THE SET COUNT, but only when the snapshot did not carry one.
+       Since it does, padding a restored [7,8,9] out to the four sets the entry happened
+       to be on afterwards is the undo inventing a target — it put back a ramp of
+       7,8,9,9 where the plan had said 7,8,9. This is for the older entries whose
+       snapshot predates the ramp being captured. */
     const e = list[i];
-    if(Array.isArray(e.rpes) && e.sets > 0){
+    if(((row.f || {}).rpes == null) && Array.isArray(e.rpes) && e.sets > 0){
       while(e.rpes.length > e.sets) e.rpes.pop();
       while(e.rpes.length < e.sets) e.rpes.push(e.rpes[e.rpes.length-1]);
     }
@@ -31379,7 +31416,7 @@ function planRevert(at){
 }
 function planRevertable(c){
   return !!c && !c.reverted && c.kind !== "revert" &&
-    (!!c.easeKey || (Array.isArray(c.undo) && c.undo.length > 0));
+    (!!c.easeKey || (Array.isArray(c.undo) && c.undo.filter(Boolean).length > 0));
 }
 /* `name` is always the name the exercise ends up with, so a renamed movement's changes
    still come back from planChangesFor() under the name you look it up by. */
@@ -32046,6 +32083,10 @@ function openSwitchExercise(wid, idx){
     if(nrm(nm) === nrm(e.name)){ hideModal(); return; }
     const was = e.name;
     const lines = [was + " → " + nm];
+    /* Keyed on the name the slot will HAVE, carrying everything it had — the switch
+       clears the cue, the load and the ramp, so a partial snapshot would put the
+       movement back and leave another lift's numbers under it. */
+    const undo = [planSnapOne(wid, e, nm)];
     e.name = nm;
     /* The cue and the side rule belonged to the old movement, not to this slot. A
        dumbbell press does not inherit "touch the chest under control, no bounce", and a
@@ -32101,7 +32142,7 @@ function openSwitchExercise(wid, idx){
       if(wasRamp !== now) lines.push("RPE per set: " + now);
     } else if(e.rpes){ delete e.rpes; lines.push("per-set RPE targets removed"); }
     logPlanChange("swapped", wid, nm, lines,
-      {note:"Switched in the plan. Logged sessions keep " + was + "."});
+      {note:"Switched in the plan. Logged sessions keep " + was + ".", undo});
     save(); queueSync(); render();
     openExerciseIntro(nm, "Switched to " + nm, {wid, idx});
   };
@@ -32174,7 +32215,7 @@ function openAddExercise(wid){
     S.program[wid].push(ne);
     logPlanChange("added", wid, nm,
       [ne.sets + "×" + ne.reps + (ne.rpe ? " @ RPE " + ne.rpe : "")],
-      {note: s.why});
+      {note: s.why, undo: [planSnapAdd(wid, nm)]});
     save(); queueSync(); render();
     /* Same moment as a switch: what it trains and how its sides are handled, said while
        the exercise is still what you are thinking about, and correctable there. */
@@ -32464,12 +32505,17 @@ function openExEditor(wid, idx){
       USER_ALIASES = S.exAliases; invalidateTableOrigin();
       if(moved) toast("Renamed, and "+moved+" logged entr"+(moved===1?"y":"ies")+" came with it");
     }
+    /* Photographed before the write, so a hand edit can be put back like anything the
+       Body tab does. Keyed on the name the entry ENDS UP with, since that is what a
+       revert has to find it by after a rename. */
+    const undo = isNew ? [planSnapAdd(wid, ne.name)] : [planSnapOne(wid, e, ne.name)];
     if(isNew) S.program[wid].push(ne); else S.program[wid][idx]=ne;
     if(isNew){
       logPlanChange("add", wid, ne.name, [],
-        {spec: ne.sets+" × "+(ne.reps||"?")+(ne.rpe?" at RPE "+ne.rpe:"")});
+        {spec: ne.sets+" × "+(ne.reps||"?")+(ne.rpe?" at RPE "+ne.rpe:""), undo});
     } else if(diff.length){
-      logPlanChange("edit", wid, ne.name, diff, renamed ? {prevName: oldName} : null);
+      logPlanChange("edit", wid, ne.name, diff,
+        Object.assign({undo}, renamed ? {prevName: oldName} : null));
     }
     invalidateMultiDay();
     save(); queueSync(); hideModal(); render();
@@ -32478,8 +32524,9 @@ function openExEditor(wid, idx){
   if(del) del.onclick = ()=>{
     if(confirm("Remove this exercise from the program? Past logs keep it.")){
       const gone = S.program[wid][idx];
+      const undo = gone ? [planSnapGone(wid, gone, idx)] : [];
       S.program[wid].splice(idx,1);
-      logPlanChange("remove", wid, gone ? gone.name : "", []);
+      logPlanChange("remove", wid, gone ? gone.name : "", [], {undo});
       invalidateMultiDay(); save(); queueSync(); hideModal(); render();
     }
   };
