@@ -5543,7 +5543,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "26.2";
+const APP_VERSION = "26.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11399,6 +11399,17 @@ function buildExSpellings(){
 }
 /* Carry it out. Every path logs what it did, so the change is visible in the Program
    tab's history and in the printed report rather than appearing out of nowhere. */
+/* The movement names a finding's plan actually edits, whichever shape it came in. */
+function exsTouched(plan){
+  if(!plan) return [];
+  const out = [];
+  const add = n=>{ if(n && out.indexOf(n) < 0) out.push(n); };
+  (plan.rows || []).forEach(r=> add(r.name));
+  const adds = plan.mode === "spread" ? ((plan.plan || {}).adds || []) : (plan.adds || []);
+  adds.forEach(a=> add(a.name || ((S.program[a.wid] || [])[a.i] || {}).name));
+  if(plan.mode === "spread") ((plan.plan || {}).newExs || []).forEach(n=> add(n.name));
+  return out;
+}
 function applyFinding(idx){
   const A = bodyAnalysis();
   const w = A.weak[idx];
@@ -11439,13 +11450,21 @@ function applyFinding(idx){
         S.program[n.wid].push({name: n.name, sets: n.sets, reps, rest});
       });
     }
-    logPlanChange("programme", null, M.name, plan.list, {note:"Applied from the Body tab."});
+    /* WHICH MOVEMENTS THIS TOUCHED, recorded rather than parsed back out of the diff
+       strings later. One press of one button changes lifts that feed several muscles —
+       a bench press is chest, front delts and triceps — and every finding those
+       movements bear on has just been acted on, not only the one filed under the muscle
+       whose name is on the entry. Without this, clearing the chest stall left identical
+       front-delt and triceps stalls standing on the same two lifts. */
+    logPlanChange("programme", null, M.name, plan.list,
+      {note:"Applied from the Body tab.", exs: exsTouched(plan)});
   } else if(plan.mode === "reps"){
     plan.rows.forEach(r=>{
       const e = (S.program[r.wid]||[])[r.i];
       if(e) e.reps = r.to;
     });
-    logPlanChange("programme", null, M.name, plan.list, {note:"Applied from the Body tab."});
+    logPlanChange("programme", null, M.name, plan.list,
+      {note:"Applied from the Body tab.", exs: exsTouched(plan)});
   }
   invalidateTableOrigin();
   save(); queueSync(); hideModal(); render();
@@ -24375,7 +24394,8 @@ function applyOwnFix(idx){
     });
     logPlanChange("programme", null, M.name, spreadList(sp),
       {note: "Spread across " + sp.daysTouched + " day" + (sp.daysTouched===1?"":"s") +
-             " from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
+             " from the Body tab to close a " + M.name.toLowerCase() + " shortfall.",
+       exs: exsTouched({mode:"spread", plan: sp})});
     toast(sp.rawSets + " set" + (sp.rawSets === 1 ? "" : "s") + " added across " +
           sp.daysTouched + " day" + (sp.daysTouched===1?"":"s") +
           (Math.abs(sp.rawSets - sp.gained) < 0.05 ? ""
@@ -31243,28 +31263,36 @@ function planChangesFor(exName, fromAt, toAt){
    rep-range edit or a weight correction on the same movement is not acting on a volume
    shortfall and must not be dressed up as one. */
 const FIX_ACK_DAYS = 21;
-function planChangeAddedWork(c){
+/* WHAT COUNTS AS ACTING ON IT DEPENDS ON WHAT IT ASKED FOR, and reading one rule for
+   both kinds got this exactly backwards. A shortfall is answered by ADDING work, so a
+   rep-range edit is not an answer to it. A stall is the opposite case — its whole point
+   is "more sets is the wrong lever", and the remedy the card offers is a new rep range or
+   a different movement, which the volume test would have thrown away as irrelevant. */
+function planChangeAddedWork(c, kind){
   if(!c) return false;
   if(c.kind === "add") return true;
-  // every Body-tab fix is a volume change by construction
+  // every Body-tab fix is applied through this kind, whichever remedy it was
   if(c.kind === "programme") return true;
   if(c.kind === "edit"){
-    return (c.changes || []).some(d=> d && d.key === "sets" &&
-      parseFloat(d.to) > parseFloat(d.from));
+    const ch = c.changes || [];
+    if(kind === "stall") return ch.some(d=> d && (d.key === "reps" || d.key === "name"));
+    return ch.some(d=> d && d.key === "sets" && parseFloat(d.to) > parseFloat(d.from));
   }
   return false;
 }
-function planFixesFor(m){
+function planFixesFor(m, kind){
   const M = MUSCLES[m];
   if(!M) return [];
   const from = Date.now() - FIX_ACK_DAYS * DAY_MS;
   const mn = nrm(M.name);
   return (S.planLog || []).filter(c=>{
-    if(!c || !(c.at > from) || !planChangeAddedWork(c)) return false;
+    if(!c || !(c.at > from) || !planChangeAddedWork(c, kind)) return false;
     /* Two ways a change belongs to this muscle: the Body tab files its fixes under the
        muscle's own name, and an edit to a single movement is filed under the movement,
        so that one is matched by what the movement trains. */
     if(nrm(c.name || "") === mn) return true;
+    // the movements the change actually edited, whatever muscle it was filed under
+    if(Array.isArray(c.exs) && c.exs.some(n=> muscleFrac(n, m) > 0)) return true;
     return muscleFrac(c.name || "", m) > 0;
   }).sort((a,b)=> b.at - a.at);
 }
@@ -31307,9 +31335,25 @@ function planAnswersFinding(A, w){
    number is still short, the plan is not being performed and the finding says so again. */
 function planFixAnswers(A, w){
   if(!w) return false;
-  if(w.kind !== "under" && w.kind !== "balance" && w.kind !== "none") return false;
-  const fixes = planFixesFor(w.muscle);
+  const shortfall = w.kind === "under" || w.kind === "balance" || w.kind === "none";
+  if(!shortfall && w.kind !== "stall") return false;
+  const fixes = planFixesFor(w.muscle, w.kind);
   if(!fixes.length) return false;
+  /* A STALL HAS NO ARITHMETIC TEST, AND NO AMOUNT OF TRAINING CLEARS IT QUICKLY.
+
+     A shortfall can be checked against the programme: either the plan prescribes enough
+     or it does not, and a full pass of the rotation settles whether it is being
+     performed. A stall is a comparison of the last three weeks against the three before
+     them — change the rep range today and every number in that comparison still
+     describes training done under the old one. There is nothing to check and nothing a
+     week of sessions can prove.
+
+     So it is held for exactly as long as the evidence that produced it takes to age out,
+     which is the same window planFixesFor() looks back over: apply the remedy and the
+     finding goes quiet while the new prescription is actually being run, then re-asks
+     itself against evidence that is finally about the change. If it fires again, it is
+     because the change did not work, which is worth hearing. */
+  if(!shortfall) return true;
   const since = (S.sessions || []).filter(x=> x && x.startedAt > fixes[0].at).length;
   if(since >= ROTATION.length) return false;
   return planAnswersFinding(A, w);
