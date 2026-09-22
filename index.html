@@ -319,6 +319,18 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   width:100%;padding:12px 8px;border-radius:10px;border:1px solid var(--line);
   background:var(--card2);color:var(--text);font-family:var(--mono);font-size:16px;text-align:center;appearance:none;
 }
+/* The plan history rows: a diff, the reason under it, and the way back on the right. */
+.ph-row{display:flex;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.ph-row:last-of-type{border-bottom:0}
+.ph-main{flex:1 1 0;min-width:0}
+.ph-main > b{font-size:14px}
+.ph-lines{margin-top:3px;font:12px var(--mono);color:var(--dim);line-height:1.5;overflow-wrap:anywhere}
+.ph-why{margin-top:5px;font-size:12.5px;color:var(--faint);line-height:1.45}
+.ph-undo{flex:0 0 auto;white-space:nowrap}
+.ph-done,.ph-none{flex:0 0 auto;font:10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--faint);padding-top:4px}
+.ph-done{color:var(--ok)}
+.ph-row.is-undone .ph-main{opacity:.55}
 .rest-note{margin:2px 0 12px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card2);font-size:13px;color:var(--dim);text-align:center}
 /* padding, not font-size: these read as inline links and should keep doing so, but a
    14px-tall tap target is under any reasonable minimum. inline-block is what lets the
@@ -5568,7 +5580,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "26.5";
+const APP_VERSION = "26.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11445,9 +11457,19 @@ function applyFinding(idx){
     easeMap()[w.muscle] = {until: Date.now() + EASE_DAYS*DAY_MS, setsMul: plan.setsMul,
       rpeCap: plan.rpeCap, why: w.act, at: Date.now()};
     logPlanChange("ease", null, M.name, plan.list,
-      {note: plan.label + " \u2014 lifts automatically after " + EASE_DAYS + " days."});
+      {note: plan.label + " \u2014 lifts automatically after " + EASE_DAYS + " days.",
+       easeKey: w.muscle});
   } else if(plan.mode === "sets" || plan.mode === "spread"){
     const adds = plan.mode === "spread" ? plan.plan.adds : plan.adds;
+    // photographed first, while the entries still say what they said
+    const undo = [];
+    adds.forEach(a=>{
+      const e0 = (S.program[a.wid] || [])[a.i];
+      if(e0) undo.push(planSnapOne(a.wid, e0));
+    });
+    if(plan.mode === "spread"){
+      ((plan.plan || {}).newExs || []).forEach(n=> undo.push(planSnapAdd(n.wid, n.name)));
+    }
     adds.forEach(a=>{
       const e = (S.program[a.wid]||[])[a.i];
       if(!e) return;
@@ -11482,14 +11504,17 @@ function applyFinding(idx){
        whose name is on the entry. Without this, clearing the chest stall left identical
        front-delt and triceps stalls standing on the same two lifts. */
     logPlanChange("programme", null, M.name, plan.list,
-      {note:"Applied from the Body tab.", exs: exsTouched(plan)});
+      {note:"Applied from the Body tab.", exs: exsTouched(plan), undo});
   } else if(plan.mode === "reps"){
+    const undo = [];
     plan.rows.forEach(r=>{
       const e = (S.program[r.wid]||[])[r.i];
-      if(e) e.reps = r.to;
+      if(!e) return;
+      undo.push(planSnapOne(r.wid, e));
+      e.reps = r.to;
     });
     logPlanChange("programme", null, M.name, plan.list,
-      {note:"Applied from the Body tab.", exs: exsTouched(plan)});
+      {note:"Applied from the Body tab.", exs: exsTouched(plan), undo});
   }
   invalidateTableOrigin();
   save(); queueSync(); hideModal(); render();
@@ -24405,7 +24430,8 @@ function applyOwnFix(idx){
        from the next session on: its own rep range, its own rest, no loads invented. */
     S.program[wid].push({name: FIX.ex, sets: FIX.sets, reps: "8-12", rest: REST_SECOND});
     logPlanChange("added", wid, FIX.ex, [FIX.sets + " sets of 8-12"],
-      {note: "Added from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
+      {note: "Added from the Body tab to close a " + M.name.toLowerCase() + " shortfall.",
+       undo: [planSnapAdd(wid, FIX.ex)]});
     toast(FIX.ex + " added to " + dayName(wid));
   } else if(FIX.mode === "one"){
     const x = ents[Math.min(FIX.pick || 0, ents.length-1)];
@@ -24413,10 +24439,11 @@ function applyOwnFix(idx){
     const e = (S.program[x.wid] || [])[x.i];
     if(!e) return;
     const from = e.sets || 1;
+    const undo = [planSnapOne(x.wid, e)];
     e.sets = FIX.setsOne;
     if(Array.isArray(e.rpes)) while(e.rpes.length < e.sets) e.rpes.push(e.rpes[e.rpes.length-1]);
     logPlanChange("programme", null, e.name, [from + " → " + e.sets + " sets"],
-      {note: "Chosen from the Body tab to close a " + M.name.toLowerCase() + " shortfall."});
+      {note: "Chosen from the Body tab to close a " + M.name.toLowerCase() + " shortfall.", undo});
     toast(e.name + " now " + e.sets + " sets");
   } else if(FIX.mode === "spread"){
     const pin = (FIX.spEx && (FIX.spDays || []).length)
@@ -24429,6 +24456,13 @@ function applyOwnFix(idx){
       : (FIX.spread || 3);
     const sp = spreadPlan(A, m, need, w.avoid, pin);
     if(!sp) return;
+    // photographed first, while the entries still say what they said
+    const undo = [];
+    sp.adds.forEach(a=>{
+      const e0 = (S.program[a.wid] || [])[a.i];
+      if(e0) undo.push(planSnapOne(a.wid, e0));
+    });
+    (sp.newExs || []).forEach(n=> undo.push(planSnapAdd(n.wid, n.name)));
     sp.adds.forEach(a=>{
       const e = (S.program[a.wid] || [])[a.i];
       if(!e) return;
@@ -24442,7 +24476,7 @@ function applyOwnFix(idx){
     logPlanChange("programme", null, M.name, spreadList(sp),
       {note: "Spread across " + sp.daysTouched + " day" + (sp.daysTouched===1?"":"s") +
              " from the Body tab to close a " + M.name.toLowerCase() + " shortfall.",
-       exs: exsTouched({mode:"spread", plan: sp})});
+       exs: exsTouched({mode:"spread", plan: sp}), undo});
     toast(sp.rawSets + " set" + (sp.rawSets === 1 ? "" : "s") + " added across " +
           sp.daysTouched + " day" + (sp.daysTouched===1?"":"s") +
           (Math.abs(sp.rawSets - sp.gained) < 0.05 ? ""
@@ -24454,13 +24488,16 @@ function applyOwnFix(idx){
     const e = (S.program[from.wid] || [])[from.i];
     if(!e) return;
     const old = e.name;
+    /* Keyed on the name it will HAVE, since that is what a revert has to find, and
+       carrying the name it had, which is what a revert has to put back. */
+    const undo = [planSnapOne(from.wid, e, FIX.swapTo)];
     e.name = FIX.swapTo;
     /* The loads belonged to the old movement and mean nothing on the new one. Everything
        else about the slot — sets, reps, rest, its place in the day — is kept, because
        that is what makes this a swap rather than a delete and an add. */
     delete e.weight; delete e.byApp; delete e.rebuild; delete e.setsCut;
     logPlanChange("swapped", from.wid, e.name, [old + " → " + e.name],
-      {prevName: old, note: "Swapped from the Body tab for more direct " + M.name.toLowerCase() + " work."});
+      {prevName: old, note: "Swapped from the Body tab for more direct " + M.name.toLowerCase() + " work.", undo});
     toast(old + " → " + e.name);
   }
   invalidateTableOrigin();
@@ -27331,6 +27368,8 @@ function viewProgram(){
   </div>
   <div class="btn-row" style="margin-bottom:16px">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
+    <button class="btn ghost small" id="planHistBtn" style="flex:1">What changed${
+      (S.planLog || []).length ? ' <span class="nb-count">' + (S.planLog || []).length + '</span>' : ""}</button>
   </div>
   <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
   // Anything an imported document said about running the programme — phases, deloads,
@@ -29911,6 +29950,8 @@ function bind(){
   if(plan) plan.onclick = openPlan;
   const aiB = $("#aiImportBtn");
   if(aiB) aiB.onclick = ()=> openAIImport(false);
+  const phB = $("#planHistBtn");
+  if(phB) phB.onclick = openPlanHistory;
   const rep = $("#reportBtn");
   if(rep) rep.onclick = openReport;
   const docB = $("#docBtn");
@@ -31276,6 +31317,70 @@ function planDiff(a, b){
   }
   return out;
 }
+/* =====================================================================
+   PUTTING A CHANGE BACK
+
+   The programme log was a record and nothing else: you could read that the Body tab had
+   cut your chest work to a different rep range three weeks ago and there was no way to
+   change your mind about it short of remembering the old numbers and typing them in. An
+   app that edits your plan on one tap owes you the same tap back.
+
+   THE DIFF STRINGS ARE FOR READING, NOT FOR PARSING. "Upper B · Incline Smith Machine
+   Press: 3 → 6 sets" is a sentence, and reconstructing a programme out of sentences is
+   how an undo quietly writes the wrong number. So the entries the edit is about to touch
+   are photographed BEFORE it runs, and the photograph is what goes back.
+
+   Absence is recorded as well as value. A swap deletes the load, because the old load
+   meant something on the old movement — a snapshot that only stored fields it found
+   would restore the movement and leave the new load sitting under it. */
+const PLAN_UNDO_FIELDS = ["name","sets","reps","weight","rest"];
+function planSnapOne(wid, e, keyAfter){
+  const row = {wid, key: keyAfter || e.name, f: {}};
+  PLAN_UNDO_FIELDS.forEach(k=>{ row.f[k] = (e[k] === undefined ? null : e[k]); });
+  return row;
+}
+// A movement that is about to be ADDED: there is nothing to photograph, only to remove.
+function planSnapAdd(wid, name){ return {wid, key: name, added: true}; }
+function planRevert(at){
+  const c = (S.planLog || []).find(x=> x && x.at === at);
+  if(!c || c.reverted) return {ok:false, why:"gone"};
+  let done = 0, missing = 0;
+  /* An ease-off is not a programme edit — it is a temporary cap that lifts on its own
+     — so it is undone where it lives rather than through the snapshot. */
+  if(c.easeKey && easeMap()[c.easeKey]){ delete easeMap()[c.easeKey]; done++; }
+  (c.undo || []).forEach(row=>{
+    const list = S.program[row.wid] || [];
+    const i = list.findIndex(x=> x && nrm(x.name) === nrm(row.key));
+    if(row.added){
+      if(i > -1){ list.splice(i, 1); done++; } else missing++;
+      return;
+    }
+    if(i < 0){ missing++; return; }
+    PLAN_UNDO_FIELDS.forEach(k=>{
+      const v = (row.f || {})[k];
+      if(v === null || v === undefined) delete list[i][k]; else list[i][k] = v;
+    });
+    /* The per-set ramp follows the set count or the two disagree about how many sets
+       this movement has. */
+    const e = list[i];
+    if(Array.isArray(e.rpes) && e.sets > 0){
+      while(e.rpes.length > e.sets) e.rpes.pop();
+      while(e.rpes.length < e.sets) e.rpes.push(e.rpes[e.rpes.length-1]);
+    }
+    done++;
+  });
+  if(!done) return {ok:false, why:"missing"};
+  c.reverted = Date.now();
+  invalidateTableOrigin();
+  logPlanChange("revert", null, c.name, (c.changes || []).slice(0, 4),
+    {note:"Put back from the plan history.", ofAt: c.at});
+  save(); queueSync();
+  return {ok:true, done, missing};
+}
+function planRevertable(c){
+  return !!c && !c.reverted && c.kind !== "revert" &&
+    (!!c.easeKey || (Array.isArray(c.undo) && c.undo.length > 0));
+}
 /* `name` is always the name the exercise ends up with, so a renamed movement's changes
    still come back from planChangesFor() under the name you look it up by. */
 function logPlanChange(kind, wid, name, changes, extra){
@@ -31434,6 +31539,75 @@ function planChangeSentence(c){
   return "Changed <b>"+esc(c.prevName || c.name)+"</b> on "+esc(day)+": "+bits.join("; ")+".";
 }
 
+/* =====================================================================
+   WHAT ELEMENT 26 CHANGED, AND THE WAY BACK
+
+   Everything the Body tab offers to do for you lands in the programme on one tap, and
+   until now the only record of it was a paragraph inside the downloadable report. Three
+   weeks later the plan says something different from what you wrote and there is no
+   screen that says who changed it or why, let alone one that offers to change it back.
+
+   So: newest first, what it did, the sentence that justified it, and a Put back. The
+   log holds every edit including the ones you made by hand in the Program tab — those
+   are shown too, because "what has happened to my plan" is one question, and answering
+   half of it would be its own kind of lie. Only the ones carrying a snapshot can be
+   undone, and the rest say so rather than offering a button that does nothing. */
+const PLAN_HIST_MAX = 40;
+function planChangeLine(c){
+  const strs = (c.changes || []).filter(x=> typeof x === "string");
+  if(strs.length) return strs;
+  return [planChangeSentence(c).replace(/<[^>]+>/g, "")];
+}
+function planHistoryHTML(){
+  const all = (S.planLog || []).slice().sort((a,b)=> b.at - a.at).slice(0, PLAN_HIST_MAX);
+  if(!all.length){
+    return `<div class="wd-none">Nothing has changed your programme yet. Every edit from
+      here on — yours and Element 26's — is listed here with a way back.</div>`;
+  }
+  let h = "", day = null;
+  all.forEach(c=>{
+    if(c.date !== day){
+      day = c.date;
+      h += `<div class="rev-head">${esc(fmtDate(day))}</div>`;
+    }
+    const can = planRevertable(c);
+    h += `<div class="ph-row${c.reverted ? " is-undone" : ""}">
+      <div class="ph-main">
+        <b>${esc(c.kind === "revert" ? "Put back" : (c.name || "Programme"))}</b>
+        <div class="ph-lines">${planChangeLine(c).slice(0, 4).map(x=>
+          `<div>${esc(x)}</div>`).join("")}</div>
+        ${c.note ? `<div class="ph-why">${esc(c.note)}</div>` : ""}
+      </div>
+      ${c.reverted
+        ? `<span class="ph-done">put back</span>`
+        : can ? `<button class="btn ghost small ph-undo" data-planrevert="${c.at}">Put back</button>`
+              : `<span class="ph-none">${c.kind === "revert" ? "" : "no way back"}</span>`}
+    </div>`;
+  });
+  return h;
+}
+function openPlanHistory(){
+  showModal(`<h3>What changed your plan</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Newest
+      first. Anything Element 26 wrote from a finding can be put back exactly as it was;
+      your own edits are listed so the record is complete.</div>
+    ${planHistoryHTML()}
+    <button class="btn ghost small" id="closeModal" style="margin-top:14px">Done</button>`);
+  const m = $("#modal");
+  m.querySelectorAll("[data-planrevert]").forEach(b=> b.onclick = ()=>{
+    const r = planRevert(parseFloat(b.dataset.planrevert));
+    if(!r.ok){
+      toast(r.why === "missing"
+        ? "Those movements are not in your plan any more"
+        : "That one has already been put back");
+      return;
+    }
+    render();
+    openPlanHistory();
+    toast(r.missing ? "Put back — " + r.missing + " could not be found" : "Put back", "good");
+  });
+  MODAL_REOPEN = openPlanHistory;
+}
 /* ---------- program editor ---------- */
 /* =====================================================================
    THE DAY EDITOR
