@@ -5579,7 +5579,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "26.9";
+const APP_VERSION = "27.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20880,10 +20880,29 @@ function focusNote(wid){
   const nPr = (q.prs || []).length;
   const inPlan = a && a.ex && (resolvedProgram(wid) || []).some(x=>
     x && x.chosen && nrm(x.chosen.name) === nrm(a.ex));
+  /* THE SENTENCE HAD NO SUBJECT, AND THE ONLY ONE IN REACH WAS THE WRONG ONE.
+
+     "3 personal records that day. Cost you 6.1 points on that grade." Two unrelated facts
+     joined with a space, and read in order the thing that cost you the points is your
+     three records — which is the opposite of what the grade does with them. What
+     actually cost 6.1 was the section this row is about, and naming it was the one word
+     missing: "Rest discipline cost 6.1 points of that grade."
+
+     It matters most in exactly the case on screen. When the movement is in today's plan
+     the line above says only "what to change is on Cable Lat Prayer, below", so without
+     the section name the number has nothing at all to attach to.
+
+     And they are separate lines now, because two sentences in one paragraph is how the
+     first one became the subject of the second. */
   const sub = [];
-  if(nPr) sub.push(nPr + " personal record" + (nPr > 1 ? "s" : "") + " that day.");
-  if(a && !a.na && a.lost >= 1) sub.push("Cost you " + r1(a.lost) + " point" + (a.lost === 1 ? "" : "s") + " on that grade.");
-  else if(a && a.na) sub.push("That section couldn't be graded at all last time.");
+  if(a && !a.na && a.lost >= 1){
+    sub.push((a.label || "That section") + " cost " + r1(a.lost) + " point" +
+             (a.lost === 1 ? "" : "s") + " of that grade.");
+  } else if(a && a.na){
+    sub.push("That section couldn't be graded at all last time.");
+  }
+  if(nPr) sub.push(nPr + " personal record" + (nPr > 1 ? "s" : "") +
+                   " that day, counted in your favour.");
 
   return {k:"focus", act: !inPlan && !!a,
     label:"Last " + widName(wid).toLowerCase(),
@@ -20895,7 +20914,7 @@ function focusNote(wid){
         : a ? (a.ex ? "<b>" + esc(a.ex) + "</b> \u2014 " + esc(a.text) : esc(a.text))
             : "Nothing needs fixing. Repeat it, one small step heavier.",
     raw:true,
-    body:`${sub.length ? `<div class="nt-p">${esc(sub.join(" "))}</div>` : ""}
+    body:`${sub.map(x=> `<div class="nt-p">${esc(x)}</div>`).join("")}
       <button class="fc-btn" data-fullgrade="${esc(s.id)}">See the full breakdown</button>`};
 }
 function todayNotes(wid){
