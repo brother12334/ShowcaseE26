@@ -4347,6 +4347,16 @@ body.cele-open{overflow:hidden}
 .set.is-pr input{border-color:rgba(201,154,52,.55)}
 /* The evidence, in the row's own quiet voice: the badge is the claim and this is the
    number behind it, so it must not compete with it for attention. */
+/* The movement's name inside the "before you start" note: a link in the app's own hand,
+   not a button, because it goes somewhere rather than doing something. */
+.fc-jump{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--text);
+  cursor:pointer;text-decoration:underline;text-decoration-color:var(--acc-line);
+  text-underline-offset:3px;text-decoration-thickness:1.5px}
+.fc-jump:hover,.fc-jump:focus-visible{text-decoration-color:var(--acc)}
+/* AND SOMETHING TO ARRIVE AT. Scrolling to a row in a page of near-identical rows drops
+   you somewhere that looks like everywhere else, so the destination says "here". */
+@keyframes fcHit{from{background:rgba(201,138,75,.20)}to{background:transparent}}
+.ex-head.fc-hit{animation:fcHit 1.6s ease both;border-radius:8px}
 .pr-note{font:10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
 .pr-row{margin:-3px 0 7px;padding-left:47px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
 .pr-row:empty{display:none}
@@ -5579,7 +5589,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.0";
+const APP_VERSION = "27.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20910,9 +20920,25 @@ function focusNote(wid){
     /* The chip beside the label already carries the date and the grade, so the line does
        not say them again — the row would be repeating itself inside the fix for a row
        that repeated the screen. */
-    line: inPlan ? "What to change is on <b>" + esc(a.ex) + "</b>, below."
-        : a ? (a.ex ? "<b>" + esc(a.ex) + "</b> \u2014 " + esc(a.text) : esc(a.text))
-            : "Nothing needs fixing. Repeat it, one small step heavier.",
+    /* A SIGNPOST IS NOT AN INSTRUCTION.
+
+       This said "What to change is on Cable Lat Prayer, below" and stopped, on the
+       grounds that the same tip is printed again next to that exercise further down the
+       screen. The de-duplication is true and the result is a row at the top of "Before
+       you start" that does not say what to do @@ you have to go and find it, and until
+       you do, the one card whose job is "the thing to change today" is a pointer.
+
+       It says the thing now. The copy lower down keeps its place, because that one is
+       next to the bar you will be loading and this one is what you read before you
+       start; they are the same words in two different moments. And the movement's name
+       is a tap that takes you there, so "below" stops being something to hunt for. */
+    line: a
+        ? (a.ex
+            ? (inPlan
+                ? `<button type="button" class="fc-jump" data-exjump="${esc(a.ex)}">${esc(a.ex)}</button>`
+                : "<b>" + esc(a.ex) + "</b>") + " \u2014 " + esc(a.text)
+            : esc(a.text))
+        : "Nothing needs fixing. Repeat it, one small step heavier.",
     raw:true,
     body:`${sub.map(x=> `<div class="nt-p">${esc(x)}</div>`).join("")}
       <button class="fc-btn" data-fullgrade="${esc(s.id)}">See the full breakdown</button>`};
@@ -21150,7 +21176,8 @@ function viewToday(){
     const occ = occIndex(rp, rpi);
     const ll = lastBox(wid, e.name, isFinisher || sharedAcrossDays(e.name), occ);
     const ins = insight(e.name, occ);
-    h += `<div class="ex-head"><b>${esc(e.name)}${supersetBadge(supersetInfo(rp.map(x=>x.chosen), rpi))}${techBadges(e)}${other?'<span class="alt-badge">⇄</span>':''}</b><span class="ex-target">${e.sets}×${esc(e.reps)}${e.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(e.rpe))+'</span>':""}</span></div>`;
+    /* Named in the markup so the note at the top of the screen can jump to it. */
+    h += `<div class="ex-head" data-exrow="${esc(nrm(e.name))}"><b>${esc(e.name)}${supersetBadge(supersetInfo(rp.map(x=>x.chosen), rpi))}${techBadges(e)}${other?'<span class="alt-badge">⇄</span>':''}</b><span class="ex-target">${e.sets}×${esc(e.reps)}${e.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(e.rpe))+'</span>':""}</span></div>`;
     h += supersetNoteHTML(supersetInfo(rp.map(x=>x.chosen), rpi));
     /* THE CHIP WAS DRAWN ON EXACTLY ONE OF THE THREE SCREENS THAT SHOW A LOAD. It lived
        on the ordinary exercise card inside a live session and nowhere else — so reading
@@ -30282,6 +30309,23 @@ function bind(){
   if(pull) pull.onclick = pullFromGist;
   const lfB = $("#logFixBtn");
   if(lfB) lfB.onclick = openLogFix;
+  /* "Below" made literal. The note names the movement and this is what makes the name
+     mean something: the row it points at, in view, marked. */
+  document.querySelectorAll("#app [data-exjump]").forEach(b2=> b2.onclick = e2=>{
+    e2.preventDefault(); e2.stopPropagation();
+    /* Matched rather than selected: a normalised name is not guaranteed to be a safe
+       attribute selector, and one apostrophe would throw instead of scrolling. */
+    const key = nrm(b2.dataset.exjump);
+    const row = [...document.querySelectorAll("#app [data-exrow]")]
+      .find(x=> x.dataset.exrow === key);
+    if(!row){ toast("That movement is not on today's card"); return; }
+    row.scrollIntoView({behavior: reducedMotion() ? "auto" : "smooth", block: "center"});
+    document.querySelectorAll(".ex-head.fc-hit").forEach(x=> x.classList.remove("fc-hit"));
+    // restarted rather than merely added, so a second tap flashes again
+    void row.offsetWidth;
+    row.classList.add("fc-hit");
+    setTimeout(()=> row.classList.remove("fc-hit"), 1700);
+  });
   const lfU = $("#logFixUndoBtn");
   if(lfU) lfU.onclick = ()=>{
     const n = logFixUndoNow();
