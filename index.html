@@ -4349,6 +4349,9 @@ body.cele-open{overflow:hidden}
    number behind it, so it must not compete with it for attention. */
 /* The movement's name inside the "before you start" note: a link in the app's own hand,
    not a button, because it goes somewhere rather than doing something. */
+/* The one action a grade row can carry out, and what it would do, side by side. */
+.fc-do{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 2px}
+.fc-do-say{font-size:12.5px;color:var(--faint);line-height:1.45;flex:1 1 140px;min-width:0}
 .fc-jump{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--text);
   cursor:pointer;text-decoration:underline;text-decoration-color:var(--acc-line);
   text-underline-offset:3px;text-decoration-thickness:1.5px}
@@ -5589,7 +5592,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.1";
+const APP_VERSION = "27.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20914,7 +20917,10 @@ function focusNote(wid){
   if(nPr) sub.push(nPr + " personal record" + (nPr > 1 ? "s" : "") +
                    " that day, counted in your favour.");
 
-  return {k:"focus", act: !inPlan && !!a,
+  /* A row that can DO the thing is asking something of you, whether or not the movement
+     is on today's card, so it is marked accordingly. */
+  const fx = focusFixFor(a, wid);
+  return {k:"focus", act: !!fx || (!inPlan && !!a),
     label:"Last " + widName(wid).toLowerCase(),
     tag:`<span class="fc-grade" style="color:${col};background:${col}22">${esc(d)} · ${esc(q.grade)}</span>`,
     /* The chip beside the label already carries the date and the grade, so the line does
@@ -20925,7 +20931,7 @@ function focusNote(wid){
        This said "What to change is on Cable Lat Prayer, below" and stopped, on the
        grounds that the same tip is printed again next to that exercise further down the
        screen. The de-duplication is true and the result is a row at the top of "Before
-       you start" that does not say what to do @@ you have to go and find it, and until
+       you start" that does not say what to do — you have to go and find it, and until
        you do, the one card whose job is "the thing to change today" is a pointer.
 
        It says the thing now. The copy lower down keeps its place, because that one is
@@ -20941,7 +20947,47 @@ function focusNote(wid){
         : "Nothing needs fixing. Repeat it, one small step heavier.",
     raw:true,
     body:`${sub.map(x=> `<div class="nt-p">${esc(x)}</div>`).join("")}
+      ${fx ? `<div class="fc-do"><button class="btn small" data-focusfix="${esc(wid)}">${
+        esc(fx.label)}</button><span class="fc-do-say">${esc(fx.say)}</span></div>` : ""}
       <button class="fc-btn" data-fullgrade="${esc(s.id)}">See the full breakdown</button>`};
+}
+/* CARRYING OUT THE ONE THING THE ROW ASKS FOR.
+
+   "Try moving Cable Lat Prayer earlier, while you're still fresh" is a whole instruction
+   and it was only ever prose: you read it, went to the Program tab, found the day, found
+   the movement and pressed the up arrow. Every other finding in this app that names an
+   exact edit offers to make it. This one names an exact edit.
+
+   Only where the tip is unambiguous — see the `fix` tag in scoreWorkout(). Where it is
+   not, the row says what it always said and offers nothing, which is the honest answer
+   to advice a button cannot follow. */
+function focusFixFor(a, wid){
+  if(!a || !a.fix || !a.ex) return null;
+  if(a.fix.k === "earlier"){
+    const list = S.program[wid] || [];
+    const i = list.findIndex(x=> x && nrm(x.name) === nrm(a.ex));
+    if(i <= 0) return null;                       // not here, or already first
+    return {
+      label: "Move it earlier",
+      say: "Runs " + ordinalish(i) + " instead of " + ordinalish(i + 1) + " on " + dayName(wid) + ".",
+      run: ()=>{
+        const l2 = S.program[wid] || [];
+        const at = l2.findIndex(x=> x && nrm(x.name) === nrm(a.ex));
+        if(at <= 0) return false;
+        const undo = [planSnapPos(wid, l2[at].name, at)];
+        const t = l2[at - 1]; l2[at - 1] = l2[at]; l2[at] = t;
+        logPlanChange("programme", wid, a.ex,
+          [a.ex + ": position " + (at + 1) + " \u2192 " + at + " of " + l2.length],
+          {note: "Moved earlier from the grade: it went backwards at the end of the session.",
+           exs: [a.ex], undo});
+        return true;
+      }
+    };
+  }
+  return null;
+}
+function ordinalish(n){
+  return n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : n + "th";
 }
 function todayNotes(wid){
   return [deloadNote(), sleepNote(wid), asymNote(), focusNote(wid)]
@@ -24708,7 +24754,7 @@ function openWeakPoint(idx){
   /* NOT NOW. Offered on every finding, because "this is true and I am not doing anything
      about it this month" is an honest answer to any of them, and the alternative people
      actually use is ignoring the whole section. The card says exactly what brings it
-     back before you press it @@ a mute with undisclosed terms is a mute you stop
+     back before you press it — a mute with undisclosed terms is a mute you stop
      trusting. See isQuiet(). */
   {
     const band = w.sev || 1;
@@ -30309,6 +30355,17 @@ function bind(){
   if(pull) pull.onclick = pullFromGist;
   const lfB = $("#logFixBtn");
   if(lfB) lfB.onclick = openLogFix;
+  document.querySelectorAll("#app [data-focusfix]").forEach(b2=> b2.onclick = ()=>{
+    const wid = b2.dataset.focusfix;
+    const s2 = lastGradedFor(wid);
+    const a2 = s2 && s2.quality && (s2.quality.advice || [])[0];
+    const fx = focusFixFor(a2, wid);
+    if(!fx){ toast("That one has already been done"); return; }
+    if(!fx.run()){ toast("Couldn't do that \u2014 the movement has moved"); return; }
+    invalidateMultiDay(); invalidateTableOrigin();
+    save(); queueSync(); render();
+    toast(fx.label + " \u2014 done, and it is in What changed if you want it back", "good");
+  });
   /* "Below" made literal. The note names the movement and this is what makes the name
      mean something: the row it points at, in view, marked. */
   document.querySelectorAll("#app [data-exjump]").forEach(b2=> b2.onclick = e2=>{
@@ -31420,6 +31477,10 @@ function planSnapOne(wid, e, keyAfter){
 }
 // A movement that is about to be ADDED: there is nothing to photograph, only to remove.
 function planSnapAdd(wid, name){ return {wid, key: name, added: true}; }
+/* AND A ROW THAT ONLY REMEMBERS WHERE SOMETHING SAT. Reordering changes no field on the
+   entry, so a field snapshot would photograph a movement that is about to be identical
+   and put back nothing at all. Position is the whole edit. */
+function planSnapPos(wid, name, i){ return {wid, key: name, pos: i}; }
 /* And the mirror: a movement about to be REMOVED, which has to come back whole and in
    the place it was. Deep-copied, because the object it points at is about to be spliced
    out of the programme and anything left holding a reference would be putting back a
@@ -31442,6 +31503,13 @@ function planRevert(at){
     const i = list.findIndex(x=> x && nrm(x.name) === nrm(row.key));
     if(row.added){
       if(i > -1){ list.splice(i, 1); done++; } else missing++;
+      return;
+    }
+    if(row.pos != null){
+      if(i < 0){ missing++; return; }
+      const [moved] = list.splice(i, 1);
+      list.splice(Math.min(row.pos, list.length), 0, moved);
+      done++;
       return;
     }
     if(row.gone){
@@ -33091,9 +33159,13 @@ function scoreWorkout(sess){
       return;
     }
     const pts = Math.max(0, Math.min(max, earned));
+    /* `fix` is the tip in a form the app can carry out. Only set where the action is
+       unambiguous — "pick one lift and add 2.5-5 lb" is advice a person acts on, not an
+       instruction a button can follow, and a button that guesses which lift is worse
+       than no button. */
     secs.push({key, label, max, pts:Math.round(pts*10)/10, pct:pts/max,
                grade:gradeFor(pts/max), why:why.filter(Boolean), tip:tip||null,
-               ex:opt.ex||null});
+               ex:opt.ex||null, fix:opt.fix||null});
   };
   const entries = sess.entries || [];
   const allSets = [];
@@ -33212,7 +33284,10 @@ function scoreWorkout(sess){
                 " went backwards. If that keeps happening, try moving "+
                 (worst ? worst.name : "it")+" earlier, while you're still fresh."
               : null,
-      {ex: worst ? worst.name : null});
+      {ex: worst ? worst.name : null,
+       /* The one branch here whose advice is a single unambiguous edit: this movement,
+          one place earlier in the day. */
+       fix: (worst && down.length && up.length && down.length <= up.length) ? {k:"earlier"} : null});
   })();
 
   /* 3, EFFECTIVE INTENSITY ----------------------------------------------------
@@ -33525,7 +33600,7 @@ function sessionAdvice(secs){
   secs.forEach(s=>{
     if(!s.tip) return;
     const lost = s.na ? 0 : (s.max - s.pts);
-    out.push({key:s.key, label:s.label, text:s.tip, ex:s.ex||null, lost, na:!!s.na});
+    out.push({key:s.key, label:s.label, text:s.tip, ex:s.ex||null, fix:s.fix||null, lost, na:!!s.na});
   });
   return out.sort((a,b)=> (a.na - b.na) || (b.lost - a.lost)).slice(0, 4);
 }
