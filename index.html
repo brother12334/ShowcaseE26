@@ -492,8 +492,14 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .ch-tick{flex:0 0 15px;margin-top:2px;color:var(--acc);font-size:12px;opacity:0;line-height:1.3}
 .ch.on .ch-tick{opacity:1}
 .ch-tx{flex:1 1 auto;min-width:0}
-.ch-tx b{display:block;font-size:13.5px;font-weight:600;color:var(--dim);line-height:1.35}
-.ch.on .ch-tx b{color:var(--text)}
+/* DIRECT CHILD, because the option's description is allowed to contain bold and this
+   rule was catching it: "A 45 lb bar with a 45 on each end is <b>135</b>." turned the
+   number into a block, so 135 took a line of its own and left the full stop stranded on
+   the next one. The title is the <b> that IS the label; anything emphasised inside the
+   description is part of a sentence. */
+.ch-tx > b{display:block;font-size:13.5px;font-weight:600;color:var(--dim);line-height:1.35}
+.ch.on .ch-tx > b{color:var(--text)}
+.ch-tx span b{display:inline;font-size:inherit;color:var(--dim);line-height:inherit}
 .ch-tx span{display:block;font-size:12px;color:var(--faint);line-height:1.45;margin-top:2px}
 .ch.on{background:var(--acc-soft)}
 .set-sec{
@@ -5596,7 +5602,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.4";
+const APP_VERSION = "27.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -29848,8 +29854,15 @@ function bind(){
     save(); queueSync(); render();
     toast(tracksWeight() ? "Bodyweight tracking on" : "Bodyweight hidden \u2014 nothing was deleted");
   });
-  document.querySelectorAll("[data-prefbar]").forEach(b=> b.onclick=()=> setPref("barMode", b.dataset.prefbar,
-    b.dataset.prefbar === "total" ? "Barbell loads include the bar" : "Barbell loads are plates only"));
+  document.querySelectorAll("[data-prefbar]").forEach(b=> b.onclick=()=>{
+    const to = b.dataset.prefbar, from = trainPrefs().barMode;
+    if(from === to) return;
+    setPref("barMode", to,
+      to === "total" ? "Barbell loads include the bar" : "Barbell loads are plates only");
+    /* The setting takes effect immediately; what to do about everything already written
+       is a separate question, and the only one that touches your data. */
+    openBarModeConvert(to, from);
+  });
   const barW = $("#prefBarW");
   if(barW) barW.onchange = ()=>{
     const v = parseFloat(barW.value);
@@ -36046,6 +36059,121 @@ function implementWeight(name){
 }
 function barWeightFor(name){
   return trainPrefs().barMode === "total" ? implementWeight(name) : 0;
+}
+/* =====================================================================
+   CHANGING WHICH NUMBER YOU WRITE DOWN
+
+   `barAdd` is stamped on every finished entry, so switching this setting has never
+   corrupted anything: a session performed under "plates only" keeps its 90 and keeps
+   meaning 135. What it does do is leave the LOG in two conventions at once — everything
+   before the switch reading 90 and everything after reading 135, for the same bar, with
+   nothing on the row to say which is which. Every chart, every "last time" box and every
+   record then reads correctly and looks wrong.
+
+   So the switch offers to bring the old rows over. It is exactly the arithmetic the stamp
+   already encodes: add back what the entry says the implement weighed, or take off what
+   it weighs now. Nothing about what you lifted changes — only which number the app
+   writes down for it.
+
+   ASKED, NOT ASSUMED. Rewriting several hundred logged numbers is not a side effect a
+   settings tap should have, and somebody switching because they have been logging it
+   wrong wants something different from somebody switching how they will log it from now
+   on. And it is its own undo: switch back, convert again, and every figure returns,
+   because adding and subtracting the same implement weight is reversible. */
+function barModeConvertPlan(to){
+  const out = {sets: [], entries: [], plan: [], skipped: 0};
+  (S.sessions || []).forEach(sess=> (sess.entries || []).forEach(en=>{
+    if(!en || !en.name) return;
+    const imp = implementWeight(en.name);
+    const stamped = Number(en.barAdd) || 0;
+    const wasPlates = stamped > 0;
+    // already written in the convention we are moving to
+    if((to === "total") === !wasPlates) return;
+    /* Moving TO total adds back what this entry was actually performed under; moving to
+       plates takes off what the implement weighs now, there being no stamp to consult. */
+    const d = to === "total" ? stamped : -imp;
+    if(!d) return;
+    const rows = [];
+    let ok = true;
+    (en.sets || []).forEach(st=>{
+      const w = parseFloat(st && st.weight);
+      if(!isFinite(w) || w <= 0) return;
+      /* An empty bar logged as 45 becomes 0 plates, and a zero is not a load — it would
+         drop out of every record and every comparison. That entry keeps its numbers and
+         its stamp, and the sheet says how many did. */
+      if(w + d <= 0){ ok = false; return; }
+      rows.push({st, to: Math.round((w + d) * 10) / 10});
+    });
+    if(!ok){ out.skipped++; return; }
+    rows.forEach(r=> out.sets.push(r));
+    out.entries.push({en, stamp: to === "total" ? 0 : imp});
+  }));
+  /* The programme's own prescribed loads are written in the same convention, and left
+     behind they would prescribe a bar heavier or lighter than anything in the log. */
+  DAYS.concat(["finisher"]).forEach(wid=> (S.program[wid] || []).forEach(e=>{
+    [e, e && e.alt].forEach(t=>{
+      if(!t || !t.name) return;
+      const imp = implementWeight(t.name);
+      const w = parseFloat(t.weight);
+      if(!(imp > 0) || !isFinite(w) || w <= 0) return;
+      const nw = w + (to === "total" ? imp : -imp);
+      if(nw <= 0) return;
+      out.plan.push({ref: t, to: Math.round(nw * 10) / 10});
+    });
+  }));
+  return out;
+}
+function barModeConvertApply(pl, to){
+  if(!pl) return 0;
+  pl.sets.forEach(r=>{ r.st.weight = String(r.to); });
+  pl.entries.forEach(r=>{ if(r.stamp > 0) r.en.barAdd = r.stamp; else delete r.en.barAdd; });
+  pl.plan.forEach(r=>{ r.ref.weight = r.to; });
+  /* Stamped estimates are arithmetic on figures that have just moved. Cleared rather than
+     kept, and recomputed on the next look. */
+  (S.sessions || []).forEach(sess=> (sess.entries || []).forEach(en=>
+    (en.sets || []).forEach(st=>{ if(st) delete st.pr; })));
+  invalidateTableOrigin();
+  logPlanChange("weight", null, "Barbell loads",
+    [pl.sets.length + " logged sets and " + pl.plan.length + " prescribed loads rewritten"],
+    {note: "Switched to " + (to === "total" ? "bar + plates" : "plates only") +
+           ". The loads themselves are unchanged."});
+  save(); queueSync();
+  return pl.sets.length;
+}
+/* `from` is not decoration. The programme's own loads carry no stamp saying which
+   convention they are written in, so "is there anything to convert" is answered for them
+   by the switch having happened at all — call this without one and it would cheerfully
+   convert a plan that was already right. It refuses unless the mode actually moved. */
+function openBarModeConvert(to, from){
+  if(!to || !from || to === from) return false;
+  const pl = barModeConvertPlan(to);
+  if(!pl.sets.length && !pl.plan.length) return false;
+  const word = to === "total" ? "bar + plates" : "plates only";
+  const other = to === "total" ? "plates only" : "bar + plates";
+  showModal(`<h3>Bring the old numbers over?</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">You now write
+      loads down as <b>${esc(word)}</b>. ${pl.sets.length
+        ? "<b>" + pl.sets.length + "</b> logged set" + (pl.sets.length === 1 ? " is" : "s are") +
+          " still written as " + esc(other) + ""
+        : "Nothing logged needs changing"}${pl.plan.length
+        ? ", and <b>" + pl.plan.length + "</b> prescribed load" + (pl.plan.length === 1 ? "" : "s") +
+          " in your programme" : ""}.</div>
+    <div class="set-says" style="margin-bottom:14px">Nothing about what you lifted changes \u2014 only
+      the number written for it. ${to === "total"
+        ? "Each one gains the weight of the bar it was done on."
+        : "Each one loses it."} Switch back and convert again and every figure returns.${
+      pl.skipped ? " " + pl.skipped + " exercise" + (pl.skipped === 1 ? " is" : "s are") +
+        " left alone, because taking the bar off would leave a load of nothing." : ""}</div>
+    <button class="btn" id="bmGo">Convert ${pl.sets.length ? pl.sets.length + " set" + (pl.sets.length===1?"":"s") : "the plan"}</button>
+    <button class="btn ghost small" id="bmNo" style="margin-top:9px">Leave the log alone</button>`);
+  const m = $("#modal");
+  m.querySelector("#bmNo").onclick = ()=>{ hideModal(); toast("Left as it was \u2014 new sessions use the new convention"); };
+  m.querySelector("#bmGo").onclick = ()=>{
+    const n = barModeConvertApply(pl, to);
+    hideModal(); render();
+    toast(n + " set" + (n === 1 ? "" : "s") + " rewritten as " + word, "good");
+  };
+  return true;
 }
 function barAddendFor(name){
   return trainPrefs().barMode === "total" ? 0 : implementWeight(name);
