@@ -4358,6 +4358,12 @@ body.cele-open{overflow:hidden}
 /* The one action a grade row can carry out, and what it would do, side by side. */
 /* The override on a flag that advises against it: present, reachable, and plainly not
    the thing being recommended. */
+/* The bar-weight chips: one tap per answer, wrapping rather than scrolling. */
+.bw-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+.bw-chip{font:12.5px var(--mono);letter-spacing:.04em;padding:9px 13px;border-radius:999px;
+  border:1px solid var(--line);background:var(--card2);color:var(--dim);cursor:pointer}
+.bw-chip:hover,.bw-chip:focus-visible{border-color:var(--acc-line);color:var(--text)}
+.bw-chip.on{border-color:var(--acc);background:var(--acc-dim,rgba(201,138,75,.14));color:var(--text)}
 .flag-anyway{display:block;margin:8px 2px 0;font-size:12.5px;color:var(--faint)}
 .flag-anyway:hover,.flag-anyway:focus-visible{color:var(--dim)}
 .fc-do{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 2px}
@@ -5602,7 +5608,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.5";
+const APP_VERSION = "27.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -19079,6 +19085,43 @@ function setBlock(title, help, control){
     ${control}</div>`;
 }
 // EQUIPMENT: everything that is a fact about the building you lift in.
+/* THE BARS THAT EXIST, RATHER THAN A BOX.
+
+   This was a number field, which is the wrong control for a question with four common
+   answers: nobody has to remember what an Olympic bar weighs to tap "45", and a typed
+   field invites 4.5, a blank, or a number in the other unit. Chips for the bars that
+   actually sit in racks, and the box kept behind "Something else" for the training bar,
+   the thick bar and the one in a garage that nobody knows.
+
+   Not set stays a real answer. barWeight null means "I would rather not say", and every
+   percentage in the app behaves as it did before somebody was asked — so it is offered
+   as a choice rather than being the state you are stuck in until you guess. */
+const BAR_CHOICES_LB = [45, 35, 55, 25];
+const BAR_CHOICES_KG = [20, 15, 25, 10];
+// Carriages vary far more than bars, so the spread is wider and the default is in it.
+const SMITH_CHOICES_LB = [15, 25, 32, 45];
+const SMITH_CHOICES_KG = [7, 12, 15, 20];
+function barWeightPickHTML(p){
+  const opts = inKg() ? BAR_CHOICES_KG : BAR_CHOICES_LB;
+  const cur = p.barWeight == null ? null : parseFloat(p.barWeight);
+  const other = cur != null && opts.indexOf(cur) < 0;
+  const chip = (v, label, on)=> `<button type="button" class="bw-chip${on ? " on" : ""}"
+    data-prefbarw="${v}" aria-pressed="${on}">${esc(label)}</button>`;
+  return `<div class="set-block">
+    <div class="set-name">Your bar weighs</div>
+    <div class="bw-row">
+      ${opts.map(v=> chip(v, v + " " + unitWord(), cur === v)).join("")}
+      ${chip("other", other ? cur + " " + unitWord() : "Something else", other)}
+      ${chip("", "Rather not say", cur == null)}
+    </div>
+    ${other || BARW_OPEN ? `<div class="field" style="margin:10px 0 0">
+      <input id="prefBarW" inputmode="decimal" value="${esc(cur == null ? "" : String(cur))}"
+        placeholder="e.g. ${barDefault()}" aria-label="What your bar weighs"></div>` : ""}
+    <div class="set-says">Warm-up percentages come off this, and so does every load the
+      app works out for you.</div>
+  </div>`;
+}
+let BARW_OPEN = false;
 function prefsGymHTML(){
   const p = trainPrefs();
   let h = setChoice("Pounds or kilos", [
@@ -19091,14 +19134,22 @@ function prefsGymHTML(){
       {v:"off", t:"Leave it out",  d:"Nothing in the app asks for it or shows it. Anything already logged is kept."}
     ], "data-trackw", tracksWeight() ? "on" : "off",
     "Turning it off hides the feature; it does not delete a single weigh-in.");
+  /* THE EXAMPLE IS ABOUT YOUR BAR, or it is not an example of anything. This was written
+     with 45 hard-coded in both lines, so somebody who had told the app their bar weighs 25
+     was reading "a 45 lb bar with a 45 on each end is 135" directly above the field where
+     they had said otherwise \u2014 the one screen whose whole job is explaining which number
+     to write, demonstrating it with a bar they do not own. */
+  const barW = p.barWeight == null ? barDefault() : p.barWeight;
+  const plate = inKg() ? 20 : 45;               // one plate a side, the one everybody pictures
   h += setChoice("The number you write down for a barbell", [
-      {v:"total",  t:"Bar + plates", d:"A 45 lb bar with a 45 on each end is <b>135</b>."},
-      {v:"plates", t:"Plates only",  d:"The same bar is <b>90</b> \u2014 the plates, with the bar left out."}
+      {v:"total",  t:"Bar + plates",
+       d:"A " + esc(String(barW)) + " " + esc(unitWord()) + " bar with a " + plate +
+         " on each end is <b>" + esc(String(r1(barW + plate * 2))) + "</b>."},
+      {v:"plates", t:"Plates only",
+       d:"The same bar is <b>" + (plate * 2) + "</b> \u2014 the plates, with the bar left out."}
     ], "data-prefbar", p.barMode,
     "<b>Either way it is the whole load, never one side.</b> Same for a Smith machine.")
-    + (p.barMode === "total" ? `<div class="set-block"><div class="field" style="margin:0"><label>Your bar weighs</label>
-      <input id="prefBarW" inputmode="decimal" value="${esc(p.barWeight == null ? "" : p.barWeight)}"
-        placeholder="e.g. ${barDefault()} \u2014 blank if you'd rather not say"></div></div>` : "");
+    + (p.barMode === "total" ? barWeightPickHTML(p) : "");
   /* The plates and the dumbbells used to be asked for again here. They are facts about a
      ROOM, not about you, and "Where you train" already asks them per gym — so the same
      two questions were on two screens, and the answer on this one was the one the other
@@ -21897,13 +21948,35 @@ function openBarModal(kind){
         ? "Carriages run from about " + (inKg()?"3":"6") + " to " + smithBarDefault() + "+ " + unitWord() + " depending on the machine, and warm-up percentages come off it."
         : "Warm-up percentages come off this, so a different gym's bar is worth a moment."
       } Same setting as in Settings \u2014 it stays until you change it back.</div>
-    <div class="field" style="margin:0 0 12px">
-      <input id="barModalW" inputmode="decimal" value="${esc(cur == null ? "" : cur)}"
-        placeholder="${smith ? smithBarDefault() + " if you leave it blank" : (inKg() ? "e.g. 20 \u2014 most bars" : "e.g. 45 \u2014 20 kg bars read about 44")}"></div>
+    ${/* The same question as in Settings, so the same control: the bars and carriages
+          that exist, with the box behind "Something else" for the ones that do not. */
+      (()=>{
+        const opts = smith ? (inKg() ? SMITH_CHOICES_KG : SMITH_CHOICES_LB)
+                           : (inKg() ? BAR_CHOICES_KG : BAR_CHOICES_LB);
+        const c = cur == null ? null : parseFloat(cur);
+        const other = c != null && opts.indexOf(c) < 0;
+        const chip = (v, label, on)=> `<button type="button" class="bw-chip${on ? " on" : ""}"
+          data-barmodalpick="${v}" aria-pressed="${on}">${esc(label)}</button>`;
+        return `<div class="bw-row" style="margin-bottom:12px">
+          ${opts.map(v=> chip(v, v + " " + unitWord(), c === v)).join("")}
+          ${chip("other", other ? c + " " + unitWord() : "Something else", other)}
+        </div>
+        <div class="field" style="margin:0 0 12px" id="barModalBox"${other ? "" : " hidden"}>
+          <input id="barModalW" inputmode="decimal" value="${esc(cur == null ? "" : cur)}"
+            placeholder="${smith ? smithBarDefault() : barDefault()}"
+            aria-label="${smith ? "Carriage weight" : "Bar weight"}"></div>`;
+      })()}
     <button class="btn" id="barModalSave">Save</button>
     <button class="btn ghost small" id="closeModal" style="margin-top:8px">Cancel</button>`);
   const el = $("#modal").querySelector("#barModalW");
-  el.focus();
+  const box = $("#modal").querySelector("#barModalBox");
+  if(box && !box.hidden) el.focus();
+  $("#modal").querySelectorAll("[data-barmodalpick]").forEach(b2=> b2.onclick = ()=>{
+    const v = b2.dataset.barmodalpick;
+    if(v === "other"){ if(box){ box.hidden = false; el.focus(); } return; }
+    el.value = v;
+    $("#modal").querySelector("#barModalSave").click();
+  });
   $("#modal").querySelector("#barModalSave").onclick = ()=>{
     const raw = el.value.trim();
     const v = parseFloat(raw);
@@ -29863,10 +29936,22 @@ function bind(){
        is a separate question, and the only one that touches your data. */
     openBarModeConvert(to, from);
   });
+  document.querySelectorAll("[data-prefbarw]").forEach(b2=> b2.onclick = ()=>{
+    const v = b2.dataset.prefbarw;
+    if(v === "other"){ BARW_OPEN = true; render();
+      const f = $("#prefBarW"); if(f) f.focus();
+      return; }
+    BARW_OPEN = false;
+    trainPrefs().barWeight = v === "" ? null : parseFloat(v);
+    save(); queueSync(); render();
+    toast(v === "" ? "Bar weight not set \u2014 percentages behave as before"
+                   : "Bar set to " + fmtLoad(parseFloat(v)));
+  });
   const barW = $("#prefBarW");
   if(barW) barW.onchange = ()=>{
     const v = parseFloat(barW.value);
     trainPrefs().barWeight = barW.value.trim() === "" ? null : Math.max(5, Math.min(120, v || 45));
+    BARW_OPEN = trainPrefs().barWeight != null;
     save(); queueSync(); render();
     toast(trainPrefs().barWeight == null ? "Bar weight cleared" : "Bar set to " + trainPrefs().barWeight + " " + unitWord());
   };
