@@ -5592,7 +5592,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.2";
+const APP_VERSION = "27.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20962,8 +20962,21 @@ function focusNote(wid){
    not, the row says what it always said and offers nothing, which is the honest answer
    to advice a button cannot follow. */
 function focusFixFor(a, wid){
-  if(!a || !a.fix || !a.ex) return null;
-  if(a.fix.k === "earlier"){
+  if(!a || !a.ex) return null;
+  /* A GRADE IS STAMPED AT FINISH AND NEVER RE-DERIVED, which is right — it is a fact
+     about what happened, and re-scoring old sessions would quietly rewrite history every
+     time this file changes. It also means every session graded before the tag existed
+     carries advice with no `fix` on it, and the button would not appear on the very card
+     that prompted it.
+
+     So for those, and only those, the shape is read back off the stored advice: the
+     overload section, a movement named, and a sentence about the running order. A prose
+     test is a poor primary source and an honest fallback for data that predates the
+     field. */
+  const fix = a.fix || ((a.key === "overload" && /\bearlier\b|running order/i.test(a.text || ""))
+    ? {k:"earlier", legacy:true} : null);
+  if(!fix) return null;
+  if(fix.k === "earlier"){
     const list = S.program[wid] || [];
     const i = list.findIndex(x=> x && nrm(x.name) === nrm(a.ex));
     if(i <= 0) return null;                       // not here, or already first
@@ -33285,9 +33298,12 @@ function scoreWorkout(sess){
                 (worst ? worst.name : "it")+" earlier, while you're still fresh."
               : null,
       {ex: worst ? worst.name : null,
-       /* The one branch here whose advice is a single unambiguous edit: this movement,
-          one place earlier in the day. */
-       fix: (worst && down.length && up.length && down.length <= up.length) ? {k:"earlier"} : null});
+       /* THE TWO BRANCHES THAT ARE ABOUT THE RUNNING ORDER. Both end at the same edit —
+          this movement, one place earlier in the day — whether the sentence says it
+          outright or says "whatever sits at the end pays for everything in front of it".
+          The third branch with a movement on it blames fatigue and asks for a lighter
+          week, which is not a reorder, so it carries no fix. */
+       fix: (worst && down.length && up.length) ? {k:"earlier"} : null});
   })();
 
   /* 3, EFFECTIVE INTENSITY ----------------------------------------------------
