@@ -5608,7 +5608,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.6";
+const APP_VERSION = "27.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7285,17 +7285,60 @@ function hasTech(e, k){ return techList(e).some(t=> t.k === k); }
    first: the same functions read both. The flag rides along inside the set object, so it
    is written into the session with everything else and the grade months later still knows
    those reps were partials. */
-function setFlagLP(e, idx){
-  return !!(e && Array.isArray(e.sets) && e.sets[idx] && e.sets[idx].lp);
+/* WHICH TECHNIQUE, NOT WHETHER IT IS PARTIALS. This started as one boolean because there
+   was one thing to mark. The kinds that can honestly live on a single SET are the ones
+   that change what the set asks for without adding rows to it @@ partials, to failure,
+   as many as possible. A drop set or myo-reps is a structure with pieces underneath, and
+   that belongs to the movement in the plan, not to a set you added at the rack.
+
+   `lp` is still read: sets marked before this carried a boolean and a log is not
+   something to rewrite for tidiness. */
+const SET_TECH_KINDS = ["lengthened", "failure", "amrap"];
+function setTechOf(e, idx){
+  const st = (e && Array.isArray(e.sets)) ? e.sets[idx] : null;
+  if(!st) return null;
+  if(st.lp) return "lengthened";
+  return (st.tech && SET_TECH_KINDS.indexOf(st.tech) > -1) ? st.tech : null;
 }
-/* Hidden when the whole movement is already running as partials — every set is one
-   then, and a button offering to add "a partials set" to a partials exercise is offering
-   nothing. The toast names where the stretch is on THIS lift, because it is the bottom of
-   a curl and the top of a pulldown. */
-function lpAddBtnHTML(en, ei){
-  if(!en || lpWholeExercise(en)) return "";
-  return `<button class="btn ghost small" data-addlp="${ei}"
-    title="Adds one set at the end, run through the stretched part of the range only">+ partials set</button>`;
+/* WHAT A SET CAN BE, offered where you add one. A third button on the row was the wrong
+   answer to "what kind of set is this": it put one technique permanently on screen, said
+   nothing about the others, and grew a button every time another kind became markable.
+   The kinds live in a list and the list is what you are shown. */
+function setKindOptions(en){
+  const out = [{k:"", t:"Normal set", d:"The set the plan asks for."}];
+  /* Not offered on a movement already running every set as partials: it is what they all
+     are, and a menu entry that changes nothing is a menu entry that wastes a tap. */
+  if(en && !lpWholeExercise(en)){
+    out.push({k:"lengthened", t:TECHNIQUES.lengthened.label,
+              d:"Through the stretched part only, " + lengthenedWhere(en.name) + "."});
+  }
+  out.push({k:"failure", t:TECHNIQUES.failure.label, d:"Taken until the rep does not happen."});
+  out.push({k:"amrap",   t:TECHNIQUES.amrap.label,   d:"As many as you have, at this load."});
+  return out;
+}
+function openAddSetSheet(ei){
+  const en = S.active && S.active.entries[ei];
+  if(!en) return;
+  const opts = setKindOptions(en);
+  showModal(`<h3>Add a set to ${esc(en.name)}</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">It goes on the
+      end, empty, with nothing filled in \u2014 the load is usually the one that just ran out and
+      the app should not pretend to know that.</div>
+    <div class="ch-list">${opts.map(o=>
+      `<button type="button" class="ch" data-addkind="${esc(o.k)}">
+        <span class="ch-tx"><b>${esc(o.t)}</b><span>${esc(o.d)}</span></span>
+      </button>`).join("")}</div>
+    <button class="btn ghost small" id="closeModal" style="margin-top:12px">Never mind</button>`);
+  $("#modal").querySelectorAll("[data-addkind]").forEach(b=> b.onclick = ()=>{
+    const k = b.dataset.addkind;
+    const st = {weight:"", reps:"", rpe:"", done:false};
+    if(k) st.tech = k;
+    en.sets.push(st);
+    save(); hideModal(); render();
+    toast(k === "lengthened" ? "Partials set added \u2014 " + lengthenedWhere(en.name)
+        : k ? TECHNIQUES[k].label + " set added"
+            : "Set added", "good");
+  });
 }
 function techFor(e, idx, total){
   const out = techList(e).filter(t=>{
@@ -7309,7 +7352,8 @@ function techFor(e, idx, total){
      a set marked by hand on a movement whose last set is prescribed as partials anyway is
      the same instruction twice, and two badges saying "partials" is the bug not the
      feature. */
-  if(setFlagLP(e, idx) && !out.some(t=> t.k === "lengthened")) out.push({k:"lengthened", set:true});
+  const own = setTechOf(e, idx);
+  if(own && !out.some(t=> t.k === own)) out.push({k: own, set:true});
   return out;
 }
 function techSub(e, idx, total){
@@ -21541,7 +21585,6 @@ function viewActiveSession(){
     h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
       <button class="btn ghost small" data-addset="${ei}">+ set</button>
       <button class="btn ghost small" data-rmset="${ei}">− set</button>
-      ${lpAddBtnHTML(en, ei)}
     </div></div>`;
   }
 
@@ -21780,7 +21823,7 @@ function setGovernor(entry, si){
      a rep range written for full ones marks you up for doing less. Stamped like every
      other rule that deliberately changes what a set is, so the session it happened in
      keeps the reading it was performed under. */
-  if(lpWholeExercise(entry) || setFlagLP(entry, si)) return "lp";
+  if(lpWholeExercise(entry) || setTechOf(entry, si) === "lengthened") return "lp";
   const rx = setPrescription(entry, si);
   if(rx && rx.match != null) return "weaker";
   if(deloadActive()) return "deload";
@@ -22505,7 +22548,6 @@ function viewFocusSession(){
   h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
     <button class="btn ghost small" data-addset="${ei}">+ set</button>
     <button class="btn ghost small" data-rmset="${ei}">− set</button>
-    ${lpAddBtnHTML(en, ei)}
   </div></div>`;
   if(atEnd){
     h += `<div class="card">
@@ -29439,20 +29481,10 @@ function bind(){
     rows.splice(ri, 1);
     save(); render();
   });
-  document.querySelectorAll("[data-addset]").forEach(b=> b.onclick=()=>{
-    S.active.entries[b.dataset.addset].sets.push({weight:"",reps:"",rpe:"",done:false});
-    save(); render();
-  });
-  document.querySelectorAll("[data-addlp]").forEach(b=> b.onclick=()=>{
-    const en = S.active.entries[b.dataset.addlp];
-    if(!en) return;
-    /* THE SAME SET AS ANY OTHER, PLUS ONE FACT ABOUT IT. Nothing is pre-filled: the load
-       is usually the one that just ran out and the app should not pretend to know that,
-       and a rep count typed before the set is a set nobody did. */
-    en.sets.push({weight:"", reps:"", rpe:"", done:false, lp:true});
-    save(); render();
-    toast("Partials set added — " + lengthenedWhere(en.name), "good");
-  });
+  /* ONE BUTTON, AND IT ASKS. Adding a set and choosing what kind of set it is were two
+     controls for one decision, and the second only ever covered one technique. */
+  document.querySelectorAll("[data-addset]").forEach(b=> b.onclick=()=>
+    openAddSetSheet(parseInt(b.dataset.addset, 10)));
   document.querySelectorAll("[data-rmset]").forEach(b=> b.onclick=()=>{
     const sets = S.active.entries[b.dataset.rmset].sets;
     if(sets.length>1){ sets.pop(); save(); render(); }
