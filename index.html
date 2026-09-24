@@ -5608,7 +5608,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.8";
+const APP_VERSION = "27.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23326,6 +23326,38 @@ function fmtHours(h){
   const m = Math.round(h*60);
   return Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m";
 }
+/* HAVE YOU ALREADY DONE IT. Every line bodyStatus() writes is an instruction for a
+   session that has not happened yet — train light today, hit your usual numbers, today
+   is the day to try it — and all three are addressed to somebody standing in front of
+   the decision. Walk out of the gym, open the Body tab, and the app tells you how to
+   train today as though the last ninety minutes did not happen.
+
+   The STATE is still true: recovery, tiredness and the findings are facts about your
+   body and they do not stop being facts because you trained. It is only the advice that
+   is in the wrong tense. So the state stands and the sentence changes.
+
+   A session in progress does not count. Starting a second workout puts the decision back
+   in front of you, and advice for today is the right thing to give. */
+function trainedTodayAlready(){
+  if(S.active) return null;
+  const t = todayStr();
+  let last = null;
+  (S.sessions || []).forEach(sn=>{ if(sn && sn.date === t) last = sn; });
+  return last;
+}
+/* What to say instead, once the session is behind you. Keyed on the same three states,
+   because "you already trained" lands differently on a day you were flagged to ease off
+   than on one you were cleared to push. Nothing here congratulates a hard session the
+   app has not read — the grade card does that, with the numbers in front of it — and
+   nothing here asks for a change that can no longer be made. */
+const DONE_ADVICE = {
+  caution: "You've already trained today, so there's nothing to change now. Keep the rest "
+         + "of the day easy, and if this is still here next time round, that's the session to take light.",
+  ok:      "You've already trained today, so that's the session done. Nothing more is needed "
+         + "from you now \u2014 food and sleep are what turn it into progress.",
+  good:    "You've already trained today, and you went into it recovered. The rest of today "
+         + "is for eating and sleeping on top of it."
+};
 /* THE ONE THING THE SCREEN EXISTS TO ANSWER. Three states, chosen from the same totals
    the old screen printed as four separate percentages and left the reader to combine.
    The thresholds are the ones already used elsewhere in the app for colouring those
@@ -23362,6 +23394,15 @@ function bodyStatus(A){
   return {level:"good", dot:C_OK, title:"Doing well",
     line: "You're recovered and handling your training comfortably.",
     advice: "Good day to train hard. If a lift has felt ready to go up, today is the day to try it."};
+}
+/* The wrapper every caller goes through, so no screen can get the untensed version by
+   accident. bodyStatus() stays pure and testable; this is the one place that knows what
+   day it is. */
+function bodyStatusNow(A){
+  const st = bodyStatus(A);
+  if(st && trainedTodayAlready() && DONE_ADVICE[st.level])
+    return Object.assign({}, st, {advice: DONE_ADVICE[st.level], trained: true});
+  return st;
 }
 /* Each tile answers its own number so the reader never has to. `note` is the sentence
    that turns a figure into a fact about them. */
@@ -23641,7 +23682,7 @@ function viewBody(){
   const win = A.win;
   const cyc = A.cyc;
   const t = A.totals;
-  const st = bodyStatus(A);
+  const st = bodyStatusNow(A);
 
   h += `<div class="nb" style="--nb-accent:${st.dot}">`;
   /* ---- 1. AM I OK? ------------------------------------------------------------- */
