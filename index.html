@@ -5628,7 +5628,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "28.2";
+const APP_VERSION = "28.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23852,7 +23852,28 @@ function viewBody(){
      strange place to keep the answer to "am I doing too much". The same four facts, as
      sentences, in the main flow. */
   h += SECM("load");
-  const topFat = MKEYS.slice().sort((a,b)=>A.fat[b]-A.fat[a])[0];
+  /* "MOST WORKED" HAS TO MEAN MOST WORKED.
+
+     This row read A.fat — the muscle carrying the most fatigue RIGHT NOW — under a
+     label that says most WORKED, in a section headed Your training load, with a footnote
+     underneath saying everything above it is counted over the cycle. Three statements of
+     the window, and the value obeyed none of them.
+
+     Fatigue decays by the hour, so the answer moved by the hour: biceps in the morning,
+     forearms the day before, lats by the evening, none of them wrong and none of them
+     the thing anybody reads that row to find out. A row that changes between two looks
+     at the same screen teaches you to stop reading it.
+
+     A.vol is the per-muscle set count over the very window the footnote names, so the
+     row now answers its own question. It moves when you train, which is the only thing
+     that should move it. The fatigue of that muscle survives as the sentence underneath,
+     where it is context for a fact rather than the fact itself.
+
+     Ties break by MKEYS order rather than by sort chance, so two muscles level on sets
+     do not swap places between renders. */
+  const topVol = MKEYS.slice().sort((a,b)=> (A.vol[b]||0) - (A.vol[a]||0))[0];
+  const topVolSets = topVol ? (A.vol[topVol] || 0) : 0;
+  const topVolFat = topVol ? (A.fat[topVol] || 0) : 0;
   const loadRows = [
     {k:"Sets this week", v:String(t.setsWk),
      /* "The same as last week" was hardcoded, so a cycle-mode window that happened to
@@ -23870,10 +23891,12 @@ function viewBody(){
         : t.acwr<0.8 ? "Lighter than usual, which is fine for an easy spell."
         : "A steady, sustainable rate.",
      c: t.acwr==null ? "var(--dim)" : (t.acwr>1.5||t.acwr<0.8) ? C_WARN : C_OK},
-    {k:"Most worked muscle", v: topFat ? gName(topFat) : "\u2014",
-     s: !topFat ? "" : A.fat[topFat]>=60 ? "Carrying real tiredness \u2014 give it a day."
-        : A.fat[topFat]>=35 ? "Normally tired, nothing unusual."
-        : "Even your hardest-worked muscle is fresh.",
+    {k:"Most worked muscle", v: topVolSets>0 ? gName(topVol) : "\u2014",
+     s: topVolSets<=0 ? "Nothing logged " + win.short + " yet."
+        : topVolSets + " set" + (topVolSets===1?"":"s") + " " + win.short + ", "
+          + (topVolFat>=60 ? "and it's carrying real tiredness \u2014 give it a day."
+           : topVolFat>=35 ? "and it's normally tired, nothing unusual."
+           : "and it's still fresh."),
      c:"var(--text)"},
     {k:"Anything overdone", v: t.inj>=55 ? "Yes" : "No",
      s: t.inj>=55 ? "At least one muscle is being pushed harder than it recovers from."
