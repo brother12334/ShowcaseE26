@@ -1201,6 +1201,12 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
 }
 .plate-line b{color:var(--text);font-weight:400}
 .pl-say{margin-top:7px}
+.warm-pl{font:12px var(--mono);color:var(--dim);line-height:1.45;
+  border:1px dashed var(--line);border-radius:9px;padding:8px 10px;margin:8px 0 0}
+.warm-set.warm-pl-on{box-shadow:inset 0 0 0 1px var(--acc);color:var(--text)}
+.plate-gap{border-style:solid;border-color:rgba(201,154,52,.3)}
+.pl-gap-s{color:var(--dim)}
+.plate-gap .nb-link{margin-top:6px;font-family:var(--mono);font-size:11.5px}
 /* The drawing. Plates hang on a sleeve that runs left to right, heaviest nearest the
    middle of the bar, which is the order you actually load them in. */
 .pl-art{display:flex;align-items:center;gap:0;min-height:54px}
@@ -5628,7 +5634,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "28.3";
+const APP_VERSION = "28.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -27951,6 +27957,11 @@ function syncCardHTML(){
    Everything below is the same set of controls, in the same groups, with the same ids —
    the change is what the screen looks like before you touch it. */
 let SET_PAGE = null;                 // which group is open, or null for the grid
+/* WHICH WARM-UP RUNG IS SHOWING ITS PLATES, as "entryIndex:rungIndex". One at a time:
+   the answer is about the bar in front of you, and two of them open at once is a list to
+   read rather than an answer. Not saved — it is a question you ask mid-session and it
+   should not still be open tomorrow. */
+let WARM_PL = null;
 let HIST_Q = "";                     // what History is filtered by, if anything
 /* The catch-up list is a list of nights that still WANT something, so a night that has
    been settled leaves it. This is the way back in when one was settled wrongly. */
@@ -30442,7 +30453,29 @@ function bind(){
      plain text at that point, so this never sees a second tap on the same one. Marking it
      costs nothing and un-marking it would be the only undo in the app that puts work back
      on your list. */
+  /* PRESS AND HOLD, WITHOUT BREAKING THE TAP. The rung is already a button that ticks
+     itself off, so the hold has to end without the click that normally follows it ever
+     reaching that handler. HELD is set when the timer fires and read by the click below,
+     which swallows exactly one press — the one that opened the panel. Movement cancels
+     it, so a scroll that starts on a rung stays a scroll. */
+  let HELD = false;
+  document.querySelectorAll("[data-warmpl]").forEach(b=>{
+    const key = b.dataset.warmpl;
+    let t = null;
+    const open = ()=>{ WARM_PL = (WARM_PL === key) ? null : key; HELD = true; render(); };
+    const stop = ()=>{ if(t){ clearTimeout(t); t = null; } };
+    b.addEventListener("pointerdown", ()=>{ stop(); t = setTimeout(open, 450); });
+    ["pointerup","pointercancel","pointerleave","pointermove"].forEach(ev=>
+      b.addEventListener(ev, stop));
+    // the desktop equivalent, where nobody holds a mouse button down
+    b.addEventListener("contextmenu", ev=>{ ev.preventDefault(); open(); });
+  });
+  document.querySelectorAll("[data-platefix]").forEach(b=> b.onclick = ev=>{
+    ev.stopPropagation();
+    TAB = "sync"; SET_PAGE = "gym"; render(); window.scrollTo(0, 0);
+  });
   document.querySelectorAll("[data-warmtick]").forEach(b=> b.onclick = ()=>{
+    if(HELD){ HELD = false; return; }        // this press opened the plates, it does not also tick
     const [ei, wi] = b.dataset.warmtick.split(":").map(n=> parseInt(n, 10));
     const en = S.active && S.active.entries[ei];
     if(!en) return;
@@ -36560,6 +36593,33 @@ function plateBreakdown(total, name){
   return {bar: barW, plates, perSide: perSide - left, exact: left < 0.001, short: left,
           platesOnly};
 }
+/* WHY THERE IS NO PLATE COUNT, WHEN THERE OUGHT TO BE ONE.
+
+   plateBreakdown() returns null for two quite different classes of reason. One is "this
+   question does not apply here": a cable row has no plates to count, a set with no weight
+   in it has nothing to break down. The other is "the app has not been told something it
+   needs": which plates are on the tree, or what the bar weighs.
+
+   Both produced exactly the same thing on screen — nothing — and the second one is a
+   silent failure. The shipped default is bar + plates with the bar weight UNSET, so out
+   of the box every barbell in the app has no plate maths and says nothing about why.
+   Switch from plates-only to bar + plates without filling the bar weight in and every
+   calculator you had disappears at once, which is what this looked like.
+
+   So the gap gets a sentence and a way to close it. Only the fixable ones: a movement
+   with no plates, a set with no load, and a load under the empty bar all stay silent,
+   because there is nothing to set up. */
+function plateGapFor(name, total){
+  const p = trainPrefs();
+  const eq = equipmentOf(name);
+  if(eq !== "barbell" && eq !== "smith") return null;
+  if(!(parseFloat(total) > 0)) return null;
+  const miss = [];
+  if(p.barMode === "total" && !(implementWeight(name) > 0))
+    miss.push(eq === "smith" ? "what your Smith carriage weighs" : "what your bar weighs");
+  if(!(p.plateStep > 0)) miss.push("which plates you have");
+  return miss.length ? {miss, eq} : null;
+}
 /* The same thing as a sentence, or "" when there is nothing honest to say. */
 function plateLine(total, name){
   const b = plateBreakdown(total, name);
@@ -36682,7 +36742,8 @@ function warmupFromPlan(e, ctx){
   return (e.warmups || []).slice(0, 6).map(x=>{
     const pct = Number(x.pct);
     if(isFinite(pct) && pct > 0 && pct < 1 && w > 0)
-      return {label: warmRound(w * pct, e.name) + " " + unitWord(), reps: String(x.reps || ""), pct: Math.round(pct*100), src:"plan"};
+      return {label: warmRound(w * pct, e.name) + " " + unitWord(), w: warmRound(w * pct, e.name),
+              reps: String(x.reps || ""), pct: Math.round(pct*100), src:"plan"};
     return {label: String(x.label || (isFinite(pct) && pct > 0 ? Math.round(pct*100) + "%" : "warm-up")).slice(0,24),
             reps: String(x.reps || ""), src:"plan"};
   }).filter(x=> x.label);
@@ -36718,6 +36779,7 @@ function warmupPlan(e, kind, ctx){
       : [{label:"one light set", reps:"5", placeholder:true}];
   }
   return spec.map(x=>({label: warmRound(w * x.pct, e.name) + " " + unitWord(), reps: x.reps,
+                       w: warmRound(w * x.pct, e.name),
                        pct: Math.round(x.pct*100), src: src.src, uni}));
 }
 function warmupHTML(e, kind, ctx){
@@ -36744,9 +36806,39 @@ function warmupHTML(e, kind, ctx){
         return `<span class="warm-set${x.placeholder?" warm-ph":""}${on?" warm-on":""}"${
           on ? ` title="Done"` : ""}>${face}</span>`;
       }
-      return `<button type="button" class="warm-set${x.placeholder?" warm-ph":""}"
-             data-warmtick="${ei2}:${wi}" title="Mark this rung done">${face}</button>`;
+      const holdable = x.w > 0 && !!plateBreakdown(x.w, e.name);
+      const shown = WARM_PL === ei2 + ":" + wi;
+      return `<button type="button" class="warm-set${x.placeholder?" warm-ph":""}${
+             shown?" warm-pl-on":""}"
+             data-warmtick="${ei2}:${wi}"${holdable ? ` data-warmpl="${ei2}:${wi}"` : ""}
+             title="${holdable ? "Tap to tick it off, hold to see the plates" : "Mark this rung done"}"
+             >${face}</button>`;
     }).join("")}</span>
+    ${(()=>{
+      /* THE RAMP IS WHERE YOU ACTUALLY COUNT PLATES, and it was the one place with no
+         plate maths. The working load gets a full breakdown at the top of the card, and
+         then the four rungs you load the bar for FIRST are bare numbers — 95, 135, 165
+         — each of which you work out in your head while standing at the rack.
+
+         Tap already means "mark this rung done", and that is the right thing for tap to
+         mean, so this is a press and hold. Held, the rung opens its own breakdown under
+         the row; held again, or tapped, it closes. Right-click does the same on a
+         desktop, where holding a mouse button is nobody's habit. */
+      const ei3 = entryIndexOf(e);
+      if(ei3 < 0 || !WARM_PL) return "";
+      const [pe, pw] = String(WARM_PL).split(":").map(n=> parseInt(n, 10));
+      if(pe !== ei3) return "";
+      const rung = plan[pw];
+      if(!rung || !(rung.w > 0)) return "";
+      const gap = plateGapFor(e.name, rung.w);
+      if(gap) return `<div class="warm-pl"><div class="pl-gap-s">No plate count for
+        ${esc(fmtLoad(rung.w))} yet \u2014 Element 26 needs to know ${esc(joinList(gap.miss))}.</div>
+        <button type="button" class="nb-link" data-platefix="1">Set that up</button></div>`;
+      const line = plateLine(rung.w, e.name);
+      if(!line) return "";
+      return `<div class="warm-pl">${plateArtHTML(plateBreakdown(rung.w, e.name))}
+        <div class="pl-say"><b>${esc(fmtLoad(rung.w))}</b> = ${esc(line)}</div></div>`;
+    })()}
     <span class="warm-note">${
       /* EACH SIDE, SAID ONCE. Every rung on a one-limb movement is done twice, and
          "40 lb × 6" on a single-arm row means 6 per arm, not 6 in total. Said here
@@ -37641,6 +37733,10 @@ function plateLineHTML(en){
   const typed = (en.sets || []).map(st=> parseFloat(st && st.weight)).find(v=> v > 0);
   const want = typed != null ? typed : parseFloat(planLoadFor(en));
   if(!(want > 0)) return "";
+  const gap = plateGapFor(en.name, want);
+  if(gap) return `<div class="plate-line plate-gap"><div class="pl-gap-s">No plate count for
+    ${esc(fmtLoad(want))} yet \u2014 Element 26 needs to know ${esc(joinList(gap.miss))}.</div>
+    <button type="button" class="nb-link" data-platefix="1">Set that up</button></div>`;
   const line = plateLine(want, en.name);
   if(!line) return "";
   const b = plateBreakdown(want, en.name);
