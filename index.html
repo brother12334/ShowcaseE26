@@ -2203,6 +2203,8 @@ body.onboarding #app{padding:0}
    Greyed by COLOUR rather than by opacity, deliberately. Fading the whole card would take
    the hold notice down with it, and that notice is the one live thing on there — the
    sentence that says when this becomes pressable has to stay the most readable part. */
+.flag-again{font-size:12.5px;color:var(--arms);line-height:1.45;margin-top:5px}
+.nb-flag.is-held .flag-again{color:var(--faint)}
 .nb-flag.is-held{background:var(--card)}
 .nb-flag.is-held.sev1,.nb-flag.is-held.sev2,.nb-flag.is-held.sev3{border-left-color:var(--line)}
 .nb-flag.is-held .nb-flag-t,.nb-flag.is-held .nb-flag-m,.nb-flag.is-held .nb-flag-f{color:var(--faint)}
@@ -5626,7 +5628,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "28.1";
+const APP_VERSION = "28.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23948,6 +23950,11 @@ function viewBody(){
           ? `<span class="conf-tag conf-${esc(f.conf)}">${esc((CONF_BANDS.find(b=>b.k===f.conf)||{}).label||"")}</span>` : ""}</div>
         <div class="nb-flag-m">${esc(f.msg)}</div>
         ${f.fix?`<div class="nb-flag-f">${esc(f.fix)}</div>`:""}
+        ${(()=>{ const rp = flagRepeat(f); return rp ? `<div class="flag-again">${
+          rp.n === 1
+            ? "You dismissed this on " + esc(fmtDateShort(rp.last)) + " \u2014 your last session raised it again."
+            : "Dismissed " + rp.n + " times before, most recently " + esc(fmtDateShort(rp.last))
+              + " \u2014 it keeps coming back."}</div>` : ""; })()}
         ${f.kind === "fade" ? (()=>{
           /* Each half draws its own state, so half a decision looks like half a decision
              rather than like the card having failed. A settled half keeps its row — it is
@@ -35043,6 +35050,31 @@ function fadeFindings(sess){
 }
 function openFlags(){
   return flagLog().filter(f=> f && !f.applied && !f.dismissed).sort((a,b)=> b.at - a.at);
+}
+/* IT CAME BACK, AND THE CARD SHOULD SAY SO.
+
+   Dismissing a flag does not suppress the finding, and it was never meant to: flagKey()
+   is scoped to the session that raised it, so the next session that still shows the
+   problem raises a fresh one. That is the right behaviour — dismissing is "not now",
+   not "never tell me again", and a stall you waved off three weeks ago is a worse
+   problem now than it was then, not a settled one.
+
+   What was missing is that the returning card looked exactly like a first sighting. The
+   app knew it was the third time and said nothing, so the only record that you had seen
+   this before was your own memory of it, and the natural reading was that dismissing had
+   simply failed to stick.
+
+   Only DISMISSED ones count. A flag you applied and then saw return is a different
+   story — you did the thing and it did not work — and it deserves its own sentence
+   rather than being folded in with the ones you waved off. */
+function flagRepeat(f){
+  if(!f || !f.ex || !f.kind) return null;
+  const key = nrm(f.ex), at = f.at || 0;
+  const prior = flagLog().filter(x=> x && x.dismissed && x.kind === f.kind
+    && nrm(x.ex || "") === key && (x.at || 0) < at);
+  if(!prior.length) return null;
+  prior.sort((a, b)=> (a.at || 0) - (b.at || 0));
+  return {n: prior.length, last: prior[prior.length - 1].date};
 }
 /* Doing what the flag says. Each branch goes through the same code the grade card uses,
    so a flag applied from the Body tab and the same flag applied on the night are the
