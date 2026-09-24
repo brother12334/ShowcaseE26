@@ -5608,7 +5608,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.7";
+const APP_VERSION = "27.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7287,7 +7287,7 @@ function hasTech(e, k){ return techList(e).some(t=> t.k === k); }
    those reps were partials. */
 /* WHICH TECHNIQUE, NOT WHETHER IT IS PARTIALS. This started as one boolean because there
    was one thing to mark. The kinds that can honestly live on a single SET are the ones
-   that change what the set asks for without adding rows to it @@ partials, to failure,
+   that change what the set asks for without adding rows to it — partials, to failure,
    as many as possible. A drop set or myo-reps is a structure with pieces underneath, and
    that belongs to the movement in the plan, not to a set you added at the rack.
 
@@ -37344,9 +37344,26 @@ function planBehindLineHTML(en){
      accept, so it lands in the plan and the plan history identically, and closes any
      open load flag for the movement on the way. */
   const raiseWaiting = openFlags().some(f=> f && f.kind === "up" && nrm(f.ex || "") === nrm(p.name));
+  /* AND IT CANNOT CALL THE PLAN "OUT OF DATE" WHEN THE APP SET IT ON TUESDAY.
+
+     This line and the change chip above it were written apart and neither knew the other
+     existed, so an exercise the app had just cut carried both: a chip saying Element 26
+     cut you to 40 lb, and directly underneath, a button offering to put you back on 45.
+     Two statements about one number, in opposite directions, with nothing to tell you
+     which one the app meant. Out of date is the wrong word for a figure something wrote
+     deliberately thirteen days ago; the honest version names the cut and says plainly
+     that the cut is the part that is wrong. */
+  const b = p.byApp;
+  const cutTo = b ? parseFloat(b.to) : NaN;
+  const fromApp = b && isFinite(cutTo) && isFinite(parseFloat(b.from))
+    && parseFloat(b.from) > cutTo + 0.01 && Math.abs(plan - cutTo) < 0.01;
+  const undoing = fromApp && loadCutDisproved(p);
   return `<div class="ex-insight"><span class="ins-tag">plan is behind</span><span>Your
     programme says ${esc(fmtLoad(plan))}; you last worked at <b>${esc(fmtLoad(top))}</b>, so the
-    boxes suggest that. ${raiseWaiting
+    boxes suggest that. ${undoing
+      ? "Element 26 cut it to " + esc(fmtLoad(plan)) + " on " + esc(fmtDateShort(dayStr(b.at)))
+        + " for a range you had already hit at this weight, so the cut is the part that is wrong."
+      : raiseWaiting
       ? "The grade card has a raise waiting \u2014 or put the plan on what you are already doing."
       : "Nothing has earned a raise yet, so this is just the plan being out of date."}
     <button type="button" class="nb-link ex-catch" data-plancatch="${esc(p.name)}"
@@ -37506,6 +37523,51 @@ function pctLineHTML(en){
   return `<div class="plan-line pct-line">${esc(pctWords(p))}
     <button class="linklike" data-setmax="${esc(nm)}">${p.src === "estimated" ? "set it properly" : "change"}</button></div>`;
 }
+/* A CUT THE LOG ITSELF CONTRADICTS.
+
+   impossibleLoadCheck() can cut a load because the prescribed range is unreachable at
+   it, and the sentence it writes is stamped onto the programme entry and printed from
+   then on. Stamped is the right design — the reason has to survive so the number is
+   never mysterious — but it means a claim the app would no longer make outlives the
+   code that made it. This one shipped four days before the rule that would have
+   stopped it: "45 lb for 10-15 reps is not reachable" quoting a FIFTY pound set, which
+   says nothing whatever about forty-five, and the entry has been repeating it ever
+   since while the log sat there holding the disproof.
+
+   The disproof is simple and it is the same test the claim was making: did you, at any
+   point, take the load it called unreachable and reach the range at it. If you did, the
+   sentence is not stale phrasing, it is false, and the app has no business quoting it
+   underneath a line offering to put the plan back where it was.
+
+   Evidence from BEFORE the cut counts, deliberately. beaten() inside the check only
+   looks forward because it is closing a live flag against later sessions; this is
+   asking whether the cut should ever have happened, and a session the check overlooked
+   is exactly the kind that produces one of these. */
+function loadCutDisproved(p){
+  const b = p && p.byApp;
+  if(!b) return null;
+  const from = parseFloat(b.from), to = parseFloat(b.to);
+  if(!isFinite(from) || !isFinite(to) || !(from > to + 0.01)) return null;
+  const rr = repRange(p.reps);
+  if(!rr) return null;
+  const key = nrm(p.name);
+  let best = null;
+  /* Raw weight against the plan's raw number, the way planBehindLineHTML() compares
+     them: both are what you type, in whatever convention the movement is logged in. */
+  (S.sessions || []).forEach(sn=>{
+    (sn.entries || []).forEach(en=>{
+      if(!en || nrm(en.name) !== key) return;
+      (en.sets || []).forEach(st=>{
+        if(!isWorkingSet(st)) return;
+        const r = parseFloat(st.reps) || 0, w = parseFloat(st.weight) || 0;
+        if(!(r >= rr[0]) || !(w >= from - 0.01)) return;
+        if(!best || w > best.w || (w === best.w && sn.date > best.date))
+          best = {w, reps: r, date: sn.date, lo: rr[0], hi: rr[1]};
+      });
+    });
+  });
+  return best;
+}
 /* HOW A CHANGE THE APP MADE IS SAID, and why it is a chip rather than a sentence.
 
    Version one printed one line in the accent colour, worded the same whether the load had
@@ -37526,6 +37588,9 @@ function planChangeLineHTML(en){
   const chips = [], subs = [], whys = [];
   const cut = p.setsCut && p.setsCut.until && Date.now() < p.setsCut.until;
   const b = p.byApp;
+  /* The chip stays: the app did change your number and that is worth a mark. What goes
+     is the REASON, when the log has since contradicted it. */
+  const dis = loadCutDisproved(p);
   // the set cut says all of this in its own chip below; two of them is the app repeating itself
   /* AND IT STOPS BEING NEWS THE MOMENT YOU HAVE TRAINED IT.
 
@@ -37570,7 +37635,10 @@ function planChangeLineHTML(en){
         + " grade, replacing the opening estimate of " + fmtLoad(from)
       : (up ? "raised" : "cut") + " to " + fmtLoad(p.weight)
         + " by Element 26 \u00b7 " + fmtDateShort(dayStr(b.at)) + " grade");
-    if(b.why) whys.push(b.why);
+    if(dis) whys.push("That no longer stands: on " + fmtDate(dis.date) + " you did "
+      + fmtLoad(dis.w) + " for " + dis.reps + " rep" + (dis.reps === 1 ? "" : "s")
+      + ", inside " + dis.lo + "-" + dis.hi + ". Put the plan back where your sets are.");
+    else if(b.why) whys.push(b.why);
   }
   /* A LOAD THE APP WORKED OUT, WHICH IS NOT THE SAME AS ONE IT CHANGED — and until now
      the one kind of app-authored number with no mark on it at all.
