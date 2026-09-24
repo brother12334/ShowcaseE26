@@ -4364,6 +4364,12 @@ body.cele-open{overflow:hidden}
   border:1px solid var(--line);background:var(--card2);color:var(--dim);cursor:pointer}
 .bw-chip:hover,.bw-chip:focus-visible{border-color:var(--acc-line);color:var(--text)}
 .bw-chip.on{border-color:var(--acc);background:var(--acc-dim,rgba(201,138,75,.14));color:var(--text)}
+.flag-held{display:flex;gap:9px;align-items:flex-start;margin-top:9px;padding:9px 11px;
+  border:1px solid rgba(79,124,201,.32);border-radius:10px;
+  background:linear-gradient(180deg,rgba(79,124,201,.10),transparent)}
+.flag-held-k{font:9.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--back);
+  white-space:nowrap;flex-shrink:0;padding-top:2px}
+.flag-held-s{font-size:12.5px;color:var(--dim);line-height:1.45}
 .flag-anyway{display:block;margin:8px 2px 0;font-size:12.5px;color:var(--faint)}
 .flag-anyway:hover,.flag-anyway:focus-visible{color:var(--dim)}
 .fc-do{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 2px}
@@ -5608,7 +5614,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "27.9";
+const APP_VERSION = "28.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23920,6 +23926,7 @@ function viewBody(){
     const showF = BODY_OPEN.nbflags ? flags : flags.slice(0, 4);
     showF.forEach(f=>{
       const actionable = (f.to != null) || f.kind === "stall";
+      const held = flagDeloadHeld(f);
       h += `<div class="nb-flag sev${f.sev}">
         <div class="nb-flag-h">
           <span class="nb-flag-t">${esc(f.title)}</span>
@@ -23981,6 +23988,14 @@ function viewBody(){
         </div>
         <button class="nb-link flag-anyway" data-flagdo="${esc(f.id)}">Cut a set anyway</button>`
         : `
+        ${held ? `<div class="flag-held">
+          <span class="flag-held-k">On hold</span>
+          <span class="flag-held-s">Apply this after your deload week \u2014 ${esc(held.when)}.
+            You earned the weight; it keeps until the week is done.</span>
+        </div>
+        <div class="btn-row" style="margin-top:9px">
+          <button class="btn ghost small" data-flagno="${esc(f.id)}" style="flex:1">Dismiss</button>
+        </div>` : `
         <div class="btn-row" style="margin-top:9px">
           ${actionable && f.kind !== "stall" ? `<span class="pg-to">
             <input inputmode="decimal" data-flagtoin="${esc(f.id)}" value="${f.to == null ? "" : f.to}"
@@ -23988,7 +24003,7 @@ function viewBody(){
           ${actionable?`<button class="btn small" data-flagdo="${esc(f.id)}" style="flex:1">${
             f.kind === "stall" ? "Cut a set for now" : "Set it"}</button>`:""}
           <button class="btn ghost small" data-flagno="${esc(f.id)}" style="flex:0 0 auto">Dismiss</button>
-        </div>`}`}
+        </div>`}`}`}
       </div>`;
     });
     if(flags.length > 4){
@@ -35794,6 +35809,34 @@ function deloadActive(){
   // a deload is one week and expires on its own; a forgotten toggle should not quietly
   // halve your training for a month
   return (Date.now() - d.startedAt) < 8 * DAY_MS;
+}
+/* A RAISE THE DELOAD WILL REFUSE, SAID BEFORE YOU PRESS IT RATHER THAN AFTER.
+
+   applyProgression() has always blocked load increases during a deload, and it was the
+   only thing that knew. The Body tab drew "Ready for more weight" with a full accent
+   SET IT on it, you pressed it, and a toast came back saying the thing the card could
+   have told you before you reached for it. Three of them stacked up on one screen, all
+   of them dead buttons.
+
+   The finding itself is not wrong and must not be hidden — you DID earn the weight,
+   and it should still be there waiting when the week is over. So the card keeps every
+   word it had; what goes is the button, replaced by the date it becomes pressable.
+
+   A CUT IS NOT AFFECTED, for the same reason applyProgression() lets one through: a
+   load the prescription cannot reach is wrong in a deload week too, and refusing the
+   correction leaves you deloading against a number you cannot lift. */
+function flagDeloadHeld(f){
+  if(!deloadActive() || !f || f.to == null) return null;
+  if(f.kind === "stall" || f.kind === "fade") return null;   // neither one moves a load up
+  const to = parseFloat(f.to);
+  if(!isFinite(to)) return null;
+  const pe = findProgramEntry(f.ex);
+  const from = (pe && pe.weight != null && pe.weight !== "") ? parseFloat(pe.weight) : NaN;
+  if(isFinite(from) && to < from) return null;
+  const left = Math.max(0, 7 - (Math.floor((Date.now() - S.deload.startedAt) / DAY_MS) + 1));
+  return {left, when: left <= 0 ? "from your next session"
+                    : left === 1 ? "tomorrow"
+                    : "in " + left + " days"};
 }
 /* The programme as it should be performed right now. Everything that reads the plan for
    a SESSION goes through here; the Program tab still shows the real thing, with a
