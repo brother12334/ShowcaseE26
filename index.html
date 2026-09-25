@@ -5662,7 +5662,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "29.2";
+const APP_VERSION = "29.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23477,6 +23477,24 @@ function trainedTodayAlready(){
    than on one you were cleared to push. Nothing here congratulates a hard session the
    app has not read — the grade card does that, with the numbers in front of it — and
    nothing here asks for a change that can no longer be made. */
+/* AND THE OTHER DAY THE ADVICE IS ADDRESSED TO NOBODY: A REST DAY.
+
+   28.x taught this to stop instructing a session you had already done. It still had
+   nothing to say about the day there is no session to instruct — so a scheduled rest day
+   was met with "Good day to train hard. If a lift has felt ready to go up, today is the
+   day to try it", which is the app telling you to go to the gym on the day its own
+   schedule gave you off.
+
+   The state stands here for the same reason it stands there: being recovered on a rest
+   day is a fact, and a good one. It is the instruction that has nowhere to land. */
+const REST_ADVICE = {
+  caution: "It's a rest day, which is exactly what your body is asking for. Nothing to train "
+         + "today, and taking it now is what stops this turning into a niggle.",
+  ok:      "It's a rest day, so there's nothing to train. The tiredness you're carrying is "
+         + "what today is for — it drains off on its own from here.",
+  good:    "It's a rest day, so there's nothing to train. You'll go into the next session "
+         + "recovered, which is the whole point of taking it."
+};
 const DONE_ADVICE = {
   caution: "You've already trained today, so there's nothing to change now. Keep the rest "
          + "of the day easy, and if this is still here next time round, that's the session to take light.",
@@ -23527,8 +23545,14 @@ function bodyStatus(A){
    day it is. */
 function bodyStatusNow(A){
   const st = bodyStatus(A);
-  if(st && trainedTodayAlready() && DONE_ADVICE[st.level])
+  if(!st) return st;
+  /* Trained first, and it is not a tie: isRestToday() already refuses to call today a
+     rest day once a session is logged on it, but a day you recorded as rest and then
+     trained anyway would satisfy both, and what you DID outranks what was planned. */
+  if(trainedTodayAlready() && DONE_ADVICE[st.level])
     return Object.assign({}, st, {advice: DONE_ADVICE[st.level], trained: true});
+  if(isRestToday() && REST_ADVICE[st.level])
+    return Object.assign({}, st, {advice: REST_ADVICE[st.level], resting: true});
   return st;
 }
 /* Each tile answers its own number so the reader never has to. `note` is the sentence
