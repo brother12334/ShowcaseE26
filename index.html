@@ -5283,9 +5283,10 @@ body.cele-open{overflow:hidden}
 .gl-def b{color:var(--text)}
 .gl-scale{margin:14px 0 4px}
 .gl-bar{display:flex;height:22px;border-radius:7px;overflow:hidden;font:10px var(--mono);text-transform:uppercase;letter-spacing:.05em}
-.gl-bar>span{display:flex;align-items:center;justify-content:center;color:#15150f;font-weight:600}
-.gl-ticks{display:flex;margin-top:5px;font:10.5px var(--mono);color:var(--faint)}
-.gl-ticks>span{flex:1;text-align:center}
+.gl-bar>span{display:flex;align-items:center;justify-content:center;color:#15150f;font-weight:600;
+  min-width:0;white-space:nowrap;overflow:hidden}
+.gl-ticks{position:relative;height:14px;margin-top:5px;font:10.5px var(--mono);color:var(--faint)}
+.gl-ticks>i{position:absolute;top:0;font-style:normal;white-space:nowrap;transform:translateX(-50%)}
 .gl-table{width:100%;border-collapse:collapse;margin:10px 0 2px;font-family:var(--mono);font-size:13px}
 .gl-table td{padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top}
 .gl-table td:first-child{color:var(--dim);white-space:nowrap;padding-right:10px}
@@ -5648,7 +5649,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "28.9";
+const APP_VERSION = "29.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6461,19 +6462,46 @@ function term(id, label){
     tip ? ` data-tip="${attrSafe(tip)}" title="${attrSafe(tip)}"` : ""
   }>${label==null?id:label}</span>`;
 }
-// Shared tail for the three volume landmarks, they only make sense as a set.
-const VOL_LANDMARK_SCALE = `
+/* THE BAR AND ITS OWN LABELS DISAGREED ABOUT WHERE THE LANDMARKS ARE.
+
+   The segments are weighted 10 / 10 / 4 / 5, and the tick row under them was five cells
+   of flex:1 — five EQUAL cells under four unequal ones. So MEV sat under the middle of
+   the green instead of at its left edge, MAV under the green-yellow boundary it is
+   nowhere near, and MRV inside the red rather than at the start of it. Every label was
+   pointing at the wrong place on a diagram whose entire job is where the lines fall.
+
+   Both rows are built from one array now, so a tick cannot drift from the boundary it
+   names: each landmark sits at the running total of the widths before it, centred on
+   that edge.
+
+   And "hard but ok" did not fit its own segment. Four parts of twenty-nine is about
+   45px on a phone, the text wrapped to two lines, and a 22px bar grew a second row that
+   overlapped the one beside it. The labels are short enough to fit now and are pinned to
+   one line regardless, so a narrower screen clips a word instead of breaking the shape. */
+const VOL_ZONES = [
+  {w:10, c:"#3f5f8c", t:"too little", at:"0"},
+  {w:10, c:"#4a9358", t:"sweet spot", at:"MEV"},
+  {w:4,  c:"#c99a34", t:"hard",       at:"MAV"},
+  {w:5,  c:"#d1584f", t:"too much",   at:"MRV"}
+];
+const VOL_LANDMARK_SCALE = (()=>{
+  const total = VOL_ZONES.reduce((n, z)=> n + z.w, 0);
+  let run = 0;
+  const ticks = VOL_ZONES.map((z, i)=>{
+    const pct = run / total * 100;
+    run += z.w;
+    // the first one is flush left, or half of "0" hangs off the edge of the card
+    return `<i style="left:${r1(pct)}%${i === 0 ? ";transform:none" : ""}">${z.at}</i>`;
+  }).join("");
+  return `
 <div class="gl-scale">
-  <div class="gl-bar">
-    <span style="flex:10;background:#3f5f8c">too little</span>
-    <span style="flex:10;background:#4a9358">the sweet spot</span>
-    <span style="flex:4;background:#c99a34">hard but ok</span>
-    <span style="flex:5;background:#d1584f">too much</span>
-  </div>
-  <div class="gl-ticks"><span>0</span><span>MEV</span><span>MAV</span><span>MRV</span><span></span></div>
+  <div class="gl-bar">${VOL_ZONES.map(z=>
+    `<span style="flex:${z.w};background:${z.c}">${z.t}</span>`).join("")}</div>
+  <div class="gl-ticks">${ticks}</div>
 </div>
 <p>All three are counted in <b>${term("hardset","hard sets")} per muscle per week</b>. Three sets of bench press count as 3 chest sets, and partial credit goes to your front delts and triceps, because they did real work too.</p>
 <p style="color:var(--faint);font-size:13.5px">These landmarks come from the volume-landmark framework popularised by Mike Israetel and Renaissance Periodization. They're <b>population averages with wide individual variation</b>, treat them as a starting frame, not a law. Yours may sit higher or lower.</p>`;
+})();
 
 const GLOSSARY = {
   rpe:{title:"RPE, Rate of Perceived Exertion", html:`
