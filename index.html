@@ -5692,7 +5692,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "30.2";
+const APP_VERSION = "31.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9234,8 +9234,11 @@ function migrate(){
     }catch(e){}
     S.byAppBackfill = 1;
   }
-  // A6: classify the library once, so the regexes stop being consulted at read time
-  try{ seedCompoundFlags(); }catch(e){}
+  /* The two seeds do NOT run here. migrate() is called at module level, before GROUPS,
+     EX_MUSCLES_ALL and the rest of the analysis constants have been evaluated, so
+     anything touching them dies in the temporal dead zone — silently, because the calls
+     were wrapped. runOneTimeSeeds() runs them from the first render instead, by which
+     point the module is fully built. */
 
   /* ---- Spider Curl is bilateral ----
      It was classified as one-limb-at-a-time, which stamped an L/R chip on every set,
@@ -9838,7 +9841,7 @@ function bestEverFor(exName, upToEntry, upToSet){
   };
   // all finished history, name-normalised, so trailing spaces or a change of
   // capitalisation can't hide your own history from the comparison
-  S.sessions.forEach(s=> s.entries.forEach(en=>{
+  (S.sessions || []).forEach(s=> (s && s.entries || []).forEach(en=>{
     if(nrm(en.name)!==key) return;
     const add = entryBarAdd(en);
     en.sets.forEach(st=> consider(st, add));
@@ -10048,7 +10051,7 @@ function sweepSessionPRs(sess){
    summary therefore keeps only the best set per exercise. */
 function sessionPRs(sess){
   const best = new Map();
-  (sess.entries||[]).forEach(e=> e.sets.forEach((st,i)=>{
+  (sess.entries||[]).forEach(e=> (e && e.sets || []).forEach((st,i)=>{
     if(!st.pr) return;
     const k = nrm(e.name);
     const row = {name:e.name, set:i+1, kind:st.pr, weight:st.weight, reps:st.reps};
@@ -13150,9 +13153,15 @@ function windowStats(from, to){
                                    nearFail:0, restN:0, restShort:0, exs:{},
                                    compound:0, rpeSum:0, rpeN:0, dates:{}, effDates:{},
                                    days:0, rpeAvg:0}));
-  S.sessions.forEach(s=>{
-    if(s.startedAt < from || s.startedAt >= to) return;
-    s.entries.forEach(e=>{
+  /* A LOG THAT IS NOT QUITE THE RIGHT SHAPE MUST NOT TAKE THE APP DOWN. A session with
+     no entries array, or an entry whose sets are null, has arrived here from a partial
+     sync, an interrupted write and a hand-edited restore \u2014 and this is the function the
+     whole Body tab, every grade and now the calibration all run through, so throwing
+     here is the difference between one odd row and a blank screen. */
+  (S.sessions || []).forEach(s=>{
+    if(!s || !(s.startedAt >= from) || s.startedAt >= to) return;
+    (s.entries || []).forEach(e=>{
+      if(!e || !Array.isArray(e.sets)) return;
       const mm = musclesFor(e.name);
       if(!mm) return;
       /* Tonnage and the strength trend are both loads moved, so both carry the
@@ -13287,7 +13296,8 @@ function fatigueByMuscle(now){
   S.sessions.forEach(s=>{
     const hrs = (now - s.startedAt)/3600e3;
     if(hrs < 0 || hrs > 14*24) return;
-    s.entries.forEach(e=>{
+    (s.entries || []).forEach(e=>{
+      if(!e || !Array.isArray(e.sets)) return;
       const mm = musclesFor(e.name);
       if(!mm) return;
       e.sets.forEach(st=>{
@@ -13743,6 +13753,526 @@ function landmarkWithoutManual(A, g, which){
   try{ v = adjustedLandmarks(A, g)[which]; } finally { map[g] = keep; }
   return v;
 }
+/* =====================================================================
+   PART B: LEARNING A MUSCLE'S LANDMARKS FROM ITS OWN RESPONSE
+
+   Everything before step 7.5 is a population figure scaled by things the app can read
+   about your training. None of it observes what happened to YOU at those volumes. This
+   is the part that does.
+
+   The signal is PERFORMANCE, and it is worth being exact about what that means:
+   estimated 1RM on the lifts that a muscle owns outright, tracked cycle to cycle. It is
+   an INDIRECT signal of growth, not a measurement of it. A muscle can grow without its
+   e1RM moving and can move its e1RM without growing. What it is good for is the
+   direction of the volume decision: at this much work, is the lift still going up, flat,
+   or falling away — which, with soreness and joint pain alongside it, is what a coach
+   would actually use.
+
+   Everything here reads the log and writes nothing. The decisions in B4 and the
+   calibration in B5 are the only things that change state, and neither is applied
+   without asking.
+   ===================================================================== */
+
+/* B2.1 INDEX LIFTS. The exercises where this muscle's share is 1.0 — the ones whose
+   e1RM is about that muscle and not about four others. Up to two, by set count, so the
+   measurement is stable rather than following whatever was done most recently. A pinned
+   choice wins: somebody who knows their own programme knows which lift is the bellwether. */
+const INDEX_LIFT_MAX = 2;
+const INDEX_LIFT_MIN_CYCLES = 2;      // must appear in each of the last N cycles
+function indexLifts(g){
+  const pinned = (S.indexPin && S.indexPin[g]) || null;
+  if(pinned && pinned.length) return pinned.slice(0, INDEX_LIFT_MAX);
+  const count = {};
+  const cutoff = Date.now() - INDEX_LIFT_MIN_CYCLES * 21 * DAY_MS;   // generous: 2 cycles
+  (S.sessions || []).forEach(sn=>{
+    if(!sn || sn.startedAt < cutoff) return;
+    (sn.entries || []).forEach(e=>{
+      const mm = musclesFor(e.name);
+      if(!mm || mm[g] !== 1) return;               // owned outright, or not counted
+      const n = (e.sets || []).filter(isWorkingSet).length;
+      if(n > 0) count[nrm(e.name)] = (count[nrm(e.name)] || 0) + n;
+    });
+  });
+  return Object.keys(count).sort((a,b)=> count[b] - count[a]).slice(0, INDEX_LIFT_MAX);
+}
+
+/* B2.2 EFFORT-ADJUSTED e1RM. Epley extended by the reps left in the tank, so a set of 8
+   at RPE 8 and a set of 10 at RPE 10 are read as the same lift, which they roughly are.
+   Only 3-12 reps, because the formula degrades outside that, and only with RPE logged,
+   because without it the RIR term is an invention.
+
+   A bodyweight movement has no load to put in the formula, so reps at a comparable RIR
+   stand in — comparable being the point: the same set taken to the same distance from
+   failure. */
+const E1RM_REPS_MIN = 3, E1RM_REPS_MAX = 12;
+function setE1RM(st, add, bodyweight){
+  const reps = parseFloat(st && st.reps) || 0;
+  const rpe  = parseFloat(st && st.rpe)  || 0;
+  if(!(reps >= E1RM_REPS_MIN && reps <= E1RM_REPS_MAX)) return null;
+  if(!(rpe > 0)) return null;
+  const rir = Math.max(0, 10 - rpe);
+  if(bodyweight) return {v: reps + rir, bw: true};
+  const w = setLoad(st, add);
+  if(!(w > 0)) return null;
+  return {v: w * (1 + (reps + rir) / 30), bw: false};
+}
+/* The best usable set of one entry, which is what an exposure is worth. */
+function entryE1RM(e){
+  const add = entryBarAdd(e);
+  const warms = entryWarmups(e);
+  const anyLoad = (e.sets || []).some(st=> (parseFloat(st.weight) || 0) > 0);
+  let best = null;
+  (e.sets || []).forEach((st, i)=>{
+    if(!isWorkingSet(st) || warms[i]) return;
+    const r = setE1RM(st, add, !anyLoad);
+    if(r && (best == null || r.v > best)) best = r.v;
+  });
+  return best;
+}
+
+/* B3 EXPOSURES THE PERFORMANCE READ MUST IGNORE.
+
+   Each of these is a reason the number in front of you says something other than "this
+   is how the muscle is responding to its volume". Skipping them costs data; NOT skipping
+   them means a bad week of sleep gets recorded as evidence that the volume is too high,
+   and the calibration learns from it for ever. */
+const PERF_SKIP_SLEEP_H   = 5.5;   // averaged over the two nights before
+const PERF_SKIP_GAP_DAYS  = 10;    // longer than this and it is not a comparison
+const PERF_DELOAD_SHARE   = 0.60;  // weekly effective volume under this share of last cycle
+function exposureSkip(sess, g, ctx){
+  const out = [];
+  if(!sess) return out;
+  const day = sess.date;
+  const flags = (S.dayFlags || {})[day] || {};
+  if(flags.ill) out.push("illness");
+  if(flags.notRep) out.push("marked not representative");
+  if(sess.notRepresentative) out.push("marked not representative");
+  /* Two nights before, not the night of — the sleep that fed the session. */
+  const sl = [1,2].map(i=>{
+    const d = new Date(Date.parse(day + "T12:00:00") - i*DAY_MS).toLocaleDateString("en-CA");
+    return parseFloat(((S.checkins || {})[d] || {}).sleep);
+  }).filter(x=> x > 0);
+  if(sl.length && sl.reduce((a,b)=>a+b,0)/sl.length < PERF_SKIP_SLEEP_H)
+    out.push("under " + PERF_SKIP_SLEEP_H + " h sleep");
+  if(ctx && ctx.gapDays > PERF_SKIP_GAP_DAYS)
+    out.push(Math.round(ctx.gapDays) + " days since the last exposure");
+  if(ctx && ctx.newExercise) out.push("new exercise, no baseline yet");
+  if(ctx && ctx.deload) out.push("deload cycle");
+  return out;
+}
+
+/* B2.3-4 THE TREND. Every exposure of a muscle's index lifts, newest first, with the
+   percentage change against the exposure before it; then a 2-against-2 median so one
+   good day does not read as a trend and one bad day does not read as a collapse. */
+function muscleExposures(g, opts){
+  const lifts = (opts && opts.lifts) || indexLifts(g);
+  if(!lifts.length) return [];
+  const byLift = {};
+  const out = [];
+  (S.sessions || []).slice().sort((a,b)=> a.startedAt - b.startedAt).forEach(sn=>{
+    (sn.entries || []).forEach(e=>{
+      const k = nrm(e.name);
+      if(lifts.indexOf(k) < 0) return;
+      const v = entryE1RM(e);
+      if(v == null) return;
+      const prev = byLift[k];
+      const gapDays = prev ? (sn.startedAt - prev.at)/DAY_MS : 0;
+      const skip = exposureSkip(sn, g, {gapDays, newExercise: !prev});
+      byLift[k] = {at: sn.startedAt, v};
+      out.push({at: sn.startedAt, date: sn.date, lift: k, v,
+                pct: prev ? (v - prev.v)/prev.v*100 : null, skip, sessionId: sn.id});
+    });
+  });
+  return out;
+}
+function muscleTrend(g, opts){
+  const usable = muscleExposures(g, opts).filter(x=> !x.skip.length && x.pct != null);
+  if(usable.length < 4) return {pct: null, n: usable.length, thin: true};
+  const med = arr => {
+    const a = arr.slice().sort((x,y)=> x-y);
+    return a.length % 2 ? a[(a.length-1)/2] : (a[a.length/2 - 1] + a[a.length/2])/2;
+  };
+  const vals = usable.map(x=> x.v);
+  const recent = med(vals.slice(-2));
+  const before = med(vals.slice(-4, -2));
+  if(!(before > 0)) return {pct: null, n: usable.length, thin: true};
+  return {pct: (recent - before)/before*100, n: usable.length, thin: false,
+          recent, before, lifts: (opts && opts.lifts) || indexLifts(g)};
+}
+
+/* B4 THE DECISION, ONCE PER CYCLE, PER MUSCLE.
+
+   Three outcomes, and the thresholds are all named because none of them is a measured
+   cutoff — they are the shape of a coaching decision written down.
+
+   Note what OVERREACHED does NOT require: it does not need the lift to have fallen. Two
+   cycles of real soreness, or joint pain on the muscle's own lifts, is enough on its
+   own. Waiting for performance to drop before believing somebody is doing too much is
+   waiting for the damage. */
+const RESPOND_TREND_PCT  = 1.0;    // e1RM trend at or above this is responding
+const DECLINE_TREND_PCT  = -2.0;   // at or below this, for two cycles, is overreached
+const SORE_OK            = 1;      // average sorenessBefore at or under this is fine
+const SORE_OVER          = 2;      // at or over this, for two cycles, is overreached
+const JOINT_OVER         = 2;      // joint pain at or over this on its lifts
+const ADD_SETS_PER_CYCLE = 1;      // suggested increase, per session
+const ADD_SETS_MAX       = 2;      // never suggest more than this in one cycle
+const CUT_SETS_OVER      = [2, 3]; // how many to cut when overreached
+const DELOAD_MUSCLES     = 2;      // this many overreached at once means deload everything
+const HOLD_CYCLES_BEFORE_PROBE = 2;
+
+/* The soreness a muscle averaged over one cycle, from the pre-session taps. Null when
+   nothing was tapped, which is different from zero and has to stay different. */
+function soreAvgOver(g, fromMs, toMs){
+  const log = (S.sore && typeof S.sore === "object") ? S.sore : {};
+  const vals = [];
+  Object.keys(log).forEach(d=>{
+    const at = Date.parse(d + "T12:00:00") || 0;
+    if(at < fromMs || at > toMs) return;
+    const v = log[d] && log[d][g];
+    if(typeof v === "number") vals.push(v);
+  });
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+}
+function jointMaxOver(g, fromMs, toMs){
+  const log = (S.joint && typeof S.joint === "object") ? S.joint : {};
+  let worst = null;
+  Object.keys(log).forEach(d=>{
+    const at = Date.parse(d + "T12:00:00") || 0;
+    if(at < fromMs || at > toMs) return;
+    const rec = log[d] || {};
+    Object.keys(rec).forEach(exKey=>{
+      const mm = musclesFor(exKey);
+      if(!mm || !(mm[g] >= 1)) return;
+      const v = rec[exKey];
+      if(typeof v === "number" && (worst == null || v > worst)) worst = v;
+    });
+  });
+  return worst;
+}
+
+/* One muscle's verdict for the cycle that just ended. Pure: everything it needs is in
+   `cycle`, assembled by cycleReview() below, so it can be tested on made-up numbers. */
+function decideForMuscle(g, cycle){
+  /* cycle: {V, trendPct, sore, joint, prev} — assembled by cycleReview() so this stays
+     a pure decision and can be tested on made-up numbers. */
+  const {V, trendPct, sore, joint, prev} = cycle;
+  const soreBad  = sore != null && sore >= SORE_OVER;
+  const soreOk   = sore == null || sore <= SORE_OK;
+  const jointBad = joint != null && joint >= JOINT_OVER;
+  const fell     = trendPct != null && trendPct <= DECLINE_TREND_PCT;
+  const fellBefore = prev && prev.trendPct != null && prev.trendPct <= DECLINE_TREND_PCT;
+  const soreBefore = prev && prev.sore != null && prev.sore >= SORE_OVER;
+
+  if((fell && fellBefore) || (soreBad && soreBefore) || jointBad){
+    const why = jointBad ? "joint pain on its own lifts"
+      : (fell && fellBefore) ? "the lift fell two cycles running"
+      : "real soreness two cycles running";
+    return {k:"over", V, why,
+            observe:{mrv:V},
+            cut: CUT_SETS_OVER,
+            say:"Overreached — " + why + " at about " + r1(V) + " sets a week"};
+  }
+  if(trendPct != null && trendPct >= RESPOND_TREND_PCT && soreOk && !jointBad){
+    return {k:"up", V, why:"the lift is still climbing at this volume",
+            add: ADD_SETS_PER_CYCLE, max: ADD_SETS_MAX,
+            say:"Responding — up " + r1(trendPct) + "% at about " + r1(V) + " sets a week"};
+  }
+  if(trendPct != null && trendPct > DECLINE_TREND_PCT && trendPct < RESPOND_TREND_PCT && soreOk){
+    /* HOLD, and after two of them a single probe. A plateau at a volume that is not
+       costing you anything is the one case where the honest move is to find out, and
+       the probe is reversible by design: one cycle, one set, and it goes back if the
+       answer is no. */
+    const held = (prev && prev.k === "hold" ? (prev.heldFor || 1) : 0) + 1;
+    const probe = held >= HOLD_CYCLES_BEFORE_PROBE;
+    return {k:"hold", V, heldFor: held, probe,
+            why: probe ? "flat for two cycles, so worth one more set to find out"
+                       : "flat, and not costing you anything",
+            add: probe ? ADD_SETS_PER_CYCLE : 0,
+            say: probe ? "Flat twice — try one more set and see"
+                       : "Holding at about " + r1(V) + " sets a week"};
+  }
+  return {k:"unclear", V, why: trendPct == null ? "not enough usable exposures yet" : "mixed signals",
+          say:"No call this cycle"};
+}
+
+/* =====================================================================
+   B5 LEARNING THE LANDMARKS
+
+   A block is a run of cycles ending in a deload or an overreach. At the end of one, each
+   muscle with enough usable cycles can say three things about itself:
+
+     obsMRV  the volume it was carrying when it overreached — the last V before the
+             first OVERREACHED cycle. If it never overreached, all that can be said is
+             "at least this much", which raises the ceiling and can never lower it.
+     obsMAV  the volume at its best response, averaged with its neighbours when they
+             were responding too, because a single best cycle is a coin toss.
+     obsMEV  the lowest volume that was still responding — and only when the block
+             actually started low enough to have tested the floor. A block that never
+             went below the current MEV has said nothing about it.
+
+   THE OBSERVATION IS STORED AS A RATIO, not as a number of sets. The chain's own output
+   moves when a cycle length changes, or sleep, or training age; an observation recorded
+   as "23 sets" would silently become wrong the moment any of those did. Recorded as
+   "1.15 times what the chain predicted at the time", it stays true. */
+const CAL_MIN_CYCLES     = 3;      // usable cycles in a block before it can say anything
+const CAL_WEIGHT_PER_BLOCK = 0.35; // trust gained per block with an observation
+const CAL_WEIGHT_MAX     = 0.85;   // never fully replace the prior
+const CAL_RECENCY        = 0.6;    // weight of each step back in time
+const CAL_CLAMP          = [0.5, 2.0];
+const CAL_MRV_HARD_MAX   = 35;     // C2: never calibrate a ceiling past this
+
+function calWeight(blocks){ return Math.min(CAL_WEIGHT_MAX, CAL_WEIGHT_PER_BLOCK * blocks); }
+/* Newest first, each step back worth CAL_RECENCY of the one in front of it. */
+function weightedRatio(ratios){
+  if(!ratios || !ratios.length) return null;
+  let num = 0, den = 0, w = 1;
+  for(let i = ratios.length - 1; i >= 0; i--){ num += ratios[i] * w; den += w; w *= CAL_RECENCY; }
+  return den > 0 ? num/den : null;
+}
+function calibrationFrom(ratios){
+  const avg = weightedRatio(ratios);
+  if(avg == null) return 1;
+  const w = calWeight(ratios.length);
+  return Math.max(CAL_CLAMP[0], Math.min(CAL_CLAMP[1], 1 + w * (avg - 1)));
+}
+/* Fold one block's observations into the stored calibration for a muscle. `chain` is
+   what the chain predicted for that landmark AT THE TIME, which is what makes the ratio
+   portable. */
+function recordObservation(g, which, obs, chain, opts){
+  if(!(obs > 0) || !(chain > 0)) return;
+  if(!S.lmCalObs || typeof S.lmCalObs !== "object") S.lmCalObs = {};
+  if(!S.lmCalObs[g]) S.lmCalObs[g] = {};
+  const list = S.lmCalObs[g][which] || (S.lmCalObs[g][which] = []);
+  const ratio = obs / chain;
+  /* "MRV is AT LEAST this" can only push the ceiling up. Recording it as an ordinary
+     observation would let a block where nothing went wrong argue the ceiling DOWN,
+     which is the opposite of what it showed. */
+  if(opts && opts.atLeast && ratio <= 1) return;
+  list.push({ratio, at: Date.now(), obs, chain, atLeast: !!(opts && opts.atLeast),
+             seeded: !!(opts && opts.seeded)});
+  while(list.length > 8) list.shift();
+  rebuildCalibration(g);
+}
+function rebuildCalibration(g){
+  const obs = (S.lmCalObs || {})[g] || {};
+  if(!S.lmCal || typeof S.lmCal !== "object") S.lmCal = {};
+  const out = {};
+  let blocks = 0;
+  ["mev","mav","mrv"].forEach(which=>{
+    const list = (obs[which] || []).map(x=> x.ratio);
+    out[which] = calibrationFrom(list);
+    blocks = Math.max(blocks, list.length);
+  });
+  out.blocks = blocks;
+  out.w = calWeight(blocks);
+  out.seeded = ["mev","mav","mrv"].some(k=> (obs[k] || []).some(x=> x.seeded));
+  out.label = blocks === 0 ? null
+    : blocks + " block" + (blocks === 1 ? "" : "s") + " of your own training";
+  out.note = out.seeded
+    ? "estimated from the sessions already in your log, and refined every block from here"
+    : "learned from how your lifts and recovery behaved at these volumes";
+  S.lmCal[g] = out;
+  return out;
+}
+/* C2: a calibrated ceiling is still a ceiling. Applied where the calibration is used
+   rather than where it is stored, so the observation itself stays honest. */
+function capCalibratedMRV(v){ return Math.min(v, CAL_MRV_HARD_MAX); }
+
+/* THE CYCLES A MUSCLE HAS BEEN THROUGH, in weekly-equivalent effective sets, with the
+   trend and the soreness that went with each. This is the spine of Part B: B4 decides
+   from it and B5 learns from it, and B7 runs it over history so nobody starts blank. */
+function muscleCycles(g, opts){
+  const bounds = cycleBounds();
+  if(!bounds.length) return [];
+  const lifts = (opts && opts.lifts) || indexLifts(g);
+  const exps  = muscleExposures(g, {lifts});
+  const out = [];
+  bounds.forEach((b, i)=>{
+    const wk = windowStats(b.from, b.to);
+    const days = b.days || 7;
+    const V = weeklyEquivalent(wk[g].eff, days);
+    const mine = exps.filter(x=> x.at >= b.from && x.at < b.to);
+    const usable = mine.filter(x=> !x.skip.length && x.pct != null);
+    const prev = out[out.length - 1] || null;
+    /* The trend for a cycle is the change across the exposures inside it, which is what
+       "did it move while I was doing this much" actually asks. */
+    const pct = usable.length
+      ? usable.reduce((t,x)=> t + x.pct, 0) / usable.length : null;
+    const deload = prev && prev.V > 0 && V < prev.V * PERF_DELOAD_SHARE;
+    out.push({i, from:b.from, to:b.to, days, V, trendPct: deload ? null : pct,
+              exposures: mine.length, usable: usable.length, deload,
+              sore: soreAvgOver(g, b.from, b.to),
+              joint: jointMaxOver(g, b.from, b.to)});
+  });
+  return out;
+}
+/* Cycle boundaries from the log. S.lastCycle holds the one that just ended and
+   S.cycleStart the live one; anything older is reconstructed from session dates in
+   cycle-length chunks, which is approximate and is only ever used for seeding. */
+function cycleBounds(){
+  const out = [];
+  const len = Math.max(2, (CYCLE_LAYOUT || []).length || 7) * DAY_MS;
+  const first = (S.sessions || [])[0];
+  if(!first) return out;
+  const start = S.cycleStart && S.cycleStart < Date.now() ? S.cycleStart : first.startedAt;
+  let t = first.startedAt;
+  while(t < Date.now()){
+    const to = Math.min(t + len, Date.now() + 1);
+    out.push({from: t, to, days: (to - t)/DAY_MS});
+    t = to;
+  }
+  return out.slice(-12);            // a year of 4-week blocks is plenty to learn from
+}
+
+/* ONE-TIME SEEDS, RUN AFTER THE MODULE IS BUILT.
+
+   Both read constants declared far below migrate()'s call site, so neither can run from
+   migrate() — they throw into a catch and leave the work undone, which is exactly what
+   happened the first time I wired this up. Called from the first render instead.
+
+   EVERY EXISTING USER GETS THIS, NOT JUST NEW ONES. A feedback loop that only started
+   learning from the day it shipped would leave somebody with two years of logs being
+   told their landmarks are a population guess, while the answer sat in their own
+   history.
+
+   Each is wrapped on its own so one failing cannot take the other with it, and a failure
+   is RECORDED rather than swallowed. A calibration is an improvement, not a
+   prerequisite: if either throws on a log shape I have not seen, the app still starts
+   and the user gets exactly what they had before the update. */
+let SEEDS_RUN = false;
+function runOneTimeSeeds(){
+  if(SEEDS_RUN) return;
+  SEEDS_RUN = true;
+  let dirty = false;
+  try{
+    if(!S.exCompoundSeeded){ seedCompoundFlags(); dirty = true; }
+  }catch(e){ S.exCompoundSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
+  try{
+    if(!S.lmCalSeeded){ seedCalibrationFromHistory(); dirty = true; }
+  }catch(e){ S.lmCalSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
+  if(dirty) saveQuiet();
+}
+
+/* MIGRATION: ASKING EXISTING USERS THE ONE QUESTION THE IMPORTER NOW ASKS.
+
+   A3 made training age the basis of the experience level, and an existing user has no
+   priorTrainingWeeks because nothing ever asked them. Left unanswered they are read as
+   having started the day they installed the app, which is the exact mistake A3 set out
+   to fix — so it has to be asked rather than defaulted.
+
+   Asked once, skippable, and never again either way: `priorAsked` records that the
+   question was put, separately from the answer, so declining to say is a real answer
+   and not a reason to keep asking. */
+function priorTrainingAskDue(){
+  if(S.priorAsked) return false;
+  if(S.priorTrainingWeeks != null) return false;
+  return (S.sessions || []).length > 0;       // brand-new users get it in onboarding
+}
+const PRIOR_CHOICES = [
+  {w: 0,   t:"I'm new to lifting",      d:"under a year"},
+  {w: 78,  t:"A year or two",           d:"1-2 years"},
+  {w: 208, t:"A few years",             d:"3-5 years"},
+  {w: 416, t:"Longer than that",        d:"5+ years"}
+];
+function openPriorTrainingAsk(){
+  showModal(`<h3>Before this app, how long had you been training?</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Element 26
+      works out your volume targets partly from how long you have trained, and until now it
+      could only count the sessions logged here. Answering this stops it treating years of
+      training as though they never happened.</div>
+    <div class="ch-list">${PRIOR_CHOICES.map(c=>
+      `<button class="ch" data-prior="${c.w}"><span class="ch-tx"><b>${esc(c.t)}</b>
+        <span>${esc(c.d)}</span></span></button>`).join("")}</div>
+    <button class="btn ghost small" id="priorSkip" style="margin-top:9px">Rather not say</button>`);
+  const m = $("#modal");
+  m.querySelectorAll("[data-prior]").forEach(b=> b.onclick = ()=>{
+    S.priorTrainingWeeks = parseInt(b.dataset.prior, 10) || 0;
+    S.priorAsked = Date.now();
+    /* The level moves the moment this is answered, so the seeding has to run again
+       against the corrected chain rather than the one that assumed a beginner. */
+    delete S.lmCalSeeded;
+    try{ seedCalibrationFromHistory(); }catch(e){}
+    save(); queueSync(); hideModal(); render();
+    toast("Targets updated for " + experienceWhy().level + " training age", "good");
+  });
+  m.querySelector("#priorSkip").onclick = ()=>{
+    S.priorAsked = Date.now(); save(); hideModal();
+  };
+}
+
+/* B4 APPLIED. One pass over every muscle, returning suggestions. Nothing here writes to
+   the programme: the whole point is that a volume change is proposed and accepted, never
+   applied behind you. */
+function cycleReview(){
+  const out = [];
+  MKEYS.forEach(g=>{
+    if((GROUPS[g] || {}).optional && !manualLandmarks(g).mev) return;
+    const cycles = muscleCycles(g);
+    if(cycles.length < 2) return;
+    const cur = cycles[cycles.length - 1];
+    const prev = cycles[cycles.length - 2];
+    const d = decideForMuscle(g, {V: cur.V, trendPct: cur.trendPct, sore: cur.sore,
+                                  joint: cur.joint, prev: {trendPct: prev.trendPct,
+                                  sore: prev.sore, k: (prev.decision || {}).k}});
+    if(d.k === "unclear") return;
+    out.push(Object.assign({g, name: gName(g)}, d));
+  });
+  /* B4: enough muscles overreached at once and the answer is not per-muscle trimming,
+     it is a lighter week for everything. */
+  const over = out.filter(x=> x.k === "over");
+  return {list: out, deload: over.length >= DELOAD_MUSCLES, over: over.length};
+}
+
+/* B7 SEEDING FROM WHAT IS ALREADY LOGGED.
+
+   Without this, every existing user starts at calibration 1.0 and stays there until they
+   have trained three more blocks through the new system — months of the app knowing
+   less about them than their own log already says. This runs the same B2-B5 machinery
+   over history once, records what it finds as ordinary observations marked `seeded`, and
+   then gets out of the way.
+
+   It is deliberately conservative: it only looks at muscles with real RPE coverage,
+   because without effort ratings the effective-set count is mostly assumption and a
+   calibration built on it would be learning from a guess. */
+const SEED_MIN_RPE_SHARE = 0.5;
+function seedCalibrationFromHistory(){
+  if(S.lmCalSeeded) return {done:false, why:"already seeded"};
+  if(!(S.sessions || []).length) return {done:false, why:"nothing logged"};
+  const A = bodyAnalysis();
+  let n = 0;
+  MKEYS.forEach(g=>{
+    const cycles = muscleCycles(g).filter(c=> c.V > 0);
+    if(cycles.length < CAL_MIN_CYCLES) return;
+    /* Effort coverage, over the whole history rather than the current window. */
+    const all = windowStats(0, Date.now() + 1)[g];
+    const rated = (all.rpeSets || 0), un = (all.noRpe || 0);
+    if(rated + un <= 0 || rated/(rated + un) < SEED_MIN_RPE_SHARE) return;
+    const chain = (A.lm && A.lm[g]) ? A.lm[g] : adjustedLandmarks(A, g);
+    const responding = cycles.filter(c=> c.trendPct != null && c.trendPct >= RESPOND_TREND_PCT);
+    const over = cycles.filter(c=> (c.trendPct != null && c.trendPct <= DECLINE_TREND_PCT)
+                                || (c.sore != null && c.sore >= SORE_OVER));
+    if(over.length){
+      const firstOver = cycles.indexOf(over[0]);
+      const lastGood = firstOver > 0 ? cycles[firstOver - 1] : null;
+      if(lastGood){ recordObservation(g, "mrv", lastGood.V, chain.mrv, {seeded:true}); n++; }
+    } else {
+      const maxV = Math.max.apply(null, cycles.map(c=> c.V));
+      recordObservation(g, "mrv", maxV, chain.mrv, {atLeast:true, seeded:true});
+    }
+    if(responding.length){
+      const best = responding.slice().sort((a,b)=> b.trendPct - a.trendPct)[0];
+      recordObservation(g, "mav", best.V, chain.mav, {seeded:true}); n++;
+      const lowest = responding.slice().sort((a,b)=> a.V - b.V)[0];
+      /* Only if the block actually went low enough to test the floor. */
+      if(lowest.V <= chain.mev * 1.05){
+        recordObservation(g, "mev", lowest.V, chain.mev, {seeded:true}); n++;
+      }
+    }
+  });
+  S.lmCalSeeded = {at: Date.now(), n};
+  return {done:true, n};
+}
+
 /* PART B FILLS THIS IN. Returns the multiplier each landmark has earned from the
    user's own observed response, plus a label for the explainer and the confidence the
    UI needs. Neutral until there is anything to learn from, so the chain is unchanged
@@ -13866,7 +14396,7 @@ function adjustedLandmarks(A, g){
      leaves the chain exactly as it was. */
   const cal = landmarkCalibration(g);
   if(cal.mev !== 1 || cal.mav !== 1 || cal.mrv !== 1){
-    mev *= cal.mev; mav *= cal.mav; mrv *= cal.mrv;
+    mev *= cal.mev; mav *= cal.mav; mrv = capCalibratedMRV(mrv * cal.mrv);
     why.push({k:"Your own response", v:cal.label || "learned from your training",
       note: cal.note || "adjusted by how your lifts and recovery actually behaved at these volumes"});
   }
@@ -14194,7 +14724,10 @@ function bodyAnalysis(){
     let n = 0;
     S.sessions.forEach(s=>{
       if(s.startedAt < from || s.startedAt >= to) return;
-      s.entries.forEach(e=> e.sets.forEach(st=>{ if(isWorkingSet(st)) n++; }));
+      (s.entries || []).forEach(e=>{
+        if(!e || !Array.isArray(e.sets)) return;
+        e.sets.forEach(st=>{ if(isWorkingSet(st)) n++; });
+      });
     });
     return n;
   };
@@ -20142,6 +20675,7 @@ function renameDay(wid, name){
 }
 
 function render(){
+  runOneTimeSeeds();
   const app = $("#app");
   /* No account, no app. Signing up comes before everything — the plan, the wizard, the
      tab bar — because every byte the app is about to write belongs to an account, and
@@ -20187,6 +20721,12 @@ function render(){
   // the page just changed height, so the tab bar's "am I at the bottom?" test needs
   // the new figure. Read it here, once, rather than inside the scroll handler.
   refreshNavBounds();
+  /* MIGRATION PROMPT. After the screen is up, never during: a modal thrown mid-render
+     fights whatever the render was doing. Once, on an ordinary tab, and only for an
+     existing user \u2014 somebody still in onboarding is asked as part of it. */
+  if(!OB && !$("#modalBg").classList.contains("show") && priorTrainingAskDue()){
+    setTimeout(()=>{ if(!$("#modalBg").classList.contains("show") && priorTrainingAskDue()) openPriorTrainingAsk(); }, 400);
+  }
 }
 
 /* =====================================================================
@@ -23746,7 +24286,8 @@ function regionStats(from, to){
   RKEYS.forEach(r=>{ sets[r]=0; vol[r]=0; exs[r]={}; });
   S.sessions.forEach(s=>{
     if(s.startedAt < from || s.startedAt >= to) return;
-    s.entries.forEach(e=>{
+    (s.entries || []).forEach(e=>{
+      if(!e || !Array.isArray(e.sets)) return;
       const mm = musclesFor(e.name);
       if(!mm) return;
       e.sets.forEach(st=>{
@@ -24146,7 +24687,7 @@ function bodyTrends(){
     let sets = 0;
     S.sessions.forEach(s=>{
       if(s.date !== key) return;
-      s.entries.forEach(e=> e.sets.forEach(st=>{ if(isWorkingSet(st)) sets++; }));
+      (s.entries || []).forEach(e=> (e && e.sets || []).forEach(st=>{ if(isWorkingSet(st)) sets++; }));
     });
     const ci = (S.checkins||{})[key];
     const sl = ci && parseFloat(ci.sleep);
@@ -33792,7 +34333,7 @@ function allExerciseNames(){
       if(e.alt && e.alt.name) set.add(e.alt.name);
     });
   });
-  S.sessions.forEach(s=>s.entries.forEach(e=>set.add(e.name)));
+  (S.sessions || []).forEach(s=> (s && s.entries || []).forEach(e=> e && set.add(e.name)));
   return [...set].filter(n=>n && !/round 2/i.test(n)).sort((a,b)=>a.localeCompare(b));
 }
 function openSessionEditor(id){
@@ -39712,7 +40253,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","expManual","exCompound","exCompoundSeeded","sore","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","dayFlags","lmCalObs","lmCalSeeded","indexPin","cycleLog","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
