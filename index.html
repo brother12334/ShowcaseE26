@@ -1427,6 +1427,20 @@ button.side-chip.sc-set::after{
 .pg-main b{font-size:15px}
 .pg-msg{font-family:var(--mono);font-size:14.5px;font-weight:600;color:var(--ok);margin-top:3px}
 .pg-sub{font-size:12.5px;color:var(--dim);margin-top:4px;line-height:1.45}
+/* HELD FOR THE DELOAD, greyed the same way the Body tab greys its flag: the green stripe
+   that means "there is a button here" goes back to the neutral line colour, the panel
+   drops to the flat card tone, and the earned-it line loses its green. By colour, not by
+   opacity, so the hold notice underneath keeps its own contrast. */
+.pg-row.pg-held{background:var(--card);border-left-color:var(--line)}
+.pg-held .pg-msg{color:var(--faint);font-weight:400}
+.pg-held .pg-main b{color:var(--dim)}
+.pg-held .pg-sub{color:var(--faint)}
+.pg-hold{display:flex;gap:9px;align-items:flex-start;margin-top:9px;padding:9px 11px;
+  border:1px solid rgba(79,124,201,.32);border-radius:10px;
+  background:linear-gradient(180deg,rgba(79,124,201,.10),transparent);
+  font-size:12.5px;color:var(--dim);line-height:1.45}
+.pg-hold-k{font:9.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--back);
+  white-space:nowrap;flex-shrink:0;padding-top:2px}
 .pg-apply{
   flex-shrink:0;background:var(--ok);color:#0d1a10;border:none;border-radius:9px;
   padding:9px 14px;cursor:pointer;
@@ -5634,7 +5648,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "28.4";
+const APP_VERSION = "28.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -35514,6 +35528,25 @@ function confTagHTML(p){
     : c.before + " previous session" + (c.before === 1 ? "" : "s") + " to compare against";
   return `<span class="conf-tag conf-${esc(c.band)}" title="${attrSafe(b.why + " \u2014 " + detail)}">${esc(b.label)}</span>`;
 }
+/* THE SAME ROW, WITH THE BUTTON TAKEN OFF IT. The grade card was still drawing a full
+   green APPLY on a raise during a deload week, directly under the banner explaining that
+   load increases are blocked — press it and the toast refused it. The Body tab already
+   learned this in 28.0; this is the other half, because both of them write through
+   applyProgression() and both have to agree about what it will accept.
+
+   The finding keeps every word it had. Only the input and the button go. */
+function pgHeldRowHTML(p, hold){
+  return `<div class="pg-row pg-held" style="cursor:default">
+    <div class="pg-main">
+      <b>${esc(p.name)}</b>
+      <div class="pg-msg">${esc(p.msg)}</div>
+      <div class="pg-sub">${esc(p.sub)}</div>
+      <div class="pg-hold"><span class="pg-hold-k">On hold</span>
+        <span>Apply this after your deload week \u2014 ${esc(hold.when)}.
+          You earned the weight; it keeps until the week is done.</span></div>
+    </div>
+  </div>`;
+}
 function progressionHTML(list){
   if(!list || !list.length) return "";
   const done = list.filter(p=>p.kind === "up" && progressionApplied(p));
@@ -35591,7 +35624,11 @@ function progressionHTML(list){
     h += `<div class="sub" style="margin:6px 0 2px">You're managing loads yourself, so nothing has been changed. Change that in Setup if you'd like Element 26 to handle it.</div>`;
   } else if(ups.length){
     h += `<div class="rev-head">Add weight next time, ${ups.length}</div>`;
+    let upsOpen = 0;
     ups.forEach((p,i)=>{
+      const hold = deloadHoldNote(p.name, p.to);
+      if(hold){ h += pgHeldRowHTML(p, hold); return; }
+      upsOpen++;
       h += `<div class="pg-row">
         <div class="pg-main">
           <b>${esc(p.name)}</b>
@@ -35606,7 +35643,10 @@ function progressionHTML(list){
         <button class="pg-apply" data-progapply="${esc(p.name)}" data-progto="${p.to == null ? "" : p.to}">Apply</button>
       </div>`;
     });
-    h += `<button class="more-btn" id="progApplyAll">Apply all ${ups.length} to the programme</button>`;
+    /* The button counts what it can actually do. All of them held means no button at
+       all rather than one that would be refused for every row under it. */
+    if(upsOpen > 0)
+      h += `<button class="more-btn" id="progApplyAll">Apply all ${upsOpen} to the programme</button>`;
   }
   /* THE PLAN CATCHING UP, KEPT APART FROM THE RAISES.
 
@@ -35623,6 +35663,8 @@ function progressionHTML(list){
   if(catchups.length){
     h += `<div class="rev-head">Your plan is behind, ${catchups.length}</div>`;
     catchups.forEach(p=>{
+      const hold = deloadHoldNote(p.name, p.to);
+      if(hold){ h += pgHeldRowHTML(p, hold); return; }
       h += `<div class="pg-row">
         <div class="pg-main">
           <b>${esc(p.name)}</b>
@@ -35925,18 +35967,26 @@ function deloadActive(){
    A CUT IS NOT AFFECTED, for the same reason applyProgression() lets one through: a
    load the prescription cannot reach is wrong in a deload week too, and refusing the
    correction leaves you deloading against a number you cannot lift. */
-function flagDeloadHeld(f){
-  if(!deloadActive() || !f || f.to == null) return null;
-  if(f.kind === "stall" || f.kind === "fade") return null;   // neither one moves a load up
-  const to = parseFloat(f.to);
-  if(!isFinite(to)) return null;
-  const pe = findProgramEntry(f.ex);
+function deloadHoldNote(name, to){
+  if(!deloadActive()) return null;
+  const v = parseFloat(to);
+  if(!isFinite(v)) return null;
+  const pe = findProgramEntry(name);
   const from = (pe && pe.weight != null && pe.weight !== "") ? parseFloat(pe.weight) : NaN;
-  if(isFinite(from) && to < from) return null;
+  if(isFinite(from) && v < from) return null;
   const left = Math.max(0, 7 - (Math.floor((Date.now() - S.deload.startedAt) / DAY_MS) + 1));
   return {left, when: left <= 0 ? "from your next session"
                     : left === 1 ? "tomorrow"
                     : "in " + left + " days"};
+}
+/* ONE RULE, TWO SCREENS. The grade card and the Body tab both offer to write a load into
+   the programme, through the same applyProgression(), so they have to agree about which
+   ones the deload will refuse — and say it in the same words on the same countdown.
+   This wrapper is the flag-shaped door onto it. */
+function flagDeloadHeld(f){
+  if(!f || f.to == null) return null;
+  if(f.kind === "stall" || f.kind === "fade") return null;   // neither one moves a load up
+  return deloadHoldNote(f.ex, f.to);
 }
 /* The programme as it should be performed right now. Everything that reads the plan for
    a SESSION goes through here; the Program tab still shows the real thing, with a
