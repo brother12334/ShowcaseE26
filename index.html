@@ -3148,6 +3148,27 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .wd-k{flex:1;min-width:0;font-size:13.5px;font-weight:600}
 .wd-t{font:10.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--acc);flex-shrink:0}
 .wd-go{color:var(--faint);font-size:16px;flex-shrink:0}
+/* B1. The same line as the weigh-in prompt, in the recovery colour rather than the accent,
+   because it is asking about the body rather than about a number. */
+.sore-line{border-left-color:var(--back)}
+.sore-line .wd-t{color:var(--back)}
+.sore-row{padding:10px 0;border-top:1px solid var(--line)}
+.sore-row:first-child{border-top:0}
+.sore-m{font-size:13.5px;margin-bottom:7px}
+.sore-taps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.sore-t,.sore-f{background:var(--card2);border:1px solid var(--line);border-radius:var(--r);
+  color:var(--dim);font-size:11.5px;padding:8px 4px;cursor:pointer;text-align:center;
+  line-height:1.2}
+.sore-t.on,.sore-f.on{background:var(--card);border-color:var(--back);color:var(--text)}
+.sore-t:active,.sore-f:active{transform:scale(.97)}
+.sore-flags{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:7px}
+.sore-f{padding:9px 6px}
+.ready-note{border-left:2px solid var(--back)}
+.rn-row{display:flex;align-items:flex-start;gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+.rn-row:first-of-type{border-top:0}
+.rn-m{flex:1;min-width:0;font-size:13.5px;line-height:1.45}
+.rn-m span{display:block;font-size:12px;color:var(--dim);margin-top:2px}
+.rn-c{flex-shrink:0;font-family:var(--mono);font-size:12.5px;color:var(--back)}
 .bl-due{border-color:var(--acc-line)}
 .bl-tag{flex-shrink:0;font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
   color:var(--acc);border:1px solid var(--acc-line);border-radius:999px;padding:4px 9px}
@@ -5724,7 +5745,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "31.2";
+const APP_VERSION = "31.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13877,7 +13898,13 @@ function exposureSkip(sess, g, ctx){
   const day = sess.date;
   const flags = (S.dayFlags || {})[day] || {};
   if(flags.ill) out.push("illness");
+  if(flags.stress) out.push("unusual stress that week");
   if(flags.notRep) out.push("marked not representative");
+  /* EATING LESS IS NOT ON THIS LIST, ON PURPOSE. Illness and a bad week are episodes: a
+     handful of sessions that say nothing about your volume. A deficit is a training
+     phase, and throwing out every session in it would leave the calibration learning
+     nothing for months from the person who needs it most. The goal adjustment in
+     adjustedLandmarks() is where a cut belongs, and it is already there. */
   if(sess.notRepresentative) out.push("marked not representative");
   /* Two nights before, not the night of — the sleep that fed the session. */
   const sl = [1,2].map(i=>{
@@ -22420,6 +22447,7 @@ function viewToday(){
 
   h += plateStrip();
   h += weighDueHTML();
+  h += soreAskHTML();
   h += planWeekStripHTML();
 
   /* THE SESSION LIVES IN ITS OWN TAB NOW. What Today has to say while one is running is
@@ -22574,6 +22602,7 @@ function viewToday(){
       : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them.", "day-open-sub")}
   </div>`;
   h += noteStackHTML(todayNotes(wid));
+  h += readinessNoteHTML(wid);
   // The one thing worth changing today, taken from the grade of your last session of
   // THIS day. Sits above the exercise list, while there is still time to act on it.
 
@@ -22623,6 +22652,51 @@ function viewToday(){
      trained. If you genuinely need to jump, tapping a plate above still moves the
      pointer, which takes deliberate intent rather than one tap on the main screen. */
   return h;
+}
+/* B6 — WHAT TODAY LOOKS LIKE FROM THE BODY'S SIDE.
+
+   readinessToday() has existed since the landmark rework and has never been shown to
+   anybody. It is the SHORT-window read — hours since the muscle was trained, the soreness
+   you tapped this morning, three nights of sleep — and it deliberately touches no
+   landmark: a bad night should change today's session, not your training block.
+
+   It is a note, not an instruction, and it does not change the plan. The sets on the
+   screen are the sets you programmed; this says which of them are walking in tired and
+   what a sensible trim would be if you agree. Volume you cut on purpose after reading a
+   line like this is a different thing from volume you missed.
+
+   Only the muscles today actually trains, and only when something is genuinely off — with
+   nothing to say it draws nothing. */
+const READY_NOTE_MAX = 3;          // muscles named before it becomes a list nobody reads
+function readinessNoteHTML(wid){
+  let A = null;
+  try{ A = bodyAnalysis(); }catch(e){ return ""; }
+  if(!A) return "";
+  const per = {};
+  try{
+    (resolvedProgram(wid) || []).forEach(x=>{
+      const e = x && x.chosen;
+      if(!e) return;
+      const mm = musclesFor(e.name) || {};
+      Object.keys(mm).forEach(g=>{ if(mm[g] >= 1) per[g] = (per[g] || 0) + (parseInt(e.sets,10) || 0); });
+    });
+  }catch(e){ return ""; }
+  const hits = Object.keys(per)
+    .map(g=> ({g, sets: per[g], r: readinessToday(A, g)}))
+    .filter(x=> x.r && x.r.reasons && x.r.reasons.length)
+    .sort((a,b)=> b.r.cut - a.r.cut || b.sets - a.sets)
+    .slice(0, READY_NOTE_MAX);
+  if(!hits.length) return "";
+  return `<div class="card ready-note">
+    <div class="rs-k">Going in a bit short</div>
+    ${hits.map(x=> `<div class="rn-row">
+      <div class="rn-m"><b>${esc(gName(x.g))}</b><span>${esc(x.r.reasons.join(" · "))}</span></div>
+      <div class="rn-c num">−${x.r.cut} set${x.r.cut===1?"":"s"}</div>
+    </div>`).join("")}
+    <div class="sub" style="margin:10px 0 0">Nothing has been changed. If a muscle is walking in
+      tired, taking a set or two off it today costs almost nothing and is not the same as
+      missing the work — the sets you drop on purpose are the ones you can afford.</div>
+  </div>`;
 }
 // A finished exercise's sets, each tagged with the side it was done on where relevant.
 function setListHTML(e){
@@ -28317,6 +28391,140 @@ function weighDueHTML(){
     <span class="wd-go">\u203a</span>
   </button>`;
 }
+/* =====================================================================
+   B1 — HOW THE BODY FEELS, ASKED ONCE A DAY
+
+   The feedback loop that calibrates your landmarks reads three things: what your lifts
+   did, how sore the muscle was, and whether the joints complained. The first it can take
+   from the log on its own. The other two only exist if somebody says so, and everything
+   downstream — soreBefore(), soreAvgOver(), readinessToday(), decideForMuscle() — has
+   been sitting there reading an empty box.
+
+   WHERE IT IS ASKED matters more than the question. It is not in the pre-workout screen:
+   that screen is two taps and a heading and it stays that way. It is one line on Today,
+   in the same family as the weigh-in prompt, and it only appears at all when there is
+   something to ask about — a muscle you trained inside SORE_ASK_HOURS. Answer it, skip
+   it, or ignore it, and it is gone for the day either way.
+
+   IT ASKS ABOUT AT MOST SORE_ASK_MAX MUSCLES, hardest-trained first. A form with twelve
+   rows on it is a form nobody fills in twice, and the muscles you did not train are the
+   ones whose soreness says least.
+
+   THE SCALE IS 0-3 because that is what the readers are denominated in, and because a
+   scale with four points is one people answer the same way twice. 0 none, 1 a little,
+   2 sore, 3 very sore — SORE_OK is 1 and SORE_OVER is 2, so the words and the thresholds
+   mean the same thing.
+
+   THE DAY FLAGS are the other half: illness, unusual stress and eating less all change
+   what a session says about your volume, and exposureSkip() already knows to throw those
+   sessions out of the performance read. It just needed somewhere to be told. */
+const SORE_ASK_HOURS   = 72;    // a muscle trained inside this window is worth asking about
+const SORE_ASK_MAX     = 6;     // never ask about more muscles than this at once
+const SORE_ASK_MIN_SETS = 1.5;  // effective sets in the window before it is worth asking
+const SORE_WORDS = ["none", "a little", "sore", "very sore"];
+const DAY_FLAG_FIELDS = [
+  {k:"ill",    t:"Ill",              say:"Under the weather"},
+  {k:"stress", t:"Unusual stress",   say:"A bad week outside the gym"},
+  {k:"cut",    t:"Eating less",      say:"In a deficit right now"},
+  {k:"notRep", t:"Not a normal day", say:"Whatever happened, do not learn from it"}
+];
+let SORE_SNOOZE = null;         // the day it was waved away, for as long as the app is open
+/* The muscles worth asking about today, hardest-trained first. */
+function soreAskMuscles(){
+  const now = Date.now();
+  let wk = null;
+  try{ wk = windowStats(now - SORE_ASK_HOURS*3600e3, now + 1); }catch(e){ return []; }
+  if(!wk) return [];
+  return MKEYS.filter(m=> wk[m] && wk[m].eff >= SORE_ASK_MIN_SETS)
+    .sort((a,b)=> wk[b].eff - wk[a].eff)
+    .slice(0, SORE_ASK_MAX);
+}
+function soreAskedToday(){
+  const d = todayStr();
+  const rec = (S.sore || {})[d];
+  return !!(rec && Object.keys(rec).length) || SORE_SNOOZE === d;
+}
+function soreAskHTML(){
+  if(S.active) return "";                       // not in the middle of a session
+  if(soreAskedToday()) return "";
+  const ms = soreAskMuscles();
+  if(!ms.length) return "";
+  return `<button class="wd-line sore-line" id="soreAsk">
+    <span class="wd-k">How does the body feel today?</span>
+    <span class="wd-t">${ms.length} muscle${ms.length===1?"":"s"}</span>
+    <span class="wd-go">›</span>
+  </button>`;
+}
+function openSoreSheet(){
+  const d = todayStr();
+  const ms = soreAskMuscles();
+  const have = (S.sore || {})[d] || {};
+  const flags = (S.dayFlags || {})[d] || {};
+  const h = `<h3>How does the body feel?</h3>
+    <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">
+      Soreness from what you trained in the last ${Math.round(SORE_ASK_HOURS/24)} days. It is
+      what tells Element 26 whether your volume is landing or piling up — and it is the one
+      thing it cannot read off your sets.</div>
+    <div class="sore-list">${ms.map(m=>{
+      const cur = have[m];
+      return `<div class="sore-row">
+        <div class="sore-m">${esc(gName(m))}</div>
+        <div class="sore-taps">${SORE_WORDS.map((w,i)=>
+          `<button class="sore-t${cur === i ? " on" : ""}" data-sore="${esc(m)}" data-sorev="${i}"
+             aria-pressed="${cur === i}">${esc(w)}</button>`).join("")}</div>
+      </div>`;
+    }).join("")}</div>
+    <div class="k-lab" style="margin-top:16px">Anything else about today</div>
+    <div class="sore-flags">${DAY_FLAG_FIELDS.map(f=>
+      `<button class="sore-f${flags[f.k] ? " on" : ""}" data-dayflag="${esc(f.k)}"
+         aria-pressed="${!!flags[f.k]}" title="${esc(f.say)}">${esc(f.t)}</button>`).join("")}</div>
+    <div class="set-says">A day you were ill, stressed or eating noticeably less is a day your
+      lifts say something other than "this is how the volume is working". Marked days still
+      count as training; they are just left out of what the app learns from.</div>
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn small" id="soreSave" style="flex:1">Save</button>
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn ghost small" id="soreSkip" style="flex:1">Not today</button>
+    </div>`;
+  showModal(h);
+  MODAL_REOPEN = openSoreSheet;
+  const m = $("#modal");
+  const picked = Object.assign({}, have);
+  const fl = Object.assign({}, flags);
+  m.querySelectorAll("[data-sore]").forEach(b=> b.onclick = ()=>{
+    const g = b.dataset.sore, v = parseInt(b.dataset.sorev, 10);
+    /* Tapping the answer you already gave takes it back, because a scale with no way to
+       unsay 0 is a scale that records a shrug as data. */
+    if(picked[g] === v) delete picked[g]; else picked[g] = v;
+    m.querySelectorAll('[data-sore="' + g + '"]').forEach(x=>{
+      const on = picked[g] === parseInt(x.dataset.sorev, 10);
+      x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on));
+    });
+  });
+  m.querySelectorAll("[data-dayflag]").forEach(b=> b.onclick = ()=>{
+    const k = b.dataset.dayflag;
+    fl[k] = !fl[k];
+    b.classList.toggle("on", !!fl[k]); b.setAttribute("aria-pressed", String(!!fl[k]));
+  });
+  m.querySelector("#soreSave").onclick = ()=>{
+    if(!S.sore || typeof S.sore !== "object") S.sore = {};
+    if(!S.dayFlags || typeof S.dayFlags !== "object") S.dayFlags = {};
+    if(Object.keys(picked).length) S.sore[d] = picked; else delete S.sore[d];
+    const on = {};
+    Object.keys(fl).forEach(k=>{ if(fl[k]) on[k] = true; });
+    if(Object.keys(on).length) S.dayFlags[d] = on; else delete S.dayFlags[d];
+    /* Nothing said at all is not an answer, so the line comes back tomorrow rather than
+       recording a day of silence as a day of no soreness. */
+    if(!Object.keys(picked).length) SORE_SNOOZE = d;
+    save(); queueSync(); hideModal(); render();
+    toast(Object.keys(picked).length ? "Noted" : "Nothing recorded", "good");
+  };
+  m.querySelector("#soreSkip").onclick = ()=>{
+    SORE_SNOOZE = d;
+    hideModal(); render();
+  };
+}
 function bodyLogHTML(){
   if(!tracksWeight()) return "";
   const list = bodyLogList();
@@ -31818,6 +32026,8 @@ function bind(){
   if(blA) blA.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
   const wdL = $("#weighDue");
   if(wdL) wdL.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
+  const srA = $("#soreAsk");
+  if(srA) srA.onclick = openSoreSheet;
   const rbOpen = $("#recordsBtn");
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
