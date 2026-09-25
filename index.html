@@ -5678,7 +5678,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "30.0";
+const APP_VERSION = "30.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13741,16 +13741,24 @@ function adjustedLandmarks(A, g){
      thresholds by the window's real length keeps the comparison honest: 10 sets over a
      9-day cycle is not the same claim as 10 sets in a week, and only one of them should
      be measured against a weekly MEV. */
+  /* A8: THE LANDMARK IS A WEEKLY FIGURE AND STAYS ONE.
+
+     This used to multiply all three by the cycle's length in days over seven, so what
+     the app called your MAV was a per-cycle target that moved every time a cycle ran
+     long or short. It read like a weekly figure, could not be compared with any
+     published number, and on a nine-day cycle a chest MAV of 20 was quietly presented
+     as 25.7.
+
+     The conversion now runs the other way: the landmark stays weekly, and the VOLUME is
+     converted to a weekly equivalent before the two meet. Same comparison, one number
+     that means something outside this app. The per-cycle figures survive as `cycle` for
+     the advanced view's secondary line. */
   const win = A.win || {scale:1, days:7, mode:"week"};
   const scale = win.scale || 1;
-  const weekly = {mev: Math.round(mev*10)/10, mav: Math.round(mav*10)/10, mrv: Math.round(mrv*10)/10};
   if(scale !== 1){
-    mev *= scale; mav *= scale; mrv *= scale;
-    why.push({k:"Window", v:Math.round(win.days)+" days",
-      note: win.off >= 2
-        ? "targets scaled to the "+Math.round(win.days)+" days of this cycle you actually trained through. "
-          + Math.round(win.off)+" days away are left out, so time off does not inflate the target"
-        : "targets scaled from per-week figures to the length of this cycle"});
+    why.push({k:"Window", v:Math.round(win.days)+" day cycle",
+      note: "the target stays per week; your volume is converted to a weekly equivalent"
+        + (win.off >= 2 ? ". " + Math.round(win.off) + " days away are left out of the conversion" : "")});
   }
 
   /* TWO WAYS TO DISAGREE WITH THE NUMBER, AND THEY APPLY IN THIS ORDER.
@@ -13778,7 +13786,11 @@ function adjustedLandmarks(A, g){
   }
   const R = v => Math.max(0, Math.round(v*10)/10);
   mev = R(mev); mav = R(Math.max(mav, mev+1)); mrv = R(Math.max(mrv, mav+1));
-  return {mev, mav, mrv, weekly, scale, why, exp, base:{mev:G.mev, mav:G.mav, mrv:G.mrv}};
+  /* The same three numbers expressed over this cycle rather than a week. Secondary
+     everywhere: shown only in the advanced view, and always labelled. */
+  const cycle = {mev: R(mev*scale), mav: R(mav*scale), mrv: R(mrv*scale)};
+  return {mev, mav, mrv, cycle, weekly:{mev, mav, mrv}, scale, why, exp,
+          base:{mev:G.mev, mav:G.mav, mrv:G.mrv}};
 }
 function landmarkExplainerHTML(A){
   let h = `<div class="bm-explain">Your set targets are not fixed numbers. They start from published
@@ -13809,12 +13821,46 @@ function landmarkExplainerHTML(A){
   return h;
 }
 
+/* =====================================================================
+   WEEKLY EQUIVALENT
+
+   A cycle is a rotation, not a week, and volume inside one arrives in lumps. On
+   PPL-rest-PPL-rest chest is trained on day 1 and day 5, so measuring "sets so far"
+   against "target scaled to days so far" gave a verdict that flipped as the cycle ran:
+   too much on day 2, too little on day 4, too much again on day 6, none of it
+   describing anything about the training.
+
+   Two rules fix it, and they are separable:
+
+     1. The denominator is the PLANNED cycle length, not the elapsed one. A number that
+        moves every day cannot be compared with one that does not.
+     2. Mid-cycle there is no verdict at all, only a projection \u2014 what the week comes to
+        if the rest of the cycle is performed as written.
+
+   With no program or no cycle the denominator is already seven and both rules are
+   no-ops, which is the right behaviour for somebody the cycle machinery cannot
+   describe. */
+function plannedCycleDays(){
+  if(!S.cycleStart) return 0;
+  const n = (CYCLE_LAYOUT || []).length;
+  return n >= 2 ? n : 0;
+}
+function weeklyEquivalent(effSets, days){
+  const d = days == null ? plannedCycleDays() : days;
+  if(!(d >= 2)) return effSets;            // already a weekly window
+  return effSets * 7 / d;
+}
 /* `ctx` carries the accumulation window's own wording and what the rest of the cycle
    still prescribes, so "not trained" never gets stated as a fact about your training
    when it is really a fact about which day of the rotation it is. */
 function volState(m, sets, L, ctx){
   L = L || GROUPS[m];
   ctx = ctx || {};
+  const band = v =>
+      v < L.mev  ? {k:"under",   label:"too little"}
+    : v <= L.mav ? {k:"optimal", label:"just right"}
+    : v <= L.mrv ? {k:"high",    label:"a lot"}
+    :              {k:"over",    label:"too much"};
   if(sets <= 0){
     return (ctx.pending > 0)
       ? {k:"queued", label:"not trained yet",
@@ -13823,10 +13869,21 @@ function volState(m, sets, L, ctx){
          txt:"no sets logged "+(ctx.short || "this week")+
              (ctx.cycleOpen ? ", and nothing left in this cycle trains it" : "")};
   }
-  if(sets < L.mev)   return {k:"under",   label:"too little",  txt:r1(sets)+" of the "+L.mev+" weekly sets it takes to grow"};
-  if(sets <= L.mav)  return {k:"optimal", label:"just right",  txt:r1(sets)+" sets, inside your productive "+L.mev+" to "+L.mav+" window"};
-  if(sets <= L.mrv)  return {k:"high",    label:"a lot",       txt:r1(sets)+" sets, above your target of "+L.mav+" but still recoverable"};
-  return               {k:"over",    label:"too much",    txt:r1(sets)+" sets, past the "+L.mrv+" you can recover from"};
+  /* MID-CYCLE IS A PROJECTION, NOT A VERDICT. Judging a part-finished cycle against a
+     whole-cycle target is judging a week on Wednesday. What can honestly be said is
+     where it is heading if the days still to come are performed as written. */
+  if(ctx.midCycle && ctx.projected != null){
+    const pb = band(ctx.projected);
+    return {k:"proj", proj:true, band:pb.k, label:"on track",
+            txt:"on track for about "+r1(ctx.projected)+" sets a week, which is "+pb.label+
+                (ctx.pending > 0 ? " \u2014 "+r1(ctx.pending)+" still prescribed this cycle" : ""),
+            now:sets, projected:ctx.projected};
+  }
+  const b = band(sets);
+  if(b.k === "under")   return {k:b.k, label:b.label, txt:r1(sets)+" of the "+L.mev+" weekly sets it takes to grow"};
+  if(b.k === "optimal") return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, inside your productive "+L.mev+" to "+L.mav+" window"};
+  if(b.k === "high")    return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, above your target of "+L.mav+" but still recoverable"};
+  return                       {k:b.k, label:b.label, txt:r1(sets)+" sets a week, past the "+L.mrv+" you can recover from"};
 }
 
 /* ---------- the accumulation window ----------
@@ -13996,10 +14053,20 @@ function bodyAnalysis(){
   /* A1: the landmarks are denominated in hard sets, so the number compared against them
      is the effective count, not the raw one. `wk[m].sets` is still there for everything
      that means "sets you did". */
-  const vol    = blankMuscleMap(m => wk[m].eff);
-  const stCtx  = {short: win.short, cycleOpen: !cyc.complete};
-  const state  = blankMuscleMap(m => volState(m, wk[m].eff, lm[m],
+  /* A8: converted to a weekly equivalent first, because the landmark is weekly and the
+     window usually is not. */
+  const planDays = plannedCycleDays();
+  const vol    = blankMuscleMap(m => weeklyEquivalent(wk[m].eff, planDays));
+  /* The rest of the cycle, counted as full-credit sets. They are prescribed working sets
+     with no RPE yet, so full credit is the only honest assumption \u2014 and it is stated as
+     a projection rather than a measurement for exactly that reason. */
+  const projected = blankMuscleMap(m =>
+    weeklyEquivalent(wk[m].eff + (cyc.pending[m] || 0), planDays));
+  const midCycle = planDays >= 2 && !cyc.complete;
+  const stCtx  = {short: win.short, cycleOpen: !cyc.complete, midCycle};
+  const state  = blankMuscleMap(m => volState(m, vol[m], lm[m],
                    Object.assign({pending: cyc.pending[m] || 0,
+                                  projected: projected[m],
                                   names: dayList(pendingDayNames(cyc, m))}, stCtx)));
 
   /* Whole-body load. Deliberately NOT the sum of the per-muscle numbers: a bench press
@@ -14026,7 +14093,8 @@ function bodyAnalysis(){
   totals.acwr = chronicWkAll >= 4 ? ((totals.setsWk/(win.scale||1))/chronicWkAll) : null;
 
   const rwk = regionStats(win.from, win.to);
-  return {now, win, lm, wk, prevWk, fat, rec, grow, inj, vol, state, totals, modInfo, rwk, cyc,
+  return {now, win, lm, wk, prevWk, fat, rec, grow, inj, vol, projected, midCycle, planDays,
+          state, totals, modInfo, rwk, cyc,
           weak: weakPoints({wk, prevWk, fat, rec, grow, inj, state, lm, win, rwk, cyc})};
 }
 
@@ -23739,8 +23807,12 @@ function mapSelHTML(A, metric){
   /* Its numbers in one sentence, in the order somebody asks them: how much have I done,
      and how is it. No label on either half, because "12 of 18 sets this cycle" and
      "getting tired" do not need one. */
+  /* A8.5: the per-cycle figures are secondary and live here, in the advanced view only,
+     always labelled. The primary number everywhere is per week, because that is the one
+     that means the same thing next cycle and in every paper the landmarks come from. */
   const stat = A.wk[g].sets > 0
-    ? r1(A.wk[g].sets) + " of " + Math.round(L.mav) + " sets " + A.win.short
+    ? r1(A.vol[g]) + " of " + Math.round(L.mav) + " sets a week"
+      + (A.planDays >= 2 ? " \u00b7 " + r1(A.wk[g].eff) + " of " + Math.round(L.cycle.mav) + " this cycle" : "")
     : queued > 0
       ? "not trained yet \u2014 " + r1(queued) + " sets due on " + dayList(pendingDayNames(A.cyc, g))
       : "no work logged " + A.win.short;
