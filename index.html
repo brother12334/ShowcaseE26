@@ -264,6 +264,13 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
    but they don't take a tap. */
 .plate.past,.plate.locked{cursor:default}
 .plate.past:active,.plate.locked:active{transform:none}
+/* NOT A CONTROL, SO IT DOES NOT BEHAVE LIKE ONE. A day the rotation has passed, a day it
+   has not reached, and a rest your plan already places are all records rather than
+   choices. They used to take the tap so a toast could explain why nothing happened —
+   which meant the strip answered back every time a thumb landed on it. A plate that
+   cannot be chosen now simply is not pressable. The colour, the tick and the label
+   already say which is which. */
+.plate.inert{pointer-events:none}
 /* Inside the cell now, and small. On the old discs it was a badge hanging off the edge;
    on a 48px cell that is a third of the thing, and the wash already says "done". */
 .pcheck{
@@ -3170,6 +3177,12 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
   transition:transform .22s ease}
 .bl-tape[open]>summary::after{transform:rotate(90deg)}
 .bl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+/* Two columns already, so a left/right pair sits side by side in the reading order it is
+   measured in. Nothing else changes about the box. */
+.bl-old label{color:var(--faint)}
+.bl-gap{font-size:12px;color:var(--dim);padding:9px 13px;border-top:1px solid var(--line);
+  line-height:1.45}
+.bl-gap b{color:var(--text);font-weight:400}
 @media (max-width:359px){ .bl-grid{grid-template-columns:1fr} }
 /* THE RECORD BOOK.
 
@@ -5711,7 +5724,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "31.1";
+const APP_VERSION = "31.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14799,15 +14812,36 @@ function weakPoints(A){
   const cyc = A.cyc || {pending:{}, planned:{}, names:[], done:0, total:0, complete:true};
   const pend = m => (cyc.pending && cyc.pending[m]) || 0;
 
+  /* A DELOAD IS A CUT YOU CHOSE, NOT A SHORTFALL YOU MISSED.
+
+     Every volume rule here reads the log, and a deload week is exactly the week the log
+     is supposed to be light — so "your chest is under-stimulated" fired on people who
+     were following the app's own instruction to train less. The app reporting its own
+     deload back to you as a training error.
+
+     While a deload is running these rules read the PROGRAMME instead: what a full pass
+     of your rotation prescribes, converted to the same window the section is showing.
+     A programme with a genuine hole in it still gets caught — that is true whatever week
+     you are in, and it is the finding worth acting on — and a week you deliberately cut
+     no longer counts against you. Nothing is suppressed on the basis of the calendar;
+     the question just changes from "what did you do" to "what does your plan say". */
+  const onDeload = deloadActive();
+  const cycDays = plannedCycleDays() || (win.days || 7);
+  const planWin = m => ((cyc.planned && cyc.planned[m]) || 0) * ((win.days || 7) / (cycDays || 7));
+  const volOf   = m => onDeload ? planWin(m) : A.wk[m].sets;
+  const prevOf  = m => onDeload ? planWin(m) : A.prevWk[m].sets;
+  /* Already inside planWin, so adding it again would count the same sets twice. */
+  const pendOf  = m => onDeload ? 0 : pend(m);
+
   // 1, under-stimulated relative to minimum effective volume
   MKEYS.forEach(m=>{
-    const M = MUSCLES[m], lm = L(m), s = A.wk[m].sets, p = A.prevWk[m].sets;
+    const M = MUSCLES[m], lm = L(m), s = volOf(m), p = prevOf(m);
     if(s <= 0 && p <= 0) return;                     // rule 2 owns the "not trained at all" case
     if(!(lm.mev > 0) || s >= lm.mev) return;
     /* The sets the remaining days of the cycle still owe this muscle count towards the
        threshold. Being 4 sets short with 6 prescribed on a day you haven't done yet is
        a schedule, not a shortfall, and calling it one is how the section loses you. */
-    const projected = s + pend(m);
+    const projected = s + pendOf(m);
     if(projected >= lm.mev * 0.95) return;
     const shortfall = (lm.mev - projected)/lm.mev;   // 0 → will reach MEV, 1 → nothing at all
     const chronic = p < lm.mev;
@@ -14817,8 +14851,10 @@ function weakPoints(A){
     push(score, m, "under",
       M.name+" "+mIs(m)+" under-stimulated",
       "Add about "+need+" more hard sets of direct "+mMovement(m)+".",
-      r1(s)+" of the "+r1(lm.mev)+" sets it takes to grow, "+win.short+
-        (pend(m) > 0 ? ", and only "+r1(pend(m))+" more scheduled before the cycle ends" : "")+".",
+      (onDeload
+        ? "your programme prescribes about "+r1(s)+" of the "+r1(lm.mev)+" sets it takes to grow — read from the plan, since a deload week's log is meant to be light."
+        : r1(s)+" of the "+r1(lm.mev)+" sets it takes to grow, "+win.short+
+          (pend(m) > 0 ? ", and only "+r1(pend(m))+" more scheduled before the cycle ends" : "")+"."),
       /* WHAT THIS MEANS DEPENDS ON WHAT YOU ARE TRAINING FOR. The same shortfall is a
          growth problem for somebody eating to grow and a muscle-RETENTION problem for
          somebody in a deficit — and the second one is more urgent, not less, because the
@@ -14830,12 +14866,15 @@ function weakPoints(A){
         : trainingGoal() === "strength"
           ? "Even training for strength, a muscle has to be fed enough to hold its size — and cross-sectional area is most of what you are expressing when you lift heavy. "
           : "A muscle needs a certain amount of total work before it has any reason to adapt, and effort doesn't substitute for it. ")+
-      (pend(m) > 0
+      (onDeload
+        ? "This is judged on your programme rather than this week's log, because you are deloading and the log is supposed to be light. Nothing here is asking you to train more this week — it is the plan that comes back after it that falls short. "
+        : pend(m) > 0
         ? "The rest of this cycle is already counted here: even once "+dayList(pendingDayNames(cyc, m))+
           " "+(pendingDayNames(cyc, m).length===1?"is":"are")+" done, it still lands short. "
         : cyc.complete ? "" : "Nothing left in this cycle trains it. ")+
-      (chronic ? "It was short in the previous period too, so this isn't one quiet week."
-               : "Last time round it was in range, so this may just be a light spell.")+
+      (onDeload ? ""
+        : chronic ? "It was short in the previous period too, so this isn't one quiet week."
+                  : "Last time round it was in range, so this may just be a light spell.")+
       " One extra "+(GROUPS[m].lc||gName(m).toLowerCase())+" movement of 3 sets does it, or a set added to each one you already run."+
       (trainingGoal() === "lean"
         ? " Get to the floor and stop there: past it is recovery you do not have while eating less."
@@ -14916,23 +14955,27 @@ function weakPoints(A){
   // 4, structural balance between opposing / paired muscles
   const ratios = RATIO_PAIRS;
   ratios.forEach(R=>{
-    const sa = R.a.reduce((t,m)=>t+A.wk[m].sets,0);
-    const sb = R.b.reduce((t,m)=>t+A.wk[m].sets,0);
+    /* Same substitution as rule 1: during a deload this compares the two sides of your
+       PROGRAMME, so a light week read as "no pulling volume at all". */
+    const sa = R.a.reduce((t,m)=>t+volOf(m),0);
+    const sb = R.b.reduce((t,m)=>t+volOf(m),0);
     if(sa + sb < 6) return;                          // too little data to call it
     /* Mid-rotation, this compares a side that has come round against one that hasn't.
        Chest day then back day reads as 2:1 pushing on the Monday and 1:1 on the Tuesday,
        and only one of those is about you. The projected ratio, with the rest of the
        cycle's prescribed sets added in, has to be out of band as well before it counts. */
-    const pa = R.a.reduce((t,m)=>t+pend(m),0);
-    const pb = R.b.reduce((t,m)=>t+pend(m),0);
+    const pa = R.a.reduce((t,m)=>t+pendOf(m),0);
+    const pb = R.b.reduce((t,m)=>t+pendOf(m),0);
     const proj = (sa+pa)/Math.max(0.5, sb+pb);
     if(sb < 1){
       if(pb > 0) return;                             // the balancing work is still queued
       push(88, R.b[0], "balance",
         "No "+R.bn+" volume at all",
         R.actHigh,
-        r1(sa)+" sets of "+R.an+" work with nothing balancing it, "+win.short+
-          ", and nothing left in this cycle trains it.",
+        (onDeload
+          ? "your programme runs "+r1(sa)+" sets of "+R.an+" work with nothing balancing it — read from the plan, not from this deload week."
+          : r1(sa)+" sets of "+R.an+" work with nothing balancing it, "+win.short+
+            ", and nothing left in this cycle trains it."),
         R.whyHigh);
       return;
     }
@@ -20905,8 +20948,8 @@ function plateStrip(){
     if(key === "rest"){
       const idx = restSeen++;
       /* Under a scheduled rotation this plate is a marker, not a control: the plan has
-         already said where the rest goes, so there is nothing here to choose. It still
-         takes the tap, so a press can explain itself rather than doing nothing.
+         already said where the rest goes, so there is nothing here to choose — and so
+         it does not take the tap at all.
 
          Which slot a plate IS differs between the two modes. Floating rests are spent in
          the order they are taken, so the n-th plate is the n-th date. Scheduled ones sit
@@ -20929,7 +20972,10 @@ function plateStrip(){
          when. Train on the day it falls and it is owed TOMORROW — and the plate still
          printed "today" on it, directly under a card reading "your rest lands tomorrow".
          Only a rest that is genuinely being spent now says today. */
-      html += `<button class="plate rest${isCur?" cur":""}${resting?" done":""}${fixed&&!due?" past":""}"
+      html += `<button class="plate rest${isCur?" cur":""}${resting?" done":""}${fixed&&!due?" past":""}${
+        /* Scheduled rests are placed by the plan, so the plate is a marker. Floating
+           ones are spent by tapping, so those stay live. */
+        fixed?" inert":""}"
         data-rest="${idx}" data-restsched="${fixed ? layoutRestSlot[idx] : -1}"
         aria-label="Rest ${idx+1} of ${REST_CREDITS}${
           /* The weekday this plate SITS on is not where it is being spent, and on the
@@ -20955,10 +21001,10 @@ function plateStrip(){
     const past = slotIsPast(i);
     const locked = slotIsLocked(i);
     const cls = "plate" + (i===cur && !restNow && !restNext ?" cur":"") + (done?" done":"")
-              + (past?" past":"") + (locked?" locked":"");
-    /* aria-disabled, not disabled: a past plate still has to take the tap so it can say
-       WHY nothing happened. A hard-disabled button swallows the tap silently, and
-       "I pressed it and the app ignored me" is indistinguishable from a bug. */
+              + (past?" past":"") + (locked?" locked":"") + (past||locked?" inert":"");
+    /* aria-disabled, and inert to the touch. The label still carries the reason for a
+       screen reader; the thumb just gets no response, because there is nothing here to
+       choose and being told so on every press is worse than silence. */
     html += `<button class="${cls}" data-slot="${i}" style="--c:${m.color}"${
       past||locked?' aria-disabled="true"':""}
       aria-label="${esc(m.name)}, ${wd}${done?", done":past?", already passed this cycle"
@@ -27858,17 +27904,64 @@ function hurtsHTML(){
 
    Nothing here is required and nothing nags. A log with three weigh-ins in it is still
    more than the app knew before. */
+/* LEFT AND RIGHT, BECAUSE A LIMB HAS TWO OF THEM.
+
+   One "Upper arm" box asked you to measure the same side every time and then told you
+   nothing about the other one — which is a shame, because the gap between sides is the
+   single most useful thing a tape can tell a lifter, and this app already tracks
+   side-to-side strength imbalance everywhere else. The girths that come in pairs are now
+   logged in pairs. The ones that do not (neck, chest, waist, hips) are unchanged.
+
+   MEAS_LEGACY holds the keys measurements used to be filed under. They are never
+   rewritten — nobody recorded which arm they measured, and picking one for them would be
+   inventing data. They stay readable, keep their place in the history and the trend, and
+   appear in the sheet on any entry that still carries them, so they can be corrected or
+   cleared by hand. New entries are sided. */
 const MEAS_FIELDS = [
   {k:"neck",      t:"Neck"},
   {k:"shoulders", t:"Shoulders"},
   {k:"chest",     t:"Chest"},
-  {k:"arm",       t:"Upper arm"},
-  {k:"forearm",   t:"Forearm"},
+  {k:"arm_l",     t:"Upper arm, left",  pair:"arm",     side:"l"},
+  {k:"arm_r",     t:"Upper arm, right", pair:"arm",     side:"r"},
+  {k:"forearm_l", t:"Forearm, left",    pair:"forearm", side:"l"},
+  {k:"forearm_r", t:"Forearm, right",   pair:"forearm", side:"r"},
   {k:"waist",     t:"Waist"},
   {k:"hips",      t:"Hips"},
-  {k:"thigh",     t:"Thigh"},
-  {k:"calf",      t:"Calf"}
+  {k:"thigh_l",   t:"Thigh, left",      pair:"thigh",   side:"l"},
+  {k:"thigh_r",   t:"Thigh, right",     pair:"thigh",   side:"r"},
+  {k:"calf_l",    t:"Calf, left",       pair:"calf",    side:"l"},
+  {k:"calf_r",    t:"Calf, right",      pair:"calf",    side:"r"}
 ];
+const MEAS_LEGACY = [
+  {k:"arm",     t:"Upper arm (before sides)", legacy:true},
+  {k:"forearm", t:"Forearm (before sides)",   legacy:true},
+  {k:"thigh",   t:"Thigh (before sides)",     legacy:true},
+  {k:"calf",    t:"Calf (before sides)",      legacy:true}
+];
+/* Everything a record can hold. Anything that READS the log uses this; only the sheet's
+   new inputs use MEAS_FIELDS on its own. */
+const MEAS_ALL = MEAS_FIELDS.concat(MEAS_LEGACY);
+/* The fields one entry's sheet shows: the sided set, plus any legacy box that entry
+   actually has a number in. */
+function measFieldsFor(rec){
+  return MEAS_FIELDS.concat(MEAS_LEGACY.filter(f=> (rec || {})[f.k] > 0));
+}
+/* The two sides of one girth on the most recent entry that has both, and what separates
+   them. Null unless there is a real pair to compare. */
+/* How far apart the sides have to be before it is worth a sentence. 3% is about 1 cm on a
+   40 cm arm — comfortably outside what a tape moved slightly up or down the limb explains,
+   and the point where the usual coaching advice starts treating a difference as real. */
+const MEAS_GAP_PCT = 0.03;
+function measPair(pair, list){
+  const L = pair + "_l", R = pair + "_r";
+  const rec = (list || []).filter(x=> x[L] > 0 && x[R] > 0)[0];
+  if(!rec) return null;
+  const l = rec[L], r = rec[R];
+  const big = Math.max(l, r), small = Math.min(l, r);
+  return {l, r, d: rec.d, diff: big - small, pct: big > 0 ? (big - small)/big : 0,
+          bigger: l === r ? null : (l > r ? "left" : "right"),
+          wide: big > 0 && (big - small)/big >= MEAS_GAP_PCT};
+}
 /* Inches with pounds, centimetres with kilos, until you say otherwise. See `tapeUnit`:
    the inference is a sensible default and it was wrong to make it the only answer. */
 function lenWord(){
@@ -27889,7 +27982,7 @@ function tapeConvertPlan(to){
   Object.keys(L).forEach(d=>{
     const rec = L[d];
     if(!rec) return;
-    MEAS_FIELDS.forEach(f=>{ if(rec[f.k] > 0) hits.push({d, k: f.k}); });
+    MEAS_ALL.forEach(f=>{ if(rec[f.k] > 0) hits.push({d, k: f.k}); });
   });
   return {hits, to};
 }
@@ -27941,7 +28034,7 @@ function bodyLog(){
 // Newest first, which is the order every screen that reads it wants.
 function bodyLogList(){
   const L = bodyLog();
-  return Object.keys(L).filter(d=> L[d] && (L[d].w > 0 || MEAS_FIELDS.some(f=> L[d][f.k] > 0)))
+  return Object.keys(L).filter(d=> L[d] && (L[d].w > 0 || MEAS_ALL.some(f=> L[d][f.k] > 0)))
     .sort((a,b)=> a < b ? 1 : -1).map(d=> Object.assign({d}, L[d]));
 }
 /* WHAT TIME YOU USUALLY DO IT, AND WHY IT MATTERS.
@@ -28057,7 +28150,7 @@ function medianGapDays(list){
 function bodyLogDue(kind){
   if(!tracksWeight()) return null;
   const tape = kind === "tape";
-  const list = bodyLogList().filter(x=> tape ? MEAS_FIELDS.some(f=> x[f.k] > 0) : x.w > 0);
+  const list = bodyLogList().filter(x=> tape ? MEAS_ALL.some(f=> x[f.k] > 0) : x.w > 0);
   if(tape && !list.length) return null;          // never used it, so never asked about it
   const def = tape ? TAPE_EVERY_DEFAULT : WEIGH_EVERY_DEFAULT;
   const lo = tape ? TAPE_MIN : WEIGH_MIN, hi = tape ? TAPE_MAX : WEIGH_MAX;
@@ -28090,7 +28183,7 @@ function openBodyLog(dateStr){
   if(!tracksWeight()) return;
   const d = dateStr || todayStr();
   const rec = bodyLog()[d] || {};
-  const has = MEAS_FIELDS.some(f=> rec[f.k] > 0);
+  const has = MEAS_ALL.some(f=> rec[f.k] > 0);
   const open = BODYLOG_TAPE || has;
   const last = latestWeighIn();
   const usual = usualWeighTime();
@@ -28127,12 +28220,18 @@ function openBodyLog(dateStr){
           from now on \u2014 the same hour every time is what makes the trend mean anything.</div>`}
     <details class="bl-tape"${open ? " open" : ""}>
       <summary>Tape measurements <span>${has ? "filled in" : "optional"}</span></summary>
-      <div class="bl-grid">${MEAS_FIELDS.map(f=>
-        `<div class="field"><label>${esc(f.t)} (${esc(lenWord())})</label>
+      <div class="bl-grid">${measFieldsFor(rec).map(f=>
+        `<div class="field${f.pair ? " bl-side" : ""}${f.legacy ? " bl-old" : ""}"><label>${
+          esc(f.t)} (${esc(lenWord())})</label>
           <input id="bl_${f.k}" inputmode="decimal" ${num(f.k, "")}></div>`).join("")}</div>
-      <div class="set-says">Measure the same side and the same spot every time — a tape moved
+      <div class="set-says">Same spot every time — a tape moved
         ${lenWord() === "cm" ? "a couple of centimetres" : "an inch"} up your arm is worth more than
-        a month of training, and the app cannot see that it moved.</div>
+        a month of training, and the app cannot see that it moved. Left and right are asked for
+        separately because the gap between them is worth knowing; one side on its own is still
+        a measurement, so fill in what you take.${
+        MEAS_LEGACY.some(f=> rec[f.k] > 0)
+          ? " The boxes marked <b>before sides</b> are earlier measurements that were not taken left or right. They are kept as they are — nothing here knows which arm they were."
+          : ""}</div>
     </details>
     <div class="btn-row" style="margin-top:16px">
       <button class="btn small" id="blSave" style="flex:1">Save</button>
@@ -28152,13 +28251,13 @@ function openBodyLog(dateStr){
     const keep = {};
     const wEl = m.querySelector("#blW");
     if(wEl) keep.w = wEl.value;
-    MEAS_FIELDS.forEach(f=>{ const el = m.querySelector("#bl_" + f.k); if(el) keep[f.k] = el.value; });
+    MEAS_ALL.forEach(f=>{ const el = m.querySelector("#bl_" + f.k); if(el) keep[f.k] = el.value; });
     if(hmToMin(tIn.value) != null) BODYLOG_T = tIn.value;
     openBodyLog(d);
     const m2 = $("#modal");
     const w2 = m2.querySelector("#blW");
     if(w2 && keep.w) w2.value = keep.w;
-    MEAS_FIELDS.forEach(f=>{
+    MEAS_ALL.forEach(f=>{
       const el = m2.querySelector("#bl_" + f.k);
       if(el && keep[f.k]) el.value = keep[f.k];
     });
@@ -28175,7 +28274,7 @@ function openBodyLog(dateStr){
     const out = {};
     const w = read("blW");
     if(w != null) out.w = w;
-    MEAS_FIELDS.forEach(f=>{ const v = read("bl_" + f.k); if(v != null) out[f.k] = v; });
+    MEAS_ALL.forEach(f=>{ const v = read("bl_" + f.k); if(v != null) out[f.k] = v; });
     const tEl = m.querySelector("#blT");
     if(w != null && tEl && hmToMin(tEl.value) != null) out.t = tEl.value;
     if(!Object.keys(out).length){
@@ -28253,7 +28352,7 @@ function bodyLogHTML(){
   } else {
     h += `<button class="btn ghost small" id="blAdd" style="width:100%;margin-bottom:10px">Log a weigh-in</button>`;
   }
-  const taped = MEAS_FIELDS.filter(f=> list.some(x=> x[f.k] > 0));
+  const taped = MEAS_ALL.filter(f=> list.some(x=> x[f.k] > 0));
   if(taped.length){
     h += `<div class="bl-meas">${taped.map(f=>{
       const cur = list.filter(x=> x[f.k] > 0)[0];
@@ -28263,7 +28362,19 @@ function bodyLogHTML(){
         <span class="bl-m-v num">${esc(fmtLen(cur[f.k]))}</span>
         <span class="bl-m-d num">${tr && tr.delta ? esc(bodyDelta(f.k, true)) : ""}</span>
       </div>`;
-    }).join("")}</div>`;
+    }).join("")}${
+      /* THE GAP IS THE POINT OF MEASURING BOTH. A side difference under MEAS_GAP_PCT is
+         tape noise and every human body has one; past it, it is worth knowing about, and
+         it is the sort of thing you only ever notice if something says it out loud. */
+      [...new Set(MEAS_FIELDS.filter(f=> f.pair).map(f=> f.pair))]
+        .map(pr=> ({pr, x: measPair(pr, list)}))
+        .filter(o=> o.x && o.x.wide)
+        .map(o=> `<div class="bl-gap">Your <b>${esc(o.pr === "arm" ? "upper arms" : o.pr + "s")}</b>
+          are ${esc(fmtLen(Math.round(o.x.diff*10)/10))} apart — ${esc(fmtLen(o.x.l))} left,
+          ${esc(fmtLen(o.x.r))} right. Worth knowing rather than worth worrying about: almost
+          everybody is uneven, and the thing that closes it is unilateral work on the smaller
+          side, not more work overall.</div>`).join("")
+    }</div>`;
   }
   const uw = usualWeighTime();
   h += `<div class="bl-foot">${list.length} entr${list.length === 1 ? "y" : "ies"}${
@@ -30420,16 +30531,9 @@ function bind(){
       /* A spent slot is not selectable, and under the default neither is one the
          rotation has not reached: re-running a day you have done, or jumping past one
          you have not, are the two ways the day at the far end stops getting trained. */
-      if(slotIsPast(slot)){
-        toast(S.cycleDone.includes(slot)
-          ? "Already done this cycle. The rotation only moves forward"
-          : "That day has passed. The rotation only moves forward");
-        return;
-      }
-      if(slotIsLocked(slot)){
-        toast(dayName(ROTATION[S.pointer]) + " comes first — your plan sets the order");
-        return;
-      }
+      /* Inert in the markup, so this only catches a keyboard press. Nothing is said:
+         see the note on .plate.inert. */
+      if(slotIsPast(slot) || slotIsLocked(slot)) return;
       S.pointer = slot;
       S.override = null;
       save(); queueSync(); render();
@@ -30461,17 +30565,9 @@ function bind(){
     const taken = restDaysThisCycle();
     const date = taken[slot] || null;
     const today = todayStr();
-    /* Scheduled rests are not chosen, so there is nothing to tap them for — but the
-       press still has to answer for itself. A plate that silently ignores you is
-       indistinguishable from a broken one. */
-    if(!restsFloat()){
-      const st = restStatus();
-      const mine = st[parseInt(rp.dataset.restsched, 10)] || {};
-      toast(mine.due ? "Today is your scheduled rest day"
-          : mine.satisfied ? "That rest is already taken"
-          : "Your plan schedules this rest — it comes round on its own");
-      return;
-    }
+    /* Scheduled rests are not chosen, so the plate is inert in the markup. This only
+       catches a keyboard press. */
+    if(!restsFloat()) return;      // placed by the plan, so there is nothing to press
     if(date === today){
       if(confirm("Cancel today's rest day? The credit goes back.")){
         releaseRestDay(today, true);
