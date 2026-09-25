@@ -5648,7 +5648,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "28.5";
+const APP_VERSION = "28.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7077,6 +7077,12 @@ const PREF_DEFAULTS = {
      as it always did. Told, it stops suggesting weights that do not exist: there is no
      point telling somebody to add 2.5 lb a hand when the rack goes 10, 15, 20. */
   dbStep: null,      // smallest gap between two of your dumbbells, per hand
+  /* WHAT THE TAPE IS READ IN, on purpose rather than by inference. This used to be
+     derived from `units`: inches with pounds, centimetres with kilos, on the reasoning
+     that nobody measures their arm in centimetres and their bench in pounds. People do.
+     Left null it still follows the weight unit, which keeps every existing install
+     exactly where it was; set, it is the answer and the weight unit is not consulted. */
+  tapeUnit: null,    // null follows `units` | "in" | "cm"
   plateStep: null,   // smallest plate you own — a bar changes by twice this
   /* WHERE THE RACK STOPS. A rack that ends at 50 makes every suggestion above 50 a
      weight that does not exist in the building, and the app was happy to print them.
@@ -19218,6 +19224,15 @@ function prefsGymHTML(){
       {v:"off", t:"Leave it out",  d:"Nothing in the app asks for it or shows it. Anything already logged is kept."}
     ], "data-trackw", tracksWeight() ? "on" : "off",
     "Turning it off hides the feature; it does not delete a single weigh-in.");
+  /* ASKED, BECAUSE IT WAS BEING GUESSED. The tape unit was derived from the weight unit
+     on the reasoning that nobody wants pounds and centimetres together. People do, and
+     there was no way to say so. Only offered where the tape exists at all. */
+  if(tracksWeight())
+    h += setChoice("Tape measurements", [
+        {v:"in", t:"Inches", d:"Arms, chest, waist and the rest in <b>in</b>."},
+        {v:"cm", t:"Centimetres", d:"The same measurements in <b>cm</b>."}
+      ], "data-tapeunit", lenWord(),
+      "Independent of pounds or kilos. Anything already measured can be converted when you switch.");
   /* THE EXAMPLE IS ABOUT YOUR BAR, or it is not an example of anything. This was written
      with 45 hard-coded in both lines, so somebody who had told the app their bar weighs 25
      was reading "a 45 lb bar with a 45 on each end is 135" directly above the field where
@@ -26516,10 +26531,67 @@ const MEAS_FIELDS = [
   {k:"thigh",     t:"Thigh"},
   {k:"calf",      t:"Calf"}
 ];
-/* Inches with pounds, centimetres with kilos. Nobody measures their arm in centimetres
-   and their bench in pounds, and asking which would be a question with one sensible
-   answer. */
-function lenWord(){ return inKg() ? "cm" : "in"; }
+/* Inches with pounds, centimetres with kilos, until you say otherwise. See `tapeUnit`:
+   the inference is a sensible default and it was wrong to make it the only answer. */
+function lenWord(){
+  const t = trainPrefs().tapeUnit;
+  return (t === "cm" || t === "in") ? t : (inKg() ? "cm" : "in");
+}
+const CM_PER_IN = 2.54;
+/* Every measurement already logged, rewritten into the new unit.
+
+   A stored measurement is a bare number with no unit on it, exactly like a logged load
+   before barAdd was stamped: switch the unit and a 15 that meant inches silently becomes
+   a 15 that means centimetres, and the chart reads a 40% collapse in your arm. So the
+   switch offers to bring them over, and it is the same offer barMode makes, for the same
+   reason. Reversible: convert back and the arithmetic returns every figure. */
+function tapeConvertPlan(to){
+  const L = bodyLog();
+  const hits = [];
+  Object.keys(L).forEach(d=>{
+    const rec = L[d];
+    if(!rec) return;
+    MEAS_FIELDS.forEach(f=>{ if(rec[f.k] > 0) hits.push({d, k: f.k}); });
+  });
+  return {hits, to};
+}
+function tapeConvertApply(pl){
+  const L = bodyLog();
+  const mul = pl.to === "cm" ? CM_PER_IN : 1 / CM_PER_IN;
+  let n = 0;
+  pl.hits.forEach(h=>{
+    const rec = L[h.d];
+    if(!rec || !(rec[h.k] > 0)) return;
+    rec[h.k] = Math.round(rec[h.k] * mul * 10) / 10;
+    n++;
+  });
+  save();
+  return n;
+}
+function openTapeConvert(to){
+  const pl = tapeConvertPlan(to);
+  if(!pl.hits.length) return false;
+  const other = to === "cm" ? "inches" : "centimetres";
+  const word  = to === "cm" ? "centimetres" : "inches";
+  showModal(`<h3>Bring the old measurements over?</h3>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">You now
+      measure in <b>${esc(word)}</b>. <b>${pl.hits.length}</b> measurement${
+      pl.hits.length === 1 ? " is" : "s are"} still written in ${esc(other)}.</div>
+    <div class="set-says" style="margin-bottom:14px">Nothing about your body changes \u2014 only
+      the number written for it. Left alone, your chart will read the switch as a sudden
+      ${to === "cm" ? "gain" : "loss"}. Switch back and convert again and every figure returns.</div>
+    <button class="btn" id="tuGo">Convert ${pl.hits.length} measurement${pl.hits.length===1?"":"s"}</button>
+    <button class="btn ghost small" id="tuNo" style="margin-top:9px">Leave them alone</button>`);
+  const m = $("#modal");
+  m.querySelector("#tuNo").onclick = ()=>{ hideModal(); render();
+    toast("Left as they were \u2014 new measurements use " + word); };
+  m.querySelector("#tuGo").onclick = ()=>{
+    const n = tapeConvertApply(pl);
+    hideModal(); render();
+    toast(n + " measurement" + (n === 1 ? "" : "s") + " rewritten in " + word, "good");
+  };
+  return true;
+}
 function fmtLen(v){
   if(v == null || !isFinite(v)) return "—";
   return (Math.round(v * 10) / 10) + " " + lenWord();
@@ -26720,9 +26792,9 @@ function openBodyLog(dateStr){
       <div class="bl-grid">${MEAS_FIELDS.map(f=>
         `<div class="field"><label>${esc(f.t)} (${esc(lenWord())})</label>
           <input id="bl_${f.k}" inputmode="decimal" ${num(f.k, "")}></div>`).join("")}</div>
-      <div class="set-says">Measure the same side and the same spot every time — a tape moved an
-        inch up your arm is worth more than a month of training, and the app cannot see that it
-        moved.</div>
+      <div class="set-says">Measure the same side and the same spot every time — a tape moved
+        ${lenWord() === "cm" ? "a couple of centimetres" : "an inch"} up your arm is worth more than
+        a month of training, and the app cannot see that it moved.</div>
     </details>
     <div class="btn-row" style="margin-top:16px">
       <button class="btn small" id="blSave" style="flex:1">Save</button>
@@ -30077,6 +30149,15 @@ function bind(){
     save(); queueSync(); render();
     toast(n === 1 ? "Floor cleared" : n + " floors cleared");
   };
+  document.querySelectorAll("[data-tapeunit]").forEach(b=> b.onclick = ()=>{
+    const v = b.dataset.tapeunit;
+    const was = lenWord();
+    if(v === was) return;
+    S.prefs = Object.assign({}, S.prefs, {tapeUnit: v});
+    save(); render();
+    // nothing logged means nothing to offer, and the switch is simply done
+    if(!openTapeConvert(v)) toast("Tape measurements in " + (v === "cm" ? "centimetres" : "inches"));
+  });
   document.querySelectorAll("[data-trackw]").forEach(b=> b.onclick = ()=>{
     trainPrefs().trackWeight = b.dataset.trackw === "on";
     save(); queueSync(); render();
