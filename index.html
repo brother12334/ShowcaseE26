@@ -4445,16 +4445,21 @@ body.cele-open{overflow:hidden}
 .reason-ic .ico{width:21px;height:21px;vertical-align:-.25em}
 
 /* ================= BODY / TRAINING STRESS MAP ================= */
-.metric-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -14px 14px;padding:0 14px;scrollbar-width:none}
-.metric-scroll::-webkit-scrollbar{display:none}
-.metric-seg{display:inline-flex;gap:7px;padding-bottom:2px}
-.metric-seg button{
-  flex-shrink:0;padding:10px 15px;border-radius:11px;cursor:pointer;
-  background:var(--card2);border:1px solid var(--line);color:var(--dim);
-  font-family:var(--disp);font-size:15.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
-  white-space:nowrap;
-}
-.metric-seg button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+/* ONE VIEW AT A TIME. The arrows are the only tappable things, so they are sized like
+   buttons rather than like text; the name and its sentence sit between them as one
+   block, and the dots underneath say how far along the five you are. */
+.metric-step{display:flex;align-items:center;gap:6px;margin-bottom:12px;padding:9px 6px;
+  border-radius:12px;background:var(--card2);border:1px solid var(--line)}
+.ms-ar{flex:0 0 auto;width:38px;height:38px;border:none;background:none;cursor:pointer;
+  color:var(--acc);font:20px var(--mono);line-height:1;border-radius:9px}
+.ms-ar:hover,.ms-ar:focus-visible{background:var(--acc-soft)}
+.ms-ar:active{opacity:.6}
+.ms-mid{flex:1;min-width:0;text-align:center}
+.ms-mid>b{display:block;font-size:14.5px;font-weight:600;color:var(--text)}
+.ms-mid>span{display:block;font-size:12.5px;color:var(--faint);line-height:1.4;margin-top:3px}
+.ms-dots{display:flex!important;gap:5px;justify-content:center;margin-top:7px}
+.ms-dots i{width:5px;height:5px;border-radius:50%;background:var(--line);flex:0 0 auto}
+.ms-dots i.on{background:var(--acc)}
 .bm-card{padding:14px 10px 10px}
 .bm-figs{display:flex;gap:4px;justify-content:center;align-items:flex-start}
 .bm-fig{flex:1;min-width:0;max-width:190px;display:flex;flex-direction:column;align-items:center;gap:7px}
@@ -5649,7 +5654,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "29.0";
+const APP_VERSION = "29.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -22899,19 +22904,23 @@ function ramp(stops, t){
   }
   return stops[stops.length-1][1];
 }
+/* NAMED FOR WHAT THEY ANSWER. "Fatigue", "Volume" and "Injury Risk" are the words the
+   research uses and they are not the words a person picking a view uses. The stepper
+   shows one at a time with its sentence attached, so the label has room to be ordinary
+   English and the sentence carries the detail. */
 const METRICS = [
-  {id:"fatigue",  label:"Fatigue"},
-  {id:"volume",   label:"Volume"},
-  {id:"recovery", label:"Recovery"},
-  {id:"growth",   label:"Growth"},
-  {id:"injury",   label:"Injury Risk"}
+  {id:"fatigue",  label:"Tiredness"},
+  {id:"volume",   label:"Sets done"},
+  {id:"recovery", label:"Ready to go"},
+  {id:"growth",   label:"Progress"},
+  {id:"injury",   label:"Overdoing it"}
 ];
 // Volume is the one metric whose meaning depends on the window it's counted over, so
 // its label and its one-liner say which window that is rather than assuming a week.
 function metricLabel(id, win){
   const m = METRICS.find(x=>x.id===id);
   if(!m) return id;
-  return id === "volume" ? (win && win.mode==="cycle" ? "Cycle Volume" : "Weekly Volume") : m.label;
+  return id === "volume" ? "Sets " + ((win && win.short) || "this week") : m.label;
 }
 function metricOneLiner(id, win){
   if(id === "volume"){
@@ -24000,10 +24009,28 @@ function viewBody(){
   const shownMetric = advanced ? metric : "fatigue";
   h += `<div class="nb-map nb-in" style="--d:520ms">
     <div class="nb-sec-k">Your muscles</div>
-    ${advanced ? `<div class="metric-scroll"><div class="metric-seg">${
-      METRICS.map(m=>`<button data-metric="${m.id}" class="${m.id===metric?"on":""}">${esc(metricLabel(m.id, win))}</button>`).join("")
-    }</div></div>` : ""}
-    <div class="nb-map-say">${advanced ? esc(metricOneLiner(shownMetric, win)) : "Green is rested, red needs a break. Tap a muscle to see how it's doing."}</div>
+    ${/* FIVE BUTTONS IN A ROW THAT RAN OFF THE EDGE OF THE SCREEN.
+
+          The picker was every view at once, in a strip that scrolled sideways, each one
+          named for the number behind it rather than the question in front of it. Two of
+          the five sat past the right edge at any width a phone has, so the row had to be
+          discovered before it could be used, and the sentence explaining the view you had
+          landed on sat separately underneath it.
+
+          One at a time instead. The name and its sentence travel together, which is the
+          pairing that was always missing, and the dots say how many there are and where
+          you are among them. Nothing scrolls and nothing hides. */ advanced
+      ? `<div class="metric-step">
+          <button class="ms-ar" data-metricstep="-1" aria-label="Previous view">\u2039</button>
+          <span class="ms-mid">
+            <b>${esc(metricLabel(shownMetric, win))}</b>
+            <span>${esc(metricOneLiner(shownMetric, win))}</span>
+            <span class="ms-dots">${METRICS.map(m=>
+              `<i class="${m.id === shownMetric ? "on" : ""}"></i>`).join("")}</span>
+          </span>
+          <button class="ms-ar" data-metricstep="1" aria-label="Next view">\u203a</button>
+        </div>`
+      : `<div class="nb-map-say">Green is rested, red needs a break. Tap a muscle to see how it's doing.</div>`}
     <div class="bm-figs">
       <div class="bm-fig">${bodyFrontSVG(A, shownMetric)}<div class="bm-fig-label">Front</div></div>
       <div class="bm-fig">${bodyBackSVG(A, shownMetric)}<div class="bm-fig-label">Back</div></div>
@@ -30503,8 +30530,12 @@ function bind(){
   });
 
   // body / training stress map
-  document.querySelectorAll("[data-metric]").forEach(b=> b.onclick=()=>{
-    BODY_METRIC = b.dataset.metric;
+  document.querySelectorAll("[data-metricstep]").forEach(b=> b.onclick=()=>{
+    /* Wraps, because a five-item ring with a dead end at each side makes you walk back
+       through the middle to reach the one next to where you started. */
+    const d = parseInt(b.dataset.metricstep, 10) || 1;
+    const at = Math.max(0, METRICS.findIndex(m=> m.id === BODY_METRIC));
+    BODY_METRIC = METRICS[(at + d + METRICS.length) % METRICS.length].id;
     render();
   });
   /* Figure taps. A tap SELECTS a major muscle and nothing more; splitting it into its
