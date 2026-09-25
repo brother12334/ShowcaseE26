@@ -5159,6 +5159,20 @@ body.cele-open{overflow:hidden}
 .tg-v{flex:0 0 auto;font-size:13px;color:var(--dim)}
 .tg-row.is-mine .tg-v{color:var(--acc)}
 .tg-body{padding:2px 12px 13px}
+/* Three landmarks in one expanded row. Each is a labelled block with its own stepper, so
+   the floor and the ceiling can never be mistaken for one another the way a single
+   unlabelled number could. */
+.tg-land{padding:10px 0;border-top:1px solid var(--line)}
+.tg-land:first-child{border-top:0;padding-top:2px}
+.tg-land-h{display:flex;align-items:baseline;gap:8px;margin-bottom:7px}
+.tg-land-h b{font-size:13.5px}
+.tg-land-h span{font-size:11.5px;color:var(--faint)}
+.tg-land.is-mine .tg-land-h b{color:var(--acc)}
+.tg-land-s{font-size:11.5px;color:var(--faint);margin-top:6px;line-height:1.45}
+.tg-dis{margin-top:10px;padding:9px 11px;border-radius:9px;font-size:12.5px;line-height:1.5;
+  color:var(--dim);border:1px solid rgba(201,154,52,.32);
+  background:linear-gradient(180deg,rgba(201,154,52,.07),transparent)}
+.tg-dis b{color:var(--text)}
 .tg-body .fx-step{margin:0 0 9px}
 .tg-body .nb-link{margin-top:8px;display:inline-block}
 /* The typed way in, beside the stepper rather than instead of it: the buttons are for
@@ -5678,7 +5692,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "30.1";
+const APP_VERSION = "30.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13672,6 +13686,74 @@ function ratioPairFor(m){
    future build with a wider range, must not be able to set every target in the app to
    zero or to ten times the evidence. */
 const LM_SCALE_MIN = 0.5, LM_SCALE_MAX = 1.5;
+/* A10: TENTHS INSIDE, WHOLE NUMBERS ON SCREEN.
+
+   The arithmetic keeps one decimal because the chain multiplies six or seven factors
+   together and rounding early compounds. The SCREEN shows whole numbers, because 15.3
+   asserts a precision the model does not have \u2014 these are population figures scaled by
+   estimates, and the third significant figure is noise dressed as measurement. */
+function fmtLandmark(v){
+  return (v == null || !isFinite(v)) ? "\u2014" : String(Math.round(v));
+}
+
+/* WHAT YOU HAVE SET BY HAND, per landmark. Null where you have not said. */
+function manualLandmarks(g){
+  const num = v => (typeof v === "number" && v > 0) ? v : null;
+  return {
+    mev: num(S.lmFloor && S.lmFloor[g]),
+    mav: num(S.lmMav   && S.lmMav[g]),
+    mrv: num(S.lmMrv   && S.lmMrv[g])
+  };
+}
+function setManualLandmark(g, which, v){
+  const key = which === "mev" ? "lmFloor" : which === "mav" ? "lmMav" : "lmMrv";
+  if(v == null){ if(S[key]) delete S[key][g]; return; }
+  if(!S[key]) S[key] = {};
+  S[key][g] = v;
+}
+/* A9.2: WHEN WHAT YOU SET AND WHAT THE APP WORKED OUT HAVE PARTED COMPANY.
+
+   A manual figure is the last word and stays the last word \u2014 this never overrides it.
+   But once the chain (and, from Part B, your own calibration) has moved a long way from
+   the number you typed in, one of the two is out of date and only you know which. Said
+   once, quietly, next to the number. */
+const MANUAL_DISAGREE_PCT = 0.25;
+function manualDisagreement(A, g){
+  const man = manualLandmarks(g);
+  const out = [];
+  ["mev","mav","mrv"].forEach(which=>{
+    if(man[which] == null) return;
+    const auto = landmarkWithoutManual(A, g, which);
+    if(!(auto > 0)) return;
+    const diff = Math.abs(auto - man[which]) / auto;
+    if(diff >= MANUAL_DISAGREE_PCT)
+      out.push({which, mine: man[which], auto: r1(auto), pct: Math.round(diff*100)});
+  });
+  return out;
+}
+/* The figure this landmark would carry with your own value out of the way. Asked of the
+   real chain rather than half-reimplemented, which is what keeps the two in step. */
+function landmarkWithoutManual(A, g, which){
+  const key = which === "mev" ? "lmFloor" : which === "mav" ? "lmMav" : "lmMrv";
+  const map = S[key];
+  if(!map || !(g in map)) return (((A && A.lm && A.lm[g]) || adjustedLandmarks(A, g))[which]);
+  const keep = map[g];
+  delete map[g];
+  let v;
+  try{ v = adjustedLandmarks(A, g)[which]; } finally { map[g] = keep; }
+  return v;
+}
+/* PART B FILLS THIS IN. Returns the multiplier each landmark has earned from the
+   user's own observed response, plus a label for the explainer and the confidence the
+   UI needs. Neutral until there is anything to learn from, so the chain is unchanged
+   for anybody whose log has not yet produced an observation. */
+function landmarkCalibration(g){
+  const c = (S.lmCal && S.lmCal[g]) || null;
+  if(!c) return {mev:1, mav:1, mrv:1, blocks:0, w:0};
+  const v = k => (typeof c[k] === "number" && c[k] > 0) ? c[k] : 1;
+  return {mev:v("mev"), mav:v("mav"), mrv:v("mrv"),
+          blocks: c.blocks || 0, w: c.w || 0, label: c.label, note: c.note};
+}
 function lmScale(){
   const v = Number(S.lmScale);
   if(!isFinite(v) || v <= 0) return 1;
@@ -13772,17 +13854,53 @@ function adjustedLandmarks(A, g){
      is what makes "this one number is wrong" say exactly that rather than being quietly
      re-scaled afterwards. Everything above still runs either way — the experience,
      frequency and cycle-length adjustments shape MAV and MRV too. */
+  /* STEP 7.5: PERSONAL CALIBRATION.
+
+     Everything above this line is a population figure scaled by things the app can read
+     about your training. This is the first step that is about how you RESPONDED to it,
+     and it is deliberately the last thing before your own hand-set values: a calibration
+     learned from your log should be able to move the prior, and should never be able to
+     argue with a number you typed in yourself.
+
+     Part B fills it in. Until then landmarkCalibration() returns 1 for everything, which
+     leaves the chain exactly as it was. */
+  const cal = landmarkCalibration(g);
+  if(cal.mev !== 1 || cal.mav !== 1 || cal.mrv !== 1){
+    mev *= cal.mev; mav *= cal.mav; mrv *= cal.mrv;
+    why.push({k:"Your own response", v:cal.label || "learned from your training",
+      note: cal.note || "adjusted by how your lifts and recovery actually behaved at these volumes"});
+  }
   const sc2 = lmScale();
   if(sc2 !== 1){
     mev *= sc2; mav *= sc2; mrv *= sc2;
     why.push({k:"Your scale", v:Math.round(sc2*100) + "% of the figures",
       note:"you set this in Settings, and it moves every muscle's targets together"});
   }
-  const own = S.lmFloor && S.lmFloor[g];
-  if(typeof own === "number" && own > 0){
-    mev = own;
-    why.push({k:"Your floor", v:own + " sets",
-      note:"you set this one yourself in Settings, so the computed figure is not used for it"});
+  /* A9: MANUAL LANDMARKS, all three of them.
+
+     This was a floor and nothing else: you could tell the app your MEV and had to take
+     its MAV and MRV on trust, which is backwards \u2014 the ceiling is the one people learn
+     about themselves first, usually the hard way. All three are settable now, each
+     independently, each replacing its own figure and touching neither of the others.
+
+     Stored per landmark rather than as a triple so that setting a ceiling does not
+     silently pin a floor you never chose. `lmFloor` stays the home of the manual MEV so
+     no existing setting has to migrate. */
+  const man = manualLandmarks(g);
+  if(man.mev != null){
+    mev = man.mev;
+    why.push({k:"Your MEV", v:man.mev + " sets a week",
+      note:"you set this yourself, so the computed floor is not used for it"});
+  }
+  if(man.mav != null){
+    mav = man.mav;
+    why.push({k:"Your MAV", v:man.mav + " sets a week",
+      note:"you set this yourself, so the computed target is not used for it"});
+  }
+  if(man.mrv != null){
+    mrv = man.mrv;
+    why.push({k:"Your MRV", v:man.mrv + " sets a week",
+      note:"you set this yourself, so the computed ceiling is not used for it"});
   }
   const R = v => Math.max(0, Math.round(v*10)/10);
   mev = R(mev); mav = R(Math.max(mav, mev+1)); mrv = R(Math.max(mrv, mav+1));
@@ -13812,7 +13930,7 @@ function landmarkExplainerHTML(A){
       <table class="gl-table">
         <tr><td>Base</td><td>MEV ${L.base.mev} / MAV ${L.base.mav} / MRV ${L.base.mrv} sets per week</td></tr>` +
       L.why.map(w=>`<tr><td>${esc(w.k)}</td><td><b>${esc(String(w.v))}</b><br><span style="color:var(--faint)">${esc(w.note)}</span></td></tr>`).join("") +
-      `<tr><td><b>Yours</b></td><td><b>MEV ${L.mev} / MAV ${L.mav} / MRV ${L.mrv}</b></td></tr>
+      `<tr><td><b>Yours</b></td><td><b>MEV ${fmtLandmark(L.mev)} / MAV ${fmtLandmark(L.mav)} / MRV ${fmtLandmark(L.mrv)}</b> sets a week</td></tr>
       </table>`;
   }
   h += `<div class="gl-note">Head-level regions like the three triceps heads do not get their own thresholds.
@@ -13880,10 +13998,10 @@ function volState(m, sets, L, ctx){
             now:sets, projected:ctx.projected};
   }
   const b = band(sets);
-  if(b.k === "under")   return {k:b.k, label:b.label, txt:r1(sets)+" of the "+L.mev+" weekly sets it takes to grow"};
-  if(b.k === "optimal") return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, inside your productive "+L.mev+" to "+L.mav+" window"};
-  if(b.k === "high")    return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, above your target of "+L.mav+" but still recoverable"};
-  return                       {k:b.k, label:b.label, txt:r1(sets)+" sets a week, past the "+L.mrv+" you can recover from"};
+  if(b.k === "under")   return {k:b.k, label:b.label, txt:r1(sets)+" of the "+fmtLandmark(L.mev)+" weekly sets it takes to grow"};
+  if(b.k === "optimal") return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, inside your productive "+fmtLandmark(L.mev)+" to "+fmtLandmark(L.mav)+" window"};
+  if(b.k === "high")    return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, above your target of "+fmtLandmark(L.mav)+" but still recoverable"};
+  return                       {k:b.k, label:b.label, txt:r1(sets)+" sets a week, past the "+fmtLandmark(L.mrv)+" you can recover from"};
 }
 
 /* ---------- the accumulation window ----------
@@ -23811,8 +23929,8 @@ function mapSelHTML(A, metric){
      always labelled. The primary number everywhere is per week, because that is the one
      that means the same thing next cycle and in every paper the landmarks come from. */
   const stat = A.wk[g].sets > 0
-    ? r1(A.vol[g]) + " of " + Math.round(L.mav) + " sets a week"
-      + (A.planDays >= 2 ? " \u00b7 " + r1(A.wk[g].eff) + " of " + Math.round(L.cycle.mav) + " this cycle" : "")
+    ? r1(A.vol[g]) + " of " + fmtLandmark(L.mav) + " sets a week"
+      + (A.planDays >= 2 ? " \u00b7 " + r1(A.wk[g].eff) + " of " + fmtLandmark(L.cycle.mav) + " this cycle" : "")
     : queued > 0
       ? "not trained yet \u2014 " + r1(queued) + " sets due on " + dayList(pendingDayNames(A.cyc, g))
       : "no work logged " + A.win.short;
@@ -29257,38 +29375,56 @@ function targetsScreenHTML(){
     h += `<div class="tg-area">${esc(area)}</div>`;
     rows.forEach(g=>{
       const L = (A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g];
-      const own = S.lmFloor && S.lmFloor[g];
-      const mine = typeof own === "number" && own > 0;
-      const now = r1(((A.wk[g] || {}).sets || 0) + ((A.cyc && A.cyc.pending[g]) || 0));
+      const man = manualLandmarks(g);
+      const mine = man.mev != null || man.mav != null || man.mrv != null;
+      const now = r1((A.vol && A.vol[g] != null) ? A.vol[g] : 0);
       const floor = r1(L.mev);
       const open = TG_OPEN === g;
       h += `<div class="tg-row${mine ? " is-mine" : ""}${open ? " is-open" : ""}">
         <button type="button" class="tg-head" data-tgopen="${g}" aria-expanded="${open}">
           <span class="tg-n">${esc(gName(g))}${mine ? `<i class="tg-mark">yours</i>` : ""}</span>
-          <span class="tg-v num">${floor > 0 ? now + " / " + floor : now + " · no floor"}</span>
+          <span class="tg-v num">${now} \u00b7 ${fmtLandmark(L.mev)}/${fmtLandmark(L.mav)}/${fmtLandmark(L.mrv)}</span>
         </button>`;
       if(open){
-        const base = r1(adjustedFloorWithout(A, g));
+        const LAND = [
+          {k:"mev", t:"Floor",   sub:"least that still grows it"},
+          {k:"mav", t:"Target",  sub:"top of the productive range"},
+          {k:"mrv", t:"Ceiling", sub:"most it can recover from"}
+        ];
+        const dis = manualDisagreement(A, g);
         h += `<div class="tg-body">
-          <div class="fx-step">
-            <button type="button" data-tgstep="${g}:down" aria-label="Lower the ${esc(gName(g))} floor by a tenth of a set">−</button>
-            <b class="num">${floor}</b>
-            <button type="button" data-tgstep="${g}:up" aria-label="Raise the ${esc(gName(g))} floor by a tenth of a set">+</button>
-          </div>
-          <div class="tg-type">
-            <label for="tgT_${g}">or type it</label>
-            <input id="tgT_${g}" data-tgtype="${g}" type="number" inputmode="decimal"
-              step="0.1" min="0.1" max="40" value="${floor}"
-              aria-label="${esc(gName(g))} floor, in sets">
-            <span>sets</span>
-          </div>
-          <div class="set-says">${mine
-            ? "Yours. Element 26 would put it at <b>" + (base > 0 ? base : "no floor at all") + "</b>."
-            : floor > 0
-              ? "Element 26's figure, from the published numbers scaled to your training."
-              : "Element 26 sets no floor for this one — there is no published figure worth holding you to, so it is never reported as behind. Setting one here makes it a group the Body tab watches."}
-            You are doing <b>${now}</b> ${now === 1 ? "set" : "sets"} of direct work against it.</div>
-          ${mine ? `<button type="button" class="nb-link" data-tgclear="${g}">Use Element 26's figure again</button>` : ""}
+          ${LAND.map(x=>{
+            const v = r1(L[x.k]);
+            const own = man[x.k] != null;
+            const auto = own ? r1(landmarkWithoutManual(A, g, x.k)) : null;
+            return `<div class="tg-land${own ? " is-mine" : ""}">
+              <div class="tg-land-h"><b>${x.t}</b><span>${esc(x.sub)}</span></div>
+              <div class="fx-step">
+                <button type="button" data-tgstep="${g}:${x.k}:down"
+                  aria-label="Lower the ${esc(gName(g))} ${x.t.toLowerCase()} by a tenth of a set">\u2212</button>
+                <b class="num">${v}</b>
+                <button type="button" data-tgstep="${g}:${x.k}:up"
+                  aria-label="Raise the ${esc(gName(g))} ${x.t.toLowerCase()} by a tenth of a set">+</button>
+              </div>
+              <div class="tg-type">
+                <label for="tgT_${g}_${x.k}">or type it</label>
+                <input id="tgT_${g}_${x.k}" data-tgtype="${g}:${x.k}" type="number"
+                  inputmode="decimal" step="0.1" min="0.1" max="40" value="${v}"
+                  aria-label="${esc(gName(g))} ${x.t.toLowerCase()}, in sets a week">
+                <span>a week</span>
+              </div>
+              <div class="tg-land-s">${own
+                ? "Yours. Element 26 would say <b>" + (auto > 0 ? auto : "nothing here") + "</b>."
+                : "Element 26's figure, from the published numbers scaled to your training."}</div>
+            </div>`;
+          }).join("")}
+          ${dis.length ? `<div class="tg-dis">${dis.map(d=>
+            `Your ${d.which.toUpperCase()} is set to <b>${d.mine}</b>. Your data suggests
+             <b>${d.auto}</b> \u2014 ${d.pct}% apart. One of the two is out of date, and only
+             you know which.`).join("<br>")}</div>` : ""}
+          <div class="set-says">You are doing <b>${now}</b> effective ${now === 1 ? "set" : "sets"}
+            a week against these.</div>
+          ${mine ? `<button type="button" class="nb-link" data-tgclear="${g}">Use Element 26's figures again</button>` : ""}
         </div>`;
       }
       h += `</div>`;
@@ -29308,20 +29444,8 @@ function targetsScreenHTML(){
     you cannot justify against your own training is not one worth typing in.</div></div>`;
   return h;
 }
-/* What the floor WOULD be if this group had no override — so the row can say what it is
-   overriding rather than just that it is overridden. Computed by asking for the landmarks
-   with the override temporarily out of the way, which is cheap and keeps one source of
-   truth for the arithmetic instead of half-reimplementing it here. */
-function adjustedFloorWithout(A, g){
-  const map = S.lmFloor;
-  if(!map || !(g in map)) return ((A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g]).mev;
-  const keep = map[g];
-  delete map[g];
-  let v;
-  try{ v = adjustedLandmarks(A, g).mev; }
-  finally{ map[g] = keep; }
-  return v;
-}
+/* landmarkWithoutManual() replaced adjustedFloorWithout(): same trick, now per
+   landmark rather than for the floor alone. */
 let TG_OPEN = null;
 function settingsPlanHTML(){
   /* WHAT'S HERE, WHAT ISN'T, AND WHY IT CAME BACK.
@@ -30614,10 +30738,10 @@ function bind(){
      re-rendering per tick would destroy the button under your finger, which is the same
      trap the targets dial fell into when every keypress rebuilt the element that had
      focus. */
-  const tgFloorNow = g =>{
+  const tgFloorNow = (g, which)=>{
     const A = bodyAnalysis();
     const L = (A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g];
-    return Math.round(L.mev * 10) / 10;
+    return Math.round(L[which || "mev"] * 10) / 10;
   };
   const tgClamp = v => Math.max(0.1, Math.min(40, Math.round(v * 10) / 10));
   /* THE FIRST PRESS ON A GROUP WITH NO FLOOR IS NOT A TENTH. Neck and inner thigh are
@@ -30631,18 +30755,19 @@ function bind(){
      the top of this file — and a `const` of the same name in this scope shadowed it, so
      every arrow key on the dial called this instead and threw on gName(a number). The
      same collision that cost an afternoon over EX_LIBRARY. One floor, one name. */
-  const tgFloorCommit = (g, was, v)=>{
+  const TG_WORD = {mev:"floor", mav:"target", mrv:"ceiling"};
+  const tgFloorCommit = (g, was, v, which)=>{
     if(v === was) return;
-    if(!S.lmFloor) S.lmFloor = {};
-    S.lmFloor[g] = v;
+    const k = which || "mev";
+    setManualLandmark(g, k, v);
     logPlanChange("rule", null, gName(g),
-      [gName(g) + " floor " + was + " \u2192 " + v + " sets"],
-      {note: "You set this floor yourself in Settings."});
+      [gName(g) + " " + TG_WORD[k] + " " + was + " \u2192 " + v + " sets a week"],
+      {note: "You set this " + TG_WORD[k] + " yourself in Settings."});
     save(); queueSync(); render();
   };
   document.querySelectorAll("[data-tgstep]").forEach(b=>{
-    const [g, dir] = b.dataset.tgstep.split(":");
-    if(!GROUPS[g]) return;
+    const [g, which, dir] = b.dataset.tgstep.split(":");
+    if(!GROUPS[g] || !TG_WORD[which]) return;
     const sign = dir === "up" ? 1 : -1;
     const readout = b.parentNode && b.parentNode.querySelector("b.num");
     let held = null, ticks = 0, was = 0, cur = 0;
@@ -30656,12 +30781,12 @@ function bind(){
     const stop = ()=>{
       if(held == null) return;
       clearInterval(held); held = null;
-      tgFloorCommit(g, was, cur);
+      tgFloorCommit(g, was, cur, which);
     };
     const start = ev=>{
       if(held != null) return;
       if(ev && ev.button > 0) return;
-      was = tgFloorNow(g); cur = was; ticks = 0;
+      was = tgFloorNow(g, which); cur = was; ticks = 0;
       bump();                               // the press itself is the first tenth
       held = setInterval(bump, 110);
       if(ev && ev.pointerId != null && b.setPointerCapture){
@@ -30675,34 +30800,34 @@ function bind(){
     /* Keyboards and assistive tech send click without ever sending pointerdown. */
     b.onclick = ev=>{
       if(ev && (ev.detail > 0 || held != null)) return;   // a real press already handled it
-      const from = tgFloorNow(g);
-      tgFloorCommit(g, from, tgNext(from, sign, 0.1));
+      const from = tgFloorNow(g, which);
+      tgFloorCommit(g, from, tgNext(from, sign, 0.1), which);
     };
   });
-  /* THE SAME NUMBER, TYPED. Committed on blur and on Enter rather than per keystroke,
-     because committing per keystroke re-renders the screen and takes the field you are
-     typing into with it. */
+  /* THE SAME NUMBER, TYPED. One field per landmark now. Committed on blur and on Enter
+     rather than per keystroke, because committing per keystroke re-renders the screen
+     and takes the field you are typing into with it. */
   document.querySelectorAll("[data-tgtype]").forEach(inp=>{
-    const g = inp.dataset.tgtype;
-    if(!GROUPS[g]) return;
+    const [g, which] = inp.dataset.tgtype.split(":");
+    if(!GROUPS[g] || !TG_WORD[which]) return;
     const go = ()=>{
       const raw = parseFloat(String(inp.value).replace(",", "."));
-      const was = tgFloorNow(g);
+      const was = tgFloorNow(g, which);
       if(!isFinite(raw) || raw <= 0){ inp.value = r1(was); return; }
-      tgFloorCommit(g, was, tgClamp(raw));
+      tgFloorCommit(g, was, tgClamp(raw), which);
     };
     inp.onblur = go;
-    /* change fires where blur does not — a phone keyboard's Done, a spinner, the
-       arrow keys. Committing twice is harmless: the second pass reads the value it
-       just wrote and stops. */
+    /* change fires where blur does not \u2014 a phone keyboard's Done, a spinner, the arrow
+       keys. Committing twice is harmless: the second pass reads what it just wrote. */
     inp.onchange = go;
     inp.onkeydown = ev=>{ if(ev.key === "Enter"){ ev.preventDefault(); inp.blur(); } };
   });
   document.querySelectorAll("[data-tgclear]").forEach(b=> b.onclick = ()=>{
     const g = b.dataset.tgclear;
-    if(!S.lmFloor || !(g in S.lmFloor)) return;
-    const was = S.lmFloor[g];
-    delete S.lmFloor[g];
+    const man = manualLandmarks(g);
+    if(man.mev == null && man.mav == null && man.mrv == null) return;
+    const was = man.mev != null ? man.mev : (man.mav != null ? man.mav : man.mrv);
+    ["mev","mav","mrv"].forEach(k=> setManualLandmark(g, k, null));
     logPlanChange("rule", null, gName(g),
       [gName(g) + " floor back to Element 26's figure, from " + was],
       {note: "You cleared a floor you had set."});
@@ -39587,7 +39712,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmScale","lmSuggest","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","expManual","exCompound","exCompoundSeeded","sore","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
