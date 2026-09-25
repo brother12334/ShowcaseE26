@@ -4485,22 +4485,30 @@ body.cele-open{overflow:hidden}
 .bm-dim{opacity:.28;transition:opacity .2s}
 .bm-head-shape{stroke-width:2.8}
 .bm-sel{stroke:var(--text);stroke-width:3.2}
-.bm-drill small{color:var(--faint);font-family:var(--mono);font-size:11.5px}
-.bm-clear{
-  background:none;border:none;color:var(--faint);cursor:pointer;
-  font:12px var(--mono);text-decoration:underline dotted;text-underline-offset:3px;padding:2px;
-}
-.bm-drill{
-  display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
-  margin-top:12px;padding:10px 12px;border-radius:11px;
-  background:var(--card2);border:1px solid var(--line);font-size:13px;color:var(--dim);
-}
-.bm-drill b{color:var(--text)}
-.bm-drill button{
-  background:var(--text);color:var(--bg);border:none;border-radius:8px;cursor:pointer;
-  padding:7px 12px;font-family:var(--disp);font-size:13px;font-weight:700;
-  text-transform:uppercase;letter-spacing:.05em;flex-shrink:0;
-}
+/* THE SELECTED MUSCLE, ABOVE THE FIGURES. Sized and coloured like the view stepper
+   directly above it, because they are the same kind of thing: one line saying what you
+   are looking at. The whole left side is the target; the x is the only other one. */
+.ms-sel{display:flex;align-items:stretch;gap:6px;margin:0 0 12px}
+.ms-sel-b{flex:1;min-width:0;display:flex;align-items:center;gap:10px;text-align:left;
+  background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;
+  cursor:pointer;color:var(--text)}
+.ms-sel-b:hover,.ms-sel-b:focus-visible{border-color:var(--acc-line)}
+.ms-sel-b:active{opacity:.7}
+.ms-sel-dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+.ms-sel-t{flex:1;min-width:0}
+.ms-sel-t>b{display:block;font-size:14.5px;font-weight:600}
+/* Wraps rather than clipping. "4 of 16 sets this cycle · tiredness 12%" is two facts,
+   and an ellipsis takes the second one away on exactly the phones that need it most. */
+.ms-sel-t>span{display:block;font:11.5px var(--mono);color:var(--faint);margin-top:3px;
+  line-height:1.4}
+.ms-sel-go{flex:0 0 auto;color:var(--acc);font:18px var(--mono);line-height:1}
+.ms-sel-x{flex:0 0 auto;width:42px;background:var(--card2);border:1px solid var(--line);
+  border-radius:12px;color:var(--faint);font:16px var(--mono);cursor:pointer}
+.ms-sel-x:hover,.ms-sel-x:focus-visible{color:var(--text);border-color:var(--acc-line)}
+.ms-sel-h{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;
+  background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.ms-sel-h>b{font-size:14.5px;font-weight:600}
+.ms-sel-h>span{font:11.5px var(--mono);color:var(--faint);margin-top:3px}
 /* ===================== BODY TAB, the plain-English layer =====================
    Everything here is prefixed .nb- and lives only inside the Body tab. It deliberately
    uses the app's existing tokens rather than a palette of its own, so the tab reads as
@@ -5654,7 +5662,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "29.1";
+const APP_VERSION = "29.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23349,44 +23357,59 @@ function sectionCard(key, title, sub, body, count){
    individual heads is now an explicit action ("Break it down") rather than something a
    second tap does by accident, because 37 competing shapes is not a picture anyone can
    read, and the heads only mean anything once you have picked a muscle to study. */
-function drillBarHTML(A, metric){
-  if(!BODY_FOCUS){
-    return `<div class="bm-tap">Tap any muscle to see how it's doing.</div>`;
-  }
-  const g = BODY_FOCUS, heads = GROUP_REGIONS[g] || [];
+/* THE SELECTED MUSCLE, ABOVE THE MAP RATHER THAN BOLTED UNDER IT.
+
+   This used to be a panel below the legend carrying two buttons, "Analyse" and "Break it
+   down", and nothing on the card said which of them had what you wanted. Both names
+   described what the APP would do rather than what you would see, and the panel itself
+   arrived from nowhere the moment you touched the figure, pushing the page around under
+   your thumb.
+
+   The selection now reads where the view name reads, directly above the figures, so the
+   thing you tapped and the thing that describes it are next to each other and the bottom
+   of the card never changes shape. One target: the whole block opens that muscle, and
+   the sheet it opens already carries the parts behind its own button, which is where
+   "Break it down" went. Nothing is lost and there is nothing left to choose between. */
+function mapSelHTML(A, metric){
+  const g = BODY_FOCUS;
+  if(!g) return "";
   const gm = groupTileMetric(A, g, metric);
   const L = A.lm[g] || adjustedLandmarks(A, g);
   const queued = (A.cyc && A.cyc.pending[g]) || 0;
-  const stat = A.wk[g].sets > 0
-    ? r1(A.wk[g].sets)+" of "+L.mav+" target sets "+A.win.short
-    : queued > 0
-      ? "not trained yet, "+r1(queued)+" sets due on "+dayList(pendingDayNames(A.cyc, g))
-      : "no work logged "+A.win.short;
-  if(!BODY_EXPAND){
-    return `<div class="bm-drill">
-      <span><b>${esc(gName(g))}</b><br><small>${esc(stat)}${
-        gm.txt && gm.v != null && metric !== "volume"
-          ? " · "+esc(metricLabel(metric, A.win).toLowerCase())+" "+esc(gm.txt) : ""
-      }</small></span>
-      <span style="display:flex;gap:7px;flex-shrink:0">
-        <button data-gdetail="${g}">Analyse</button>
-        ${heads.length>1 ? `<button data-g2="${g}" style="background:var(--card2);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)">Break it down</button>` : ""}
-      </span>
+  const heads = GROUP_REGIONS[g] || [];
+  if(BODY_EXPAND && heads.length > 1){
+    return `<div class="ms-sel">
+      <div class="ms-sel-h"><b>${esc(gName(g))}</b><span>its ${heads.length} parts \u2014 tap one</span></div>
+      <button class="ms-sel-x" id="bmBack" aria-label="Back to all muscles">\u2190</button>
     </div>
-    <div class="bm-tap" style="margin-top:7px"><button class="bm-clear" id="bmBack">Clear selection</button></div>`;
-  }
-  return `<div class="bm-drill">
-      <span>The <b>${heads.length} parts</b> of your ${esc(gName(g).toLowerCase())}. Tap one for what it is and how to train it.</span>
-      <button id="bmBack">Back to all muscles</button>
-    </div>
-    <div class="bm-heads" style="margin-top:9px;border:none;padding:0">${heads.map(r=>{
+    <div class="bm-heads">${heads.map(r=>{
       const rm = regionMetric(A, r, metric);
       return `<button class="bm-head" data-mrow="${r}" style="border-color:${rm.color}66">
         <span class="bm-hdot" style="background:${rm.color}"></span>${esc(REGIONS[r].name)}
         <small>${esc(rm.txt)}</small></button>`;
     }).join("")}</div>`;
+  }
+  /* Its numbers in one sentence, in the order somebody asks them: how much have I done,
+     and how is it. No label on either half, because "12 of 18 sets this cycle" and
+     "getting tired" do not need one. */
+  const stat = A.wk[g].sets > 0
+    ? r1(A.wk[g].sets) + " of " + Math.round(L.mav) + " sets " + A.win.short
+    : queued > 0
+      ? "not trained yet \u2014 " + r1(queued) + " sets due on " + dayList(pendingDayNames(A.cyc, g))
+      : "no work logged " + A.win.short;
+  /* "12%" on its own says nothing about what is 12%, so the reading carries the name of
+     the view it came from, exactly as the stepper above it names that view. */
+  const read = (A.wk[g].sets > 0 && gm.txt && metric !== "volume")
+    ? " \u00b7 " + metricLabel(metric, A.win).toLowerCase() + " " + gm.txt : "";
+  return `<div class="ms-sel">
+    <button class="ms-sel-b" data-gdetail="${g}">
+      <span class="ms-sel-dot" style="background:${A.wk[g].sets > 0 ? gm.color : C_GREY}"></span>
+      <span class="ms-sel-t"><b>${esc(gName(g))}</b><span>${esc(stat + read)}</span></span>
+      <span class="ms-sel-go">\u203a</span>
+    </button>
+    <button class="ms-sel-x" id="bmBack" aria-label="Clear selection">\u00d7</button>
+  </div>`;
 }
-
 /* =====================================================================
    BODY TAB, THE PLAIN-ENGLISH LAYER
 
@@ -23686,7 +23709,8 @@ function sparkSVG(vals, color, id, domain, minSpan){
    somebody who tapped their chest to see whether it was still sore. Those live in
    Advanced now. */
 function nbMapPickHTML(A, metric, advanced){
-  if(advanced) return drillBarHTML(A, metric);
+  // advanced says it above the figures instead, in mapSelHTML()
+  if(advanced) return "";
   if(!BODY_FOCUS) return "";
   const g = BODY_FOCUS;
   const gm = groupTileMetric(A, g, metric);
@@ -24031,6 +24055,7 @@ function viewBody(){
           <button class="ms-ar" data-metricstep="1" aria-label="Next view">\u203a</button>
         </div>`
       : `<div class="nb-map-say">Green is rested, red needs a break. Tap a muscle to see how it's doing.</div>`}
+    ${advanced ? mapSelHTML(A, shownMetric) : ""}
     <div class="bm-figs">
       <div class="bm-fig">${bodyFrontSVG(A, shownMetric)}<div class="bm-fig-label">Front</div></div>
       <div class="bm-fig">${bodyBackSVG(A, shownMetric)}<div class="bm-fig-label">Back</div></div>
