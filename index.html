@@ -1200,26 +1200,34 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
   padding:8px 10px;margin:0 0 10px;
 }
 .plate-line b{color:var(--text);font-weight:400}
-/* Boxes around each plate cost about 18px apiece, which on a four-plate load pushed
-   "a side" off the end of the row and left it reading "45 ×2  10  2.5  a". The swatch is
-   already the thing that separates one plate from the next, so the box was doing nothing
-   the colour was not. Gone, and the whole load fits at phone width. */
-.pl-row{display:flex;align-items:center;gap:9px;overflow-x:auto;-webkit-overflow-scrolling:touch;
-  padding-bottom:1px}
-.pl-tot{font:600 13px var(--mono);color:var(--text);flex:0 0 auto}
-.pl-bar{font:10.5px var(--mono);color:var(--faint);flex:0 0 auto;white-space:nowrap}
-.pl-p{display:flex;align-items:center;gap:4px;flex:0 0 auto;white-space:nowrap;
-  font:12.5px var(--mono);color:var(--text)}
-.pl-p i{width:4px;border-radius:1px;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(0,0,0,.45)}
-.pl-p u{text-decoration:none;color:var(--faint);font-size:10.5px}
-.pl-side{font:10.5px var(--mono);color:var(--faint);flex:0 0 auto;white-space:nowrap}
-.pl-short{font:10.5px var(--mono);color:var(--acc);flex:0 0 auto;white-space:nowrap}
+.pl-say{margin-top:7px}
 .warm-pl{font:12px var(--mono);color:var(--dim);line-height:1.45;
   border:1px dashed var(--line);border-radius:9px;padding:8px 10px;margin:8px 0 0}
 .warm-set.warm-pl-on{box-shadow:inset 0 0 0 1px var(--acc);color:var(--text)}
 .plate-gap{border-style:solid;border-color:rgba(201,154,52,.3)}
 .pl-gap-s{color:var(--dim)}
 .plate-gap .nb-link{margin-top:6px;font-family:var(--mono);font-size:11.5px}
+/* The drawing. Plates hang on a sleeve that runs left to right, heaviest nearest the
+   middle of the bar, which is the order you actually load them in. */
+.pl-art{display:flex;align-items:center;gap:0;min-height:54px}
+.pl-stub{
+  flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  height:13px;padding:0 7px;border-radius:3px 0 0 3px;
+  background:linear-gradient(180deg,#4a4a55,#33333c);
+}
+.pl-stub b{font:8.5px var(--mono);color:#c9c6c0;font-weight:600;letter-spacing:.04em}
+.pl-sleeve{position:relative;flex:0 1 auto;display:flex;align-items:center;gap:2px;
+  padding:0 9px 0 4px;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* The bar itself, behind the discs. */
+/* Runs past the collar, or the bar looks like it stops where the plates do. */
+.pl-rod{position:absolute;left:0;right:-7px;top:50%;height:7px;margin-top:-3.5px;
+  background:linear-gradient(180deg,#54545f,#3a3a44);border-radius:2px}
+.pl-d{
+  position:relative;z-index:1;flex:0 0 auto;border-radius:2px;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.5);
+}
+.pl-collar{position:relative;z-index:1;flex:0 0 auto;width:6px;height:17px;border-radius:2px;
+  background:linear-gradient(180deg,#5c5c68,#3e3e48);margin-left:2px}
 /* ---------- the session card ---------- */
 .sx{
   border:1px solid var(--line);border-left:3px solid var(--day,var(--acc));
@@ -5640,7 +5648,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "28.7";
+const APP_VERSION = "28.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -36957,9 +36965,10 @@ function warmupHTML(e, kind, ctx){
       if(gap) return `<div class="warm-pl"><div class="pl-gap-s">No plate count for
         ${esc(fmtLoad(rung.w))} yet \u2014 Element 26 needs to know ${esc(joinList(gap.miss))}.</div>
         <button type="button" class="nb-link" data-platefix="1">Set that up</button></div>`;
-      const row = plateRowHTML(rung.w, plateBreakdown(rung.w, e.name), e.name);
-      if(!row) return "";
-      return `<div class="warm-pl">${row}</div>`;
+      const line = plateLine(rung.w, e.name);
+      if(!line) return "";
+      return `<div class="warm-pl">${plateArtHTML(plateBreakdown(rung.w, e.name))}
+        <div class="pl-say"><b>${esc(fmtLoad(rung.w))}</b> = ${esc(line)}</div></div>`;
     })()}
     <span class="warm-note">${
       /* EACH SIDE, SAID ONCE. Every rung on a one-limb movement is done twice, and
@@ -37834,40 +37843,20 @@ const PLATE_HUE_LB = {45:"#46617f", 35:"#8a7b46", 25:"#4a7a56", 10:"#a8a59d",
                       5:"#8f4f4a", 2.5:"#6f6d69", 1.25:"#56545a"};
 const PLATE_HUE_KG = {25:"#8f4f4a", 20:"#46617f", 15:"#8a7b46", 10:"#4a7a56",
                       5:"#a8a59d", 2.5:"#8f4f4a", 1.25:"#6f6d69"};
-/* ONE ROW, IN THE ORDER YOU LOAD THEM.
-
-   The drawing and the sentence under it said the same thing twice: a side-on sleeve with
-   a disc per plate, and then "45 lb bar + 45 + 25 a side" spelling out the picture
-   immediately below. Two lines and 54px of card for one fact, on a screen you read
-   standing at the rack.
-
-   So it is one row and it is the whole answer. Each distinct plate once, with its count,
-   left to right in loading order — which is the order the old drawing already used, and
-   the order you actually slide them on. The colour swatch stays because that is how the
-   plate is found on the tree at a glance; it is sized by weight for the same reason the
-   discs were, on the same square root, so a 2.5 next to a 45 is still a distinguishable
-   thing rather than a smudge.
-
-   The sentence survives as the accessible label. Nothing is lost to a screen reader by
-   the picture getting smaller. */
-function plateRowHTML(total, b, name){
+function plateArtHTML(b){
   if(!b || !b.plates.length) return "";
   const hue = inKg() ? PLATE_HUE_KG : PLATE_HUE_LB;
   const big = inKg() ? 25 : 45;
-  const hOf = w=> Math.round(11 + 13 * Math.sqrt(Math.min(1, w / big)));
-  const counts = [];
-  b.plates.forEach(w=>{
-    const l = counts[counts.length - 1];
-    if(l && l.w === w) l.n++; else counts.push({w, n: 1});
-  });
-  const said = plateLine(total, name);
-  return `<div class="pl-row"${said ? ` aria-label="${attrSafe(fmtLoad(total) + " is " + said)}"` : ""}>
-    <b class="pl-tot">${esc(fmtLoad(total))}</b>
-    ${b.platesOnly ? "" : `<span class="pl-bar">${esc(r1(b.bar))} bar +</span>`}
-    ${counts.map(c=> `<span class="pl-p"><i style="height:${hOf(c.w)}px;background:${
-      hue[c.w] || "#56545a"}"></i>${esc(r1(c.w))}${c.n > 1 ? `<u>\u00d7${c.n}</u>` : ""}</span>`).join("")}
-    <span class="pl-side">a side</span>${b.exact ? "" :
-      `<span class="pl-short">${esc(fmtLoad(b.short))} short</span>`}
+  /* Square-root, not linear: a 1.25 next to a 45 on a linear scale is three pixels tall
+     and reads as a smudge, and the point of the drawing is that you can tell them apart. */
+  const hOf = w=> Math.round(19 + 33 * Math.sqrt(Math.min(1, w / big)));
+  const wOf = w=> w >= big * 0.5 ? 13 : w >= big * 0.2 ? 11 : 9;
+  const discs = b.plates.map(w=>
+    `<i class="pl-d" style="height:${hOf(w)}px;width:${wOf(w)}px;background:${hue[w] || "#56545a"}"
+       title="${esc(r1(w) + " " + unitWord())}"></i>`).join("");
+  return `<div class="pl-art" aria-hidden="true">
+    ${b.platesOnly ? "" : `<span class="pl-stub"><b>${esc(fmtLoad(b.bar))}</b></span>`}
+    <span class="pl-sleeve"><span class="pl-rod"></span>${discs}<span class="pl-collar"></span></span>
   </div>`;
 }
 function plateLineHTML(en){
@@ -37879,10 +37868,11 @@ function plateLineHTML(en){
   if(gap) return `<div class="plate-line plate-gap"><div class="pl-gap-s">No plate count for
     ${esc(fmtLoad(want))} yet \u2014 Element 26 needs to know ${esc(joinList(gap.miss))}.</div>
     <button type="button" class="nb-link" data-platefix="1">Set that up</button></div>`;
+  const line = plateLine(want, en.name);
+  if(!line) return "";
   const b = plateBreakdown(want, en.name);
-  const row = plateRowHTML(want, b, en.name);
-  if(!row) return "";
-  return `<div class="plate-line">${row}</div>`;
+  return `<div class="plate-line">${plateArtHTML(b)}<div class="pl-say"><b>${
+    esc(fmtLoad(want))}</b> = ${esc(line)}</div></div>`;
 }
 function lpLineHTML(en){
   if(!lpWholeExercise(en)) return "";
