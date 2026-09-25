@@ -5745,7 +5745,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "31.3";
+const APP_VERSION = "31.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14199,6 +14199,25 @@ function cycleBounds(){
    prerequisite: if either throws on a log shape I have not seen, the app still starts
    and the user gets exactly what they had before the update. */
 let SEEDS_RUN = false;
+/* Everything anybody has ever logged under "something hurt" belongs in the joint signal
+   too — it was the same question, asked before there was anywhere to put the answer. Run
+   once, on the day it was said, and never overwriting a worse reading on the same day. */
+function seedJointFromHurts(){
+  let n = 0;
+  (Array.isArray(S.hurts) ? S.hurts : []).forEach(h=>{
+    if(!h || !h.level) return;
+    const sev = (HURT_LEVEL_BY[h.level] || {}).sev;
+    if(!(sev > 0)) return;
+    const d = h.date || h.first;
+    if(!d) return;
+    if(!S.joint || typeof S.joint !== "object") S.joint = {};
+    if(!S.joint[d] || typeof S.joint[d] !== "object") S.joint[d] = {};
+    const k = h.exKey || nrm(h.ex || "");
+    if(!k) return;
+    if(!(S.joint[d][k] >= sev)){ S.joint[d][k] = sev; n++; }
+  });
+  S.jointSeeded = {at: Date.now(), n};
+}
 function runOneTimeSeeds(){
   if(SEEDS_RUN) return;
   SEEDS_RUN = true;
@@ -14209,6 +14228,9 @@ function runOneTimeSeeds(){
   try{
     if(!S.lmCalSeeded){ seedCalibrationFromHistory(); dirty = true; }
   }catch(e){ S.lmCalSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
+  try{
+    if(!S.jointSeeded){ seedJointFromHurts(); dirty = true; }
+  }catch(e){ S.jointSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
   if(dirty) saveQuiet();
 }
 
@@ -27841,8 +27863,30 @@ function hurtFor(name){
   if(!on.length) return null;
   return on.sort((a,b)=> (HURT_LEVEL_BY[b.level] || {sev:0}).sev - (HURT_LEVEL_BY[a.level] || {sev:0}).sev)[0];
 }
+/* B1 — THE JOINT SIGNAL, TAKEN FROM THE FEATURE THAT ALREADY COLLECTS IT.
+
+   decideForMuscle() treats joint pain on a muscle's own lifts as a stop sign: JOINT_OVER
+   or worse and the volume comes down whatever the lift is doing. It reads S.joint, which
+   nothing wrote to — while "something hurt" had been asking exactly this question, on
+   exactly the right movement, since long before the feedback loop existed.
+
+   So it is recorded from there rather than asked for twice. The three levels already
+   carry a `sev` of 1, 2 and 3, and JOINT_OVER is 2, so "held me back" is the line in both
+   places without anything being reinterpreted. Filed under the day it was said and the
+   movement it was said about, which is what jointMaxOver() reads. */
+function jointRecord(exName, level){
+  const sev = (HURT_LEVEL_BY[level] || {}).sev;
+  if(!(sev > 0)) return;
+  if(!S.joint || typeof S.joint !== "object") S.joint = {};
+  const d = todayStr();
+  if(!S.joint[d] || typeof S.joint[d] !== "object") S.joint[d] = {};
+  const k = nrm(exName);
+  // Worst thing said about that movement today, not the last thing said.
+  if(!(S.joint[d][k] >= sev)) S.joint[d][k] = sev;
+}
 function hurtAdd(exName, where, level, note){
   const k = nrm(exName);
+  jointRecord(exName, level);
   const open = activeHurts().filter(h=> h.exKey === k && h.where === where)[0];
   if(open){
     /* THE SAME NIGGLE, SAID AGAIN, IS NOT A SECOND NIGGLE. Otherwise a shoulder that has
@@ -27921,6 +27965,7 @@ function hurtSettle(id){
 function hurtAgain(id){
   const h = hurtLog().filter(x=> x && x.id === id)[0];
   if(!h) return;
+  jointRecord(h.ex || h.exKey, h.level);
   h.at = Date.now(); h.date = todayStr(); h.times = (h.times || 1) + 1;
   delete h.settled;
   save(); queueSync(); render();
@@ -40696,7 +40741,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","dayFlags","lmCalObs","lmCalSeeded","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
