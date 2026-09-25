@@ -5222,6 +5222,15 @@ body.cele-open{overflow:hidden}
 .tg-land-h span{font-size:11.5px;color:var(--faint)}
 .tg-land.is-mine .tg-land-h b{color:var(--acc)}
 .tg-land-s{font-size:11.5px;color:var(--faint);margin-top:6px;line-height:1.45}
+.tg-land-s b{color:var(--dim);font-weight:400}
+/* C3. How much of this number is about you. Quiet by design: it is a caveat on a figure,
+   not a badge. */
+.tg-conf{margin:0 0 10px;padding:8px 10px;border-radius:9px;background:var(--card2);
+  border:1px solid var(--line)}
+.tg-conf b{display:block;font-size:12px;margin-bottom:3px}
+.tg-conf span{display:block;font-size:11.5px;color:var(--faint);line-height:1.45}
+.tg-conf-personal{border-color:var(--acc-line)}
+.tg-conf-personal b{color:var(--acc)}
 .tg-dis{margin-top:10px;padding:9px 11px;border-radius:9px;font-size:12.5px;line-height:1.5;
   color:var(--dim);border:1px solid rgba(201,154,52,.32);
   background:linear-gradient(180deg,rgba(201,154,52,.07),transparent)}
@@ -5745,7 +5754,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "31.4";
+const APP_VERSION = "31.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11126,6 +11135,37 @@ function shiftedRange(reps){
    And it stops at the ceiling. Volume you cannot recover from is not a fix for volume
    you are short of. */
 const SPREAD_MAX_PER_EX = 6;
+/* C1 — WHAT ONE SESSION CAN USEFULLY GIVE ONE MUSCLE.
+
+   Weekly volume is the number the landmarks are denominated in, and it is not the whole
+   story: the same 20 weekly sets are a different proposition split over three days than
+   piled into one. The evidence base thins out fast above about six hard sets for a muscle
+   in a single session — Remmert et al. 2025 found very few studies going past it — and
+   what there is does not suggest the seventh, eighth and tenth sets pay like the first
+   six. Past ten in one sitting there is essentially nothing to stand on.
+
+   So: SESSION_SETS_INFO is where the app mentions it, SESSION_SETS_MAX is a hard stop on
+   what the app itself will PROPOSE. It never stops you writing whatever you like into
+   your own programme — it stops the app quietly building a 14-set chest day for you while
+   fixing a weekly shortfall. */
+const SESSION_SETS_INFO = 6;
+const SESSION_SETS_MAX  = 10;
+/* C2 — the weekly figure past which the meta-regression stops finding any further growth
+   for further sets (Pelland et al. 2025, ~31 weekly sets). Not a limit the app enforces:
+   a note it makes, because somebody at 34 sets is paying for sets that are not buying
+   anything. The calibration's own hard ceiling is CAL_MRV_HARD_MAX. */
+const WEEKLY_SETS_FLAT = 31;
+/* One day's prescribed sets of one muscle, fractional credit included. */
+function planSessionSets(m, wid){
+  return (S.program[wid] || []).reduce((t,e)=>
+    t + (muscleFrac(e.name, m) * (parseInt(e.sets,10) || 0)), 0);
+}
+/* Every day in the programme that already gives a muscle more than the info line. */
+function sessionHeavyDays(m, cut){
+  const lim = cut == null ? SESSION_SETS_INFO : cut;
+  return DAYS.filter(wid=> planSessionSets(m, wid) > lim)
+             .map(wid=> ({wid, name: widName(wid), sets: r1(planSessionSets(m, wid))}));
+}
 function daySetCount(wid){
   return (S.program[wid] || []).reduce((t, e)=> t + (parseInt(e.sets, 10) || 0), 0);
 }
@@ -11185,7 +11225,9 @@ function spreadPlan(A, m, need, avoid, pin){
       const at = (S.program[wid] || []).findIndex(e=> nrm(e.name) === key);
       if(at > -1){
         const cur = (S.program[wid][at].sets || 1);
-        const to = Math.min(SPREAD_MAX_PER_EX, cur + sets);
+        /* The per-exercise cap and the per-session one, whichever bites first. */
+        const room = Math.max(0, Math.floor((SESSION_SETS_MAX - planSessionSets(m, wid)) / Math.max(0.1, pf)));
+        const to = Math.min(SPREAD_MAX_PER_EX, cur + Math.min(sets, room));
         if(to > cur){
           /* Registered in byKey as well as pushed, or the round-robin below would find
              the same slot untouched and overwrite what the pin just set. */
@@ -11295,6 +11337,13 @@ function spreadPlan(A, m, need, avoid, pin){
         const cost = (avoid || []).reduce((t, k)=> t + (mm[k] || 0), 0);
         return x.frac - cost * 0.8;
       };
+      /* C1. One session only absorbs so much of one muscle, however much the week is
+         short by. A day at the cap is skipped and the work goes somewhere else — or, if
+         every day is full, the plan comes back smaller than asked for, which is the
+         honest answer. */
+      const dayLoad = (dayOf[wid] || []).reduce((t,x)=>
+        t + (((byKey[keyOf(x)] || {}).to) || x.e.sets || 1) * x.frac, 0);
+      if(dayLoad >= SESSION_SETS_MAX) continue;
       const slot = (dayOf[wid] || [])
         .filter(x=> (((byKey[keyOf(x)] || {}).to) || x.e.sets || 1) < SPREAD_MAX_PER_EX)
         .sort((p,q)=> worth(q) - worth(p) || q.frac - p.frac)[0];
@@ -13768,11 +13817,48 @@ function manualLandmarks(g){
     mrv: num(S.lmMrv   && S.lmMrv[g])
   };
 }
+/* C4 — EVERY LANDMARK CHANGE KEEPS ITS REASON.
+
+   These numbers decide what the app tells you to do, and until now they moved silently:
+   a ceiling that had been 18 was 15 a fortnight later with nothing anywhere saying why,
+   or who. A landmark that changes without a reason attached is a number you cannot argue
+   with, which is the worst thing a coaching figure can be.
+
+   Every change is now recorded — what it was, what it became, and which of the three
+   possible authors did it: you, the calibration learning from a block, or a reset back to
+   the app's own figure. Newest first, capped, and shown in full when you open the chain
+   for that muscle. */
+const LM_WHY_KEEP = 8;
+function logLandmarkChange(g, which, from, to, src, note){
+  if(from == null && to == null) return;
+  if(from != null && to != null && Math.abs(from - to) < 0.05) return;
+  if(!S.lmWhy || typeof S.lmWhy !== "object") S.lmWhy = {};
+  if(!S.lmWhy[g] || typeof S.lmWhy[g] !== "object") S.lmWhy[g] = {};
+  const list = S.lmWhy[g][which] || (S.lmWhy[g][which] = []);
+  list.push({at: Date.now(), from, to, src, note: note || ""});
+  while(list.length > LM_WHY_KEEP) list.shift();
+}
+function landmarkHistory(g, which){
+  const l = ((S.lmWhy || {})[g] || {})[which] || [];
+  return l.slice().reverse();
+}
+const LM_WHY_WORD = {
+  you:        "you set it",
+  cleared:    "you handed it back to Element 26",
+  calibration:"learned from a block of your training"
+};
 function setManualLandmark(g, which, v){
   const key = which === "mev" ? "lmFloor" : which === "mav" ? "lmMav" : "lmMrv";
-  if(v == null){ if(S[key]) delete S[key][g]; return; }
+  const prev = S[key] && S[key][g];
+  const was = (typeof prev === "number" && prev > 0) ? prev : null;
+  if(v == null){
+    if(S[key]) delete S[key][g];
+    logLandmarkChange(g, which, was, null, "cleared");
+    return;
+  }
   if(!S[key]) S[key] = {};
   S[key][g] = v;
+  logLandmarkChange(g, which, was, v, "you");
 }
 /* A9.2: WHEN WHAT YOU SET AND WHAT THE APP WORKED OUT HAVE PARTED COMPANY.
 
@@ -14130,6 +14216,17 @@ function rebuildCalibration(g){
   out.note = out.seeded
     ? "estimated from the sessions already in your log, and refined every block from here"
     : "learned from how your lifts and recovery behaved at these volumes";
+  /* C4. A calibration step that actually moves a landmark is a change with an author,
+     so it says so — in multipliers, because that is what this step does; the sets it
+     works out to depend on the rest of the chain at the time it is read. */
+  const before = (S.lmCal || {})[g] || {};
+  ["mev","mav","mrv"].forEach(which=>{
+    const b = typeof before[which] === "number" ? before[which] : 1;
+    if(Math.abs(b - out[which]) < 0.02) return;
+    logLandmarkChange(g, which, Math.round(b*100), Math.round(out[which]*100), "calibration",
+      "your own response moved this landmark to " + Math.round(out[which]*100) +
+      "% of the population figure, on " + out.blocks + " block" + (out.blocks===1?"":"s") + " of training");
+  });
   S.lmCal[g] = out;
   return out;
 }
@@ -14304,6 +14401,54 @@ function cycleReview(){
   return {list: out, deload: over.length >= DELOAD_MUSCLES, over: over.length};
 }
 
+/* B5 LIVE — WHAT EACH FINISHED CYCLE TEACHES THE LANDMARKS.
+
+   The seeding pass reads history once. This is the other half: every time a cycle closes,
+   what the muscles did in it is folded into the calibration, so the numbers keep learning
+   instead of being fixed by whatever was in the log the day the feature shipped.
+
+   WHAT EACH VERDICT IS EVIDENCE OF:
+
+     over    the muscle broke down at this week's volume, so the ceiling is NOT here — it
+             is at the last volume it actually handled. Recording the overreached figure
+             would teach the app that the volume which hurt you is the volume you can take.
+     up      it is still responding here, so this much is productive (MAV) and the ceiling
+             is AT LEAST here — at-least only, because nothing went wrong, and a cycle
+             where nothing went wrong cannot argue a ceiling down.
+     hold    flat. That says something about the productive range and nothing about the
+             ceiling, so only MAV is recorded.
+     unclear nothing is recorded, which is the whole point of having the verdict.
+
+   Once per closed cycle, guarded on the cycle's own end stamp so a re-render, a restore or
+   two tabs cannot record the same cycle twice. */
+function runCycleCalibration(endMs){
+  const stamp = endMs || Date.now();
+  const done = S.lmCalRun && S.lmCalRun.cycleEnd;
+  if(done && Math.abs(done - stamp) < DAY_MS) return {done:false, why:"already run"};
+  let A = null;
+  try{ A = bodyAnalysis(); }catch(e){ return {done:false, why:"no analysis"}; }
+  const rev = cycleReview();
+  let n = 0;
+  rev.list.forEach(d=>{
+    const g = d.g;
+    const chain = (A.lm && A.lm[g]) ? A.lm[g] : adjustedLandmarks(A, g);
+    const cycles = muscleCycles(g);
+    const cur = cycles[cycles.length - 1];
+    const prev = cycles[cycles.length - 2];
+    if(!cur || !(cur.V > 0)) return;
+    if(d.k === "over"){
+      if(prev && prev.V > 0){ recordObservation(g, "mrv", prev.V, chain.mrv); n++; }
+    } else if(d.k === "up"){
+      recordObservation(g, "mrv", cur.V, chain.mrv, {atLeast:true});
+      recordObservation(g, "mav", cur.V, chain.mav); n++;
+    } else if(d.k === "hold"){
+      recordObservation(g, "mav", cur.V, chain.mav); n++;
+    }
+  });
+  S.lmCalRun = {at: Date.now(), cycleEnd: stamp, n, deload: !!rev.deload};
+  return {done:true, n, deload: rev.deload};
+}
+
 /* B7 SEEDING FROM WHAT IS ALREADY LOGGED.
 
    Without this, every existing user starts at calibration 1.0 and stays there until they
@@ -14364,6 +14509,47 @@ function landmarkCalibration(g){
   const v = k => (typeof c[k] === "number" && c[k] > 0) ? c[k] : 1;
   return {mev:v("mev"), mav:v("mav"), mrv:v("mrv"),
           blocks: c.blocks || 0, w: c.w || 0, label: c.label, note: c.note};
+}
+/* C3 — HOW MUCH THE NUMBER DESERVES TO BE BELIEVED.
+
+   A landmark is an estimate, and for most people most of the time it is an estimate built
+   from somebody else's study population. Printing "14.2" with no more ceremony than a
+   bodyweight reading is the single most misleading thing this app could do with it.
+
+   So every landmark carries a confidence, taken from the calibration weight the feedback
+   loop has actually earned — nothing for a lifter it has learned nothing about, up to
+   CAL_WEIGHT_MAX for one it has watched over several blocks — and a range around the
+   figure that gets narrower as that weight grows. The percentages are not measured error
+   bars, and the app says so: they are an honest statement of how wide the individual
+   variation in the literature is, and how much of it has been closed by watching you. */
+const LM_CONF_PERSONAL = 0.7;                 // calibration weight at which it is mostly yours
+const LM_RANGE_PCT = {population:0.30, partial:0.20, personal:0.10};
+function landmarkConfidence(g){
+  const cal = landmarkCalibration(g);
+  const w = cal.w || 0;
+  const blocks = cal.blocks || 0;
+  if(!(w > 0) || !blocks)
+    return {k:"population", w, blocks, pct:LM_RANGE_PCT.population,
+            label:"Population estimate",
+            note:"from published figures scaled to your training. Individual variation in the studies is wide, so treat it as a starting point rather than your number."};
+  if(w < LM_CONF_PERSONAL)
+    return {k:"partial", w, blocks, pct:LM_RANGE_PCT.partial,
+            label:"Partly personalised",
+            note:"the population figure, moved by " + blocks + " block" + (blocks===1?"":"s") +
+                 " of your own response. It gets narrower each block."};
+  return {k:"personal", w, blocks, pct:LM_RANGE_PCT.personal,
+          label:"Based on your training",
+          note:"mostly learned from how your own lifts and recovery behaved at these volumes, over " +
+               blocks + " blocks."};
+}
+function landmarkRange(v, conf){
+  if(!(v > 0) || !conf) return null;
+  return {lo: Math.max(0, Math.round(v * (1 - conf.pct) * 10)/10),
+          hi: Math.round(v * (1 + conf.pct) * 10)/10, pct: conf.pct};
+}
+function fmtLandmarkRange(v, conf){
+  const r = landmarkRange(v, conf);
+  return r ? (fmtLandmark(r.lo) + "\u2013" + fmtLandmark(r.hi)) : fmtLandmark(v);
 }
 function lmScale(){
   const v = Number(S.lmScale);
@@ -14585,11 +14771,20 @@ function weeklyEquivalent(effSets, days){
 function volState(m, sets, L, ctx){
   L = L || GROUPS[m];
   ctx = ctx || {};
+  /* C3 — WHAT THE FOUR BANDS ARE ACTUALLY CLAIMING.
+
+     "too little / just right / a lot / too much" read as a mark out of four, and three of
+     the four were wrong about what the landmarks mean. Below MEV is not a failing grade:
+     it is the volume that holds the muscle you have, which is a legitimate place to be on
+     a cut or in a busy month. Above MAV is not "a lot" — the meta-regression has growth
+     still rising there, just more slowly and at a real cost in recovery, which is a
+     trade-off rather than a warning. Only the top band is a caution, and it is about YOUR
+     estimated recovery limit rather than a universal one. */
   const band = v =>
-      v < L.mev  ? {k:"under",   label:"too little"}
-    : v <= L.mav ? {k:"optimal", label:"just right"}
-    : v <= L.mrv ? {k:"high",    label:"a lot"}
-    :              {k:"over",    label:"too much"};
+      v < L.mev  ? {k:"under",   label:"maintenance range"}
+    : v <= L.mav ? {k:"optimal", label:"productive"}
+    : v <= L.mrv ? {k:"high",    label:"high"}
+    :              {k:"over",    label:"above your limit"};
   if(sets <= 0){
     return (ctx.pending > 0)
       ? {k:"queued", label:"not trained yet",
@@ -14609,10 +14804,16 @@ function volState(m, sets, L, ctx){
             now:sets, projected:ctx.projected};
   }
   const b = band(sets);
-  if(b.k === "under")   return {k:b.k, label:b.label, txt:r1(sets)+" of the "+fmtLandmark(L.mev)+" weekly sets it takes to grow"};
+  /* C2. Past about WEEKLY_SETS_FLAT weekly sets the meta-regression stops finding more
+     growth for more sets at all — whatever your own ceiling says. Worth one sentence
+     wherever the number is that high, and worth saying only there. */
+  const flat = sets >= WEEKLY_SETS_FLAT
+    ? " — past about " + WEEKLY_SETS_FLAT + " weekly sets the research stops finding more growth for more sets"
+    : "";
+  if(b.k === "under")   return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, under the "+fmtLandmark(L.mev)+" it takes to grow — enough to hold the muscle, not to add to it"};
   if(b.k === "optimal") return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, inside your productive "+fmtLandmark(L.mev)+" to "+fmtLandmark(L.mav)+" window"};
-  if(b.k === "high")    return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, above your target of "+fmtLandmark(L.mav)+" but still recoverable"};
-  return                       {k:b.k, label:b.label, txt:r1(sets)+" sets a week, past the "+fmtLandmark(L.mrv)+" you can recover from"};
+  if(b.k === "high")    return {k:b.k, label:b.label, txt:r1(sets)+" sets a week, above your target of "+fmtLandmark(L.mav)+": more growth is still on the table here, and it costs more recovery"+flat};
+  return                       {k:b.k, label:b.label, txt:r1(sets)+" sets a week, above the "+fmtLandmark(L.mrv)+" this app estimates you recover from"+flat};
 }
 
 /* ---------- the accumulation window ----------
@@ -25866,8 +26067,25 @@ function openOwnFix(idx){
               <b>${esc(e.e.name)}</b><span class="num">${e.e.sets||1} sets · ${esc(fracWordsFor(e.frac, M.name.toLowerCase()))}${
                 i === 0 && ents.length > 1 ? " · best fit" : ""}</span></button>`).join("")}</div>
           <div class="k-lab" style="margin-top:12px">Sets on ${esc(x.e.name)}</div>
-          ${stepRow("fxSetsOne", FIX.setsOne, 1, 8)}
-          <div class="sub" style="margin:6px 2px 0">Was ${from}.</div>`;
+          ${(()=>{
+            /* C1. What the day already gives this muscle, less this movement's share, is
+               what decides how far the stepper can go: the app will not propose a session
+               past SESSION_SETS_MAX of one muscle however short the week is. */
+            const rest = Math.max(0, planSessionSets(m, x.wid) - from * x.frac);
+            const hi = Math.max(1, Math.min(8, Math.floor((SESSION_SETS_MAX - rest) / Math.max(0.1, x.frac))));
+            if(FIX.setsOne > hi) FIX.setsOne = hi;
+            const after = rest + FIX.setsOne * x.frac;
+            return stepRow("fxSetsOne", FIX.setsOne, 1, hi) +
+              `<div class="sub" style="margin:6px 2px 0">Was ${from}.${
+                after > SESSION_SETS_INFO
+                  ? " That is " + r1(after) + " sets of " + esc(M.name.toLowerCase()) + " in one session" +
+                    (FIX.setsOne >= hi
+                      ? " — as far as this day goes. Past about " + SESSION_SETS_MAX +
+                        " in a sitting there is nothing to suggest the extra sets pay, so the rest belongs on another day."
+                      : ", which is past the " + SESSION_SETS_INFO +
+                        " or so where the evidence for more in one sitting runs out. It still counts; it just does less than the same sets spread out.")
+                  : ""}</div>`;
+          })()}`;
       }
     } else if(FIX.mode === "spread"){
       /* ONE NUMBER ON THE SCREEN AT A TIME.
@@ -30420,7 +30638,11 @@ function targetsScreenHTML(){
           {k:"mrv", t:"Ceiling", sub:"most it can recover from"}
         ];
         const dis = manualDisagreement(A, g);
+        /* C3. One confidence for the muscle, since all three landmarks are moved by the
+           same calibration. Stated once at the top rather than three times over. */
+        const conf = landmarkConfidence(g);
         h += `<div class="tg-body">
+          <div class="tg-conf tg-conf-${conf.k}"><b>${esc(conf.label)}</b><span>${esc(conf.note)}</span></div>
           ${LAND.map(x=>{
             const v = r1(L[x.k]);
             const own = man[x.k] != null;
@@ -30443,7 +30665,8 @@ function targetsScreenHTML(){
               </div>
               <div class="tg-land-s">${own
                 ? "Yours. Element 26 would say <b>" + (auto > 0 ? auto : "nothing here") + "</b>."
-                : "Element 26's figure, from the published numbers scaled to your training."}</div>
+                : `Element 26's figure. Somewhere around <b>${esc(fmtLandmarkRange(v, conf))}</b>
+                   is as precise as it can honestly be: ${esc(conf.note)}`}</div>
             </div>`;
           }).join("")}
           ${dis.length ? `<div class="tg-dis">${dis.map(d=>
@@ -30452,6 +30675,7 @@ function targetsScreenHTML(){
              you know which.`).join("<br>")}</div>` : ""}
           <div class="set-says">You are doing <b>${now}</b> effective ${now === 1 ? "set" : "sets"}
             a week against these.</div>
+          <button type="button" class="nb-link" data-tgchain="${g}">Where these numbers come from</button>
           ${mine ? `<button type="button" class="nb-link" data-tgclear="${g}">Use Element 26's figures again</button>` : ""}
         </div>`;
       }
@@ -30471,6 +30695,57 @@ function targetsScreenHTML(){
     you train, how long your cycle ran and what your log says you recover from. A number
     you cannot justify against your own training is not one worth typing in.</div></div>`;
   return h;
+}
+/* C4 — THE WHOLE CHAIN, FOR ONE MUSCLE, ON DEMAND.
+
+   The explainer has always worked one muscle through as an example. This is the same
+   thing for the muscle you actually tapped: the base row, every adjustment that moved it
+   and why, what the three numbers came out as, how much of that is about you, and the
+   log of every time any of them changed. Nothing here is editable — it is the receipt. */
+function openLandmarkChain(g){
+  let A = null;
+  try{ A = bodyAnalysis(); }catch(e){ return; }
+  const L = (A.lm && A.lm[g]) || adjustedLandmarks(A, g);
+  const conf = landmarkConfidence(g);
+  const now = r1((A.vol && A.vol[g] != null) ? A.vol[g] : 0);
+  const LAND = [{k:"mev", t:"Floor"}, {k:"mav", t:"Target"}, {k:"mrv", t:"Ceiling"}];
+  const hist = [];
+  LAND.forEach(x=> landmarkHistory(g, x.k).forEach(h=> hist.push(Object.assign({which:x.t}, h))));
+  hist.sort((a,b)=> b.at - a.at);
+  const h = `<h3>${esc(gName(g))}</h3>
+    <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">Where these
+      three numbers come from, in the order they are worked out.</div>
+    <div class="tg-conf tg-conf-${conf.k}"><b>${esc(conf.label)}</b><span>${esc(conf.note)}</span></div>
+    <table class="gl-table">
+      <tr><td>Base</td><td>MEV ${L.base.mev} / MAV ${L.base.mav} / MRV ${L.base.mrv} sets a week,
+        published figures for this muscle</td></tr>
+      ${L.why.map(w=> `<tr><td>${esc(w.k)}</td><td><b>${esc(String(w.v))}</b><br>
+        <span style="color:var(--faint)">${esc(w.note)}</span></td></tr>`).join("")}
+      <tr><td><b>Yours</b></td><td><b>MEV ${fmtLandmark(L.mev)} / MAV ${fmtLandmark(L.mav)} /
+        MRV ${fmtLandmark(L.mrv)}</b> sets a week</td></tr>
+    </table>
+    <div class="rev-head">How precise that is</div>
+    <table class="gl-table">${LAND.map(x=>
+      `<tr><td>${x.t}</td><td><b>${fmtLandmark(L[x.k])}</b> · somewhere around
+        ${esc(fmtLandmarkRange(L[x.k], conf))} sets a week</td></tr>`).join("")}</table>
+    <div class="sub" style="margin:8px 2px 0;font-size:12px;color:var(--faint)">You are doing
+      <b>${now}</b> effective ${now === 1 ? "set" : "sets"} a week against these. The ranges are
+      not error bars off your own log — they are how wide individual variation runs in the
+      studies these figures come from, narrowed by however much Element 26 has learned about
+      you.</div>
+    ${hist.length ? `<div class="rev-head">Every time one of them changed</div>
+      <table class="gl-table">${hist.map(x=>
+        `<tr><td>${esc(fmtDateShort(new Date(x.at).toLocaleDateString("en-CA")))}</td>
+          <td><b>${esc(x.which)}</b> ${x.from == null ? "set" : esc(String(x.from))}${
+            x.to == null ? " — back to Element 26's figure" : " → " + esc(String(x.to))}${
+            x.src === "calibration" ? "% of the population figure" : ""}<br>
+          <span style="color:var(--faint)">${esc(LM_WHY_WORD[x.src] || x.src)}${
+            x.note ? " — " + esc(x.note) : ""}</span></td></tr>`).join("")}</table>`
+      : `<div class="sub" style="margin:14px 2px 0">Nothing has changed these yet — they are
+         still the app's own figures, and every change from here is recorded here.</div>`}
+    <button class="btn" style="margin-top:16px" id="closeModal">Done</button>`;
+  showModal(h);
+  MODAL_REOPEN = ()=> openLandmarkChain(g);
 }
 /* landmarkWithoutManual() replaced adjustedFloorWithout(): same trick, now per
    landmark rather than for the floor alone. */
@@ -31835,6 +32110,7 @@ function bind(){
     inp.onchange = go;
     inp.onkeydown = ev=>{ if(ev.key === "Enter"){ ev.preventDefault(); inp.blur(); } };
   });
+  document.querySelectorAll("[data-tgchain]").forEach(b=> b.onclick = ()=> openLandmarkChain(b.dataset.tgchain));
   document.querySelectorAll("[data-tgclear]").forEach(b=> b.onclick = ()=>{
     const g = b.dataset.tgclear;
     const man = manualLandmarks(g);
@@ -33451,6 +33727,11 @@ function recomputeCycle(announce){
     // full cycle in the books → capture the review, then start fresh
     S.lastReview = buildCycleReview();
     S.lastCycle = {start:S.cycleStart, end:Date.now()};
+    /* The cycle that just closed is the newest thing the landmarks know about you. Wrapped
+       so a throw in the calibration can never cost somebody their cycle roll-over. */
+    try{ runCycleCalibration(S.lastCycle.end); }
+    catch(e){ S.lmCalRun = {at: Date.now(), cycleEnd: S.lastCycle.end, n: 0,
+                            failed: String((e && e.message) || e)}; }
     S.cycleStart = Date.now();
     S.cycleDone = [];
     S.restDays = [];
@@ -40741,7 +41022,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
