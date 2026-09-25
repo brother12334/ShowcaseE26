@@ -5754,7 +5754,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "31.5";
+const APP_VERSION = "31.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14436,17 +14436,39 @@ function runCycleCalibration(endMs){
     const cur = cycles[cycles.length - 1];
     const prev = cycles[cycles.length - 2];
     if(!cur || !(cur.V > 0)) return;
-    if(d.k === "over"){
-      if(prev && prev.V > 0){ recordObservation(g, "mrv", prev.V, chain.mrv); n++; }
-    } else if(d.k === "up"){
-      recordObservation(g, "mrv", cur.V, chain.mrv, {atLeast:true});
-      recordObservation(g, "mav", cur.V, chain.mav); n++;
-    } else if(d.k === "hold"){
-      recordObservation(g, "mav", cur.V, chain.mav); n++;
-    }
+    n += observeFromDecision(g, d, cur.V, prev ? prev.V : null, chain);
   });
   S.lmCalRun = {at: Date.now(), cycleEnd: stamp, n, deload: !!rev.deload};
   return {done:true, n, deload: rev.deload};
+}
+/* The evidence one verdict is, kept apart from the machinery that fetches the cycles — so
+   the same rules that run on your log can be run on a thousand made-up lifters, which is
+   how the at-least rule below was found to be necessary. Returns 1 if it learned anything. */
+function observeFromDecision(g, d, curV, prevV, chain){
+    if(!d || !(curV > 0) || !chain) return 0;
+    let n = 0;
+    if(d.k === "over"){
+      if(prevV > 0){ recordObservation(g, "mrv", prevV, chain.mrv); n++; }
+    } else if(d.k === "up"){
+      /* STILL CLIMBING IS A FLOOR ON BOTH NUMBERS, NOT A READING OF EITHER.
+
+         Recording "your MAV is this volume" every time a muscle responded was the one
+         real bug the thousand-lifter simulation found: somebody working up from 12 sets
+         towards a true MAV of 20 responds at 12, 13 and 14, and each of those was filed
+         as an estimate of the top of their productive range. The calibration then chased
+         the volume they happened to be doing and drifted FURTHER from the truth every
+         block — median error climbing 17% → 20% over six blocks.
+
+         Responding at V says MAV is at least V. Where the productive range actually ends
+         is what the flat cycles below say. */
+      recordObservation(g, "mrv", curV, chain.mrv, {atLeast:true});
+      recordObservation(g, "mav", curV, chain.mav, {atLeast:true}); n++;
+    } else if(d.k === "hold"){
+      /* Flat at a volume that is not costing anything: this is the reading. More sets
+         stopped paying here, which is what MAV means. */
+      recordObservation(g, "mav", curV, chain.mav); n++;
+    }
+    return n;
 }
 
 /* B7 SEEDING FROM WHAT IS ALREADY LOGGED.
@@ -14486,8 +14508,10 @@ function seedCalibrationFromHistory(){
       recordObservation(g, "mrv", maxV, chain.mrv, {atLeast:true, seeded:true});
     }
     if(responding.length){
-      const best = responding.slice().sort((a,b)=> b.trendPct - a.trendPct)[0];
-      recordObservation(g, "mav", best.V, chain.mav, {seeded:true}); n++;
+      /* At-least, for the same reason the live path records it that way: a cycle that
+         responded puts a floor under MAV and does not locate it. */
+      const best = responding.slice().sort((a,b)=> b.V - a.V)[0];
+      recordObservation(g, "mav", best.V, chain.mav, {atLeast:true, seeded:true}); n++;
       const lowest = responding.slice().sort((a,b)=> a.V - b.V)[0];
       /* Only if the block actually went low enough to test the floor. */
       if(lowest.V <= chain.mev * 1.05){
@@ -14503,7 +14527,16 @@ function seedCalibrationFromHistory(){
    user's own observed response, plus a label for the explainer and the confidence the
    UI needs. Neutral until there is anything to learn from, so the chain is unchanged
    for anybody whose log has not yet produced an observation. */
+/* D3 — ONE RELEASE'S WAY BACK OUT.
+
+   The calibration is the one step in the chain that learns from you, and it is new. Anybody
+   who would rather have the figures the app published before it — the population chain,
+   unmoved by their own log — can say so, and nothing is thrown away: the observations keep
+   accruing quietly, so turning it back on restores everything it had worked out. Kept for
+   one release, as the plan for this rework said it should be. */
+function calibrationOff(){ return trainPrefs().lmNoCal === true; }
 function landmarkCalibration(g){
+  if(calibrationOff()) return {mev:1, mav:1, mrv:1, blocks:0, w:0, off:true};
   const c = (S.lmCal && S.lmCal[g]) || null;
   if(!c) return {mev:1, mav:1, mrv:1, blocks:0, w:0};
   const v = k => (typeof c[k] === "number" && c[k] > 0) ? c[k] : 1;
@@ -30609,6 +30642,14 @@ function targetsScreenHTML(){
     </div>`
     + (pct !== 100 ? `<div class="btn-row" style="margin-top:9px"><button class="btn ghost small" id="tgScaleReset" style="flex:1">Back to the published figures</button></div>` : ""));
 
+  h += setChoice("Where the figures come from", [
+      {v:"learn", t:"Learn from my training",
+       d:"The published figures, moved by how your own lifts and recovery have behaved at the volumes you have trained at."},
+      {v:"pub",   t:"Published figures only",
+       d:"The chain as it was before Element 26 started learning from your response. Nothing is lost — it keeps watching, and switching back restores what it has worked out."}
+    ], "data-lmcal", calibrationOff() ? "pub" : "learn",
+    "This changes the numbers on this screen and what the Body tab says about them. It never touches your programme.");
+
   /* One row per group, grouped by body area, because twenty-one loose rows is a list
      nobody finds anything in. Each row carries the number the app arrived at, what you
      are actually doing against it, and a control that only appears once you open it —
@@ -32142,6 +32183,13 @@ function bind(){
     save(); render();
     // nothing logged means nothing to offer, and the switch is simply done
     if(!openTapeConvert(v)) toast("Tape measurements in " + (v === "cm" ? "centimetres" : "inches"));
+  });
+  document.querySelectorAll("[data-lmcal]").forEach(b=> b.onclick = ()=>{
+    const off = b.dataset.lmcal === "pub";
+    if(off === calibrationOff()) return;
+    S.prefs = Object.assign({}, S.prefs, {lmNoCal: off});
+    save(); queueSync(); render();
+    toast(off ? "Back to the published figures" : "Using what your own training says", "good");
   });
   document.querySelectorAll("[data-trackw]").forEach(b=> b.onclick = ()=>{
     trainPrefs().trackWeight = b.dataset.trackw === "on";
