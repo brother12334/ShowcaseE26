@@ -2121,6 +2121,17 @@ body.onboarding #app{padding:0}
 }
 .idx-btn:active{color:var(--acc)}
 .idx-btn.has-note{color:var(--acc)}
+/* The warm-up toggle. Faint until it means something, so a row nobody has touched does
+   not carry a third lit control. `said` is the hand-set state, drawn solid, because
+   "I said so" and "the app worked it out" should not look identical. */
+.wu-btn{border:0;background:none;cursor:pointer;padding:0;line-height:1;
+  font:9px var(--mono);font-weight:700;letter-spacing:.06em;
+  color:var(--line);border-radius:4px;width:17px;height:13px;
+  -webkit-appearance:none;appearance:none;transition:color .15s,background .15s}
+.wu-btn:hover,.wu-btn:focus-visible{color:var(--faint)}
+.wu-btn.on{color:var(--arms);box-shadow:inset 0 0 0 1px rgba(201,154,52,.4)}
+.wu-btn.on.said{background:var(--arms);color:#17140c;box-shadow:none}
+.set.is-warm input,.set.is-warm .rpe-cell{opacity:.5}
 .idx-btn.has-note::after{
   content:"";position:absolute;top:-1px;right:-6px;width:4px;height:4px;border-radius:50%;
   background:var(--acc);
@@ -4672,6 +4683,11 @@ body.cele-open{overflow:hidden}
 
 /* 7. the map */
 .nb-map-say{font-size:13px;color:var(--dim);line-height:1.5;margin:2px 0 4px}
+.nb-rpe{border:1px solid rgba(201,154,52,.32);border-radius:12px;padding:11px 13px;
+  margin:0 0 14px;background:linear-gradient(180deg,rgba(201,154,52,.07),transparent)}
+.nb-rpe-k{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--arms);margin-bottom:6px}
+.nb-rpe-s{font-size:12.5px;color:var(--dim);line-height:1.5}
 .nb-pick{display:flex;align-items:center;gap:9px;background:var(--card2);border:1px solid var(--line);
   border-radius:10px;padding:9px 11px;margin-top:9px;animation:nbIn .24s cubic-bezier(.2,.7,.3,1) both}
 .nb-pick-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
@@ -5662,7 +5678,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "29.3";
+const APP_VERSION = "30.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9204,6 +9220,8 @@ function migrate(){
     }catch(e){}
     S.byAppBackfill = 1;
   }
+  // A6: classify the library once, so the regexes stop being consulted at read time
+  try{ seedCompoundFlags(); }catch(e){}
 
   /* ---- Spider Curl is bilateral ----
      It was classified as one-limb-at-a-time, which stamped an L/R chip on every set,
@@ -11931,7 +11949,12 @@ const GROUPS = {
   // was the only group missing it, which is why its weak-point advice read
   // "add more undefined movement work".
   chest:       {name:"Chest",          mev:10, mav:20, mrv:22, recov:48, lc:"chest", pl:0, region:"Chest"},
-  delts_front: {name:"Front Delts",    mev:6,  mav:12, mrv:16, recov:40, lc:"front delt", pl:1, region:"Shoulders"},
+  /* A2: MEV 0, and optional. Renaissance Periodization puts front-delt MEV at or near
+     zero for anyone who presses, and this app hands the front delts a share of every
+     press, bench and dip in the log \u2014 so a floor of 6 was asking for direct raises on
+     top of work they were already buried in. Optional in the same sense as adductors and
+     neck: the app will not report a shortfall it does not believe in. */
+  delts_front: {name:"Front Delts",    mev:0,  mav:12, mrv:16, recov:40, optional:true, lc:"front delt", pl:1, region:"Shoulders"},
   delts_side:  {name:"Side Delts",     mev:8,  mav:20, mrv:26, recov:36, lc:"side delt", pl:1, region:"Shoulders"},
   delts_rear:  {name:"Rear Delts",     mev:6,  mav:18, mrv:24, recov:36, lc:"rear delt", pl:1, region:"Shoulders"},
   biceps:      {name:"Biceps",         mev:8,  mav:18, mrv:24, recov:40, lc:"bicep", pl:1, region:"Arms"},
@@ -11954,6 +11977,35 @@ const GROUPS = {
      you nothing. Its outline is still drawn, as part of the inert layer. */
   neck:        {name:"Neck",           mev:0,  mav:6,  mrv:12, recov:40, optional:true, lc:"neck", pl:0, region:"Back"}
 };
+/* WHERE THE BASE TABLE CAME FROM, AND WHAT IT ASSUMES.
+
+   Recorded so a later change is traceable rather than archaeology. Bump the version
+   whenever a figure in GROUPS moves. */
+const LANDMARK_SOURCE = {
+  version: 2,
+  basis: "Renaissance Periodization volume landmarks, hypertrophy, intermediate lifter",
+  counted: "hard sets per muscle per week",
+  changed: [
+    "v2 \u2014 front delts MEV 6 \u2192 0 and marked optional: RP puts it at ~0 for anyone who presses"
+  ]
+};
+
+/* THE COUNTING MISMATCH, NAMED SO IT CAN BE CORRECTED.
+
+   The published figures were written with direct work chiefly in mind. This app also
+   pays fractional credit to every assisting muscle, so the groups that assist constantly
+   \u2014 front delts, triceps, biceps, side delts, traps, lower back, glutes \u2014 accumulate
+   volume against a base figure that did not expect it. Their numbers are therefore not
+   strictly comparable to a muscle that only ever gets direct sets.
+
+   Every entry is 1.0 today: correcting them by hand would be swapping one guess for
+   another. The per-user calibration learns the real correction from how each muscle
+   actually responds, and this constant is where a population-level correction would go
+   if one is ever justified. */
+const INDIRECT_BASIS_CORRECTION = blankMuscleMapStatic(1.0);
+function blankMuscleMapStatic(v){
+  const o = {}; Object.keys(GROUPS).forEach(k=> o[k] = v); return o;
+}
 const GKEYS = Object.keys(GROUPS);
 
 /* ---------------- REGIONS ----------------
@@ -12974,14 +13026,116 @@ function muscleSourceOf(name){
 function effRpe(st){ const r = parseFloat(st && st.rpe); return r > 0 ? r : 8; }
 function isWorkingSet(st){ return (parseFloat(st && st.reps)||0) > 0; }
 
+/* =====================================================================
+   EFFECTIVE SETS
+
+   isWorkingSet() answers "did this set happen", and every part of the app that counts
+   what you did — tonnage, records, the grade — is right to use it. The VOLUME landmarks
+   are asking a different question: how much of this set counted toward growth. A warm-up
+   single and a top set three reps from failure are both sets that happened, and only one
+   of them is what MEV, MAV and MRV are denominated in.
+
+   Two discounts, in order:
+
+     1. WARM-UPS DO NOT COUNT AT ALL. Flagged by hand where you say so, detected
+        otherwise.
+     2. EFFORT. Only sets taken reasonably close to failure count in full. The published
+        landmark figures are written for hard sets, so counting an RPE 5 back-off the
+        same as a top set inflates the volume being compared against them.
+
+   THESE ARE DEFAULTS, NOT PROVEN CUTOFFS. Every threshold here is a named constant for
+   exactly that reason. The effort ladder in particular is a coaching convention rather
+   than a measured function \u2014 the underlying meta-analytic work (Pelland et al. 2025)
+   counts sets taken close to failure and is silent about how much a genuinely easy set
+   is worth, so 0.5 / 0.25 / 0 is a reasonable shape rather than a finding.
+   ===================================================================== */
+const WARMUP_LOAD_PCT   = 0.60;   // under this share of the session's top load for the lift
+const DROPSET_SET_VALUE = 1.0;    // one drop set is one hard set, however many drops
+const RPE_COVERAGE_WARN = 0.30;   // prompt once this share of working sets has no RPE
+/* RIR = 10 - RPE. Read as "credit applies at this RIR or below". */
+const EFFORT_CREDIT = [
+  {rir: 3, credit: 1.00},
+  {rir: 4, credit: 0.50},
+  {rir: 5, credit: 0.25}
+];
+const EFFORT_CREDIT_FLOOR = 0;    // RIR 6 and above, i.e. RPE 4 and under
+const FREQ_MIN_DAY_SETS = 1.0;    // effective sets before a day counts as training it
+
+/* How much of a set counts, and whether we are guessing. A set with no RPE counts in
+   full \u2014 the alternative is quietly deleting volume somebody really performed because
+   they did not rate it \u2014 but it is marked so the UI can say how much of the picture is
+   assumed rather than logged. */
+function effortCredit(st){
+  const r = parseFloat(st && st.rpe);
+  if(!(r > 0)) return {credit: 1, unknown: true};
+  const rir = 10 - r;
+  for(const row of EFFORT_CREDIT){
+    if(rir <= row.rir) return {credit: row.credit, unknown: false};
+  }
+  return {credit: EFFORT_CREDIT_FLOOR, unknown: false};
+}
+
+/* WHICH SETS OF THIS ENTRY ARE WARM-UPS.
+
+   An explicit flag always wins; it is the only thing that can be right about a set the
+   arithmetic cannot see. Failing that: a set is a warm-up when it is under
+   WARMUP_LOAD_PCT of the heaviest load recorded for this movement in this session AND
+   nothing at or above that line has come before it. The second half is what stops a
+   back-off set at the end of an exercise \u2014 which is real work \u2014 from being deleted as a
+   warm-up; once you have been up to the top load, everything after it counts.
+
+   Bodyweight movements are exempt, because with no load to compare there is nothing to
+   put a percentage of, and every set would either all pass or all fail.
+
+   Returns one boolean per set, computed for the whole entry at once. */
+function entryWarmups(e){
+  const sets = (e && e.sets) || [];
+  const add = entryBarAdd(e);
+  const loads = sets.map(st=> isWorkingSet(st) ? setLoad(st, add) : 0);
+  const top = Math.max.apply(null, loads.concat([0]));
+  const bodyweight = !(top > 0);
+  let reachedWork = false;
+  return sets.map((st, i)=>{
+    if(st && typeof st.warmup === "boolean") return st.warmup;
+    if(bodyweight || !isWorkingSet(st)) return false;
+    const isLight = loads[i] < top * WARMUP_LOAD_PCT;
+    if(!isLight) reachedWork = true;
+    return isLight && !reachedWork;
+  });
+}
+function setIsWarmup(e, si){ return !!entryWarmups(e)[si]; }
+
+/* What one set contributes to a muscle's effective volume, before the muscle's own
+   share is applied. Zero for a warm-up, otherwise its effort credit. */
+function setEffective(e, si, warms){
+  const st = (e && e.sets) ? e.sets[si] : null;
+  if(!st || !isWorkingSet(st)) return {v: 0, unknown: false};
+  const w = warms ? warms[si] : setIsWarmup(e, si);
+  if(w) return {v: 0, unknown: false, warm: true};
+  const c = effortCredit(st);
+  return {v: c.credit * DROPSET_SET_VALUE, unknown: c.unknown};
+}
+/* The whole entry, in effective sets, ignoring which muscles they pay into. Used by the
+   per-session limit check in C1 and by the logger's own readout. */
+function entryEffectiveSets(e){
+  const warms = entryWarmups(e);
+  return (e && e.sets ? e.sets : []).reduce((t, st, i)=> t + setEffective(e, i, warms).v, 0);
+}
+
 const DAY_MS = 86400000;
 function blankMuscleMap(v){ const o = {}; MKEYS.forEach(k=> o[k] = (typeof v==="function" ? v(k) : v)); return o; }
 
 /* Walk every logged set in a time window and attribute it to muscles. */
 function windowStats(from, to){
-  const out = blankMuscleMap(()=>({sets:0, vol:0, best:0, lastMs:0, lastSets:0, hardSets:0,
+  /* `sets` stays what it always was \u2014 raw working sets, which is what tonnage, records
+     and the grade count. `eff` is the same walk discounted for warm-ups and effort, and
+     it is what the volume landmarks are compared against. Both are kept because they
+     answer different questions and the app asks both. */
+  const out = blankMuscleMap(()=>({sets:0, eff:0, vol:0, best:0, lastMs:0, lastSets:0,
+                                   lastEff:0, hardSets:0, warmSets:0, noRpe:0, rpeSets:0,
                                    nearFail:0, restN:0, restShort:0, exs:{},
-                                   compound:0, rpeSum:0, rpeN:0, dates:{}, days:0, rpeAvg:0}));
+                                   compound:0, rpeSum:0, rpeN:0, dates:{}, effDates:{},
+                                   days:0, rpeAvg:0}));
   S.sessions.forEach(s=>{
     if(s.startedAt < from || s.startedAt >= to) return;
     s.entries.forEach(e=>{
@@ -12992,8 +13146,10 @@ function windowStats(from, to){
          undercounts every barbell and Smith set by the weight of the empty bar, and two
          gyms whose carriages differ are compared as though they did not. */
       const eAdd = entryBarAdd(e);
-      e.sets.forEach(st=>{
+      const warms = entryWarmups(e);
+      e.sets.forEach((st, si)=>{
         if(!isWorkingSet(st)) return;
+        const effOne = setEffective(e, si, warms);
         const reps = parseFloat(st.reps)||0;
         const w = setLoad(st, eAdd);
         const rpe = effRpe(st);
@@ -13013,17 +13169,25 @@ function windowStats(from, to){
           if(!o) return;
           const c = mm[m];
           o.sets += c;
+          o.eff  += c * effOne.v;
+          if(effOne.warm) o.warmSets += c;
+          else if(effOne.unknown) o.noRpe += c;
+          else o.rpeSets += c;
           o.vol  += (w * reps + subVol) * c;
           o.exs[e.name] = (o.exs[e.name]||0) + c;
           if(rpe >= 7) o.hardSets += c;
           if(rpe >= 9.5) o.nearFail += c;
           if(mm[m] >= 1 && e1 > o.best) o.best = e1;
           if(st.rest != null){ o.restN += 1; if(st.rest < tgt.warn) o.restShort += 1; }
-          if(s.startedAt > o.lastMs){ o.lastMs = s.startedAt; o.lastSets = 0; }
-          if(s.startedAt === o.lastMs) o.lastSets += c;
+          if(s.startedAt > o.lastMs){ o.lastMs = s.startedAt; o.lastSets = 0; o.lastEff = 0; }
+          if(s.startedAt === o.lastMs){ o.lastSets += c; o.lastEff += c * effOne.v; }
+          o.effDates[s.date] = (o.effDates[s.date] || 0) + c * effOne.v;
           // inputs the adjusted landmarks need: how often, how hard, how compound
           if(isCompound(e.name)) o.compound += c;
-          o.rpeSum += rpe * c; o.rpeN += c;
+          /* A5: warm-ups and unrated sets are out of the average. effRpe() defaults an
+             unrated set to 8, which quietly pulled every average toward 8 and let the
+             intensity step fire on somebody who logs no RPE at all. */
+          if(!effOne.warm && !effOne.unknown){ o.rpeSum += rpe * c; o.rpeN += c; }
           o.dates[s.date] = 1;
         });
       });
@@ -13031,7 +13195,14 @@ function windowStats(from, to){
   });
   MKEYS.forEach(m=>{
     const o = out[m];
+    /* A4: a DAY TRAINED has to have trained it. This counted any day the muscle picked
+       up a fraction of a set, so 0.3 abs from an overhead press made that day part of
+       your ab frequency \u2014 and three such days bought a 15% rise in what the app thought
+       you could recover from. A day now counts only once the muscle received
+       FREQ_MIN_DAY_SETS effective sets on it. `days` is the raw count, kept because
+       other screens say "trained on N days" and mean exactly that. */
     o.days = Object.keys(o.dates).length;
+    o.effDays = Object.keys(o.effDates).filter(d=> o.effDates[d] >= FREQ_MIN_DAY_SETS).length;
     o.rpeAvg = o.rpeN > 0 ? o.rpeSum/o.rpeN : 0;
   });
   return out;
@@ -13040,10 +13211,58 @@ function windowStats(from, to){
    why a compound-heavy week lowers what you can recover from. */
 const COMPOUND_RE = /bench|press|row|pulldown|pull[- ]?up|chin|squat|deadlift|rdl|romanian|lunge|dip\b|thrust|leg press|hack|clean|snatch|shrug/i;
 const ISOLATION_RE = /fly|flye|raise|curl|extension|kickback|pushdown|press[- ]?down|crunch|calf|abduction|adduction|pullover|prayer/i;
+/* A6: COMPOUND IS A FACT ABOUT THE MOVEMENT, NOT ABOUT ITS NAME.
+
+   Matching substrings gets this wrong in both directions and always will: "press"
+   catches a triceps pressdown, "row" catches narrow-grip anything, and a name somebody
+   types themselves can land either way. The share of compound work lowers MRV, so a
+   misread here quietly changes what the app thinks you can recover from.
+
+   The library now carries an explicit flag. The regexes survive as the fallback for a
+   movement that has not been classified yet \u2014 a user's own exercise before they answer,
+   or a library entry the migration has not reached \u2014 and `compoundKnown()` says which
+   of the two answered, so the UI can ask rather than guess. */
+function compoundFlagFor(name){
+  const k = nrm(name);
+  const own = (S.exCompound || {})[k];
+  if(own === true || own === false) return own;
+  const lib = (EX_COMPOUND || {})[k];
+  if(lib === true || lib === false) return lib;
+  return null;
+}
+function compoundKnown(name){ return compoundFlagFor(name) !== null; }
 function isCompound(name){
+  const flag = compoundFlagFor(name);
+  if(flag !== null) return flag;
   const k = nrm(name);
   if(ISOLATION_RE.test(k) && !/press|row|squat/.test(k)) return false;
   return COMPOUND_RE.test(k);
+}
+/* Filled by the one-time migration below, and by the question asked when somebody makes
+   their own exercise. Kept separate from the library object so a library update cannot
+   silently overwrite an answer the user gave. */
+const EX_COMPOUND = {};
+/* THE ONE-TIME PREFILL. Runs once, writes the regex verdict for every movement the
+   library knows into the explicit map, and records that it was a guess. From then on the
+   regexes are never consulted for those names again, so a later fix to this list is a
+   data change somebody can review rather than a silent reclassification of everyone's
+   history. `exCompoundSeeded` marks the entries that came from the regex rather than
+   from a person, which is what the review in A6.3 needs to find them. */
+function seedCompoundFlags(){
+  if(S.exCompoundSeeded) return;
+  if(!S.exCompound || typeof S.exCompound !== "object") S.exCompound = {};
+  const guessed = {};
+  const rx = k => {
+    if(ISOLATION_RE.test(k) && !/press|row|squat/.test(k)) return false;
+    return COMPOUND_RE.test(k);
+  };
+  Object.keys(EX_MUSCLES_ALL || {}).forEach(name=>{
+    const k = nrm(name);
+    if(S.exCompound[k] === true || S.exCompound[k] === false) return;
+    EX_COMPOUND[k] = rx(k);
+    guessed[k] = 1;
+  });
+  S.exCompoundSeeded = {at: Date.now(), n: Object.keys(guessed).length, from: "name match"};
 }
 
 /* Fatigue, every hard set leaves a residue that decays exponentially with the
@@ -13074,14 +13293,39 @@ function fatigueByMuscle(now){
 
 /* Sleep and energy don't change per-muscle, but they absolutely change how fast any
    of it comes back, so they shift every muscle's recovery clock together. */
-function recoveryModifier(){
+/* TWO DIFFERENT QUESTIONS, ON TWO DIFFERENT CLOCKS.
+
+   This read the last three days and used the answer to rescale the LANDMARKS \u2014 so one
+   bad night moved the targets for the whole block, and three days later they moved back.
+   A landmark describes what a muscle can productively absorb over a training block; it
+   should not be a function of last night.
+
+   So the same point table now runs twice, over different windows and for different
+   purposes:
+
+     LANDMARK_RECOVERY_DAYS (14)  shifts MRV and MAV. Slow, block-shaped, and it needs
+                                  real coverage \u2014 under LANDMARK_RECOVERY_MIN check-ins
+                                  it returns 0 rather than judging a fortnight from one
+                                  Tuesday.
+     READINESS_DAYS (3)           changes what today's session suggests, and touches no
+                                  landmark at all. See readinessToday().                */
+const LANDMARK_RECOVERY_DAYS = 14;
+const LANDMARK_RECOVERY_MIN  = 5;    // check-ins needed inside that window
+const READINESS_DAYS = 3;
+function checkinsOver(nDays){
   const days = [];
-  for(let i=0;i<3;i++){
+  for(let i=0;i<nDays;i++){
     const d = new Date(Date.now() - i*DAY_MS).toLocaleDateString("en-CA");
     const ci = (S.checkins||{})[d];
     if(ci) days.push(ci);
   }
-  if(!days.length) return {mod:0, why:[]};
+  return days;
+}
+function recoveryModifier(){
+  const days = checkinsOver(LANDMARK_RECOVERY_DAYS);
+  if(days.length < LANDMARK_RECOVERY_MIN){
+    return {mod:0, why:[], thin:true, have:days.length, need:LANDMARK_RECOVERY_MIN};
+  }
   let mod = 0; const why = [];
   const sl = days.map(c=>parseFloat(c.sleep)).filter(x=>x>0);
   if(sl.length){
@@ -13096,7 +13340,49 @@ function recoveryModifier(){
     if(avg <= 4){ mod -= 10; why.push("self-rated energy is low ("+avg.toFixed(1)+"/10)"); }
     else if(avg >= 8){ mod += 4; why.push("self-rated energy is high ("+avg.toFixed(1)+"/10)"); }
   }
-  return {mod: Math.max(-25, Math.min(10, mod)), why};
+  return {mod: Math.max(-25, Math.min(10, mod)), why, days: days.length,
+          window: LANDMARK_RECOVERY_DAYS};
+}
+/* READINESS: the short-window read, which suggests a lighter session and changes nothing
+   about the landmarks. Per muscle, because how long it has had to recover is per muscle.
+   B6 wires this into the session; this is the measurement. */
+const READY_WINDOW_PCT = 0.75;    // under this share of the recovery window is short
+const READY_SORE_CUT   = 2;       // 0-3 scale, "noticeably sore"
+const READY_SLEEP_MIN  = 6;       // hours, averaged over READINESS_DAYS
+const READY_SET_CUT    = [1, 2];  // how many sets to suggest dropping, mild then clear
+function readinessToday(A, g){
+  const o = (A && A.wk && A.wk[g]) || {};
+  const reasons = [];
+  if(o.lastMs){
+    const hrs = (Date.now() - o.lastMs)/3600e3;
+    const need = (GROUPS[g] || {}).recov || 48;
+    if(hrs < need * READY_WINDOW_PCT)
+      reasons.push(Math.round(hrs) + " h since you trained it, against a " + need + " h window");
+  }
+  const sore = soreBefore(g);
+  if(sore != null && sore >= READY_SORE_CUT)
+    reasons.push("you reported it " + (sore >= 3 ? "very sore" : "noticeably sore"));
+  const sl = checkinsOver(READINESS_DAYS).map(c=> parseFloat(c.sleep)).filter(x=> x > 0);
+  if(sl.length){
+    const avg = sl.reduce((a,b)=>a+b,0)/sl.length;
+    if(avg < READY_SLEEP_MIN) reasons.push("averaging " + r1(avg) + " h sleep over three nights");
+  }
+  if(!reasons.length) return null;
+  return {cut: READY_SET_CUT[Math.min(reasons.length, READY_SET_CUT.length) - 1], reasons};
+}
+/* The most recent soreness rating for a muscle, from the pre-session taps (B1). Null
+   until the user has answered for it. */
+function soreBefore(g){
+  const log = S.sore && typeof S.sore === "object" ? S.sore : null;
+  if(!log) return null;
+  let best = null, bestAt = 0;
+  Object.keys(log).forEach(d=>{
+    const rec = log[d];
+    if(!rec || rec[g] == null) return;
+    const at = Date.parse(d + "T12:00:00") || 0;
+    if(at >= bestAt){ bestAt = at; best = rec[g]; }
+  });
+  return best;
 }
 
 /* Recovery, how far through its own recovery window each muscle is. Distinct from
@@ -13206,20 +13492,67 @@ function r1(n){ return Math.round(n*10)/10; }
    an import was told and otherwise assumes intermediate rather than beginner.
    ===================================================================== */
 const EXP_LEVELS = ["beginner","intermediate","advanced"];
+/* TRAINING AGE, NOT APP AGE.
+
+   This used to infer a level from this app's log alone, and what you said at import
+   stopped counting after eight weeks. Two things were wrong with that, and they
+   compounded:
+
+     The test was an OR \u2014 "under 30 weeks OR under 55 sessions" \u2014 so somebody who has
+     lifted for three years and installed the app last month was a beginner, and so was
+     somebody who has lifted for three years and trains twice a week, for ever, because
+     they would not reach 55 sessions inside 30 weeks. Beginner cuts MAV to 0.75 and MEV
+     to 0.70, so the app spent their first months telling an experienced lifter that
+     two-thirds of their normal volume was plenty.
+
+     And the seed expiring meant the correction was temporary by design.
+
+   Now: training age is what you did before this app PLUS what you have done in it, the
+   imported figure never expires, and the log can only move the level UP. The one way it
+   moves down is the frequency rule below, which is about how much you are training now
+   rather than how long you have trained. */
+const EXP_YEARS = {beginner: 52, intermediate: 156};   // weeks of training age per level
+const EXP_DROP_SESSIONS_WK = 1.5;                      // under this, drop one level
+const EXP_DROP_WINDOW_WKS  = 26;                       // averaged over this long
+function trainingAgeWeeks(){
+  const prior = Math.max(0, Number(S.priorTrainingWeeks) || 0);
+  const logged = S.sessions && S.sessions.length
+    ? Math.max(0, (Date.now() - S.sessions[0].startedAt)/(7*DAY_MS)) : 0;
+  return prior + logged;
+}
 function inferExperience(){
-  /* WHAT YOU TOLD THE IMPORTER IS A SEED, NOT AN OVERRIDE. The inference can only see
-     this app, so for the first couple of months it has nothing to judge with and a real
-     beginner would be read as intermediate. Where a level was actually stated at import
-     it fills exactly that gap — and stops mattering the moment the log can speak for
-     itself, which is the whole point of not making this a dial you set once and forget. */
-  const stated = EXP_LEVELS.indexOf(S.experience) > -1 ? S.experience : null;
-  if(!S.sessions.length) return stated || "intermediate";
-  const weeks = (Date.now() - S.sessions[0].startedAt)/(7*DAY_MS);
-  const n = S.sessions.length;
-  if(weeks < 8) return stated || "intermediate";       // too little to judge
-  if(weeks < 30 || n < 55) return "beginner";
-  if(weeks < 100 || n < 190) return "intermediate";
-  return "advanced";
+  /* A hand-set level is the last word: it is the one input that knows things neither the
+     log nor the import answer can. */
+  if(EXP_LEVELS.indexOf(S.expManual) > -1) return S.expManual;
+  const age = trainingAgeWeeks();
+  let idx = age < EXP_YEARS.beginner ? 0 : age < EXP_YEARS.intermediate ? 1 : 2;
+  /* TRAINING NOW, not having trained once. Somebody with ten years behind them who is
+     currently lifting once a fortnight is not carrying an advanced lifter\u2019s work
+     capacity, whatever their training age says. One level, never two. */
+  const since = Date.now() - EXP_DROP_WINDOW_WKS*7*DAY_MS;
+  const recent = (S.sessions || []).filter(x=> x && x.startedAt >= since).length;
+  const weeksObserved = Math.min(EXP_DROP_WINDOW_WKS,
+    S.sessions && S.sessions.length ? (Date.now() - S.sessions[0].startedAt)/(7*DAY_MS) : 0);
+  if(weeksObserved >= 4 && recent / weeksObserved < EXP_DROP_SESSIONS_WK) idx = Math.max(0, idx - 1);
+  return EXP_LEVELS[idx] || "intermediate";
+}
+/* The same decision, with its reasons, for the screen that shows it. */
+function experienceWhy(){
+  if(EXP_LEVELS.indexOf(S.expManual) > -1)
+    return {level: S.expManual, manual: true, bits: ["you set this yourself"]};
+  const prior = Math.max(0, Number(S.priorTrainingWeeks) || 0);
+  const age = trainingAgeWeeks();
+  const bits = [];
+  if(prior > 0) bits.push(r1(prior/52) + " year" + (prior/52 >= 2 ? "s" : "") + " before this app");
+  const logged = age - prior;
+  if(logged >= 1) bits.push(Math.round(logged) + " week" + (Math.round(logged)===1?"":"s") + " logged here");
+  if(!bits.length) bits.push("nothing logged yet");
+  const base = age < EXP_YEARS.beginner ? 0 : age < EXP_YEARS.intermediate ? 1 : 2;
+  const lvl = inferExperience();
+  const dropped = EXP_LEVELS.indexOf(lvl) < base;
+  if(dropped) bits.push("training under " + EXP_DROP_SESSIONS_WK +
+    " sessions a week lately, so one level down");
+  return {level: lvl, manual: false, age, bits};
 }
 function experience(){ return inferExperience(); }
 
@@ -13348,7 +13681,9 @@ function adjustedLandmarks(A, g){
   const G = GROUPS[g];
   const exp = experience();
   const sc = EXP_SCALE[exp] || EXP_SCALE.intermediate;
-  let mev = G.mev * sc.mev, mav = G.mav * sc.mav, mrv = G.mrv * sc.mrv;
+  // A2: the base row first, corrected for how much indirect credit this muscle collects
+  const ib = INDIRECT_BASIS_CORRECTION[g] || 1;
+  let mev = G.mev * ib * sc.mev, mav = G.mav * ib * sc.mav, mrv = G.mrv * ib * sc.mrv;
   const why = [{k:"Experience", v:exp, note:"base numbers scaled for an "+exp+" lifter"}];
   /* Second, and before anything read off the log, because it is a statement about what
      the numbers are FOR rather than an adjustment to them. */
@@ -13360,23 +13695,32 @@ function adjustedLandmarks(A, g){
   }
 
   const o = A.wk[g] || {};
-  // 2 - frequency: how many separate days this group was trained in the last 7
-  const freq = o.days || 0;
-  if(freq >= 3){ mrv *= 1.15; mav *= 1.06; why.push({k:"Frequency", v:freq+"x / week", note:"spreading volume over 3+ sessions raises what you can recover from"}); }
-  else if(freq === 1 && o.sets > 0){ mrv *= 0.90; why.push({k:"Frequency", v:"1x / week", note:"one big session a week is harder to recover from than the same volume split up"}); }
-  else if(freq === 2){ why.push({k:"Frequency", v:"2x / week", note:"a solid default, no adjustment"}); }
+  /* 2 - FREQUENCY, counted in days that actually trained it (see windowStats).
 
-  // 3 - intensity: average RPE across this group's sets
+     The MAV bonus that used to sit here is gone. It rested on the idea that spreading
+     volume out grows more muscle, and the meta-regression this app now follows (Pelland
+     et al. 2025, 67 studies) found no consistent effect of frequency on growth once
+     weekly volume is held equal. RECOVERY is a different claim and the evidence for it
+     is not in that finding, so the MRV adjustments stay. */
+  const freq = o.effDays != null ? o.effDays : (o.days || 0);
+  if(freq >= 3){ mrv *= 1.15; why.push({k:"Frequency", v:freq+" days", note:"spreading volume over 3+ sessions raises what you can recover from. It does not raise how much you grow \u2014 with weekly volume equal, frequency has no consistent effect on growth"}); }
+  else if(freq === 1 && o.eff > 0){ mrv *= 0.90; why.push({k:"Frequency", v:"1 day", note:"one big session a week is harder to recover from than the same volume split up"}); }
+  else if(freq === 2){ why.push({k:"Frequency", v:"2 days", note:"a solid default, no adjustment"}); }
+
+  /* 3 - INTENSITY. Effort is now discounted set by set in setEffective(), so the easy-
+     training row that used to raise MEV and MRV here has gone: it was the same
+     adjustment made twice, once by counting an RPE 6 set as a full set and again by
+     raising the bar it was measured against. What survives is the one claim effort
+     credit does NOT make \u2014 that sets taken to the edge cost more to recover from. */
   const rpe = o.rpeAvg;
   if(rpe > 0){
-    if(rpe >= 9.2){ mrv *= 0.85; mev *= 0.90; why.push({k:"Intensity", v:"RPE "+r1(rpe), note:"training this close to failure does more per set but costs a lot more recovery"}); }
-    else if(rpe <= 7.4){ mrv *= 1.10; mev *= 1.15; why.push({k:"Intensity", v:"RPE "+r1(rpe), note:"easier sets do less each, so it takes more of them"}); }
-    else why.push({k:"Intensity", v:"RPE "+r1(rpe), note:"in the productive range, no adjustment"});
+    if(rpe >= 9.2){ mrv *= 0.85; why.push({k:"Intensity", v:"RPE "+r1(rpe), note:"training this close to failure costs a lot more recovery. It does not change the floor \u2014 effort is already counted set by set"}); }
+    else why.push({k:"Intensity", v:"RPE "+r1(rpe), note:"no adjustment; effort is counted per set instead"});
   }
 
   // 4 - exercise selection: share of this group's sets that came from compound lifts
   if(o.sets > 0){
-    const comp = (o.compound||0)/o.sets;
+    const comp = (o.compound||0)/o.sets;   // share of SETS, not of effective volume
     if(comp > 0.6){ mrv *= 0.90; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"compound lifts carry systemic fatigue that isolation work does not"}); }
     else if(comp < 0.3){ mrv *= 1.08; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"isolation-heavy work is cheaper to recover from, so you can tolerate more"}); }
     else why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"a balanced mix, no adjustment"});
@@ -13649,9 +13993,12 @@ function bodyAnalysis(){
   MKEYS.forEach(m=>{ lm[m] = adjustedLandmarks(A0, m); });
   const inj    = injuryByMuscle(now, wk, fat, rec, lm, win);
   const cyc    = cycleProgress();
-  const vol    = blankMuscleMap(m => wk[m].sets);
+  /* A1: the landmarks are denominated in hard sets, so the number compared against them
+     is the effective count, not the raw one. `wk[m].sets` is still there for everything
+     that means "sets you did". */
+  const vol    = blankMuscleMap(m => wk[m].eff);
   const stCtx  = {short: win.short, cycleOpen: !cyc.complete};
-  const state  = blankMuscleMap(m => volState(m, wk[m].sets, lm[m],
+  const state  = blankMuscleMap(m => volState(m, wk[m].eff, lm[m],
                    Object.assign({pending: cyc.pending[m] || 0,
                                   names: dayList(pendingDayNames(cyc, m))}, stCtx)));
 
@@ -24052,6 +24399,27 @@ function viewBody(){
      decode. Everything that made it a control panel is behind Advanced, and Advanced is
      itself lighter than what it replaced: the picker and the drill controls, and no
      eighteen-row table at all. */
+  /* A1.6: HOW MUCH OF THIS IS ASSUMED.
+
+     A set with no RPE is counted in full, which is the right default and also a guess.
+     Past RPE_COVERAGE_WARN of the volume being guessed at, the effort discount is mostly
+     not running, so the number the landmarks are compared against is closer to a raw set
+     count than an effective one \u2014 and the card should say so rather than presenting it
+     with the same confidence as a fully rated week. */
+  (function(){
+    let rated = 0, un = 0;
+    MKEYS.forEach(m=>{ rated += A.wk[m].rpeSets || 0; un += A.wk[m].noRpe || 0; });
+    const tot = rated + un;
+    if(tot <= 0) return;
+    const share = un / tot;
+    if(share < RPE_COVERAGE_WARN) return;
+    h += `<div class="nb-rpe nb-in" style="--d:500ms">
+      <div class="nb-rpe-k">${Math.round(share*100)}% of your sets have no effort rating</div>
+      <div class="nb-rpe-s">Sets are counted toward your volume by how close to failure they were,
+        so an unrated set has to be counted in full. Rating your working sets is what makes
+        the numbers below yours rather than an assumption.</div>
+    </div>`;
+  })();
   h += SECM("map");
   const advanced = !!BODY_OPEN.nbadv;
   const shownMetric = advanced ? metric : "fatigue";
@@ -29509,6 +29877,21 @@ function bind(){
   });
   const setB = $("#setBack");
   if(setB) setB.onclick = ()=>{ SET_PAGE = null; render(); window.scrollTo(0, 0); };
+  document.querySelectorAll("[data-setwarm]").forEach(b=> b.onclick = ()=>{
+    const [ei, si] = b.dataset.setwarm.split(":").map(x=> parseInt(x, 10));
+    const en = S.active && S.active.entries[ei];
+    const st = en && en.sets[si];
+    if(!st) return;
+    /* Tapping sets the flag to the OPPOSITE of what is showing, which is what you meant
+       whether the current state was detected or declared. Tapping back to agree with the
+       detector clears the flag rather than pinning it, so the row goes back to following
+       the arithmetic. */
+    const shown = setIsWarmup(en, si);
+    delete st.warmup;
+    const auto = setIsWarmup(en, si);
+    if(auto === !shown) delete st.warmup; else st.warmup = !shown;
+    save(); render();
+  });
   document.querySelectorAll("[data-setnote]").forEach(b=> b.onclick = ()=>{
     const [ei, si] = b.dataset.setnote.split(":").map(x=> parseInt(x, 10));
     NOTE_ORIGIN = b;                    // the sheet grows out of the number you tapped
@@ -37884,7 +38267,8 @@ function setRowHTML(en, ei, si, last, idxLabel){
      clock past its target says nothing about whether you have stood up. The WEIGHT stays
      live, because loading the bar is exactly what rest is for. */
   const lock = restLocks(en, si);
-  return `${setTagHTML(en, si, rx)}<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}">
+  const isWarm = setIsWarmup(en, si);
+  return `${setTagHTML(en, si, rx)}<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}${isWarm?" is-warm":""}">
     <span class="idx">${(()=>{
       /* THE SET NUMBER IS THE WAY IN. Notes used to be reachable only from the pencil in
          the exercise header, which opens scoped to the whole movement — so "what happened
@@ -37896,7 +38280,23 @@ function setRowHTML(en, ei, si, last, idxLabel){
       const has = !!(st.noteCode || st.unote);
       return `<button type="button" class="idx-btn${has ? " has-note" : ""}" data-setnote="${ei2}:${si}"
         aria-label="Note on set ${idx}" title="${has ? "Edit this set's note" : "Add a note to this set"}">${idx}</button>`;
-    })()}${sideChip(en, si)}</span>
+    })()}${sideChip(en, si)}${(()=>{
+      /* A1: THE WARM-UP TOGGLE, where the set already says which set it is.
+
+         Detection gets the ordinary ramp right on its own, so this is for the cases
+         arithmetic cannot see: a light set that was real work, or a heavy single that
+         was not. One tap, and it lives in the index cell, which already stacks the
+         number over the side chip and had room for a third thing. */
+      const ei3 = entryIndexOf(en);
+      if(ei3 < 0) return "";
+      const on = setIsWarmup(en, si);
+      const said = typeof st.warmup === "boolean";
+      return `<button type="button" class="wu-btn${on ? " on" : ""}${said ? " said" : ""}"
+        data-setwarm="${ei3}:${si}" aria-pressed="${on}"
+        title="${on ? (said ? "You marked this a warm-up" : "Detected as a warm-up")
+                    : "Mark as a warm-up"} \u2014 warm-ups do not count toward your volume"
+        >W</button>`;
+    })()}</span>
     <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(String(planLoadPh(en, last, si)))}"${
       planLoadPh(en, last, si) === planLoadFor(en) && planLoadFor(en) !== "" ? ` class="ph-plan"` : ""}>
     ${rx.rebuild && rx.rebuild.top != null && !st.done
