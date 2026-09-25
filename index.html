@@ -4688,6 +4688,25 @@ body.cele-open{overflow:hidden}
 .nb-rpe-k{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
   color:var(--arms);margin-bottom:6px}
 .nb-rpe-s{font-size:12.5px;color:var(--dim);line-height:1.5}
+/* Parked until the deload finished. Blue, like everything else that is waiting on the
+   week rather than warning about it. */
+.nb-ad{border:1px solid rgba(79,124,201,.32);border-radius:12px;padding:11px 13px;
+  margin:0 0 12px;background:linear-gradient(180deg,rgba(79,124,201,.08),transparent)}
+.nb-ad-k{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--back);margin-bottom:9px}
+.nb-ad-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  flex-wrap:wrap;padding:7px 0;border-top:1px solid var(--line)}
+.nb-ad-row:first-of-type{border-top:0;padding-top:0}
+.nb-ad-t b{display:block;font-size:14px}
+.nb-ad-t span{display:block;font-size:12px;color:var(--faint);margin-top:2px}
+.nb-ad-b{display:flex;gap:7px;flex-shrink:0}
+/* The same hold, said inside the fix sheet before you commit to it. */
+.fx-held{display:flex;gap:9px;align-items:flex-start;margin:10px 0 0;padding:10px 12px;
+  border:1px solid rgba(79,124,201,.32);border-radius:10px;
+  background:linear-gradient(180deg,rgba(79,124,201,.10),transparent);
+  font-size:12.5px;color:var(--dim);line-height:1.45}
+.fx-held-k{font:9.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;
+  color:var(--back);white-space:nowrap;flex-shrink:0;padding-top:2px}
 .nb-pick{display:flex;align-items:center;gap:9px;background:var(--card2);border:1px solid var(--line);
   border-radius:10px;padding:9px 11px;margin-top:9px;animation:nbIn .24s cubic-bezier(.2,.7,.3,1) both}
 .nb-pick-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
@@ -5692,7 +5711,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "31.0";
+const APP_VERSION = "31.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -25202,6 +25221,7 @@ function viewBody(){
      card's own buttons make. Above the charts for the same reason section 4 is: a thing
      to do outranks a thing to look at. */
   h += SECM("flags");
+  h += afterDeloadDueHTML();
   const flags = openFlags();
   const doneFlags = flagLog().filter(f=> f && f.applied).sort((a,b)=> b.at - a.at);
   if(flags.length || doneFlags.length){
@@ -25892,10 +25912,23 @@ function openOwnFix(idx){
     const bal = (w.kind === "balance") ? balanceProjection(A, m, add) : null;
     h += fixReadoutHTML(pr, bal);
     if(why) h += `<div class="sub" style="margin:-4px 2px 8px;color:var(--bad)">${esc(why)}</div>`;
-    h += `<div class="btn-row" style="margin-top:12px">
+    /* During a deload the same plan is parked rather than applied. The button says what
+       will happen and when, because "Apply it" that quietly does something else later is
+       worse than either doing it or refusing. */
+    const held = deloadHoldsVolume();
+    const left = held ? Math.max(0, 7 - (Math.floor((Date.now() - S.deload.startedAt)/DAY_MS) + 1)) : 0;
+    h += held
+      ? `<div class="fx-held"><span class="fx-held-k">Deload week</span>
+          <span>Adding volume now is the one thing this week is for avoiding. Element 26 can
+          hold this and offer it the moment the deload finishes
+          ${left <= 0 ? "\u2014 from your next session" : left === 1 ? "\u2014 tomorrow" : "\u2014 in " + left + " days"}.</span></div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn small" id="fxApply" style="flex:1"${ok?"":" disabled aria-disabled=\"true\""}>Add it after the deload</button>
+        </div>`
+      : `<div class="btn-row" style="margin-top:12px">
         <button class="btn small" id="fxApply" style="flex:1"${ok?"":" disabled aria-disabled=\"true\""}>Apply it</button>
-      </div>
-      <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`;
+      </div>`;
+    h += `<div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`;
     return h;
   };
 
@@ -25973,7 +26006,18 @@ function openOwnFix(idx){
       redraw();
     });
     const ap = m2.querySelector("#fxApply");
-    if(ap && !ap.disabled) ap.onclick = ()=> applyOwnFix(idx);
+    if(ap && !ap.disabled) ap.onclick = ()=>{
+      if(deloadHoldsVolume()){
+        const A2 = bodyAnalysis();
+        const w2 = A2.weak[idx];
+        if(!w2) return;
+        const rec = queueAfterDeload(w2.muscle, FIX, fixPlanLabel(FIX, w2.muscle));
+        hideModal(); render();
+        toast(gName(w2.muscle) + " change held until the deload finishes", "good");
+        return;
+      }
+      applyOwnFix(idx);
+    };
   };
   /* The gap, the recommendation and the fold sit ABOVE #fxBody, so they are outside what
      redraw() replaces. Their handlers are bound here, against the whole sheet. */
@@ -26009,11 +26053,86 @@ function stepRow(id, val, lo, hi, step){
     <button type="button" data-fxstep="${id}:up:${lo}:${hi}:${st}" aria-label="More">+</button>
   </div>`;
 }
+/* SPLIT SO THE PLAN CAN BE APPLIED WITHOUT THE SHEET IN FRONT OF IT.
+
+   This used to read the weak-point index and the live FIX object, which is fine while
+   the sheet is open and useless the moment the plan has to be carried across a deload
+   (see queueAfterDeload). The decision \u2014 which muscle, which mode, how many sets \u2014 is
+   now a value that can be stored and replayed; the wrapper just supplies today's. */
+/* =====================================================================
+   VOLUME CHANGES WAIT FOR THE DELOAD TO FINISH
+
+   A deload holds load increases (applyProgression), and it has to hold volume ADDS for
+   the same reason and more strongly: the entire point of the week is less work, and
+   "add pressing volume, your back is ahead of your chest" is a true finding whose fix
+   is precisely the thing this week exists to avoid. Applying it now would raise next
+   week's prescription too, which is not what anybody pressing the button meant.
+
+   Dismissing it is wrong as well. The shortfall is real, it will still be real on
+   Monday, and making somebody remember to come back and redo the whole fix sheet is how
+   a good decision gets lost.
+
+   So the plan is QUEUED. The sheet keeps every word, the button changes to say when it
+   will happen, and the moment the deload ends the app offers what was parked — named,
+   with the reason it was parked, and still needing a tap. Nothing is applied behind you
+   on either side of the week. */
+function deloadHoldsVolume(){ return deloadActive(); }
+/* What the parked plan will do, in the words the sheet used, so the card offering it
+   back a week later does not just say "a change". */
+function fixPlanLabel(fix, m){
+  if(!fix) return "volume change";
+  if(fix.mode === "own")    return "add " + (fix.ex || "a movement") + ", " + (fix.sets || 0) + " sets";
+  if(fix.mode === "one")    return "take one movement to " + (fix.setsOne || 0) + " sets";
+  if(fix.mode === "swap")   return "swap a movement out";
+  if(fix.mode === "spread") return "spread " + r1(fix.spread || fix.spSets || 0) +
+                                   " more sets across your " + gName(m).toLowerCase() + " days";
+  return "volume change";
+}
+function afterDeloadQueue(){
+  if(!Array.isArray(S.afterDeload)) S.afterDeload = [];
+  return S.afterDeload;
+}
+function queueAfterDeload(m, fix, label){
+  const q = afterDeloadQueue();
+  /* One parked plan per muscle. Opening the sheet again and parking a different answer
+     means you changed your mind, not that you want both. */
+  const at = q.findIndex(x=> x && x.m === m);
+  const rec = {m, name: gName(m), fix: JSON.parse(JSON.stringify(fix)), label,
+               at: Date.now(), until: (S.deload && S.deload.startedAt) || Date.now()};
+  if(at > -1) q[at] = rec; else q.push(rec);
+  save(); queueSync();
+  return rec;
+}
+function dropAfterDeload(m){
+  S.afterDeload = afterDeloadQueue().filter(x=> x && x.m !== m);
+  save(); queueSync();
+}
+/* Shown once the deload is over and something is waiting. Not applied on its own: the
+   whole design of this app is that a plan change is offered and accepted. */
+function afterDeloadDueHTML(){
+  if(deloadActive()) return "";
+  const q = afterDeloadQueue();
+  if(!q.length) return "";
+  return `<div class="nb-ad nb-in" style="--d:220ms">
+    <div class="nb-ad-k">Held until the deload finished</div>
+    ${q.map(x=>`<div class="nb-ad-row">
+      <div class="nb-ad-t"><b>${esc(x.name)}</b><span>${esc(x.label || "volume change")}</span></div>
+      <div class="nb-ad-b">
+        <button class="btn small" data-adgo="${esc(x.m)}">Add it now</button>
+        <button class="btn ghost small" data-adno="${esc(x.m)}">Drop it</button>
+      </div>
+    </div>`).join("")}
+  </div>`;
+}
 function applyOwnFix(idx){
   const A = bodyAnalysis();
   const w = A.weak[idx];
   if(!w || !FIX) return;
-  const m = w.muscle, M = MUSCLES[m];
+  return applyFixPlan(w.muscle, FIX);
+}
+function applyFixPlan(m, FIX){
+  const M = MUSCLES[m];
+  if(!M || !FIX) return;
   const ents = planEntriesForMuscle(m);
   if(FIX.mode === "own"){
     const wid = FIX.wid || DAYS[0];
@@ -26047,7 +26166,11 @@ function applyOwnFix(idx){
     const need = pin
       ? Math.max(0.1, (pin.days.length * pin.sets * muscleFrac(pin.name, m)))
       : (FIX.spread || 3);
-    const sp = spreadPlan(A, m, need, w.avoid, pin);
+    /* The spread planner needs the same picture the Body tab had. Recomputed here rather
+       than captured, because a parked plan can be applied a week after it was made. */
+    const A2 = bodyAnalysis();
+    const w2 = (A2.weak || []).find(x=> x && x.muscle === m);
+    const sp = spreadPlan(A2, m, need, (w2 && w2.avoid) || [], pin);
     if(!sp) return;
     // photographed first, while the entries still say what they said
     const undo = [];
@@ -31805,6 +31928,20 @@ function bind(){
       b.addEventListener(ev, stop));
     // the desktop equivalent, where nobody holds a mouse button down
     b.addEventListener("contextmenu", ev=>{ ev.preventDefault(); open(); });
+  });
+  document.querySelectorAll("[data-adgo]").forEach(b=> b.onclick = ()=>{
+    const m = b.dataset.adgo;
+    const rec = afterDeloadQueue().find(x=> x && x.m === m);
+    if(!rec) return;
+    applyFixPlan(m, rec.fix);
+    dropAfterDeload(m);
+    render();
+  });
+  document.querySelectorAll("[data-adno]").forEach(b=> b.onclick = ()=>{
+    const m = b.dataset.adno;
+    dropAfterDeload(m);
+    render();
+    toast(gName(m) + " change dropped");
   });
   document.querySelectorAll("[data-platefix]").forEach(b=> b.onclick = ev=>{
     ev.stopPropagation();
@@ -40253,7 +40390,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","dayFlags","lmCalObs","lmCalSeeded","indexPin","cycleLog","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","dayFlags","lmCalObs","lmCalSeeded","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
