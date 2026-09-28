@@ -5830,7 +5830,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.1";
+const APP_VERSION = "32.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -25579,8 +25579,31 @@ function viewBody(){
      Ties break by MKEYS order rather than by sort chance, so two muscles level on sets
      do not swap places between renders. */
   const topVol = MKEYS.slice().sort((a,b)=> (A.vol[b]||0) - (A.vol[a]||0))[0];
-  const topVolSets = topVol ? (A.vol[topVol] || 0) : 0;
+  /* THE NUMBER HAS TO BE IN THE UNIT THE SENTENCE CLAIMS.
+
+     A.vol is a WEEKLY EQUIVALENT — that is the whole point of it, so volume and the
+     landmarks can be compared in the unit the research publishes. This row printed it with
+     the window's own words after it ("5.25 sets this cycle"), which on any cycle that is
+     not seven days long is a weekly figure wearing a cycle label. The ranking is unchanged
+     either way, because the conversion is the same for every muscle; the figure shown is
+     now the one the sentence is actually about. */
+  const topO = topVol ? (A.wk[topVol] || {}) : {};
+  const topVolSets = topVol
+    ? r1(win.mode === "cycle" ? (topO.eff || 0) : (A.vol[topVol] || 0)) : 0;
   const topVolFat = topVol ? (A.fat[topVol] || 0) : 0;
+  /* AND IT HAS TO SAY WHERE THE WORK CAME FROM.
+
+     "Most worked muscle: Chest" on the day after a leg session reads as a bug, and it is
+     not one: this row is the most TOTAL credited work across the window, counted the way
+     the volume landmarks count it — every set credited to each muscle it trains, so the
+     presses pay part of themselves into the chest, warm-ups are left out and sets a long
+     way from failure are discounted. Two pressing days beat one leg day. What was missing
+     is the two facts that make that obvious: how many days the work came from, and when
+     the muscle was last trained. */
+  const topDays = Object.keys(topO.effDates || {}).length;
+  const topAgo = topO.lastMs ? Math.floor((Date.now() - topO.lastMs) / DAY_MS) : null;
+  const topWhen = topAgo == null ? "" : topAgo <= 0 ? "trained today"
+    : topAgo === 1 ? "last trained yesterday" : "last trained " + topAgo + " days ago";
   const loadRows = [
     {k:"Sets this week", v:String(t.setsWk),
      /* "The same as last week" was hardcoded, so a cycle-mode window that happened to
@@ -25600,10 +25623,12 @@ function viewBody(){
      c: t.acwr==null ? "var(--dim)" : (t.acwr>1.5||t.acwr<0.8) ? C_WARN : C_OK},
     {k:"Most worked muscle", v: topVolSets>0 ? gName(topVol) : "\u2014",
      s: topVolSets<=0 ? "Nothing logged " + win.short + " yet."
-        : topVolSets + " set" + (topVolSets===1?"":"s") + " " + win.short + ", "
-          + (topVolFat>=60 ? "and it's carrying real tiredness \u2014 give it a day."
-           : topVolFat>=35 ? "and it's normally tired, nothing unusual."
-           : "and it's still fresh."),
+        : topVolSets + " effective set" + (topVolSets===1?"":"s") + " "
+          + (topDays > 1 ? "across " + topDays + " days " : "")
+          + win.short + (topWhen ? ", " + topWhen : "") + ". "
+          + (topVolFat>=60 ? "It's carrying real tiredness \u2014 give it a day."
+           : topVolFat>=35 ? "Normally tired, nothing unusual."
+           : "It's back to fresh."),
      c:"var(--text)"},
     {k:"Anything overdone", v: t.inj>=55 ? "Yes" : "No",
      s: t.inj>=55 ? "At least one muscle is being pushed harder than it recovers from."
@@ -25617,7 +25642,14 @@ function viewBody(){
       <span class="nb-lrow-v" style="color:${r.c}">${esc(r.v)}</span>
       <span class="nb-lrow-s">${esc(r.s)}</span>
     </div>`).join("")}
-    <div class="nb-lfoot">Counted over ${esc(win.label)}. Change that in Settings.</div>
+    <div class="nb-lfoot">Counted over ${esc(win.label)}. Change that in Settings.
+      ${explainHTML("loadrows",
+        "<b>Most worked</b> is the most total work across the whole window, not the muscle you " +
+        "trained last. Every set is credited to each muscle it trains \u2014 a press pays about " +
+        "half a set into the front delts and the triceps as well as a full one into the chest \u2014 " +
+        "warm-ups are left out, and sets a long way from failure count for less. Two pressing " +
+        "days will out-total one leg day even if legs was the session you did most recently.",
+        "nb-lexplain")}</div>
   </div>`;
 
   /* ---- 7. THE MUSCLE MAP, PLAIN BY DEFAULT --------------------------------------
