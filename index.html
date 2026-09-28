@@ -5860,7 +5860,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.1";
+const APP_VERSION = "33.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23368,6 +23368,7 @@ function viewActiveSession(){
     h += planChangeLineHTML(en);
     h += planBehindLineHTML(en);
     h += exNoteLineHTML(en);
+    h += restNoteLineHTML(en);
     h += supersetNoteHTML(supersetInfo(a.entries, ei));
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(ll) h += ll;
@@ -23971,6 +23972,67 @@ function offerPlanNote(exName, txt){
     save(); queueSync(); hideModal(); render();
     toast("On the plan now \u2014 " + esc(exName), "good");
   };
+}
+/* =====================================================================
+   A REST TIME WRITTEN IN A NOTE, AND A CLOCK THAT NEVER READ IT
+
+   Notes are free text and the app deliberately does not act on what they say — a note
+   that reads "45 a side" must never become a load. But a rest period is the one thing
+   people write in there that the app ALSO has a number for, and when the two disagree
+   the screen contradicts itself: the note says three minutes and the countdown starts at
+   ninety seconds, with nothing to say which is the real instruction.
+
+   So it is read, never obeyed. Where a note names a rest that the clock is not running,
+   the card says both numbers and offers to make the clock match. One tap writes it to
+   the exercise's own rest window, which is the field the timer has always read, so from
+   then on there is one number and it is yours.
+
+   The patterns are deliberately narrow: an explicit rest word next to a time, or a bare
+   time with a unit. "90" on its own is not a rest instruction, and neither is "3 sets". */
+const REST_NOTE_TOL = 0.2;          // how far apart before it is worth mentioning
+function restFromNote(text){
+  const t = String(text || "").toLowerCase();
+  if(!t || !/rest/.test(t)) return null;
+  const num = "(\\d+(?:\\.\\d+)?)";
+  const unit = "(s|sec|secs|second|seconds|m|min|mins|minute|minutes)";
+  /* A range first — "rest 2-3 min" — then a single figure. Both must carry a unit, and
+     both must sit within a few words of "rest". */
+  const near = new RegExp("(?:rest[^.;\\n]{0,14}?|)" + num + "\\s*(?:-|\\u2013|to)\\s*" + num + "\\s*" + unit, "i");
+  const one  = new RegExp("(?:rest[^.;\\n]{0,14}?|)" + num + "\\s*" + unit, "i");
+  const secsOf = (v, u)=> /^m/.test(u) ? Math.round(parseFloat(v) * 60) : Math.round(parseFloat(v));
+  let m = t.match(near);
+  if(m){
+    const lo = secsOf(m[1], m[3]), hi = secsOf(m[2], m[3]);
+    if(lo > 0 && hi >= lo && hi <= 900) return {lo, hi, said: m[0].trim()};
+  }
+  m = t.match(one);
+  if(m){
+    const lo = secsOf(m[1], m[2]);
+    if(lo >= 15 && lo <= 900) return {lo, hi: lo + 30, said: m[0].trim()};
+  }
+  return null;
+}
+/* What the clock is actually going to do for this exercise, in seconds. */
+function restClockLoFor(en){
+  const t = restTargetFor(en, (en && en.sets && en.sets[0]) || null);
+  return t && Array.isArray(t.ideal) ? t.ideal[0] : null;
+}
+function restNoteConflict(en){
+  if(!en) return null;
+  const said = restFromNote(en.note) || restFromNote(noteWords(en));
+  if(!said) return null;
+  const now = restClockLoFor(en);
+  if(!(now > 0)) return null;
+  if(Math.abs(now - said.lo) <= Math.max(10, said.lo * REST_NOTE_TOL)) return null;
+  return {said, now};
+}
+function restNoteLineHTML(en){
+  const c = restNoteConflict(en);
+  if(!c) return "";
+  return `<div class="ex-insight"><span class="ins-tag">rest</span><span>Your note says
+    <b>${esc(fmtClock(c.said.lo))}</b>; the clock is set to <b>${esc(fmtClock(c.now))}</b>.
+    <button type="button" class="nb-link" data-restnote="${esc(en.name)}"
+      data-restlo="${c.said.lo}" data-resthi="${c.said.hi}">Use ${esc(fmtClock(c.said.lo))}</button></span></div>`;
 }
 function exNoteLineHTML(en){
   if(!en) return "";
@@ -33693,6 +33755,26 @@ function bind(){
   /* Catching the plan up to what you are already lifting. Same path as every other
      accept, so the change is written, logged, and any open load flag for the movement is
      closed — see applyProgression(). */
+  document.querySelectorAll("[data-restnote]").forEach(b=> b.onclick = ev=>{
+    ev.preventDefault(); ev.stopPropagation();
+    const name = b.dataset.restnote;
+    const lo = parseInt(b.dataset.restlo, 10), hi = parseInt(b.dataset.resthi, 10);
+    if(!(lo > 0)) return;
+    /* Written to the exercise's own rest window — the field the timer has always read —
+       on the programme so it sticks, and on the live entry so the clock changes now. */
+    const key = nrm(name);
+    let n = 0;
+    DAYS.forEach(d=> (S.program[d] || []).forEach(e=>{
+      if(nrm(e.name) === key){ e.rest = [lo, hi > lo ? hi : lo + 30]; n++; }
+    }));
+    if(S.active) (S.active.entries || []).forEach(e=>{
+      if(nrm(e.name) === key) e.rest = [lo, hi > lo ? hi : lo + 30];
+    });
+    if(n) logPlanChange("programme", null, name, [fmtClock(lo) + " rest"],
+      {note: "You set the rest window from the note on this exercise."});
+    save(); queueSync(); render();
+    toast(name + ": resting " + fmtClock(lo), "good");
+  });
   document.querySelectorAll("[data-asymoff]").forEach(b=> b.onclick = ev=>{
     ev.preventDefault(); ev.stopPropagation();
     const name = b.dataset.asymoff, key = nrm(name);
