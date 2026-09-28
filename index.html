@@ -4824,6 +4824,12 @@ body.cele-open{overflow:hidden}
 .nb-deload-k{display:block;font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
   color:var(--back);margin-bottom:5px}
 .nb-deload b{color:var(--text);font-weight:400}
+.nb-deload-q{margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
+.nb-deload-qk{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:6px}
+.nb-deload-qr{display:flex;align-items:baseline;gap:10px;padding:3px 0;font-size:12.5px}
+.nb-deload-qr span{flex:1;min-width:0}
+.nb-deload-qr .nb-link{flex-shrink:0;font-size:12px}
 .nb-ad{border:1px solid rgba(79,124,201,.32);border-radius:12px;padding:11px 13px;
   margin:0 0 12px;background:linear-gradient(180deg,rgba(79,124,201,.08),transparent)}
 .nb-ad-k{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
@@ -5854,7 +5860,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.7";
+const APP_VERSION = "32.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -15513,7 +15519,14 @@ function weakPoints(A){
      on the list. It comes off entirely once the plan clears the threshold it was judged
      by — and comes back on its own if a full rotation goes by without the log agreeing.
      See planFixAnswers(). */
-  const live = ranked.filter(w=> !planFixAnswers(A, w));
+  /* A PARKED PLAN IS AN ANSWER, EVEN THOUGH IT HAS NOT BEEN WRITTEN YET.
+
+     "Add about 3 more hard sets of direct side delt work" stayed on the list after you
+     had chosen the fix and told the app to apply it when the deload ends — so the one
+     screen that is supposed to say what is left to decide was still asking for a decision
+     you had made. It comes off while the plan waits, and the deload banner above says
+     what is waiting. If you drop the parked plan, the finding comes straight back. */
+  const live = ranked.filter(w=> !planFixAnswers(A, w) && !afterDeloadFor(w.muscle));
   const vis = live.filter(w=> !isQuiet(w));
   vis.quiet = live.filter(w=> isQuiet(w));
   return vis;
@@ -25610,6 +25623,17 @@ function viewBody(){
       <span>Everything below is judged against your <b>programme</b> rather than this week's
       log, because the log is meant to be light. Nothing here is asking you to train more
       this week${dleft <= 0 ? "" : dleft === 1 ? " — one day left" : " — " + dleft + " days left"}.</span>
+      ${/* WHAT YOU HAVE ALREADY DECIDED, SO THE LIST BELOW DOES NOT ASK AGAIN. A plan
+            parked for after the week is taken off the findings list — it is not a thing to
+            do, it is a thing that happens on Monday — and this is where it waits, in the
+            words the sheet used, with the way to change your mind. */
+        afterDeloadQueue().length ? `<div class="nb-deload-q">
+          <div class="nb-deload-qk">Waiting for the week to finish</div>
+          ${afterDeloadQueue().map(x=> `<div class="nb-deload-qr">
+            <span><b>${esc(x.name)}</b> · ${esc(x.label || "volume change")}</span>
+            <button type="button" class="nb-link" data-adno="${esc(x.m)}">Drop it</button>
+          </div>`).join("")}
+        </div>` : ""}
     </div>`;
   }
   const spanDays = (Date.now() - S.sessions[0].startedAt)/DAY_MS;
@@ -27261,6 +27285,13 @@ function fixPlanLabel(fix, m){
 function afterDeloadQueue(){
   if(!Array.isArray(S.afterDeload)) S.afterDeload = [];
   return S.afterDeload;
+}
+/* The plan parked for one muscle, if there is one. A finding whose answer is already
+   sitting in this queue has been DECIDED — it is not a thing to do, it is a thing that
+   happens on Monday — and leaving it on the list as an open action is the app forgetting
+   what you told it two taps ago. */
+function afterDeloadFor(m){
+  return afterDeloadQueue().filter(x=> x && x.m === m)[0] || null;
 }
 function queueAfterDeload(m, fix, label){
   const q = afterDeloadQueue();
