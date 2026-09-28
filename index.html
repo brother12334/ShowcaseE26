@@ -5860,7 +5860,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.8";
+const APP_VERSION = "32.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -36458,7 +36458,19 @@ function scoreWorkout(sess){
 
   /* 1, COMPLETION ------------------------------------------------------------- */
   (()=>{
-    const plan = resolvedProgram(sess.workoutId);
+    const rawPlan = resolvedProgram(sess.workoutId);
+    /* GRADED AGAINST THE CARD YOU WERE GIVEN, NOT THE ONE THE DELOAD REPLACED.
+
+       A deload rewrites every exercise down to DELOAD_SETS before the session starts —
+       that is the whole week — and this compared what you logged against the FULL
+       programme. Six exercises done exactly as prescribed came out as "12 working sets
+       logged against 17 planned (71%)", a C− for following the instruction on the screen.
+       Nothing was wrong with the session; the comparison was reading a plan that had been
+       superseded before the first set. */
+    const inDeload = deloadCovers(sess.date, sess.finishedAt || sess.startedAt);
+    const plan = inDeload
+      ? deloadView(rawPlan.map(x=> x.chosen)).map((e, i)=> Object.assign({}, rawPlan[i], {chosen: e}))
+      : rawPlan;
     const planned = plan.reduce((t,{chosen:e})=>t + (parseInt(e.sets,10)||0), 0);
     const why = [];
     if(!planned){
@@ -36474,6 +36486,8 @@ function scoreWorkout(sess){
     const skipped = plan.length - entries.length;
     if(skipped > 0) why.push(skipped+" exercise"+(skipped>1?"s":"")+" from the plan didn't get logged.");
     if(ratio >= 1) why.push("Everything on the card got done.");
+    if(inDeload) why.push("Judged against the deload card — " + DELOAD_SETS +
+      " sets an exercise, capped at RPE " + DELOAD_RPE_CAP + " — rather than your full programme.");
     add("completion","Completion",14,earned,why,
       ratio < 1 ? "Unfinished sets are the cheapest points on this card. If time is the constraint, superset the accessories rather than dropping them."
                 : null);
