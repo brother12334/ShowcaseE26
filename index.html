@@ -5836,7 +5836,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.3";
+const APP_VERSION = "32.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -33555,7 +33555,7 @@ function bind(){
     const to = parseFloat(btn.dataset.plancatchto);
     if(!isFinite(to)) return;
     if(applyProgression(name, to, "You set the plan to the load you had already been working at.",
-                        "plan caught up to your log")){
+                        "plan caught up to your log", {catchUp:true})){
       /* AND THE SESSION IN FRONT OF YOU HAS TO AGREE WITH IT.
 
          A live entry carries planWeight, frozen at Start so the warm-up ramp is built
@@ -38634,7 +38634,29 @@ function loadSanityWhy(name, from, v){
   return fmtLoad(v) + " is a long way past anything on record for " + name +
     ".\n\nThe most you have logged is " + fmtLoad(ref) + ".";
 }
-function applyProgression(name, to, why, reason){
+/* The heaviest working load actually performed on a movement inside `days`. Used to tell
+   a CORRECTION from an INCREASE: a number you have already lifted is not a raise, whatever
+   the programme happens to say. */
+const PLAN_CATCH_DAYS = 60;
+function topLoggedLoad(name, days){
+  const key = nrm(name);
+  const from = Date.now() - (days || PLAN_CATCH_DAYS) * DAY_MS;
+  let top = 0;
+  (S.sessions || []).forEach(sx=>{
+    if(!sx || !(sx.startedAt >= from)) return;
+    (sx.entries || []).forEach(e=>{
+      if(!e || nrm(e.name) !== key || !Array.isArray(e.sets)) return;
+      const add = entryBarAdd(e);
+      e.sets.forEach(st=>{
+        if(!isWorkingSet(st)) return;
+        const w = setLoad(st, add);
+        if(w > top) top = w;
+      });
+    });
+  });
+  return top;
+}
+function applyProgression(name, to, why, reason, opts){
   const e = findProgramEntry(name);
   if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
   const from = e.weight;
@@ -38646,8 +38668,19 @@ function applyProgression(name, to, why, reason){
      it OFF does not: a load the prescription cannot reach is wrong in a deload week too,
      and refusing the correction leaves you deloading against a number you cannot lift. */
   if(deloadActive() && !(from != null && v < parseFloat(from))){
-    toast("Load increases are blocked during a deload");
-    return false;
+    /* A CATCH-UP IS NOT AN INCREASE.
+
+       "Your programme says 85; you last worked at 95" is the plan being out of date, and
+       putting it right writes down a load you have already performed. Blocking that in a
+       deload week blocks a correction, not a progression — and leaves the week being run
+       against a number that was never what you were lifting. It is allowed, on one
+       condition the app can check for itself: the target has to be a load actually in your
+       log. Anything above what you have done is still a raise, and still waits. */
+    const done = (opts && opts.catchUp) ? topLoggedLoad(name, PLAN_CATCH_DAYS) : 0;
+    if(!(done > 0 && v <= done + 0.01)){
+      toast("Load increases are blocked during a deload");
+      return false;
+    }
   }
   e.weight = v;
   /* THE FLAG HAS TO SURVIVE THE GRADE SCREEN. "Rebuild from 6 reps at the new load" is
@@ -40531,7 +40564,10 @@ function planBehindLineHTML(en){
         + " for a range you had already hit at this weight, so the cut is the part that is wrong."
       : raiseWaiting
       ? "The grade card has a raise waiting \u2014 or put the plan on what you are already doing."
-      : "Nothing has earned a raise yet, so this is just the plan being out of date."}
+      : "Nothing has earned a raise yet, so this is just the plan being out of date."}${
+      deloadActive()
+        ? " You are deloading, and this still applies \u2014 it writes down a weight you have already lifted rather than adding one."
+        : ""}
     <button type="button" class="nb-link ex-catch" data-plancatch="${esc(p.name)}"
       data-plancatchto="${esc(String(top))}">Set my plan to ${esc(fmtLoad(top))}</button></span></div>`;
 }
