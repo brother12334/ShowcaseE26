@@ -1213,6 +1213,12 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
 .warm-set.warm-pl-on{box-shadow:inset 0 0 0 1px var(--acc);color:var(--text)}
 .plate-gap{border-style:solid;border-color:rgba(201,154,52,.3)}
 .pl-gap-s{color:var(--dim)}
+/* The question asked where it matters, answerable without leaving the session. The chips
+   are the Settings segment at session size. */
+.pl-gap-q{color:var(--faint);font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  margin:9px 0 6px}
+.pl-gap-seg{margin:0 0 8px}
+.pl-gap-seg button{font-family:var(--mono);font-size:12.5px;padding:8px 0}
 .plate-gap .nb-link{margin-top:6px;font-family:var(--mono);font-size:11.5px}
 /* The drawing. Plates hang on a sleeve that runs left to right, heaviest nearest the
    middle of the bar, which is the order you actually load them in. */
@@ -5830,7 +5836,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.2";
+const APP_VERSION = "32.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20759,7 +20765,11 @@ function barWeightPickHTML(p){
       <input id="prefBarW" inputmode="decimal" value="${esc(cur == null ? "" : String(cur))}"
         placeholder="e.g. ${barDefault()}" aria-label="What your bar weighs"></div>` : ""}
     <div class="set-says">Warm-up percentages come off this, and so does every load the
-      app works out for you.</div>
+      app works out for you. <b>Plates are a separate question</b> \u2014 a bar weight on its own
+      cannot turn a load into a plate count, so the smallest pair you own is asked for under
+      <b>Gym kit</b>.${trainPrefs().plateStep > 0
+        ? " Yours is set to " + esc(fmtLoad(trainPrefs().plateStep)) + " a side."
+        : ` <button type="button" class="linklike" data-platefix="1">Set that now</button>`}</div>
   </div>`;
 }
 let BARW_OPEN = false;
@@ -33268,9 +33278,24 @@ function bind(){
     render();
     toast(gName(m) + " change dropped");
   });
+  document.querySelectorAll("[data-plfast]").forEach(b=> b.onclick = ev=>{
+    ev.stopPropagation();
+    const v = parseFloat(b.dataset.plfast);
+    if(!(v > 0)) return;
+    /* Answered where it was asked. The same value the Settings chip writes, through the
+       same preference, so the two screens cannot disagree. */
+    trainPrefs().plateStep = v;
+    save(); queueSync(); render();
+    toast("Smallest plate " + fmtLoad(v) + " a side \u2014 the bar moves in " + fmtLoad(v * 2), "good");
+  });
   document.querySelectorAll("[data-platefix]").forEach(b=> b.onclick = ev=>{
     ev.stopPropagation();
-    TAB = "sync"; SET_PAGE = "gym"; render(); window.scrollTo(0, 0);
+    /* THE PAGE THAT ACTUALLY HAS THE QUESTION ON IT. This went to "In the gym", which
+       holds the units and the bar — so somebody who pressed "set that up" arrived at a
+       screen where the bar was already answered, concluded the app had lost their setup,
+       and left the plates unanswered. The plates are kit, and kit lives with the room:
+       "Where you train". */
+    TAB = "sync"; SET_PAGE = "where"; render(); window.scrollTo(0, 0);
   });
   document.querySelectorAll("[data-warmtick]").forEach(b=> b.onclick = ()=>{
     if(HELD){ HELD = false; return; }        // this press opened the plates, it does not also tick
@@ -39488,6 +39513,38 @@ function plateGapFor(name, total){
   if(!(p.plateStep > 0)) miss.push("which plates you have");
   return miss.length ? {miss, eq} : null;
 }
+/* WHAT IS MISSING, NOT "NOTHING IS SET UP".
+
+   This said "Element 26 needs to know which plates you have" under a session, on an app
+   where the bar weight and the bar convention had both been answered — so it read as the
+   app having forgotten the setup you had just done. Two different questions live behind
+   one sentence: what the BAR weighs, and what PLATES are on the tree. Answering one does
+   not answer the other, and the message now says which of them it still needs and which
+   it already has.
+
+   And it is answerable here. Sending somebody to Settings in the middle of a set to pick
+   a number from a list of four is the kind of errand that never gets run; the same four
+   chips sit in the message, and tapping one is the whole answer. The link to the full
+   page stays for the rest of the kit. */
+function plateGapHTML(gap, total, name){
+  if(!gap) return "";
+  const p = trainPrefs();
+  const kg = inKg();
+  const haveBar = !(gap.miss.some(x=> /bar|carriage/.test(x)));
+  const needPlates = !(p.plateStep > 0);
+  const known = [];
+  if(haveBar && implementWeight(name) > 0)
+    known.push((gap.eq === "smith" ? "carriage" : "bar") + " " + fmtLoad(implementWeight(name)));
+  if(!needPlates && p.plateStep > 0) known.push("plates from " + fmtLoad(p.plateStep));
+  return `<div class="pl-gap-s">No plate count for ${esc(fmtLoad(total))} yet${
+      known.length ? " \u2014 " + esc(joinList(known)) + " " + (known.length > 1 ? "are" : "is")
+                     + " set, but Element 26 still needs " + esc(joinList(gap.miss)) : ""}.</div>
+    ${needPlates ? `<div class="pl-gap-q">Smallest plate you can put on each side:</div>
+      <div class="seg step-seg pl-gap-seg">${PLATE_STEPS[kg ? "kg" : "lb"].map(v=>
+        `<button type="button" data-plfast="${v}">${stepNum(v)}</button>`).join("")}</div>` : ""}
+    <button type="button" class="nb-link" data-platefix="1">${
+      needPlates ? "Or set the rest of the kit up" : "Set that up"}</button>`;
+}
 /* The same thing as a sentence, or "" when there is nothing honest to say. */
 function plateLine(total, name){
   const b = plateBreakdown(total, name);
@@ -39699,9 +39756,7 @@ function warmupHTML(e, kind, ctx){
       const rung = plan[pw];
       if(!rung || !(rung.w > 0)) return "";
       const gap = plateGapFor(e.name, rung.w);
-      if(gap) return `<div class="warm-pl"><div class="pl-gap-s">No plate count for
-        ${esc(fmtLoad(rung.w))} yet \u2014 Element 26 needs to know ${esc(joinList(gap.miss))}.</div>
-        <button type="button" class="nb-link" data-platefix="1">Set that up</button></div>`;
+      if(gap) return `<div class="warm-pl">${plateGapHTML(gap, rung.w, e.name)}</div>`;
       const line = plateLine(rung.w, e.name);
       if(!line) return "";
       return `<div class="warm-pl">${plateArtHTML(plateBreakdown(rung.w, e.name))}
@@ -40619,9 +40674,7 @@ function plateLineHTML(en){
   const want = typed != null ? typed : parseFloat(planLoadFor(en));
   if(!(want > 0)) return "";
   const gap = plateGapFor(en.name, want);
-  if(gap) return `<div class="plate-line plate-gap"><div class="pl-gap-s">No plate count for
-    ${esc(fmtLoad(want))} yet \u2014 Element 26 needs to know ${esc(joinList(gap.miss))}.</div>
-    <button type="button" class="nb-link" data-platefix="1">Set that up</button></div>`;
+  if(gap) return `<div class="plate-line plate-gap">${plateGapHTML(gap, want, en.name)}</div>`;
   const line = plateLine(want, en.name);
   if(!line) return "";
   const b = plateBreakdown(want, en.name);
