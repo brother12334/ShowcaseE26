@@ -1510,6 +1510,7 @@ button.side-chip.sc-set::after{
 .warm-note b{color:var(--dim);font-weight:600;font-style:normal}
 
 /* The four-week rep-matching rule, on the exercise it governs. */
+.asym-off{display:inline-block;margin-top:6px;font-size:12px}
 .asym-hint{
   font-size:12.5px;line-height:1.45;color:var(--text);
   background:var(--acc-soft);border:1px solid rgba(201,154,52,.3);
@@ -2935,6 +2936,16 @@ body.pfl-open{overflow:hidden}
 .pfl-opt:active{transform:scale(.96)}
 .pfl-opt.on{border-color:var(--acc);background:var(--acc-soft);color:var(--text)}
 .pfl-opt span{font-size:9px;letter-spacing:.06em}
+/* The soreness step: one row per muscle, four taps each, at the size the rest of this
+   flow is drawn. It stays inside one screen because pfSoreMuscles() caps the list. */
+.pfl-sore{display:flex;flex-direction:column;gap:12px;margin-top:10px}
+.pfl-sore-row{animation:pfRise .45s cubic-bezier(.2,.9,.28,1.06) both;
+  animation-delay:calc(240ms + var(--i,0) * 55ms)}
+.pfl-sore-m{font:13px var(--sans);color:var(--text);margin-bottom:6px}
+.pfl-sore-taps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.pfl-sore-t{padding:9px 2px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
+  color:var(--dim);cursor:pointer;font:11px var(--mono);line-height:1.2;text-align:center}
+.pfl-sore-t.on{border-color:var(--acc);background:var(--acc-soft);color:var(--text)}
 .pfl-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .pfl-chip{
   padding:11px 15px;border-radius:12px;border:1px solid var(--line);background:var(--card2);
@@ -5836,7 +5847,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.5";
+const APP_VERSION = "32.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -22094,6 +22105,30 @@ let PF = null;
    is the gym question, which is waiting on a location read — and it is inserted before
    the last step, never behind you. */
 function pfSteps(){ return (PF && PF.steps) || ["hero", "ready"]; }
+/* WHICH MUSCLES THE PRE-WORKOUT FLOW ASKS ABOUT, and it is a shorter list than the Today
+   prompt's. Four taps is a question; twelve is a form nobody answers twice. The ones
+   today's session trains come first — those are the ones where the answer changes what
+   the session should be — then whatever else is still carrying work from the last few
+   days. */
+const PF_SORE_MAX = 4;
+function pfSoreMuscles(fresh){
+  /* FIXED WHEN THE FLOW OPENS, not recomputed on every draw. Answering the first muscle
+     makes soreAskedToday() true, which emptied the list underneath the person mid-tap and
+     took the other three rows off the screen. The question is asked once; the list it is
+     asking about does not get to change while it is open. */
+  if(!fresh && PF && Array.isArray(PF.soreList)) return PF.soreList;
+  if(soreAskedToday()) return [];
+  const all = soreAskMuscles();
+  if(!all.length) return [];
+  let today = {};
+  try{
+    ((S.active && S.active.entries) || []).forEach(e=>{
+      const mm = musclesFor(e && e.name) || {};
+      Object.keys(mm).forEach(g=>{ if(mm[g] >= 0.5) today[g] = true; });
+    });
+  }catch(err){ today = {}; }
+  return all.slice().sort((a,b)=> (today[b] ? 1 : 0) - (today[a] ? 1 : 0)).slice(0, PF_SORE_MAX);
+}
 function pfAddGymStep(){
   if(!PF || PF.steps.indexOf("gym") > -1) return;
   const at = PF.steps.indexOf(PF.step);
@@ -22200,9 +22235,20 @@ const PF_LINES = [
 function openPreflight(wid){
   if(!S.active) return;
   const m = dayMeta(wid);
+  const soreList = pfSoreMuscles(true);
   PF = {i: 0, wid, step: "hero", energy: null, mins: null, gymAsk: null, gymSaid: "",
         line: pick(PF_LINES), cut: null, done: false,
-        steps: ["hero", "map"].concat(energyDue() ? ["energy"] : []).concat(["time", "ready"])};
+        /* B1 — SORENESS IS A QUESTION ABOUT ARRIVING, SO IT IS ASKED ON THE WAY IN.
+
+           It used to be a line on Today, which meant it could land twenty minutes after a
+           session — when the honest answer is about the workout you just did rather than
+           about what you are carrying. Here it is the right question by construction: the
+           reader it feeds is soreBefore(), how sore the muscle is as you walk in. The
+           Today line stays for the days you do not train. */
+        sore: {}, soreList: soreList,
+        steps: ["hero", "map"].concat(energyDue() ? ["energy"] : [])
+                 .concat(soreList.length ? ["sore"] : [])
+                 .concat(["time", "ready"])};
   const el = document.createElement("div");
   el.id = "preflight";
   el.innerHTML = `<div class="pfl-glow" style="--day:${m.color}"></div><div class="pfl-in"></div>`;
@@ -22310,6 +22356,22 @@ function pfDraw(){
         `<button class="pfl-opt${PF.energy === e.v ? " on" : ""}" data-pfen="${e.v}" style="--i:${i}">
           <i class="pfl-bar" style="--h:${16 + i * 11}px"></i><span>${esc(e.label)}</span></button>`).join("")}</div>
     </div>`;
+  } else if(PF.step === "sore"){
+    const ms = pfSoreMuscles();
+    body = `<div class="pfl-q">
+      <div class="pfl-k" style="--d:0ms">Walking in</div>
+      <div class="pfl-h" style="--d:80ms">Anything still sore?</div>
+      <div class="pfl-sub" style="--d:140ms">From the last few days, not from today. It is the one
+        thing Element 26 cannot read off your sets, and it is what tells it whether your volume
+        is landing or piling up. Skip anything that feels fine.</div>
+      <div class="pfl-sore" style="--d:220ms">${ms.map((g, i)=>
+        `<div class="pfl-sore-row" style="--i:${i}">
+          <div class="pfl-sore-m">${esc(gName(g))}</div>
+          <div class="pfl-sore-taps">${SORE_WORDS.map((w, v)=>
+            `<button class="pfl-sore-t${PF.sore[g] === v ? " on" : ""}" data-pfsore="${esc(g)}:${v}"
+               aria-pressed="${PF.sore[g] === v}">${esc(w)}</button>`).join("")}</div>
+        </div>`).join("")}</div>
+    </div>`;
   } else if(PF.step === "time"){
     const est = fmtMins(sum.sec);
     body = `<div class="pfl-q">
@@ -22401,6 +22463,22 @@ function pfDraw(){
     save(); queueSync();
     b.classList.add("on");
     setTimeout(()=>{ if(PF) pfNext(); }, 260);          // a beat, so the tap is seen
+  });
+  host.querySelectorAll("[data-pfsore]").forEach(b=> b.onclick = ()=>{
+    const [g, v] = b.dataset.pfsore.split(":");
+    const n = parseInt(v, 10);
+    /* Tapping the answer you already gave takes it back: a scale with no way to unsay a
+       0 records a shrug as data. */
+    if(PF.sore[g] === n) delete PF.sore[g]; else PF.sore[g] = n;
+    /* Written as it is tapped rather than at the end, so a flow abandoned halfway still
+       keeps what you said. */
+    if(!S.sore || typeof S.sore !== "object") S.sore = {};
+    const d = todayStr();
+    const rec = Object.assign({}, S.sore[d] || {});
+    if(PF.sore[g] == null) delete rec[g]; else rec[g] = PF.sore[g];
+    if(Object.keys(rec).length) S.sore[d] = rec; else delete S.sore[d];
+    save(); queueSync();
+    pfDraw();
   });
   host.querySelectorAll("[data-pftime]").forEach(b=> b.onclick = ()=>{
     PF.mins = b.dataset.pftime ? parseInt(b.dataset.pftime, 10) : null;
@@ -23240,7 +23318,7 @@ function viewActiveSession(){
         </span>
       </div>`;
     h += swapNoteHTML(en);
-    h += plateLineHTML(en);
+    h += plateLineHTML(en, last);
     h += lpLineHTML(en);
     h += pctLineHTML(en);
     h += planChangeLineHTML(en);
@@ -23278,6 +23356,21 @@ function viewActiveSession(){
    left in a settings screen. The logged gap that motivates it (right 15, left 6, right
    14 on preacher curl on 7/23) is real and large enough that training both sides to
    their own limit would widen it, not close it. */
+/* NOT ON THIS ONE.
+
+   Matching the stronger side to the weaker is a choice about how you want to train, and
+   it is set once for everything. On a movement where you do not want it — you train the
+   sides on their own merits, or a "single arm" the app inferred is not how you actually
+   run it — the hint had no answer except a trip to Settings to change it everywhere.
+
+   The exercise carries its own sideMode, which sideModeFor() already prefers over the
+   global setting; this is the switch that writes it. One tap, that movement only, and the
+   rule keeps running everywhere else. */
+function asymOffHTML(e){
+  if(!e || !e.name) return "";
+  return `<button type="button" class="nb-link asym-off" data-asymoff="${esc(e.name)}">
+    Not on this one</button>`;
+}
 function asymHintHTML(e){
   if(!asymActiveFor(e)) return "";
   const st = sideStats(e.name);
@@ -23295,11 +23388,13 @@ function asymHintHTML(e){
     if(!st.sessions) return "";
     // a reading is on its way: state the rule, don't invent a number
     return `<div class="asym-hint"><b>Match the weaker side.</b> Same rep count both sides,
-      set by whichever is weaker. <span class="asym-note">${esc(st.reason)}.</span></div>`;
+      set by whichever is weaker. <span class="asym-note">${esc(st.reason)}.</span>
+      ${asymOffHTML(e)}</div>`;
   }
   if(!st.weaker){
     return `<div class="asym-hint"><b>Sides are level</b> at about ${r1(st.R.reps)} reps.
-      <span class="asym-note">${esc(asymSampleText(st))}.</span></div>`;
+      <span class="asym-note">${esc(asymSampleText(st))}.</span>
+      ${asymOffHTML(e)}</div>`;
   }
   const c = asymCap(e.name, st);
   if(!c) return "";
@@ -23309,7 +23404,8 @@ function asymHintHTML(e){
     ? "Your " + sideWordFull(st.weaker) + " did " + c.n + " this session, so that is today's number. "
     : "") + asymSampleText(st);
   return `<div class="asym-hint"><b>Cap both sides at ${c.n} reps.</b>
-    ${esc(asymGapText(st))} <span class="asym-note">${esc(note)}.</span></div>`;
+    ${esc(asymGapText(st))} <span class="asym-note">${esc(note)}.</span>
+    ${asymOffHTML(e)}</div>`;
 }
 /* =====================================================================
    COACHING HINTS, AND WHY THEY EXPIRE
@@ -29452,6 +29548,28 @@ function soreAskMuscles(){
     .sort((a,b)=> wk[b].eff - wk[a].eff)
     .slice(0, SORE_ASK_MAX);
 }
+/* HOW LONG AFTER A SESSION THE QUESTION MEANS ANYTHING.
+
+   Soreness peaks a day or two after the work that caused it, not on the walk to the car.
+   Asked twenty minutes after finishing, the answer is about the session you just did and
+   says nothing about whether the volume you are carrying is recoverable — which is the
+   only thing the calibration wants it for. The reader it feeds is soreBefore(): how sore
+   the muscle is WALKING IN. So the prompt holds its tongue for a few hours after a
+   session, and the natural place to ask is the pre-workout flow, where the question is
+   "how are you arriving" by construction. */
+const SORE_QUIET_AFTER_H = 6;
+function lastSessionEndMs(){
+  let last = 0;
+  (S.sessions || []).forEach(x=>{
+    const t = (x && (x.finishedAt || x.startedAt)) || 0;
+    if(t > last) last = t;
+  });
+  return last;
+}
+function soreJustTrained(){
+  const t = lastSessionEndMs();
+  return t > 0 && (Date.now() - t) < SORE_QUIET_AFTER_H * 3600e3;
+}
 function soreAskedToday(){
   const d = todayStr();
   const rec = (S.sore || {})[d];
@@ -29460,6 +29578,9 @@ function soreAskedToday(){
 function soreAskHTML(){
   if(S.active) return "";                       // not in the middle of a session
   if(soreAskedToday()) return "";
+  /* Just finished: the question belongs to tomorrow, or to the walk in before the next
+     session, and the pre-workout flow asks it there. */
+  if(soreJustTrained()) return "";
   const ms = soreAskMuscles();
   if(!ms.length) return "";
   return `<button class="wd-line sore-line" id="soreAsk">
@@ -33606,6 +33727,23 @@ function bind(){
   /* Catching the plan up to what you are already lifting. Same path as every other
      accept, so the change is written, logged, and any open load flag for the movement is
      closed — see applyProgression(). */
+  document.querySelectorAll("[data-asymoff]").forEach(b=> b.onclick = ev=>{
+    ev.preventDefault(); ev.stopPropagation();
+    const name = b.dataset.asymoff, key = nrm(name);
+    /* Written onto the movement in the PROGRAMME, which is what survives the session, and
+       onto the live entry so the hint goes now rather than next time. "separate" is the
+       app's own word for training each side on its own merits — the sides are still
+       logged and still compared, nothing is being hidden; the CAP stops. */
+    let n = 0;
+    DAYS.forEach(d=> (S.program[d] || []).forEach(e=>{
+      if(nrm(e.name) === key){ e.sideMode = "separate"; n++; }
+    }));
+    if(S.active) (S.active.entries || []).forEach(e=>{
+      if(nrm(e.name) === key) e.sideMode = "separate";
+    });
+    save(); queueSync(); render();
+    toast(name + ": sides trained on their own merits now", "good");
+  });
   document.querySelectorAll("[data-plancatch]").forEach(btn=> btn.onclick = ev=>{
     ev.preventDefault(); ev.stopPropagation();
     const name = btn.dataset.plancatch;
@@ -40761,10 +40899,19 @@ function plateArtHTML(b){
     <span class="pl-sleeve"><span class="pl-rod"></span>${discs}<span class="pl-collar"></span></span>
   </div>`;
 }
-function plateLineHTML(en){
+function plateLineHTML(en, last){
   if(!en || !en.name) return "";
   const typed = (en.sets || []).map(st=> parseFloat(st && st.weight)).find(v=> v > 0);
-  const want = typed != null ? typed : parseFloat(planLoadFor(en));
+  /* THE PLATE COUNT HAS TO BE FOR THE LOAD THE BOXES ARE OFFERING.
+
+     This read planLoadFor() — the PRESCRIPTION — while the set rows use planLoadPh(),
+     which is the prescription capped by what you have actually performed. On a movement
+     whose programme had run ahead of the log, the card drew "95 lb = 25 lb bar + 35 a
+     side" over rows suggesting 75: a plate count for a weight nothing on the screen was
+     asking for, and the one number on the card somebody would actually load. Same
+     function as the boxes now, so the two cannot disagree. */
+    const planned = last !== undefined ? planLoadPh(en, last, 0) : planLoadFor(en);
+  const want = typed != null ? typed : parseFloat(planned);
   if(!(want > 0)) return "";
   const gap = plateGapFor(en.name, want);
   if(gap) return `<div class="plate-line plate-gap">${plateGapHTML(gap, want, en.name)}</div>`;
