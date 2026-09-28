@@ -4791,6 +4791,15 @@ body.cele-open{overflow:hidden}
 .nb-rpe-s{font-size:12.5px;color:var(--dim);line-height:1.5}
 /* Parked until the deload finished. Blue, like everything else that is waiting on the
    week rather than warning about it. */
+/* The one line that says which week this is, over the findings it qualifies. Blue, the
+   same recovery colour the rest of the deload wears, so it reads as a state rather than
+   as a warning. */
+.nb-deload{display:block;border:1px solid var(--line);border-left:2px solid var(--back);
+  background:var(--card);border-radius:var(--r);padding:11px 13px;margin:0 0 12px;
+  font-size:12.5px;line-height:1.5;color:var(--dim)}
+.nb-deload-k{display:block;font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--back);margin-bottom:5px}
+.nb-deload b{color:var(--text);font-weight:400}
 .nb-ad{border:1px solid rgba(79,124,201,.32);border-radius:12px;padding:11px 13px;
   margin:0 0 12px;background:linear-gradient(180deg,rgba(79,124,201,.08),transparent)}
 .nb-ad-k{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
@@ -5821,7 +5830,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.0";
+const APP_VERSION = "32.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -15255,7 +15264,8 @@ function weakPoints(A){
         MUSCLES[m].name+" "+mIs(m)+" in the plan but not in the log",
         "Run the days that carry your "+MUSCLES[m].lc+" work, or move it onto a day you actually do.",
         "The rotation prescribes about "+r1(planned)+" sets a cycle, and none have been logged in 3 weeks.",
-        "A prescription only counts once it's performed. Either those days are the ones getting dropped, in which case the work belongs on a day you reliably train, or the log is behind reality.");
+        "A prescription only counts once it's performed. Either those days are the ones getting dropped, in which case the work belongs on a day you reliably train, or the log is behind reality." +
+        (onDeload ? " This week is a deload, so it is not the week that caused this — the gap is older than that." : ""));
       return;
     }
     /* (c) genuinely nothing in the programme touches it.
@@ -15282,7 +15292,11 @@ function weakPoints(A){
   });
 
   // 3, stalled despite adequate volume
-  MKEYS.forEach(m=>{
+  /* NOT DURING A DELOAD. This compares the last three weeks against the three before on
+     estimated strength, and a deload week is three-quarters of the way to guaranteeing
+     the comparison comes out flat or down — by design. Reporting that as a stall is the
+     app mistaking its own prescription for your response. It waits a week. */
+  if(!onDeload) MKEYS.forEach(m=>{
     const g = A.grow[m];
     if(!g || g.score === null || g.isNew) return;
     if(A.wk[m].sets < L(m).mev) return;              // rule 1 already owns this case
@@ -15445,9 +15459,15 @@ function weakPoints(A){
     if(!i || i.score < 55) return;
     push(i.score, m, "over",
       MUSCLES[m].name+" "+mIs(m)+" being pushed past recovery",
-      "Cut "+MUSCLES[m].name.toLowerCase()+" sets by about a third, keep the loads.",
+      /* The one finding a deload is the answer TO. Saying "cut your sets" to somebody
+         already in the middle of cutting their sets reads as the app not noticing. */
+      onDeload
+        ? "You are already deloading, which is exactly the right response — keep the week light."
+        : "Cut "+MUSCLES[m].name.toLowerCase()+" sets by about a third, keep the loads.",
       i.flags.slice(0,2).map(f=>f.t).join("; ")+".",
-      (trainingGoal() === "lean"
+      (onDeload
+        ? "This is what the deload is for. The reading is from the work you did BEFORE this week, and it is the reason the week exists — there is nothing to do about it beyond finishing the week as prescribed. If it is still saying this a fortnight after the deload, the ceiling itself is the thing to look at."
+        : trainingGoal() === "lean"
         ? "Volume you can't recover from is volume you don't grow from — and in a deficit the line sits lower than it does when you are eating enough, which is why this fires sooner now. Hold the weights where they are: the load is what preserves the muscle, and the sets are what you can afford to lose."
         : "Volume you can't recover from is volume you don't grow from: past this point the sets cost fatigue without buying adaptation, and connective tissue takes the strain. Hold the weights where they are, because dropping the load is what costs you the strength."));
   });
@@ -23016,9 +23036,9 @@ function readinessNoteHTML(wid){
       <div class="rn-m"><b>${esc(gName(x.g))}</b><span>${esc(x.r.reasons.join(" · "))}</span></div>
       <div class="rn-c num">−${x.r.cut} set${x.r.cut===1?"":"s"}</div>
     </div>`).join("")}
-    <div class="sub" style="margin:10px 0 0">Nothing has been changed. If a muscle is walking in
-      tired, taking a set or two off it today costs almost nothing and is not the same as
-      missing the work — the sets you drop on purpose are the ones you can afford.</div>
+    <div class="sub" style="margin:10px 0 0">${deloadActive()
+      ? "Your programme is already cut this week, so today is lighter than the numbers above suggest. This is about how it feels on top of that, and on a deload the honest answer is usually to leave it alone."
+      : "Nothing has been changed. If a muscle is walking in tired, taking a set or two off it today costs almost nothing and is not the same as missing the work — the sets you drop on purpose are the ones you can afford."}</div>
   </div>`;
 }
 // A finished exercise's sets, each tagged with the side it was done on where relevant.
@@ -25440,6 +25460,21 @@ function viewBody(){
      Above the charts, deliberately: this is the only part of the screen that asks you to
      do something, and a thing to do outranks a thing to look at. */
   h += SECM("weak");
+  /* ONE LINE THAT QUALIFIES EVERY FINDING UNDER IT.
+
+     Each rule below is deload-aware on its own — the volume ones read your programme
+     instead of the log, the stall rule stands down, the recovery one knows the deload is
+     the answer. Saying so once at the top is what stops somebody reading the list as a
+     verdict on a week they were told to take easy. */
+  if(deloadActive()){
+    const dleft = Math.max(0, 7 - (Math.floor((Date.now() - S.deload.startedAt) / DAY_MS) + 1));
+    h += `<div class="nb-deload nb-in" style="--d:300ms">
+      <span class="nb-deload-k">Deload week</span>
+      <span>Everything below is judged against your <b>programme</b> rather than this week's
+      log, because the log is meant to be light. Nothing here is asking you to train more
+      this week${dleft <= 0 ? "" : dleft === 1 ? " — one day left" : " — " + dleft + " days left"}.</span>
+    </div>`;
+  }
   const spanDays = (Date.now() - S.sessions[0].startedAt)/DAY_MS;
   const enoughWP = S.sessions.length >= 4 && spanDays >= 6;
   h += `<div class="nb-fix nb-in" style="--d:360ms">
@@ -25686,6 +25721,10 @@ function viewBody(){
           ? `<span class="conf-tag conf-${esc(f.conf)}">${esc((CONF_BANDS.find(b=>b.k===f.conf)||{}).label||"")}</span>` : ""}</div>
         <div class="nb-flag-m">${esc(f.msg)}</div>
         ${f.fix?`<div class="nb-flag-f">${esc(f.fix)}</div>`:""}
+        ${f.deload ? `<div class="flag-again">Logged in a deload week, so read it as a note about
+          that session rather than about your training — the week was meant to be light.</div>` : ""}
+        ${(deloadActive() && !f.deload && !held) ? `<div class="flag-again">You are deloading this
+          week. This was raised before it, and it will still be here when the week is done.</div>` : ""}
         ${(()=>{ const rp = flagRepeat(f); return rp ? `<div class="flag-again">${
           rp.n === 1
             ? "You dismissed this on " + esc(fmtDateShort(rp.last)) + " \u2014 your last session raised it again."
@@ -37789,6 +37828,19 @@ function fadeFixFor(d){
 function recordFlags(sess, list){
   const log = flagLog();
   const seen = new Set(log.map(flagKey));
+  /* A DELOAD SESSION IS NOT EVIDENCE ABOUT LOAD OR PROGRESS.
+
+     The week is defined by fewer sets at a lower RPE, so every lift in it feels easy and
+     every number in it is down. Read literally that is "ready for more weight" on
+     everything you touched and "what stalled" on everything you did not — the app
+     congratulating you and scolding you for following its own instruction.
+
+     So a session inside a deload raises no `up` and no `stall` flags at all. What it can
+     still raise is what happened INSIDE the session: a load the prescription cannot
+     reach, and reps collapsing across sets. Those are facts about the session rather than
+     conclusions about the block, and they are true whatever week it is. Every flag from
+     such a session is stamped so the card can say where it came from. */
+  const inDeload = deloadCovers(sess && sess.date, sess && (sess.finishedAt || sess.startedAt));
   (list || []).forEach(p=>{
     /* Only the ones worth keeping. A "still working up the range" is the normal state of
        a lift and would bury the log in noise within a fortnight. */
@@ -37796,11 +37848,11 @@ function recordFlags(sess, list){
     if(p.kind === "toohard" && p.detail) kinds.push({
       kind:"load", title:"The load is wrong here", msg:p.detail.msg, fix:p.detail.fix,
       to: toohardTarget(p), sev:3});
-    if(p.stall) kinds.push({
+    if(p.stall && !inDeload) kinds.push({
       kind:"stall", title: p.stall.kind === "recovery" ? "Stalled, and it looks like recovery" : "What stalled",
       msg:p.stall.msg, fix:p.stall.sub, sev: p.stall.kind === "recovery" ? 2 : 3,
       stallKind: p.stall.kind});
-    if(p.kind === "up" && p.to != null) kinds.push({
+    if(p.kind === "up" && p.to != null && !inDeload) kinds.push({
       kind:"up", title:"Ready for more weight", msg:p.msg, fix:p.sub, to:p.to, sev:1});
     if(p.kind === "fade") kinds.push({
       kind:"fade", title:"Reps fell away across the sets", msg:p.msg, fix:p.sub,
@@ -37810,6 +37862,7 @@ function recordFlags(sess, list){
         id: uid(), at: sess.finishedAt || Date.now(), date: sess.date || todayStr(),
         sessionId: sess.id, workoutId: sess.workoutId, ex: p.name,
         conf: p.conf ? p.conf.band : null,
+        deload: inDeload || undefined,
         applied: false, dismissed: false
       }, k);
       if(seen.has(flagKey(f))) return;
@@ -38669,6 +38722,21 @@ function deloadActive(){
   // a deload is one week and expires on its own; a forgotten toggle should not quietly
   // halve your training for a month
   return (Date.now() - d.startedAt) < 8 * DAY_MS;
+}
+/* WAS THAT DAY INSIDE A DELOAD?
+
+   deloadActive() answers "is one running now", which is the wrong question for anything
+   stamped on a session: a flag raised on Tuesday of a deload week is still a flag raised
+   in a deload week when you read it a fortnight later. Everything that records a finding
+   stamps the answer at the time — grades already work this way — so the card can say so
+   for as long as it exists. */
+function deloadCovers(dateStr, atMs){
+  const d = S.deload;
+  if(!d || !d.startedAt) return false;
+  const at = atMs || (dateStr ? Date.parse(dateStr + "T12:00:00") : NaN);
+  if(!isFinite(at)) return false;
+  const end = d.endedAt || (d.startedAt + 8 * DAY_MS);
+  return at >= d.startedAt - 12 * 3600e3 && at <= end;
 }
 /* A RAISE THE DELOAD WILL REFUSE, SAID BEFORE YOU PRESS IT RATHER THAN AFTER.
 
