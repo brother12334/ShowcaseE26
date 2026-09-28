@@ -5861,7 +5861,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.3";
+const APP_VERSION = "33.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14423,6 +14423,9 @@ function seedJointFromHurts(){
   S.jointSeeded = {at: Date.now(), n};
 }
 function runOneTimeSeeds(){
+  /* Not a one-time seed, but it belongs on the same heartbeat: a deload that has run its
+     week is closed the next time the app is opened. */
+  try{ if(sweepDeload()) queueSync(); }catch(e){}
   if(SEEDS_RUN) return;
   SEEDS_RUN = true;
   let dirty = false;
@@ -22625,13 +22628,26 @@ function lastGradedFor(wid){
 function deloadNote(){
   if(deloadActive()){
     const d = S.deload;
-    const daysIn = Math.floor((Date.now() - d.startedAt) / DAY_MS) + 1;
-    return {k:"deload", act:true, label:"Deload week, day " + daysIn + " of 7",
+    const daysIn = Math.min(DELOAD_DAYS, Math.floor((Date.now() - d.startedAt) / DAY_MS) + 1);
+    return {k:"deload", act:true, label:"Deload week, day " + daysIn + " of " + DELOAD_DAYS,
       line:"Every exercise cut to " + DELOAD_SETS + " sets, capped at RPE " + DELOAD_RPE_CAP + ".",
       body:`<div class="nt-p">Loads stay exactly where they are. Keeping the weight is what preserves
         the stimulus; cutting the sets is what buys the recovery. Load increases are blocked this week,
         and next week resumes at full sets without making up what you missed.</div>
         <button class="fc-btn" id="endDeloadBtn">End the deload now</button>`};
+  }
+  /* JUST FINISHED. Said for a few days, because everything the week was holding — load
+     raises, volume adds, the plans you parked — comes back at this moment, and coming
+     back silently is what makes it look like a fault. */
+  const dl = S.deload;
+  if(dl && dl.endedAt && (Date.now() - dl.endedAt) < 3 * DAY_MS){
+    const q = afterDeloadQueue().length;
+    return {k:"deload", act:false, label:"Deload week finished",
+      line: q ? q + " change" + (q===1?"":"s") + " you parked " + (q===1?"is":"are") + " waiting below."
+              : "Full sets and normal targets from here.",
+      body:`<div class="nt-p">Everything the week was holding is live again: load increases
+        the grades had earned, volume changes you parked, and the normal set counts. Nothing was
+        made up for the sets you did not do — that is what the week was for.</div>`};
   }
   const due = deloadDue();
   if(!due) return null;
@@ -39107,7 +39123,7 @@ function deloadActive(){
   if(d.endedAt) return false;
   // a deload is one week and expires on its own; a forgotten toggle should not quietly
   // halve your training for a month
-  return (Date.now() - d.startedAt) < 8 * DAY_MS;
+  return (Date.now() - d.startedAt) < deloadWindowMs();
 }
 /* WAS THAT DAY INSIDE A DELOAD?
 
@@ -39121,7 +39137,7 @@ function deloadCovers(dateStr, atMs){
   if(!d || !d.startedAt) return false;
   const at = atMs || (dateStr ? Date.parse(dateStr + "T12:00:00") : NaN);
   if(!isFinite(at)) return false;
-  const end = d.endedAt || (d.startedAt + 8 * DAY_MS);
+  const end = d.endedAt || (d.startedAt + deloadWindowMs());
   return at >= d.startedAt - 12 * 3600e3 && at <= end;
 }
 /* A RAISE THE DELOAD WILL REFUSE, SAID BEFORE YOU PRESS IT RATHER THAN AFTER.
@@ -39258,6 +39274,32 @@ function startDeload(){
     "Loads held, increases blocked"
   ], {note: "One week. Week after resumes at the same loads and full set counts; missed volume is not made up."});
   save(); queueSync();
+}
+/* A DELOAD THAT RUNS OUT HAS TO BE CLOSED, NOT JUST IGNORED.
+
+   deloadActive() answers false once the week is up, and nothing ever wrote that down: the
+   record sat there with endedAt null for ever. Three things went wrong with that. The
+   label could read "day 8 of 7" — a week that runs eight days. Everything the deload was
+   holding came back with no word said, so a load-raise flag that had been greyed out for
+   a week was suddenly live and looked like a bug. And blockStart never moved, so the next
+   block was dated from the wrong day.
+
+   Closed properly, at the moment it actually lapsed rather than whenever the app next
+   opened, and the Today card says so for a few days afterwards. */
+const DELOAD_DAYS = 7;
+function deloadWindowMs(){ return (DELOAD_DAYS + 1) * DAY_MS; }
+function sweepDeload(){
+  const d = S.deload;
+  if(!d || !d.startedAt || d.endedAt) return false;
+  if(Date.now() - d.startedAt < deloadWindowMs()) return false;
+  d.endedAt = d.startedAt + deloadWindowMs();
+  d.ranOut = true;
+  S.blockStart = d.endedAt;
+  logPlanChange("deload", null, "Deload finished",
+    ["Full set counts and RPE targets restored"],
+    {note: "The week ran its course. Anything held back for it is available again."});
+  saveQuiet();
+  return true;
 }
 function endDeload(){
   if(!S.deload) return;
