@@ -5836,7 +5836,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.4";
+const APP_VERSION = "32.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -28835,9 +28835,31 @@ function openHurt(exName, backTo){
         <input id="huNote" value="${esc((cur && cur.note) || "")}" placeholder="e.g. only on the way down"
           autocomplete="off"></div>
       <div class="btn-row" style="margin-top:16px">
-        <button class="btn small" id="huSave" style="flex:1"${where && level ? "" : " disabled"}>Log it</button>
+        <button class="btn small" id="huSave" style="flex:1"${where && level ? "" : " disabled"}>${
+          cur ? "Update it" : "Log it"}</button>
       </div>
-      <div class="sub" style="margin:10px 2px 0;font-size:12px;color:var(--faint)">Element 26 is a
+      ${/* TWO WAYS OUT, AND THIS SHEET HAD NEITHER.
+
+            It could only ever ADD. Every other screen that shows a niggle offers "it has
+            settled", and the one place you are standing when it stops hurting — the
+            exercise itself, mid-session — could only log it again. Worse, a niggle logged
+            on the wrong movement, or on the wrong day, had no way back at all: the sheet
+            said "saying it again updates it", which is true and no help when what you want
+            is for it not to be there.
+
+            SETTLED and REMOVED are different things and both are kept. Settled is the
+            honest end of a real niggle: it happened, it is over, the record stays and the
+            weight is released. Removed is for one that should never have been written
+            down, and it takes the entry with it. */
+        cur ? `<div class="btn-row" style="margin-top:8px">
+          <button class="btn ghost small" id="huSettled" style="flex:1">It has settled</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn ghost small" id="huDelete" style="flex:1">Remove this note</button>
+        </div>` : ""}
+      <div class="sub" style="margin:10px 2px 0;font-size:12px;color:var(--faint)">${cur
+        ? "<b>Settled</b> keeps the record and releases the weight. <b>Remove</b> deletes it, for one logged by mistake. "
+        : ""}Element 26 is a
         training log, not a clinician. It can hold a weight down and remind you — it cannot tell
         you what is wrong.</div>`;
     showModal(h);
@@ -28861,8 +28883,43 @@ function openHurt(exName, backTo){
       toast(HURT_LEVEL_BY[level].t + " · " + HURT_AREA_BY[where].t.toLowerCase() + " logged",
             level === "sharp" ? "bad" : "");
     };
+    const st = m.querySelector("#huSettled");
+    if(st) st.onclick = ()=>{
+      hideModal();
+      hurtSettle(cur.id);
+      clearEntryHurt(exName);
+    };
+    const del = m.querySelector("#huDelete");
+    if(del) del.onclick = ()=>{
+      if(!confirm("Remove the " + HURT_AREA_BY[cur.where].t.toLowerCase() + " note on "
+                  + exName + "? The record goes with it."))
+        return;
+      hideModal();
+      hurtRemove(cur.id);
+      clearEntryHurt(exName);
+    };
   };
   draw();
+}
+/* The live session carries its own copy so the grade and the history can read the session
+   rather than this log — so ending a niggle has to clear that too, or the card you are
+   looking at still says something hurt. */
+function clearEntryHurt(exName){
+  if(!S.active) return;
+  (S.active.entries || []).forEach(en=>{
+    if(en && nrm(en.name) === nrm(exName)) delete en.hurt;
+  });
+  save(); render();
+}
+/* Deleted, not settled: for a niggle that should not be in the log at all. */
+function hurtRemove(id){
+  const l = hurtLog();
+  const at = l.findIndex(x=> x && x.id === id);
+  if(at < 0) return;
+  const h = l[at];
+  l.splice(at, 1);
+  save(); queueSync(); render();
+  toast((HURT_AREA_BY[h.where] ? HURT_AREA_BY[h.where].t : "The note") + " removed");
 }
 function hurtSettle(id){
   const h = hurtLog().filter(x=> x && x.id === id)[0];
