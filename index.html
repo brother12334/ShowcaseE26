@@ -5860,7 +5860,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.0";
+const APP_VERSION = "33.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -37745,6 +37745,21 @@ function progressionFor(sess, entry){
        instead, which looks at the heaviest set that met the prescription rather than the
        last one — and on that same session says the true thing: your plan is behind, you
        have been working at 75. */
+    /* AND A RAISE THE RACK CANNOT DELIVER IS NOT A RAISE. Where the cap has swallowed the
+       step, the honest answer is the other half of double progression: the load stays and
+       the reps carry the progress. Saying "add weight: 50 → 50" would be the app asking
+       for something its own ceiling forbids. */
+    if(from != null && to != null && parseFloat(to) <= parseFloat(from) + 0.01){
+      const mx = rackMaxNow();
+      return {
+        name: entry.name, kind: "hold",
+        msg: "Hold this load — the rack stops here",
+        sub: "You earned the next weight up, and " + fmtLoad(from) + " is the heaviest "
+           + (isFinite(mx) && mx > 0 ? "(your rack ends at " + fmtLoad(mx) + ")" : "one available")
+           + ". Keep the load and take the reps higher, or make the set harder: slower "
+           + "lowering, a pause, or a longer stretch at the bottom."
+      };
+    }
     if(!(isFinite(planW) && to != null && parseFloat(to) <= planW)) return {
       name: entry.name, kind: "up", from, to, step,
       msg: step.bodyweight && from == null
@@ -39620,10 +39635,14 @@ function loadStepFor(name){
    20 kg bar to the nearest 2.5 kg does not stay true for every bar that exists. */
 function roundLoadable(w, name){
   const st = loadStepFor(name);
-  if(!(st > 0) || !(w > 0)) return w;
+  /* THE RACK CEILING IS NOT PART OF THE ROUNDING, so it must not be skipped with it.
+     Both early exits here returned the raw number — so somebody who had told the app
+     where their dumbbells stop, but not what the gaps between them are, got the cap
+     silently ignored and a prescription for a weight the rack does not hold. */
+  if(!(st > 0) || !(w > 0)) return capToRack(w, name);
   const bar = barWeightFor(name);
   const plates = w - bar;
-  if(plates <= 0) return w;
+  if(plates <= 0) return capToRack(w, name);
   return capToRack(bar + Math.max(st, Math.round(plates / st) * st), name);
 }
 /* WHERE THE RACK STOPS. Suggesting 55 to somebody whose dumbbells end at 50 is an
@@ -39632,11 +39651,19 @@ function roundLoadable(w, name){
 
    Only for the movements a rack limits: a cable stack and a leg press have their own
    ends and this number says nothing about them. */
+function rackMaxNow(){
+  /* The room you are actually in wins. A rack limit set on a gym is a fact about that
+     building, and it only reached the prescription if that gym happened to have been
+     applied to your preferences — which needs location on, or the gym step in the
+     pre-workout flow. Asked directly here, the session's own gym answers first. */
+  const g = (S.active && S.active.gymId) ? gymById(S.active.gymId) : null;
+  if(g && g.dbMax !== undefined && g.dbMax !== null && g.dbMax !== "") return parseFloat(g.dbMax);
+  return parseFloat(trainPrefs().dbMax);
+}
 function capToRack(w, name){
-  const p = trainPrefs();
   const eq = equipmentOf(name);
   if(eq !== "dumbbell" && eq !== "kettlebell") return w;
-  const max = parseFloat(p.dbMax);
+  const max = rackMaxNow();
   return isFinite(max) && max > 0 && w > max ? max : w;
 }
 /* =====================================================================
