@@ -5861,7 +5861,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.4";
+const APP_VERSION = "33.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13352,7 +13352,12 @@ const DAY_MS = 86400000;
 function blankMuscleMap(v){ const o = {}; MKEYS.forEach(k=> o[k] = (typeof v==="function" ? v(k) : v)); return o; }
 
 /* Walk every logged set in a time window and attribute it to muscles. */
-function windowStats(from, to){
+/* `opts.skipDeload` leaves out sessions performed inside a deload. Only the PROGRESS
+   read uses it: a week whose whole purpose was less work at a lower effort is not
+   evidence that a muscle has stopped responding, and counting it as such is how somebody
+   who has just done exactly as they were told gets told they have stalled. Volume,
+   landmarks, tonnage and records all still count every set that happened. */
+function windowStats(from, to, opts){
   /* `sets` stays what it always was \u2014 raw working sets, which is what tonnage, records
      and the grade count. `eff` is the same walk discounted for warm-ups and effort, and
      it is what the volume landmarks are compared against. Both are kept because they
@@ -13367,8 +13372,10 @@ function windowStats(from, to){
      sync, an interrupted write and a hand-edited restore \u2014 and this is the function the
      whole Body tab, every grade and now the calibration all run through, so throwing
      here is the difference between one odd row and a blank screen. */
+  const skipDeload = !!(opts && opts.skipDeload);
   (S.sessions || []).forEach(s=>{
     if(!s || !(s.startedAt >= from) || s.startedAt >= to) return;
+    if(skipDeload && deloadCovers(s.date, s.finishedAt || s.startedAt)) return;
     (s.entries || []).forEach(e=>{
       if(!e || !Array.isArray(e.sets)) return;
       const mm = musclesFor(e.name);
@@ -13639,8 +13646,16 @@ function recoveryByMuscle(now, wk, modInfo){
    (the stimulus signal, 30%). 50 = holding steady, 100 = ~+12% and climbing fast. */
 function growthByMuscle(now){
   const W = 21*DAY_MS;
-  const a = windowStats(now - W, now + 1);
-  const b = windowStats(now - 2*W, now - W);
+  /* A DELOAD IS NOT A DATA POINT ABOUT PROGRESS.
+
+     This compared the last three weeks against the three before on top estimated 1RM and
+     total volume — and a deload week sits inside the recent half with deliberately fewer
+     sets at a capped RPE, which drags both halves of that comparison down. The week after
+     one, somebody who had followed the plan exactly was told their lats had stalled and
+     offered "take a lighter week: about half the sets", which is the week they had just
+     taken. Deload sessions are left out of both windows. */
+  const a = windowStats(now - W, now + 1, {skipDeload:true});
+  const b = windowStats(now - 2*W, now - W, {skipDeload:true});
   const out = {};
   MKEYS.forEach(m=>{
     if(!a[m].sets){ out[m] = {score:null, note:"not trained in the last 3 weeks"}; return; }
@@ -15330,24 +15345,41 @@ function weakPoints(A){
      estimated strength, and a deload week is three-quarters of the way to guaranteeing
      the comparison comes out flat or down — by design. Reporting that as a stall is the
      app mistaking its own prescription for your response. It waits a week. */
+  /* AND NOT IN THE SHADOW OF ONE EITHER. The deload's own sessions are already left out
+     of the progress read, but the week after one there is barely any post-deload training
+     to read — and the one prescription this rule has for a falling lift is the week you
+     have just taken. It waits until there is something on the other side of the deload to
+     judge. */
+  const shadow = deloadEndedRecently();
   if(!onDeload) MKEYS.forEach(m=>{
     const g = A.grow[m];
     if(!g || g.score === null || g.isNew) return;
     if(A.wk[m].sets < L(m).mev) return;              // rule 1 already owns this case
     if(g.score >= 45) return;
     const dropped = g.strP < -0.02;
+    /* Sessions since the deload ended, for this muscle. Under two of them there is no
+       read yet: the comparison is mostly the block that the deload was the answer to. */
+    const since = shadow ? (S.sessions || []).filter(sx=>
+      sx && (sx.finishedAt || sx.startedAt || 0) > shadow.at
+      && (sx.entries || []).some(e=> e && muscleFrac(e.name, m) >= 0.5
+           && (e.sets || []).some(isWorkingSet))).length : null;
+    if(shadow && since < 2) return;
     const score = dropped ? Math.min(95, 55 + Math.abs(g.strP)*300) : 42;
     push(Math.round(score), m, "stall",
       MUSCLES[m].name+" "+(MUSCLES[m].pl?"have":"has")+" stalled",
-      dropped
+      (dropped && !shadow)
         ? "Take a lighter week here: about half the sets, same loads."
         : "Change the stimulus rather than the amount of it.",
       "Volume is fine, but estimated strength is "+(dropped ? "down "+Math.abs(Math.round(g.strP*100))+"%" : "flat")+
         " versus the previous 3 weeks"+(g.bestPrev ? " ("+Math.round(g.bestPrev)+" → "+Math.round(g.bestNow)+" "+unitWord()+" est. 1RM)" : "")+".",
       "More sets is the wrong lever when the sets you already do aren't converting. "+
-      (dropped
+      (dropped && !shadow
         ? "A stall with falling strength is nearly always accumulated fatigue rather than too little work, so cut the sets by about half, keep the loads, and rebuild from there."
-        : "Swap the main movement, slow the lowering phase to about 3 seconds, or take the top set one RPE closer to failure. Any of the three changes what the muscle is being asked to adapt to."));
+        : "Swap the main movement, slow the lowering phase to about 3 seconds, or take the top set one RPE closer to failure. Any of the three changes what the muscle is being asked to adapt to.")+
+      (shadow
+        ? " Your deload finished " + (shadow.days <= 0 ? "today" : shadow.days === 1 ? "yesterday" : shadow.days + " days ago")
+          + ", and its own sessions are left out of this comparison \u2014 so a lighter week is not the answer here. You have just had one."
+        : ""));
   });
 
   // 4, structural balance between opposing / paired muscles
@@ -39287,6 +39319,17 @@ function startDeload(){
    Closed properly, at the moment it actually lapsed rather than whenever the app next
    opened, and the Today card says so for a few days afterwards. */
 const DELOAD_DAYS = 7;
+/* How long after a deload its shadow is still worth accounting for. A stall called inside
+   this window is being called on a fortnight that contains a week of prescribed easy work,
+   and the one prescription that rule has for a falling lift — a lighter week — is the week
+   somebody has just taken. */
+const DELOAD_SHADOW_DAYS = 10;
+function deloadEndedRecently(){
+  const d = S.deload;
+  if(!d || !d.endedAt) return null;
+  const days = Math.floor((Date.now() - d.endedAt) / DAY_MS);
+  return days >= 0 && days <= DELOAD_SHADOW_DAYS ? {days, at: d.endedAt} : null;
+}
 function deloadWindowMs(){ return (DELOAD_DAYS + 1) * DAY_MS; }
 function sweepDeload(){
   const d = S.deload;
