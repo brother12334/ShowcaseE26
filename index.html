@@ -4614,6 +4614,7 @@ body.cele-open{overflow:hidden}
 .bm-inert{fill:#2e2e38;stroke:#0b0b0e;stroke-width:2;stroke-linejoin:round}
 .bm-m{cursor:pointer;stroke:#0b0b0e;stroke-width:2.4;stroke-linejoin:round;transition:opacity .18s}
 .bm-m:active{opacity:.68}
+.bm-proj-say{font-size:11.5px;color:var(--faint);line-height:1.5;margin:6px 4px 0;text-align:center}
 .bm-legend{display:flex;flex-wrap:wrap;gap:7px 14px;justify-content:center;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
 .bm-lg{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim)}
 .bm-sw{width:13px;height:13px;border-radius:4px;flex-shrink:0}
@@ -5860,7 +5861,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.2";
+const APP_VERSION = "33.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -24712,8 +24713,22 @@ function muscleMetric(A, m, metric){
   }
   if(metric==="volume"){
     const st = A.state[m], sets = A.vol[m], M = MUSCLES[m];
-    const color = st.k==="none"?C_NONE : st.k==="under"?C_LOW : st.k==="optimal"?C_OK : st.k==="high"?C_WARN : C_BAD;
-    const glow = st.k==="none"?0 : st.k==="under"?.35 : st.k==="optimal"?.75 : st.k==="high"?.85 : 1;
+    /* THE BAND, NOT THE STATE'S NAME.
+
+       This switched on st.k with everything unrecognised falling through to red. Then A8
+       added two states it had never heard of — "proj", the mid-cycle projection, and
+       "queued", a muscle whose work is still to come — and from that release until now
+       the map painted EVERY muscle "too much" for the whole of a cycle, while the sheet
+       one tap away read "on track for 10.5 sets a week, which is productive".
+
+       A projection carries the band it is heading for; a queued muscle has not been
+       trained yet. Both are answered here, and anything genuinely unknown draws as
+       not-trained rather than as the worst reading on the scale. */
+    const band = st.proj ? st.band : st.k;
+    const C = {none:C_NONE, queued:C_NONE, under:C_LOW, optimal:C_OK, high:C_WARN, over:C_BAD};
+    const G = {none:0, queued:0, under:.35, optimal:.75, high:.85, over:1};
+    const color = C[band] !== undefined ? C[band] : C_NONE;
+    const glow = G[band] !== undefined ? G[band] : 0;
     return {v:Math.round(Math.min(100, sets/M.mrv*100)), txt:r1(sets)+" sets", color, glow, note:st.txt};
   }
   if(metric==="recovery"){
@@ -24738,7 +24753,10 @@ function muscleMetric(A, m, metric){
 function metricLegend(metric){
   const sw = (c,t)=>`<span class="bm-lg"><span class="bm-sw" style="background:${c}"></span>${t}</span>`;
   if(metric==="volume"){
-    return sw(C_NONE,"not trained")+sw(C_LOW,"too little")+sw(C_OK,"just right")+sw(C_WARN,"a lot")+sw(C_BAD,"too much");
+    /* The same four words the verdicts use. "too little / just right / a lot / too much"
+       was a mark out of four; these say what each band actually is. */
+    return sw(C_NONE,"not trained")+sw(C_LOW,"maintenance")+sw(C_OK,"productive")
+         + sw(C_WARN,"high")+sw(C_BAD,"above your limit");
   }
   if(metric==="growth"){
     return sw(C_OK,"growing")+sw(C_FLAT,"holding")+sw(C_BAD,"going backwards")+sw(C_NONE,"no data");
@@ -25936,6 +25954,12 @@ function viewBody(){
       <div class="bm-fig">${bodyBackSVG(A, shownMetric)}<div class="bm-fig-label">Back</div></div>
     </div>
     <div class="bm-legend">${metricLegend(shownMetric)}<span class="bm-lg"><span class="bm-sw" style="background:${C_GREY}"></span>${cyc.complete?"not trained":"not trained yet"}</span></div>
+    ${/* Mid-cycle the colours are a projection, and the legend's words are about where
+          each muscle is HEADING rather than where it has got to. Said once, under the key,
+          because a red muscle four days into a cycle otherwise reads as a verdict. */
+      shownMetric === "volume" && A.midCycle
+        ? `<div class="bm-proj-say">Part-way through the cycle, so these are where each
+            muscle is heading if the days still to come are done as written.</div>` : ""}
     ${nbMapPickHTML(A, shownMetric, advanced)}
     <button class="nb-adv" data-sec="nbadv">
       <span>${advanced?"Back to the simple view":"Advanced"}</span>
