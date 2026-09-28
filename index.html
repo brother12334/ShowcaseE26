@@ -5860,7 +5860,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.9";
+const APP_VERSION = "33.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -40648,9 +40648,40 @@ function topWorkedLast(last){
   });
   return top;
 }
+/* A LOAD THE APP HAS JUST WRITTEN IS THE ANSWER, IN EVERY BOX.
+
+   "Cut to 25 lb by Element 26" sat at the top of the card while round two suggested 30 —
+   the number from the session that CAUSED the cut. The rule underneath is "the heavier of
+   the two wins", which is right when the log has moved on and the programme has not, and
+   exactly backwards when the programme moved last: a cut is the app saying the old number
+   was unreachable, and then offering it back two rows down.
+
+   So a load the app wrote, and that has not been trained since, wins outright. It stops
+   winning the moment you perform the movement again — from then on the log is the newer
+   fact and the ordinary rule takes over. A number you typed yourself is untouched: this
+   only ever speaks for changes stamped `byApp`. */
+function appSetLoadPending(name){
+  const pe = findProgramEntry(name);
+  const b = pe && pe.byApp;
+  if(!b || !b.at || b.to == null || b.to === "") return null;
+  const to = parseFloat(b.to);
+  if(!isFinite(to) || to <= 0) return null;
+  // superseded by a later edit of your own, so it is no longer the app's number
+  if(!(Math.abs(parseFloat(pe.weight) - to) < 0.01)) return null;
+  const trained = (S.sessions || []).some(sx=>
+    (sx && (sx.finishedAt || sx.startedAt || 0) > b.at) &&
+    (sx.entries || []).some(e=> e && nrm(e.name) === nrm(name)
+      && (e.sets || []).some(isWorkingSet)));
+  return trained ? null : to;
+}
 function planLoadPh(en, last, si){
   const plan = planLoadFor(en);
   const did = lastWorkedPh(last, si);
+  const forced = appSetLoadPending(en && en.name);
+  if(forced != null){
+    const net = forced - entryBarAdd(en);
+    if(net > 0) return String(r1(net));
+  }
   if(plan !== ""){
     const p = parseFloat(plan);
     if(isFinite(did) && isFinite(p) && did > p) return String(r1(did));
