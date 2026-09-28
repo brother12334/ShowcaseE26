@@ -2946,6 +2946,15 @@ body.pfl-open{overflow:hidden}
 .pfl-sore-t{padding:9px 2px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
   color:var(--dim);cursor:pointer;font:11px var(--mono);line-height:1.2;text-align:center}
 .pfl-sore-t.on{border-color:var(--acc);background:var(--acc-soft);color:var(--text)}
+.pfl-flags{margin-top:18px;animation:pfRise .45s cubic-bezier(.2,.9,.28,1.06) both;
+  animation-delay:440ms}
+.pfl-flags-k{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:7px}
+.pfl-flags-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.pfl-flag{padding:10px 6px;border-radius:10px;border:1px solid var(--line);background:var(--card2);
+  color:var(--dim);cursor:pointer;font:11.5px var(--mono);line-height:1.2;text-align:center}
+.pfl-flag.on{border-color:var(--acc);background:var(--acc-soft);color:var(--text)}
+.pfl-flags-s{font-size:11.5px;line-height:1.5;color:var(--faint);margin-top:8px}
 .pfl-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .pfl-chip{
   padding:11px 15px;border-radius:12px;border:1px solid var(--line);background:var(--card2);
@@ -3234,8 +3243,6 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .wd-go{color:var(--faint);font-size:16px;flex-shrink:0}
 /* B1. The same line as the weigh-in prompt, in the recovery colour rather than the accent,
    because it is asking about the body rather than about a number. */
-.sore-line{border-left-color:var(--back)}
-.sore-line .wd-t{color:var(--back)}
 .sore-row{padding:10px 0;border-top:1px solid var(--line)}
 .sore-row:first-child{border-top:0}
 .sore-m{font-size:13.5px;margin-bottom:7px}
@@ -5847,7 +5854,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "32.6";
+const APP_VERSION = "32.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -22245,7 +22252,7 @@ function openPreflight(wid){
            about what you are carrying. Here it is the right question by construction: the
            reader it feeds is soreBefore(), how sore the muscle is as you walk in. The
            Today line stays for the days you do not train. */
-        sore: {}, soreList: soreList,
+        sore: {}, flags: Object.assign({}, (S.dayFlags || {})[todayStr()] || {}), soreList: soreList,
         steps: ["hero", "map"].concat(energyDue() ? ["energy"] : [])
                  .concat(soreList.length ? ["sore"] : [])
                  .concat(["time", "ready"])};
@@ -22371,6 +22378,20 @@ function pfDraw(){
             `<button class="pfl-sore-t${PF.sore[g] === v ? " on" : ""}" data-pfsore="${esc(g)}:${v}"
                aria-pressed="${PF.sore[g] === v}">${esc(w)}</button>`).join("")}</div>
         </div>`).join("")}</div>
+      ${/* The day flags travelled here with the soreness question, and they belong here
+            more than they did on Today: ill, stressed or eating noticeably less are facts
+            about the session you are ABOUT to log, and exposureSkip() reads them against
+            that session when it decides what the performance trend is allowed to learn
+            from. Optional, two taps at most, and off by default. */
+        `<div class="pfl-flags" style="--d:300ms">
+          <div class="pfl-flags-k">Anything about today?</div>
+          <div class="pfl-flags-row">${DAY_FLAG_FIELDS.map((f, i)=>
+            `<button class="pfl-flag${PF.flags[f.k] ? " on" : ""}" data-pfflag="${esc(f.k)}"
+               aria-pressed="${!!PF.flags[f.k]}" title="${esc(f.say)}" style="--i:${i}">${esc(f.t)}</button>`).join("")}</div>
+          <div class="pfl-flags-s">A day like that is a day your lifts say something other than
+            "this is how the volume is working", so it is left out of what the app learns from.
+            It still counts as training.</div>
+        </div>`}
     </div>`;
   } else if(PF.step === "time"){
     const est = fmtMins(sum.sec);
@@ -22477,6 +22498,17 @@ function pfDraw(){
     const rec = Object.assign({}, S.sore[d] || {});
     if(PF.sore[g] == null) delete rec[g]; else rec[g] = PF.sore[g];
     if(Object.keys(rec).length) S.sore[d] = rec; else delete S.sore[d];
+    save(); queueSync();
+    pfDraw();
+  });
+  host.querySelectorAll("[data-pfflag]").forEach(b=> b.onclick = ()=>{
+    const k = b.dataset.pfflag;
+    PF.flags[k] = !PF.flags[k];
+    if(!S.dayFlags || typeof S.dayFlags !== "object") S.dayFlags = {};
+    const d = todayStr();
+    const on = {};
+    Object.keys(PF.flags).forEach(x=>{ if(PF.flags[x]) on[x] = true; });
+    if(Object.keys(on).length) S.dayFlags[d] = on; else delete S.dayFlags[d];
     save(); queueSync();
     pfDraw();
   });
@@ -22878,7 +22910,6 @@ function viewToday(){
 
   h += plateStrip();
   h += weighDueHTML();
-  h += soreAskHTML();
   h += planWeekStripHTML();
 
   /* THE SESSION LIVES IN ITS OWN TAB NOW. What Today has to say while one is running is
@@ -29537,8 +29568,20 @@ const DAY_FLAG_FIELDS = [
   {k:"cut",    t:"Eating less",      say:"In a deficit right now"},
   {k:"notRep", t:"Not a normal day", say:"Whatever happened, do not learn from it"}
 ];
-let SORE_SNOOZE = null;         // the day it was waved away, for as long as the app is open
-/* The muscles worth asking about today, hardest-trained first. */
+/* ASKED ON THE WAY IN, AND ONLY THERE.
+
+   This used to be a line on the Today tab with a sheet behind it. Two things were wrong
+   with that. It could land on a day you were not training, when "how sore are you" has
+   nothing to act on; and it could land twenty minutes after a session, when the answer is
+   about the work you just did rather than about what you are carrying into the next one.
+
+   The reader it feeds is soreBefore() — how sore the muscle is WALKING IN — so the
+   question belongs in the pre-workout flow and nowhere else. The day flags moved with it:
+   ill, stressed or eating less are facts about the session you are ABOUT to log, and
+   exposureSkip() reads them against that session. See the "sore" step in pfDraw(). */
+/* The muscles worth asking about, hardest-trained first: anything that has taken real
+   work inside SORE_ASK_HOURS. The pre-workout step narrows this further — see
+   pfSoreMuscles(). */
 function soreAskMuscles(){
   const now = Date.now();
   let wk = null;
@@ -29548,116 +29591,10 @@ function soreAskMuscles(){
     .sort((a,b)=> wk[b].eff - wk[a].eff)
     .slice(0, SORE_ASK_MAX);
 }
-/* HOW LONG AFTER A SESSION THE QUESTION MEANS ANYTHING.
-
-   Soreness peaks a day or two after the work that caused it, not on the walk to the car.
-   Asked twenty minutes after finishing, the answer is about the session you just did and
-   says nothing about whether the volume you are carrying is recoverable — which is the
-   only thing the calibration wants it for. The reader it feeds is soreBefore(): how sore
-   the muscle is WALKING IN. So the prompt holds its tongue for a few hours after a
-   session, and the natural place to ask is the pre-workout flow, where the question is
-   "how are you arriving" by construction. */
-const SORE_QUIET_AFTER_H = 6;
-function lastSessionEndMs(){
-  let last = 0;
-  (S.sessions || []).forEach(x=>{
-    const t = (x && (x.finishedAt || x.startedAt)) || 0;
-    if(t > last) last = t;
-  });
-  return last;
-}
-function soreJustTrained(){
-  const t = lastSessionEndMs();
-  return t > 0 && (Date.now() - t) < SORE_QUIET_AFTER_H * 3600e3;
-}
 function soreAskedToday(){
   const d = todayStr();
   const rec = (S.sore || {})[d];
-  return !!(rec && Object.keys(rec).length) || SORE_SNOOZE === d;
-}
-function soreAskHTML(){
-  if(S.active) return "";                       // not in the middle of a session
-  if(soreAskedToday()) return "";
-  /* Just finished: the question belongs to tomorrow, or to the walk in before the next
-     session, and the pre-workout flow asks it there. */
-  if(soreJustTrained()) return "";
-  const ms = soreAskMuscles();
-  if(!ms.length) return "";
-  return `<button class="wd-line sore-line" id="soreAsk">
-    <span class="wd-k">How does the body feel today?</span>
-    <span class="wd-t">${ms.length} muscle${ms.length===1?"":"s"}</span>
-    <span class="wd-go">›</span>
-  </button>`;
-}
-function openSoreSheet(){
-  const d = todayStr();
-  const ms = soreAskMuscles();
-  const have = (S.sore || {})[d] || {};
-  const flags = (S.dayFlags || {})[d] || {};
-  const h = `<h3>How does the body feel?</h3>
-    <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">
-      Soreness from what you trained in the last ${Math.round(SORE_ASK_HOURS/24)} days. It is
-      what tells Element 26 whether your volume is landing or piling up — and it is the one
-      thing it cannot read off your sets.</div>
-    <div class="sore-list">${ms.map(m=>{
-      const cur = have[m];
-      return `<div class="sore-row">
-        <div class="sore-m">${esc(gName(m))}</div>
-        <div class="sore-taps">${SORE_WORDS.map((w,i)=>
-          `<button class="sore-t${cur === i ? " on" : ""}" data-sore="${esc(m)}" data-sorev="${i}"
-             aria-pressed="${cur === i}">${esc(w)}</button>`).join("")}</div>
-      </div>`;
-    }).join("")}</div>
-    <div class="k-lab" style="margin-top:16px">Anything else about today</div>
-    <div class="sore-flags">${DAY_FLAG_FIELDS.map(f=>
-      `<button class="sore-f${flags[f.k] ? " on" : ""}" data-dayflag="${esc(f.k)}"
-         aria-pressed="${!!flags[f.k]}" title="${esc(f.say)}">${esc(f.t)}</button>`).join("")}</div>
-    <div class="set-says">A day you were ill, stressed or eating noticeably less is a day your
-      lifts say something other than "this is how the volume is working". Marked days still
-      count as training; they are just left out of what the app learns from.</div>
-    <div class="btn-row" style="margin-top:16px">
-      <button class="btn small" id="soreSave" style="flex:1">Save</button>
-    </div>
-    <div class="btn-row" style="margin-top:8px">
-      <button class="btn ghost small" id="soreSkip" style="flex:1">Not today</button>
-    </div>`;
-  showModal(h);
-  MODAL_REOPEN = openSoreSheet;
-  const m = $("#modal");
-  const picked = Object.assign({}, have);
-  const fl = Object.assign({}, flags);
-  m.querySelectorAll("[data-sore]").forEach(b=> b.onclick = ()=>{
-    const g = b.dataset.sore, v = parseInt(b.dataset.sorev, 10);
-    /* Tapping the answer you already gave takes it back, because a scale with no way to
-       unsay 0 is a scale that records a shrug as data. */
-    if(picked[g] === v) delete picked[g]; else picked[g] = v;
-    m.querySelectorAll('[data-sore="' + g + '"]').forEach(x=>{
-      const on = picked[g] === parseInt(x.dataset.sorev, 10);
-      x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on));
-    });
-  });
-  m.querySelectorAll("[data-dayflag]").forEach(b=> b.onclick = ()=>{
-    const k = b.dataset.dayflag;
-    fl[k] = !fl[k];
-    b.classList.toggle("on", !!fl[k]); b.setAttribute("aria-pressed", String(!!fl[k]));
-  });
-  m.querySelector("#soreSave").onclick = ()=>{
-    if(!S.sore || typeof S.sore !== "object") S.sore = {};
-    if(!S.dayFlags || typeof S.dayFlags !== "object") S.dayFlags = {};
-    if(Object.keys(picked).length) S.sore[d] = picked; else delete S.sore[d];
-    const on = {};
-    Object.keys(fl).forEach(k=>{ if(fl[k]) on[k] = true; });
-    if(Object.keys(on).length) S.dayFlags[d] = on; else delete S.dayFlags[d];
-    /* Nothing said at all is not an answer, so the line comes back tomorrow rather than
-       recording a day of silence as a day of no soreness. */
-    if(!Object.keys(picked).length) SORE_SNOOZE = d;
-    save(); queueSync(); hideModal(); render();
-    toast(Object.keys(picked).length ? "Noted" : "Nothing recorded", "good");
-  };
-  m.querySelector("#soreSkip").onclick = ()=>{
-    SORE_SNOOZE = d;
-    hideModal(); render();
-  };
+  return !!(rec && Object.keys(rec).length);
 }
 function bodyLogHTML(){
   if(!tracksWeight()) return "";
@@ -33233,8 +33170,6 @@ function bind(){
   if(blA) blA.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
   const wdL = $("#weighDue");
   if(wdL) wdL.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
-  const srA = $("#soreAsk");
-  if(srA) srA.onclick = openSoreSheet;
   const rbOpen = $("#recordsBtn");
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
