@@ -5865,7 +5865,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.6";
+const APP_VERSION = "33.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -15865,15 +15865,60 @@ let refreshNavBounds = ()=>{};
      the keyboard up the bar stays where it is rather than climbing to sit on top of it,
      because a weight is being typed and the tab bar is not what anyone is aiming for. */
   const vv = window.visualViewport;
+  /* AND ONLY WHERE THE HIDDEN STRIP IS ACTUALLY AT THE BOTTOM — which is the bug that
+     put the bar in the middle of the screen.
+
+     `innerHeight - (vv.height + vv.offsetTop)` measures how much layout viewport is not
+     on screen. It CANNOT say which end of the screen that strip is at, and every browser
+     with a top URL bar produces exactly the same number as Safari's bottom toolbar: on
+     Android Chrome, with the URL bar showing, the layout viewport is still sized for the
+     collapsed state, so the sum comes out 50-90px — and the correction dutifully lifted
+     the bar that far off the bottom, where it stayed for as long as the URL bar was up.
+     Nothing was hidden down there. That is the bar "floating above the bottom", and on a
+     short page with dark space under it, the bar reading as stranded mid-screen.
+
+     So the correction is applied only where a bottom toolbar actually exists — iOS, every
+     browser on it, since they all inherit Safari's chrome — and only when the visible area
+     starts at the top of the layout viewport (offsetTop 0). Anywhere else the bar is left
+     on plain `bottom:0`, which is correct there and cannot drift.
+
+     It is also dropped outright while a text field has focus. A keyboard is 250px+ and is
+     rejected by the 90px cap, but the cap is sampled DURING the open animation too, and a
+     frame that lands between 1 and 90 would otherwise stick until the next viewport event. */
+  const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent || "")
+    || /iPad|iPhone|iPod/.test(navigator.platform || "")
+    || (/Mac/.test(navigator.platform || "") && (navigator.maxTouchPoints || 0) > 1);
+  let typing = false;
   const anchorNav = ()=>{
     if(!vv) return;
-    const gap = Math.round(window.innerHeight - (vv.height + vv.offsetTop));
-    nav.style.setProperty("--navGap", (gap > 0 && gap <= 90 ? gap : 0) + "px");
+    let gap = 0;
+    if(IOS && !typing){
+      const strip = Math.round(window.innerHeight - (vv.height + vv.offsetTop));
+      if(vv.offsetTop < 1 && strip > 0 && strip <= 90) gap = strip;
+    }
+    nav.style.setProperty("--navGap", gap + "px");
   };
   if(vv){
     vv.addEventListener("resize", anchorNav, {passive:true});
     vv.addEventListener("scroll", anchorNav, {passive:true});
+    /* the toolbar settles a beat after the gesture stops, and the resize that reports it
+       is not guaranteed — one re-measure per scroll, after it ends, is the safety net */
+    let settle = null;
+    window.addEventListener("scroll", ()=>{
+      if(settle) clearTimeout(settle);
+      settle = setTimeout(anchorNav, 140);
+    }, {passive:true});
+    document.addEventListener("focusin", e=>{
+      const t = e.target, tag = t && t.tagName;
+      if(tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT"){ typing = true; anchorNav(); }
+    });
+    document.addEventListener("focusout", ()=>{
+      typing = false;
+      setTimeout(anchorNav, 140);   // after the keyboard has finished leaving
+    });
     anchorNav();
+  }else{
+    nav.style.setProperty("--navGap", "0px");
   }
   /* COMING BACK TO THE APP IS THE OTHER MOMENT THE CORRECTION GOES STALE. The gap is
      recomputed when the visual viewport changes, and a phone that was locked, switched
