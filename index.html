@@ -5865,7 +5865,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "34.0";
+const APP_VERSION = "34.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -24761,7 +24761,12 @@ function openPickModal(ei){
     const chosen = rp.map(x=> x.chosen);
     const slot = rp.findIndex(x=> x.chosen && nrm(x.chosen.name) === nrm(info.opts[i].name));
     const side = a.entries[ei].startSide || startSideFor(a.workoutId);
+    const wasKey = a.entries[ei].planKey;
     a.entries[ei] = planEntry(info.opts[i], !!en.fin, slot < 0 ? ei : slot, chosen, side);
+    /* The slot is the same slot — it is the choice inside it that changed. Keeping the
+       stamp is what lets syncActivePlan() still recognise this row as the plan's, so a
+       later change to that slot reaches it and the re-sort leaves it where it belongs. */
+    if(wasKey) a.entries[ei].planKey = wasKey;
     save(); queueSync(); hideModal(); render();
     toast(info.opts[i].name + " it is");
   });
@@ -34963,6 +34968,116 @@ function planSnapFromRows(a){
     };
   });
 }
+/* WHICH PLAN SLOT EACH ROW OF THE SESSION IS, as an array parallel to a.entries. The
+   inverse of planRowAt(), taken once rather than per lookup. */
+function planRowIds(a, now){
+  const out = new Array(a.entries.length).fill(null);
+  now.forEach(c=>{ const j = planRowAt(a, c.id); if(j >= 0 && out[j] == null) out[j] = c.id; });
+  return out;
+}
+/* =====================================================================
+   AND IN THE PLAN'S ORDER, BECAUSE A SUPERSET IS A POSITION, NOT A LABEL
+
+   supersetInfo() pairs an entry carrying `superset` with WHATEVER SITS AT THE NEXT INDEX.
+   Nothing records "these two are a pair"; the adjacency IS the pairing. Which means a
+   session whose order has drifted from the plan does not merely list things in a different
+   sequence — it supersets the wrong two exercises, with total conviction, and the card
+   reads as an instruction to do a leg curl and a hip abduction back to back that nobody
+   ever wrote. That is how a plan pairing calf raise with hip abduction came out on the
+   workout screen as leg curl with hip abduction.
+
+   Two steps, because they carry different risk:
+
+     THE PAIR REPAIR runs always. A row that says it is the first half of a superset must
+     be followed by the exercise the PLAN puts after it; where it is not, its partner is
+     moved to sit behind it. That is repairing a statement the session is making which is
+     simply false, so it is worth doing even on a catch-up, where nothing else about the
+     order is trusted. Neither row moves if either has sets logged into it.
+
+     THE FULL RE-SORT runs on an ordinary pass only. Everything from the last exercise you
+     have logged onwards is put back into the plan's order; everything before that stays
+     exactly where it is, because the order you did things in is a fact and the plan does
+     not get to rewrite it. An exercise that answers to no plan slot — swapped at the rack,
+     rebuilt for a different gym — keeps its place in the flow rather than being swept to
+     the end. It does not run on a catch-up because the session can be reordered by hand
+     mid-workout too, and without a snapshot those two are the same reading.
+
+   Both remap the focus cursor and the rest clock by identity afterwards, since both
+   address an entry by index.                                                          */
+function planOrderFix(a, now, news, catchUp){
+  const before = a.entries.slice();
+  let ids = planRowIds(a, now);
+  let touched = false;
+
+  /* FIRST, WHOSE FLAG IT IS AT ALL. `superset` is the one field the session has no way to
+     change — there is no toggle on the workout screen, only in the plan — so a row whose
+     flag disagrees with its slot is always stale, and a stale one is not a cosmetic
+     difference: it makes the card assert a pairing nobody wrote. It is therefore taken
+     from the plan on every pass, catch-up included, before anything is moved to suit it. */
+  now.forEach(c=>{
+    const j = planRowAt(a, c.id);
+    if(j < 0) return;
+    const en = a.entries[j];
+    if(!!en.superset !== c.superset){ en.superset = c.superset || undefined; touched = true; }
+    if(!!en.supersetEnd !== c.supersetEnd){ en.supersetEnd = c.supersetEnd || undefined; touched = true; }
+  });
+
+  // then the pair repair
+  for(let i = 0; i < a.entries.length; i++){
+    const en = a.entries[i];
+    if(!en.superset) continue;
+    const id = ids[i]; if(!id) continue;
+    const at = now.findIndex(c=> c.id === id);
+    const want = (at >= 0) ? now[at + 1] : null;
+    if(!want) continue;
+    const j = planRowAt(a, want.id);
+    if(j < 0 || j === i + 1) continue;                     // already behind it
+    if(planRowLogged(a.entries[j])) continue;              // that one is work you have done
+    if(a.entries[i + 1] && planRowLogged(a.entries[i + 1])) continue;
+    const partner = a.entries[j];
+    a.entries.splice(j, 1);
+    a.entries.splice(a.entries.indexOf(en) + 1, 0, partner);
+    ids = planRowIds(a, now);
+    touched = true;
+    news.push({k:"edit", name: en.name, how: "paired with " + partner.name});
+  }
+
+  // and the re-sort of everything still to come
+  if(!catchUp){
+    let lastDone = -1;
+    a.entries.forEach((en, i)=>{ if(planRowLogged(en)) lastDone = i; });
+    const head = a.entries.slice(0, lastDone + 1);
+    const tail = a.entries.slice(lastDone + 1);
+    if(tail.length > 1){
+      const rank = {};
+      now.forEach((c, i)=> rank[c.id] = i);
+      let known = -1, drift = 0;
+      const keyed = tail.map((en, i)=>{
+        const id = ids[lastDone + 1 + i];
+        let k;
+        if(id != null && rank[id] != null){ k = rank[id]; known = k; drift = 0; }
+        else { drift++; k = known + drift / 1000; }        // no slot of its own: stays put
+        return {en, k, i};
+      });
+      keyed.sort((x, y)=> (x.k - y.k) || (x.i - y.i));     // stable: a tie keeps its order
+      if(keyed.some((x, i)=> x.i !== i)){
+        a.entries = head.concat(keyed.map(x=> x.en));
+        touched = true;
+        news.push({k:"order"});
+      }
+    }
+  }
+
+  if(!touched) return false;
+  const moved = i=>{
+    const en = before[i];
+    const j = en ? a.entries.indexOf(en) : -1;
+    return j < 0 ? Math.min(i, a.entries.length - 1) : j;
+  };
+  if(a.focusIdx != null) a.focusIdx = Math.max(0, moved(a.focusIdx));
+  if(a.restTimer && a.restTimer.e != null) a.restTimer.e = Math.max(0, moved(a.restTimer.e));
+  return true;
+}
 function syncActivePlan(){
   const a = (typeof S !== "undefined" && S) ? S.active : null;
   if(!a || !a.workoutId || !Array.isArray(a.entries)) return;
@@ -35118,6 +35233,10 @@ function syncActivePlan(){
     if(said.length){ moved = true; news.push({k:"edit", name: c.name, how: said.join(", ")}); }
   });
 
+  /* 4 — AND IN THE PLAN'S ORDER. Last, so it sorts the roster the three steps above
+     have already settled rather than a list that is about to change again. */
+  try{ if(planOrderFix(a, now, news, catchUp)) moved = true; }catch(e){}
+
   if(!moved){ saveQuiet(); return; }
   if(a.focusIdx != null) a.focusIdx = Math.max(0, Math.min(a.focusIdx, Math.max(0, a.entries.length - 1)));
   a.planEdits = (a.planEdits || []).concat(news);
@@ -35130,6 +35249,7 @@ function planEditsSay(news){
     const n = news[0];
     if(n.k === "added") return n.name + " added to this session";
     if(n.k === "gone")  return n.name + " taken out of this session";
+    if(n.k === "order") return "Reordered to match your plan";
     return n.name + " — " + n.how;
   }
   return "This session now matches your plan — " + news.length + " changes";
@@ -35141,6 +35261,7 @@ function planEditsCardHTML(a){
   if(!list.length) return "";
   const say = n => n.k === "added" ? "<b>" + esc(n.name) + "</b> added"
              : n.k === "gone"    ? "<b>" + esc(n.name) + "</b> taken out"
+             : n.k === "order"   ? "the exercises you have not started put back into your plan's order"
              : "<b>" + esc(n.name) + "</b> — " + esc(n.how);
   return `<div class="card tb-card">
     <div class="lc-k"><i></i>Your plan changed while you were training</div>
