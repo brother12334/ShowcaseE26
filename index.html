@@ -5865,7 +5865,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.7";
+const APP_VERSION = "33.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -21362,6 +21362,10 @@ function render(){
     return;
   }
   document.body.classList.remove("onboarding");
+  /* A running session follows its own day of the plan. Every path that edits the programme
+     re-renders, so this is the one place it has to be read from, and it returns on a string
+     compare when nothing has moved — which is every render but the handful that matter. */
+  try{ syncActivePlan(); }catch(e){}
   if(TAB !== "sync"){ ADV_OPEN = false; SET_PAGE = null; }
   if(TAB !== "program") DAY_EDIT = null;
   if(TAB !== "history"){ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; }
@@ -23518,6 +23522,7 @@ function viewActiveSession(){
       <div style="text-align:center;margin-top:10px"><button class="nb-link" id="tbUndo">Put it back as written</button></div>
     </div>`;
   }
+  h += planEditsCardHTML(a);
 
   let finLab = false;
   const tips = focusTipsFor(a.workoutId), tipsSeen = new Set();
@@ -24582,7 +24587,7 @@ function viewFocusSession(){
       <span class="num sub" style="font-size:15px">${a.entries.length?ei+1:0} / ${a.entries.length}</span>
     </div>
     ${plateLoaderHTML(a)}
-  </div>`;
+  </div>` + planEditsCardHTML(a);
   if(!en){
     h += `<div class="empty nb-empty">
       <div class="nb-empty-t">That's everything</div>
@@ -32933,6 +32938,8 @@ function bind(){
   document.querySelectorAll("[data-goto]").forEach(b=> b.onclick=()=>{
     goTab(b.dataset.goto); replayViewIn();
   });
+  const _pe = $("#planEditsOk");
+  if(_pe) _pe.onclick = ()=>{ if(S.active){ S.active.planEdits = []; save(); render(); } };
   document.querySelectorAll("[data-coachoff]").forEach(b=> b.onclick=()=>{
     COACH_HIDDEN = true; render();
     toast("Hidden \u2014 these stop on their own after your first session");
@@ -34676,19 +34683,27 @@ function startWorkout(wid){
   // lock in this session's starting arm now, so it can't shift if the session count
   // changes later (e.g. resuming from history splices a session out of the list).
   const side = startSideFor(wid);
+  /* One read of the plan, used three times: to build the rows, to stamp each row with the
+     slot it came from, and to keep the snapshot syncActivePlan() diffs against later. */
+  const slots = planSlotList(wid);
   S.active = {
     id: uid(),
     workoutId: wid,
     date: todayStr(),
     startedAt: Date.now(),
-    /* Built once per slot by planEntry() below. resolvedProgram() is called once and
-       the chosen list passed down, rather than rebuilt inside the loop for every slot. */
     entries: (()=>{
-      const rp = resolvedProgram(wid);
-      const chosen = rp.map(x=> x.chosen);
-      return rp.map(({chosen:e, isFinisher}, wi)=> planEntry(e, isFinisher, wi, chosen, side));
+      const chosen = slots.map(x=> x.src);
+      return slots.map(sl=>{
+        const en = planEntry(sl.src, sl.fin, sl.wi, chosen, side);
+        // which slot of the plan this row came from, so a change to the plan can find
+        // its own row again even after the session has been reordered or swapped
+        en.planKey = sl.id;
+        return en;
+      });
     })()
   };
+  S.active.planSnap = planSnapOf(slots);
+  S.active.planSig  = JSON.stringify(S.active.planSnap);
   save();
   goTab("workout");                 // the session has its own tab; open it
   /* And then the door: energy, time and which room, asked once, on one screen, before
@@ -34739,6 +34754,256 @@ function planEntry(e, isFinisher, wi, chosenList, side){
     sets: Array.from({length:e.sets}, ()=>({weight:"",reps:"",rpe:"",done:false}))
   };
 }
+/* =====================================================================
+   THE PLAN CHANGED WHILE YOU WERE TRAINING IT
+
+   A session is a snapshot. startWorkout() copies the plan into S.active.entries and every
+   prescription is frozen there, which is what stops a set you have already done from being
+   retargeted under you. The cost was that editing today's day mid-workout did nothing you
+   could see until tomorrow: you added an exercise in the Program tab, went back to the
+   session, and it wasn't there.
+
+   This reconciles the two on the next render. It is a THREE-WAY MERGE, not a rebuild. The
+   plan the session was built from is kept ON the session, so the diff answers "what did
+   you change in the PLAN" — and everything the SESSION did to itself is absent from that
+   diff and therefore survives untouched: a skipped exercise, a swap, a set added at the
+   rack, a rest range you widened, a note you typed, a gym rebuild, a time box.
+
+   The rules, all of them, in one place:
+     • added to the day     → appears in the session, in its planned place
+     • taken off the day    → leaves the session, UNLESS you have already logged into it,
+                              because that is work you did and dropping it is dropping data
+     • set count changed    → the DIFFERENCE is applied, so a set you added at the rack is
+                              not undone; rows only ever come off the end, and never a row
+                              with anything in it
+     • prescription changed → reps, RPE, the ramp, rest, load, note and techniques follow,
+                              but only where you have not already overridden them yourself
+     • a movement replaced  → immediately if the old one is untouched; next session if you
+                              have already logged sets into it, because both cannot be true
+
+   Nothing here is silent. Each change is listed in a card at the top of the session, in
+   the same shape the time box and the gym rebuild use, so a card that no longer matches
+   what you started always says why.                                                    */
+/* The day as it should be performed today, flattened into comparable slots. `src` is the
+   resolved plan entry, kept for rebuilding a row; planSnapOf() drops it for storage. */
+function planSlotList(wid){
+  const rp = resolvedProgram(wid);
+  const seen = {};
+  return rp.map(({chosen:e, isFinisher}, wi)=>{
+    const key = nrm(e.name);
+    seen[key] = (seen[key] == null) ? 0 : seen[key] + 1;
+    return {
+      // the same exercise twice on one day is two slots, told apart by which one it is
+      id: key + "#" + seen[key],
+      wi, fin: !!isFinisher, name: e.name,
+      sets: parseInt(e.sets, 10) || 0,
+      reps: e.reps == null ? "" : String(e.reps),
+      rpe:  e.rpe  == null ? "" : String(e.rpe),
+      rpes: Array.isArray(e.rpes) ? e.rpes.slice() : null,
+      rest: Array.isArray(e.rest) ? e.rest.slice() : null,
+      note: e.note == null ? "" : String(e.note),
+      weight: e.weight == null ? null : e.weight,
+      pct: e.pct || null, pctOf: e.pctOf || null,
+      tech: techList(e).map(t=> t.k + (t.detail ? ":" + t.detail : "")).join("|"),
+      sideMode: e.sideMode || "",
+      superset: !!e.superset, supersetEnd: !!e.supersetEnd,
+      src: e
+    };
+  });
+}
+function planSnapOf(slots){
+  return slots.map(sl=>{ const o = Object.assign({}, sl); delete o.src; return o; });
+}
+// anything at all in a row is work: a tick, a rep count, a weight
+function planRowLogged(en){
+  return !!(en && Array.isArray(en.sets) && en.sets.some(st=>
+    st.done || String(st.reps == null ? "" : st.reps).trim() || String(st.weight == null ? "" : st.weight).trim()));
+}
+/* Which row of the session a plan slot is, by the stamp first and by name second — the
+   fallback covers a session started before slots were stamped, and a row the swap sheet
+   rebuilt, which keeps its stamp but may have moved. */
+function planRowAt(a, id){
+  let i = a.entries.findIndex(en=> en.planKey === id);
+  if(i >= 0) return i;
+  const at = id.lastIndexOf("#");
+  if(at < 0) return -1;
+  const key = id.slice(0, at), want = parseInt(id.slice(at + 1), 10);
+  let n = -1;
+  for(let j = 0; j < a.entries.length; j++){
+    if(nrm(a.entries[j].name) === key){ n++; if(n === want) return j; }
+  }
+  return -1;
+}
+const planSame = (x, y)=> JSON.stringify(x == null ? null : x) === JSON.stringify(y == null ? null : y);
+const planStr  = v => String(v == null ? "" : v);
+function syncActivePlan(){
+  const a = (typeof S !== "undefined" && S) ? S.active : null;
+  if(!a || !a.workoutId || !Array.isArray(a.entries)) return;
+  /* Only today's session. A card left open overnight is history waiting to be filed, and
+     rewriting it from a plan that has moved on since is not an update, it is a forgery. */
+  if(a.date !== todayStr()) return;
+  let slots, now, sig;
+  try{
+    slots = planSlotList(a.workoutId);
+    now   = planSnapOf(slots);
+    sig   = JSON.stringify(now);
+  }catch(e){ return; }
+  if(a.planSig === sig) return;          // the common case, and it costs one string compare
+  const base = Array.isArray(a.planSnap) ? a.planSnap : null;
+  a.planSnap = now;
+  a.planSig  = sig;
+  // a session from before any of this existed has nothing to diff against: adopt, quietly
+  if(!base){ saveQuiet(); return; }
+
+  const B = {}, N = {};
+  base.forEach(x=> B[x.id] = x);
+  now.forEach(x=> N[x.id] = x);
+  const side = (a.entries.find(en=> en.startSide) || {}).startSide || startSideFor(a.workoutId);
+  const news = [];
+  const kept = {};                       // plan positions whose old movement you had worked
+  let moved = false;
+  /* The rest clock and the focus cursor both address an entry by INDEX, so every insert
+     and removal has to carry them, or the clock ends up counting down somebody else's
+     exercise and the focus view jumps a card. */
+  const shift = (from, by)=>{
+    if(a.focusIdx != null && a.focusIdx >= from) a.focusIdx += by;
+    if(a.restTimer && a.restTimer.e != null && a.restTimer.e >= from) a.restTimer.e += by;
+  };
+
+  // 1 — TAKEN OFF THE DAY
+  base.forEach(g=>{
+    if(N[g.id]) return;
+    const i = planRowAt(a, g.id);
+    if(i < 0) return;
+    if(planRowLogged(a.entries[i])){ kept[g.wi] = true; return; }
+    if(a.restTimer && a.restTimer.e === i){
+      a.restTimer = null;
+      try{ clearRestAlert(); hideRestUI(); }catch(e){}
+    }
+    a.entries.splice(i, 1);
+    shift(i, -1);
+    moved = true;
+    news.push({k:"gone", name: g.name});
+  });
+
+  // 2 — ADDED TO THE DAY
+  now.forEach((c, i)=>{
+    if(B[c.id]) return;
+    if(kept[c.wi]) return;               // this position swapped a movement you had worked
+    if(planRowAt(a, c.id) >= 0) return;  // already here: the swap sheet put it in itself
+    const chosen = slots.map(x=> x.src);
+    const en = planEntry(slots[i].src, c.fin, c.wi, chosen, side);
+    en.planKey = c.id;
+    // where the plan puts it: in front of the next slot that is already in the session
+    let at = a.entries.length;
+    for(let k = i + 1; k < now.length; k++){
+      const j = planRowAt(a, now[k].id);
+      if(j >= 0){ at = j; break; }
+    }
+    a.entries.splice(at, 0, en);
+    shift(at, 1);
+    moved = true;
+    news.push({k:"added", name: c.name});
+  });
+
+  // 3 — CHANGED WHERE IT IS
+  now.forEach((c, i)=>{
+    const b = B[c.id];
+    if(!b) return;
+    const j = planRowAt(a, c.id);
+    if(j < 0) return;
+    const en = a.entries[j];
+    const said = [];
+    /* THE DIFFERENCE, NOT THE NUMBER. 3→4 in the plan means one more set here, so the set
+       you added at the rack is still yours and 4 does not quietly become 4 again. */
+    if(c.sets !== b.sets && c.sets > 0){
+      const want = Math.max(1, en.sets.length + (c.sets - b.sets));
+      while(en.sets.length < want) en.sets.push({weight:"",reps:"",rpe:"",done:false});
+      while(en.sets.length > want){
+        const last = en.sets[en.sets.length - 1];
+        // a row with anything in it is the floor: the plan does not get to delete work
+        if(last.done || planStr(last.reps).trim() || planStr(last.weight).trim()) break;
+        en.sets.pop();
+      }
+      said.push(en.sets.length === want
+        ? "now " + en.sets.length + (en.sets.length === 1 ? " set" : " sets")
+        : "kept the sets you have already logged");
+    }
+    /* EVERY OTHER FIELD ONLY WHERE YOU HAVE NOT OVERRIDDEN IT. The session's own rest
+       range, note and RPE are all editable from the set row, and a plan edit that
+       overwrote them would undo whatever you had just decided at the rack. So each field
+       moves only while the session still holds what the plan used to say. */
+    let pres = false;
+    const take = (f, cv, bv, lv)=>{
+      if(planSame(cv, bv)) return;             // the plan did not change this
+      if(!planSame(lv, bv)) return;            // but you did, so it stays yours
+      en[f] = (cv === "" || cv == null) ? undefined : cv;
+      pres = true;
+    };
+    take("reps", c.reps, b.reps, planStr(en.reps));
+    take("rpe",  c.rpe,  b.rpe,  planStr(en.rpe));
+    take("note", c.note, b.note, planStr(en.note));
+    take("sideMode", c.sideMode, b.sideMode, planStr(en.sideMode));
+    if(!planSame(c.rest, b.rest) && planSame(en.rest || null, b.rest)){
+      en.rest = c.rest ? c.rest.slice() : undefined; pres = true;
+    }
+    if(!planSame(c.rpes, b.rpes)){
+      en.rpes = c.rpes ? c.rpes.slice(0, en.sets.length) : undefined; pres = true;
+    }
+    if(c.tech !== b.tech){
+      const t = techList(slots[i].src);
+      en.tech = t.length ? t.map(x=>({k:x.k, detail:x.detail})) : undefined; pres = true;
+    }
+    if(c.superset !== b.superset || c.supersetEnd !== b.supersetEnd){
+      en.superset   = c.superset   || undefined;
+      en.supersetEnd = c.supersetEnd || undefined; pres = true;
+    }
+    if(c.weight !== b.weight || c.pct !== b.pct || c.pctOf !== b.pctOf){
+      const src = slots[i].src;
+      en.pct   = c.pct   || undefined;
+      en.pctOf = c.pctOf || undefined;
+      en.planWeight = (()=>{
+        if(src.weight != null) return src.weight;
+        const pl = pctLoadFor(src);
+        return (pl && pl.load != null) ? pl.load : undefined;
+      })();
+      pres = true;
+    }
+    if(pres) said.push("changed");
+    if(said.length){ moved = true; news.push({k:"edit", name: c.name, how: said.join(", ")}); }
+  });
+
+  if(!moved){ saveQuiet(); return; }
+  if(a.focusIdx != null) a.focusIdx = Math.max(0, Math.min(a.focusIdx, Math.max(0, a.entries.length - 1)));
+  a.planEdits = (a.planEdits || []).concat(news);
+  save();
+  try{ toast(planEditsSay(news), "good"); }catch(e){}
+}
+// One line for the toast. The card underneath has the whole list.
+function planEditsSay(news){
+  if(news.length === 1){
+    const n = news[0];
+    if(n.k === "added") return n.name + " added to this session";
+    if(n.k === "gone")  return n.name + " taken out of this session";
+    return n.name + " — " + n.how;
+  }
+  return "This session now matches your plan — " + news.length + " changes";
+}
+/* What changed and when, on the session itself, because a toast is gone in three seconds
+   and the question "why is this card not what I started" outlives it. */
+function planEditsCardHTML(a){
+  const list = (a && Array.isArray(a.planEdits)) ? a.planEdits : [];
+  if(!list.length) return "";
+  const say = n => n.k === "added" ? "<b>" + esc(n.name) + "</b> added"
+             : n.k === "gone"    ? "<b>" + esc(n.name) + "</b> taken out"
+             : "<b>" + esc(n.name) + "</b> — " + esc(n.how);
+  return `<div class="card tb-card">
+    <div class="lc-k"><i></i>Your plan changed while you were training</div>
+    <div class="sub" style="margin:0">${list.map(say).join("<br>")}<br>
+      This card followed it. Anything you had already logged was left exactly as it was.</div>
+    <div style="text-align:center;margin-top:10px"><button class="nb-link" id="planEditsOk">Got it</button></div>
+  </div>`;
+}
 function resumeSession(id){
   const idx = S.sessions.findIndex(s=>s.id===id);
   if(idx<0) return;
@@ -34763,6 +35028,7 @@ function resumeSession(id){
       sideMode: e.sideMode||undefined,
       altStyle: e.altStyle || altStyle(e) || undefined,
       startSide: altStyle(e) ? (e.startSide || startSideFor(s.workoutId)) : undefined,
+      planKey: e.planKey || undefined,
       sets: e.sets.map(st=>Object.assign({}, st))
     }))
   };
@@ -34799,6 +35065,10 @@ function finishWorkout(){
   /* A SHORTENED SESSION IS NOT A POOR ONE, and the only way anything downstream can know
      the difference is if the fact travels with the session. */
   if(a.timeBox) sessObj.timeBox = a.timeBox;
+  /* And nor is a session that stopped matching the plan halfway through. The same
+     reasoning: syncActivePlan() changed this card while it was being filled in, and the
+     only way anything reading the history later can know that is if it travels too. */
+  if(Array.isArray(a.planEdits) && a.planEdits.length) sessObj.planEdits = a.planEdits;
   voiceStop();                          // the workout is over; close the microphone
   // every movement logged here is on file as something this gym has
   learnGymKit(sessObj);
