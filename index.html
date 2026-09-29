@@ -5865,7 +5865,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.8";
+const APP_VERSION = "33.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -34836,6 +34836,46 @@ function planRowAt(a, id){
 }
 const planSame = (x, y)=> JSON.stringify(x == null ? null : x) === JSON.stringify(y == null ? null : y);
 const planStr  = v => String(v == null ? "" : v);
+/* THE SESSION YOU ARE IN RIGHT NOW, WHICH HAS NO SNAPSHOT.
+
+   A session only carries the plan it was built from if it was STARTED by a build that
+   knew to keep one. Every workout already open when this shipped has none — and the first
+   render simply adopted whatever the plan said by then, which meant a change made in that
+   window was swallowed and the session never caught up. That is not an edge case, it is
+   everybody's first session after an update.
+
+   So a session without a snapshot gets its base read off its own rows instead: what the
+   plan must have said when they were built. Diffing that against the plan answers "where
+   does this session no longer match", which is the right question for a session that was
+   opened before any of this existed.
+
+   Its ROSTER is deliberately left alone on that first pass. Without a snapshot a slot
+   missing from the session is indistinguishable from one you skipped on purpose, and
+   re-adding a skipped exercise is worse than being a session late. Prescriptions — sets,
+   reps, RPE, rest, load, techniques, and whether this is half of a superset — carry no
+   such ambiguity, so they are reconciled straight away.                                */
+function planSnapFromRows(a){
+  const seen = {};
+  return a.entries.map((en, i)=>{
+    const key = nrm(en.name);
+    seen[key] = (seen[key] == null) ? 0 : seen[key] + 1;
+    return {
+      id: en.planKey || (key + "#" + seen[key]),
+      wi: i, fin: !!en.fin, name: en.name,
+      sets: en.sets.length,
+      reps: planStr(en.reps),
+      rpe:  planStr(en.rpe),
+      rpes: Array.isArray(en.rpes) ? en.rpes.slice() : null,
+      rest: Array.isArray(en.rest) ? en.rest.slice() : null,
+      note: planStr(en.note),
+      weight: en.planWeight == null ? null : en.planWeight,
+      pct: en.pct || null, pctOf: en.pctOf || null,
+      tech: techList(en).map(t=> t.k + (t.detail ? ":" + t.detail : "")).join("|"),
+      sideMode: en.sideMode || "",
+      superset: !!en.superset, supersetEnd: !!en.supersetEnd
+    };
+  });
+}
 function syncActivePlan(){
   const a = (typeof S !== "undefined" && S) ? S.active : null;
   if(!a || !a.workoutId || !Array.isArray(a.entries)) return;
@@ -34849,11 +34889,12 @@ function syncActivePlan(){
     sig   = JSON.stringify(now);
   }catch(e){ return; }
   if(a.planSig === sig) return;          // the common case, and it costs one string compare
-  const base = Array.isArray(a.planSnap) ? a.planSnap : null;
+  /* No snapshot means this session predates them. Read the base off its own rows rather
+     than adopting the plan and losing the change that is sitting there unapplied. */
+  const catchUp = !Array.isArray(a.planSnap);
+  const base = catchUp ? planSnapFromRows(a) : a.planSnap;
   a.planSnap = now;
   a.planSig  = sig;
-  // a session from before any of this existed has nothing to diff against: adopt, quietly
-  if(!base){ saveQuiet(); return; }
 
   const B = {}, N = {};
   base.forEach(x=> B[x.id] = x);
@@ -34872,6 +34913,7 @@ function syncActivePlan(){
 
   // 1 — TAKEN OFF THE DAY
   base.forEach(g=>{
+    if(catchUp) return;                  // see planSnapFromRows(): could be a skip
     if(N[g.id]) return;
     const i = planRowAt(a, g.id);
     if(i < 0) return;
@@ -34888,6 +34930,7 @@ function syncActivePlan(){
 
   // 2 — ADDED TO THE DAY
   now.forEach((c, i)=>{
+    if(catchUp) return;                  // see planSnapFromRows(): could be a skip
     if(B[c.id]) return;
     if(kept[c.wi]) return;               // this position swapped a movement you had worked
     if(planRowAt(a, c.id) >= 0) return;  // already here: the swap sheet put it in itself
@@ -34916,7 +34959,12 @@ function syncActivePlan(){
     const said = [];
     /* THE DIFFERENCE, NOT THE NUMBER. 3→4 in the plan means one more set here, so the set
        you added at the rack is still yours and 4 does not quietly become 4 again. */
-    if(c.sets !== b.sets && c.sets > 0){
+    /* NOT THE SET COUNT ON A CATCH-UP EITHER, and for the same reason as the note: with
+       the row as the base, every difference is ambiguous. A time box cut it, "− set"
+       cut it, "+ set" raised it — all three read as a plan that disagrees, and none of
+       them should lose to it. Set counts follow the plan from the next edit onward, once
+       the snapshot this pass stores exists to tell the two apart. */
+    if(!catchUp && c.sets !== b.sets && c.sets > 0){
       const want = Math.max(1, en.sets.length + (c.sets - b.sets));
       while(en.sets.length < want) en.sets.push({weight:"",reps:"",rpe:"",done:false});
       while(en.sets.length > want){
@@ -34933,30 +34981,41 @@ function syncActivePlan(){
        range, note and RPE are all editable from the set row, and a plan edit that
        overwrote them would undo whatever you had just decided at the rack. So each field
        moves only while the session still holds what the plan used to say. */
-    let pres = false;
-    const take = (f, cv, bv, lv)=>{
+    /* Each field says what it became, not that something happened: "now a superset" is the
+       whole answer, and "changed" is a prompt to go and look. */
+    const take = (f, cv, bv, lv, label)=>{
       if(planSame(cv, bv)) return;             // the plan did not change this
-      if(!planSame(lv, bv)) return;            // but you did, so it stays yours
+      if(!catchUp && !planSame(lv, bv)) return; // but you did, so it stays yours
       en[f] = (cv === "" || cv == null) ? undefined : cv;
-      pres = true;
+      if(label) said.push(label);
     };
-    take("reps", c.reps, b.reps, planStr(en.reps));
-    take("rpe",  c.rpe,  b.rpe,  planStr(en.rpe));
-    take("note", c.note, b.note, planStr(en.note));
-    take("sideMode", c.sideMode, b.sideMode, planStr(en.sideMode));
-    if(!planSame(c.rest, b.rest) && planSame(en.rest || null, b.rest)){
-      en.rest = c.rest ? c.rest.slice() : undefined; pres = true;
+    take("reps", c.reps, b.reps, planStr(en.reps), c.reps ? "reps now " + c.reps : "no rep target");
+    take("rpe",  c.rpe,  b.rpe,  planStr(en.rpe),  c.rpe ? "RPE now " + c.rpe : "no RPE target");
+    /* NOT THE NOTE, AND NOT THE REST RANGE, ON A CATCH-UP. Both are editable from the set
+       row mid-session, and on a catch-up the base IS the row — so "the plan says
+       something different" and "you wrote this yourself at the rack" are the same reading,
+       and the plan would win over the thing you just typed. */
+    if(!catchUp) take("note", c.note, b.note, planStr(en.note), "note changed");
+    take("sideMode", c.sideMode, b.sideMode, planStr(en.sideMode), "sides changed");
+    if(!catchUp && !planSame(c.rest, b.rest) && planSame(en.rest || null, b.rest)){
+      en.rest = c.rest ? c.rest.slice() : undefined;
+      said.push(c.rest ? "rest now " + fmtClock(c.rest[0]) + "\u2013" + fmtClock(c.rest[1])
+                       : "no rest target");
     }
     if(!planSame(c.rpes, b.rpes)){
-      en.rpes = c.rpes ? c.rpes.slice(0, en.sets.length) : undefined; pres = true;
+      en.rpes = c.rpes ? c.rpes.slice(0, en.sets.length) : undefined;
+      said.push(c.rpes ? "a new RPE ramp" : "no RPE ramp");
     }
     if(c.tech !== b.tech){
       const t = techList(slots[i].src);
-      en.tech = t.length ? t.map(x=>({k:x.k, detail:x.detail})) : undefined; pres = true;
+      en.tech = t.length ? t.map(x=>({k:x.k, detail:x.detail})) : undefined;
+      said.push(t.length ? "run as " + t.map(x=> (TECHNIQUES[x.k] || {}).label || x.k).join(" + ")
+                         : "no technique on it now");
     }
     if(c.superset !== b.superset || c.supersetEnd !== b.supersetEnd){
-      en.superset   = c.superset   || undefined;
-      en.supersetEnd = c.supersetEnd || undefined; pres = true;
+      en.superset    = c.superset    || undefined;
+      en.supersetEnd = c.supersetEnd || undefined;
+      if(c.superset !== b.superset) said.push(c.superset ? "now a superset" : "no longer a superset");
     }
     if(c.weight !== b.weight || c.pct !== b.pct || c.pctOf !== b.pctOf){
       const src = slots[i].src;
@@ -34967,9 +35026,8 @@ function syncActivePlan(){
         const pl = pctLoadFor(src);
         return (pl && pl.load != null) ? pl.load : undefined;
       })();
-      pres = true;
+      said.push(en.planWeight != null ? "load now " + fmtLoad(en.planWeight) : "no set load");
     }
-    if(pres) said.push("changed");
     if(said.length){ moved = true; news.push({k:"edit", name: c.name, how: said.join(", ")}); }
   });
 
