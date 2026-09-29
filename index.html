@@ -5865,7 +5865,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.9";
+const APP_VERSION = "34.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10393,6 +10393,10 @@ function fireRestAlert(){
   if(restAlertMode() === "off") return;
   rt.alerted = true;
   saveQuiet();
+  /* Marked, so plannedReminders() no longer includes it and the next post cancels the
+     scheduled push. Both carry the tag "e26-rest", so one arriving anyway replaces this
+     notification rather than adding a second one. */
+  pushSyncSchedule();
   try{ if(navigator.vibrate) navigator.vibrate([120, 80, 120]); }catch(e){}
   const en = S.active.entries[rt.e];
   const what = en && en.name ? en.name : "your next set";
@@ -10436,6 +10440,7 @@ function restAlertCatchUp(){
   if((Date.now() - rt.start) / 1000 < restTargetSec()) return;
   rt.alerted = true;
   saveQuiet();
+  pushSyncSchedule();
 }
 function recordRestIfRunning(){
   clearRestAlert();
@@ -10446,12 +10451,16 @@ function recordRestIfRunning(){
   if(set && sec >= 3) set.rest = sec;
   S.active.restTimer = null;
   save();
+  pushSyncSchedule();          // and take the phone alert back off the schedule
 }
 function startRest(e, s){
   recordRestIfRunning();
   S.active.restTimer = {start: Date.now(), e, s, min: true};
   save();
   scheduleRestAlert();
+  /* And the same deadline to the phone, which is the half that survives the app being put
+     down — see plannedReminders(). */
+  pushSyncSchedule();
   showRestUI(true);
   applyRestLocks();
   voiceSync();                 // nothing said during a rest is a set
@@ -16735,6 +16744,35 @@ function plannedReminders(){
             + "compare against." + today});
     }
   }
+  /* THE REST CLOCK, WHICH IS THE ONE REMINDER THAT IS NOT A TIME OF DAY.
+
+     The alert that matters most is the one least able to fire itself. It was a setTimeout
+     in the page, and a page that has been put down does not get to run timers: Chrome
+     throttles a hidden tab to one wake a minute and freezes it outright after a few, a
+     locked phone freezes it at once, and a browser that has been swiped away is gone. So
+     the buzz arrived the moment you came back to the app, which is precisely when you no
+     longer needed it.
+
+     A scheduled push is the only thing that still works with the screen off, and this app
+     already has one — the same pipeline the training, bedtime and wake reminders use. So
+     the rest deadline is posted as a reminder like any other. The local timer stays as
+     well: with the app open it is instant and costs nothing, and both raise the SAME
+     notification tag, so whichever lands second replaces the first instead of stacking.
+
+     Only while there is something to schedule. A rest already past its target, one the
+     app has already alerted, and every mode but "notify" produce nothing here, which is
+     also how the alert gets CANCELLED: the next post simply leaves it out. */
+  const rt = S.active && S.active.restTimer;
+  if(rt && !rt.alerted && restAlertMode() === "notify"){
+    const at = rt.start + restTargetSec() * 1000;
+    /* Under a couple of seconds there is no point: the request would not beat the clock,
+       and the page is still in front of you if it is counting down in your hand. */
+    if(at > Date.now() + 2000){
+      const en = (S.active.entries || [])[rt.e];
+      const what = (en && en.name) ? en.name : "your next set";
+      out.push({kind:"rest", at, title:"Rest is up", body:"Next: " + what});
+    }
+  }
   return out;
 }
 /* Kept as the training reminder's own accessor: the Reminders card previews it, and it
@@ -16743,19 +16781,38 @@ function nextReminder(){
   return plannedReminders().find(x=> x.kind === "train") || null;
 }
 
-let PUSH_SCHED_BUSY = false;
-/* Post the next reminder, replacing whatever was there. Safe to call from anywhere and
-   deliberately silent: this runs after finishing a workout and at launch, and a failed
-   reminder is not worth interrupting either. */
+let PUSH_SCHED_BUSY = false, PUSH_SCHED_AGAIN = false, PUSH_SCHED_LAST = "";
+/* Post the whole set of reminders, replacing whatever was there. Safe to call from
+   anywhere and deliberately silent: this runs after finishing a workout and at launch, and
+   a failed reminder is not worth interrupting either.
+
+   IT IS CALLED ON EVERY SET NOW, because the rest clock is one of the reminders, so two
+   things that did not matter when this ran twice a day do:
+
+     • DROPPING A CALL. The old guard returned when one was already in flight, which for a
+       schedule computed twice a day was a saving and for one posted at every rack is a
+       lost alert. A call that arrives mid-flight is remembered and run after it instead.
+     • SPENDING A REQUEST ON NOTHING. The items are compared against what was last posted
+       and an identical set is not sent again, so ticking through a session that changes no
+       reminder costs no requests at all. */
 async function pushSyncSchedule(){
-  if(!S.pushOn || !accountAuth() || PUSH_SCHED_BUSY) return;
+  if(!S.pushOn || !accountAuth()) return;
+  if(PUSH_SCHED_BUSY){ PUSH_SCHED_AGAIN = true; return; }
   PUSH_SCHED_BUSY = true;
   try{
-    await apiFetch("/push/schedule", {
-      method:"POST",
-      headers:{"Content-Type":"application/json", "Authorization": accountAuth()},
-      body: JSON.stringify({items: plannedReminders()})
-    });
+    do{
+      PUSH_SCHED_AGAIN = false;
+      const items = plannedReminders();
+      const sig = JSON.stringify(items);
+      if(sig === PUSH_SCHED_LAST) continue;
+      const res = await apiFetch("/push/schedule", {
+        method:"POST",
+        headers:{"Content-Type":"application/json", "Authorization": accountAuth()},
+        body: JSON.stringify({items})
+      });
+      // only remembered once the server has it, so a failure is retried by the next call
+      if(res && res.ok) PUSH_SCHED_LAST = sig;
+    }while(PUSH_SCHED_AGAIN);
   }catch(e){}
   finally{ PUSH_SCHED_BUSY = false; }
 }
@@ -17158,8 +17215,11 @@ function pushDiagHTML(){
 function pushCardHTML(){
   if(!VAPID_PUBLIC) return "";
   const why = pushBlocker();
-  let h = `<div class="sub" style="margin:0 0 12px">Three at most, each one switchable on its own.
-      Nothing is sent that isn't listed here.</div>`;
+  let h = `<div class="sub" style="margin:0 0 12px">Three here, each one switchable on its own${
+      restAlertMode() === "notify"
+        ? `, plus the <b>rest alert</b> \u2014 that one rides along on this so it can reach a locked
+           phone, and it is switched on the workout-screen page rather than here`
+        : ""}. Nothing is sent that isn't listed.</div>`;
   if(PUSH_BUSY){
     return h + `<div class="ai-busy"><span class="ai-spin"></span><span>Setting that up…</span></div>`;
   }
@@ -21045,9 +21105,22 @@ function prefsScreenHTML(){
       {v:"notify", t:"Notify my phone", d:"The same, plus a notification you get with the phone locked or on another app."}
     ], "data-prefrestalert", na,
     na === "notify"
-      ? ((typeof Notification !== "undefined" && Notification.permission === "granted")
-          ? "Notifications are allowed, so this will reach you with the screen off. It is scheduled by the app while it is open — a phone that suspends it hard may hold the alert until you come back."
-          : "Notifications are not allowed yet. Tap <b>Notify my phone</b> again to ask for permission — without it you will still get the buzz and the line on screen.")
+      ? (()=>{
+          const ok = typeof Notification !== "undefined" && Notification.permission === "granted";
+          if(!ok) return "Notifications are not allowed yet. Tap <b>Notify my phone</b> again to ask "
+            + "for permission — without it you will still get the buzz and the line on screen.";
+          /* THE HONEST VERSION OF THIS SENTENCE DEPENDS ON WHERE THE ALERT IS KEPT. Held by
+             the page it dies with the page; posted with your reminders it is your phone's job
+             and the app can be shut. Saying "with the screen off" while it was only ever the
+             former is how somebody sits through a rest that never rang. */
+          if(S.pushOn) return "This reaches you with the screen off and with the app shut — the "
+            + "rest deadline goes out with your reminders, so your phone is holding it rather "
+            + "than this page.";
+          return "Allowed, and it fires on the dot while the app is open. To get it with the "
+            + "phone locked or the app swiped away it has to be scheduled off the device, which "
+            + "is what reminders do: <button class=\"linklike\" data-restalertpush=\"1\">turn "
+            + "Reminders on</button>.";
+        })()
       : "Rest targets come from the set you just did, so a heavy triple gets longer than a set of fifteen.");
   h += setChoice("When a set falls well short", [
       {v:"on",  t:"Ask me",    d:"One tap to say why. The answer changes the advice, not just the mark."},
@@ -32723,7 +32796,9 @@ function bind(){
       } else {
         // unchecking: cancel its running timer and clear its recorded rest
         const rt = S.active.restTimer;
-        if(rt && rt.e===ei && rt.s===si){ S.active.restTimer=null; hideRestUI(); }
+        if(rt && rt.e===ei && rt.s===si){
+          S.active.restTimer=null; clearRestAlert(); pushSyncSchedule(); hideRestUI();
+        }
         delete st.rest;
         delete st.pr;
         delete st.why;              // no longer a completed set, so its reason is stale
@@ -33023,8 +33098,20 @@ function bind(){
       try{ await Notification.requestPermission(); }catch(e){}
       render();
     }
-    /* A rest already running picks the new setting up now rather than at the next set. */
+    /* A rest already running picks the new setting up now rather than at the next set — on
+       this page and on the phone, since switching away from "notify" has to take the
+       scheduled push back down again. */
     scheduleRestAlert();
+    pushSyncSchedule();
+  });
+  /* Reminders, turned on from the one screen where you can see why you would want them. */
+  document.querySelectorAll("[data-restalertpush]").forEach(b=> b.onclick = async ()=>{
+    PUSH_ERR = ""; PUSH_BUSY = true;
+    const err = await pushEnable();
+    PUSH_BUSY = false; PUSH_ERR = err;
+    render();
+    if(err) toast("Reminders not turned on");
+    else toast("Reminders on \u2014 the rest alert reaches a locked phone now", "good");
   });
   document.querySelectorAll("[data-prefrestclock]").forEach(b=> b.onclick=()=>{
     setPref("restClock", b.dataset.prefrestclock,
@@ -34920,7 +35007,7 @@ function syncActivePlan(){
     if(planRowLogged(a.entries[i])){ kept[g.wi] = true; return; }
     if(a.restTimer && a.restTimer.e === i){
       a.restTimer = null;
-      try{ clearRestAlert(); hideRestUI(); }catch(e){}
+      try{ clearRestAlert(); pushSyncSchedule(); hideRestUI(); }catch(e){}
     }
     a.entries.splice(i, 1);
     shift(i, -1);

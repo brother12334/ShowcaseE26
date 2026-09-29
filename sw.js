@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "26.9";
+const VERSION = "27.0";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -163,6 +163,12 @@ self.addEventListener("push", event=>{
       /* One tag for the lot: a reminder that arrives while yesterday's is still on the
          lock screen should replace it, not stack. */
       tag: String(n.tag || "e26-reminder"),
+      /* AND IT HAS TO BE FELT, not just seen. The rest alert is the whole reason this path
+         exists for somebody whose phone is in their pocket between sets, and a silent entry
+         on a lock screen is not an alert. renotify goes with the tag: a replacement should
+         still buzz rather than swapping itself in quietly. */
+      renotify: true,
+      vibrate: [120, 80, 120],
       icon: "./icon192v2.png",
       badge: "./icon192v2.png",
       data: {url: String(n.url || "./")}

@@ -225,13 +225,35 @@ The app detects this and says so rather than presenting a switch that fails sile
 
 ### What actually gets sent
 
-Three kinds, each switchable on its own, and nothing else:
+Four kinds, and nothing else. Three are switched in **Reminders**; the fourth is switched
+on the workout-screen page, because that is where you would look for it:
 
 | kind | when | what it says |
 |---|---|---|
 | `train` | an hour you pick | which session is up, or that today is a rest day. Skipped on a day you have already trained. |
 | `bed` | your night-start time, the one the app already uses | a nudge to start the sleep clock. Not sent on a night you have already answered. |
 | `wake` | roughly when you get up | a prompt to log the night while you can still remember it. |
+| `rest` | the second a rest between sets reaches its target | that the rest is up, and what is next. Posted when the clock starts and withdrawn the moment the next set is logged. |
+
+### The rest alert is the one that needs the second
+
+Everything else here is a time of day, where a minute either way is invisible. "Rest is
+up" thirty seconds late is worse than nothing — and a per-minute cron cannot deliver it.
+
+So rest items are picked up **before** they are due, up to `REST_AHEAD` (125 seconds,
+wider than the cron interval so a tick 61 seconds out catches one too), and the invocation
+waits out the remainder and sends on the second. A cron invocation may sit on a timer; what
+it may not do is burn CPU, and sleeping does neither. The `fired:` guard in `fireDue()` is
+what makes two invocations overlapping on one alert harmless.
+
+The app still runs its own timer in the page as well. With the app open that fires
+instantly and costs nothing; this exists for the case the page cannot cover, which is most
+of them — a hidden tab is throttled to one wake a minute and frozen after a few, a locked
+phone freezes it at once, and a browser that has been swiped away is gone. Both raise the
+tag `e26-rest`, so whichever lands second replaces the first rather than stacking.
+
+**This kind needs a redeploy.** A service still running the three-kind build accepts the
+schedule and deletes the `rest` item as an unknown kind, so the alert silently never fires.
 
 The morning one is aimed by measurement, not assumption. The wake sheet already asks
 "just woken up?"; recording the clock time of that answer turns every logged night into a

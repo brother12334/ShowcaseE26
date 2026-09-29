@@ -158,7 +158,12 @@ const VAPID_TTL = "86400";
 /* The kinds of reminder that exist. Named here only so a client cannot invent an
    unbounded set of them and fill the namespace one key at a time; what each one MEANS is
    entirely the app's business and this service never looks. */
-const SCHED_KINDS = ["train", "bed", "wake"];
+const SCHED_KINDS = ["train", "bed", "wake", "rest"];
+/* "rest" is the one kind that cannot wait for the next minute, so the cron looks this far
+   AHEAD for it as well as behind, and sleeps out the remainder before sending. Wider than
+   the cron interval on purpose: a tick 61 seconds before a deadline should catch it too,
+   and the fired: guard in fireDue() makes a second tick picking up the same item harmless. */
+const REST_AHEAD = 125 * 1000;
 const PEND_MAX = 4;
 const SCHED_MAX_AHEAD = 60 * 24 * 3600 * 1000;   // sanity bound, not a policy
 const TOKEN_RE = /^[a-f0-9]{32}$/;
@@ -641,8 +646,15 @@ export default {
   /* The cron. Configure it in wrangler.accounts.toml:
        [triggers]
        crons = ["* * * * *"]
-     Minute granularity is the floor Cloudflare offers and it is the right unit here — a
-     reminder to train is not a rest timer, and a minute either way is invisible.
+     Minute granularity is the floor Cloudflare offers, and for a reminder to train a minute
+     either way is invisible.
+
+     A REST ALERT IS NOT LIKE THAT. Thirty seconds late on "rest is up" is worse than
+     nothing, and a minute of granularity cannot deliver it — so rest items are picked up
+     BEFORE they are due, up to REST_AHEAD, and the invocation waits out the remainder and
+     sends on the second. A cron invocation is allowed to sit on a timer; what it may not do
+     is burn CPU, and sleeping does neither. Everything else still fires on the minute it
+     falls in, exactly as before.
 
      The scan is a KV list over one prefix, reading the due time out of each key's
      metadata rather than fetching every record, so an idle minute costs one list and no
@@ -651,20 +663,27 @@ export default {
     if (!env || !env.E26_ACCOUNTS || !pushConfigured(env)) return;
     const now = Date.now();
     const due = new Map();
+    const soon = [];                                  // rest alerts about to come due
     let cursor;
     for (let page = 0; page < 20; page++) {
       const res = await env.E26_ACCOUNTS.list({ prefix: "sched:", cursor, limit: 1000 });
       for (const k of res.keys) {
         const at = k.metadata && Number(k.metadata.at);
-        if (!isFinite(at) || at > now) continue;
+        if (!isFinite(at)) continue;
         const rest = k.name.slice(6);                 // "<id>:<kind>"
         const cut = rest.lastIndexOf(":");
         if (cut < 0) continue;
         const id = rest.slice(0, cut);
+        const kind = rest.slice(cut + 1);
+        if (at > now) {
+          // the only kind worth waiting for, and only while the wait is short
+          if (kind === "rest" && at <= now + REST_AHEAD) soon.push({ id, at });
+          continue;
+        }
         /* Grouped by account, not left flat: everything due for one account has to be
            handled together — see fireDue(). */
         if (!due.has(id)) due.set(id, []);
-        due.get(id).push({ kind: rest.slice(cut + 1), at });
+        due.get(id).push({ kind, at });
       }
       if (res.list_complete) break;
       cursor = res.cursor;
@@ -676,6 +695,21 @@ export default {
     for (let i = 0; i < accounts.length; i += 10) {
       await Promise.all(accounts.slice(i, i + 10)
         .map(([id, items]) => fireDue(env, id, items).catch(() => {})));
+    }
+    /* And then the rests, each on its own second. Earliest first and sequential, because
+       the wait is recomputed from the clock every time round rather than accumulated — one
+       alert due in five seconds and another in fifty both land on time.
+
+       fireDue() refuses anything whose stored `at` is still in the future, so the sleep is
+       load-bearing rather than cosmetic, and its fired: guard is what makes the overlap
+       between two invocations safe. */
+    if (soon.length) {
+      soon.sort((a, b) => a.at - b.at);
+      for (const it of soon) {
+        const wait = it.at - Date.now();
+        if (wait > 0) await new Promise((r) => setTimeout(r, Math.min(wait, REST_AHEAD)));
+        await fireDue(env, it.id, [{ kind: "rest", at: it.at }]).catch(() => {});
+      }
     }
   },
 };
