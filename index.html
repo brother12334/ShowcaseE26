@@ -1212,6 +1212,10 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
   border:1px dashed var(--line);border-radius:9px;padding:8px 10px;margin:8px 0 0}
 .warm-set.warm-pl-on{box-shadow:inset 0 0 0 1px var(--acc);color:var(--text)}
 .plate-gap{border-style:solid;border-color:rgba(201,154,52,.3)}
+/* One pulse of the rest pill when the target is reached — the visible half of the alert,
+   for a phone on silent. */
+@keyframes restDing{0%{box-shadow:0 0 0 0 var(--acc-line)}70%{box-shadow:0 0 0 14px rgba(201,138,75,0)}100%{box-shadow:0 0 0 0 rgba(201,138,75,0)}}
+.rest-ding{animation:restDing .9s ease-out 2}
 .pl-gap-s{color:var(--dim)}
 /* The question asked where it matters, answerable without leaving the session. The chips
    are the Settings segment at session size. */
@@ -5861,7 +5865,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "33.5";
+const APP_VERSION = "33.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7288,6 +7292,7 @@ const PREF_DEFAULTS = {
      countdown that freezes at 0:00 hides the one number you want at that point: how long
      you have been standing there since it finished. */
   restClock: "up",        // up | down
+  restAlert: "off",       // off | buzz | notify — what happens when the rest is up
   /* WHERE THE REST DAYS FALL. "scheduled" is the default because it is what almost
      every written programme means: the rest sits at a fixed point in the rotation —
      three days on, one off — and the plan, not the person, decides when. "floating"
@@ -10345,7 +10350,95 @@ function restTargetFor(entry, st){
   return {band:"metabolic", warn:30, ideal:[45,120], hard:180,
     why:"high-rep metabolic work, which recovers fast, 45 to 120 seconds is plenty"};
 }
+/* =====================================================================
+   WHEN THE REST IS UP
+
+   The clock has always known when a rest reached its target and never once said so, which
+   means it is only useful if you are watching it. Between sets people put the phone down.
+
+   Three settings, because the honest ones differ by how much a phone can promise:
+
+     off      what it has always done — the clock runs, nothing interrupts you.
+     buzz     a vibration and an in-app cue the moment the rest is up. Needs the app to be
+              open, which it usually is, resting between sets with the phone in your hand.
+     notify   the same, plus a notification you get with the phone locked or on another
+              app. Needs notification permission, and it is scheduled from the page — a
+              phone that suspends the app hard may hold it until you come back, so the
+              setting says so rather than promising an alarm clock.
+
+   Fired once per rest: `alerted` is stamped on the timer, so coming back to a rest that
+   is already over does not set it off again in your ear. */
+let REST_ALERT_T = null;
+function restAlertMode(){
+  const v = trainPrefs().restAlert;
+  return v === "buzz" || v === "notify" ? v : "off";
+}
+function clearRestAlert(){
+  if(REST_ALERT_T){ clearTimeout(REST_ALERT_T); REST_ALERT_T = null; }
+}
+function scheduleRestAlert(){
+  clearRestAlert();
+  if(restAlertMode() === "off") return;
+  const rt = S.active && S.active.restTimer;
+  if(!rt || rt.alerted) return;
+  const target = restTargetSec();
+  const left = target * 1000 - (Date.now() - rt.start);
+  if(left <= 0) return;                      // already over: see restAlertCatchUp()
+  REST_ALERT_T = setTimeout(fireRestAlert, left);
+}
+function fireRestAlert(){
+  REST_ALERT_T = null;
+  const rt = S.active && S.active.restTimer;
+  if(!rt || rt.alerted) return;
+  if(restAlertMode() === "off") return;
+  rt.alerted = true;
+  saveQuiet();
+  try{ if(navigator.vibrate) navigator.vibrate([120, 80, 120]); }catch(e){}
+  const en = S.active.entries[rt.e];
+  const what = en && en.name ? en.name : "your next set";
+  toast("Rest is up — " + what, "good");
+  const el = document.getElementById("restUI");
+  if(el){ el.classList.remove("rest-ding"); void el.offsetWidth; el.classList.add("rest-ding"); }
+  if(restAlertMode() !== "notify") return;
+  /* The phone, for somebody who has put it down. Through the service worker where there
+     is one, because a notification from a page that is not in front of you is otherwise
+     not shown on most phones. */
+  try{
+    if(typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const body = "Next: " + what;
+    const opts = {body, tag: "e26-rest", renotify: true, icon: "icon-192.png",
+                  badge: "icon-192.png", vibrate: [120, 80, 120], silent: false};
+    const plain = ()=>{ try{ new Notification("Rest is up", opts); }catch(e){} };
+    /* RACED, BECAUSE A PROMISE THAT NEVER SETTLES IS A NOTIFICATION THAT NEVER ARRIVES.
+       serviceWorker.ready hangs for ever where no worker is registered — a browser with
+       the feature and no registration, a page opened from a file, a first run before the
+       worker has installed — and this alert has one moment to be useful. The worker gets
+       a short head start, then the page sends it itself. */
+    if(navigator.serviceWorker && navigator.serviceWorker.ready){
+      let done = false;
+      const fallback = setTimeout(()=>{ if(!done){ done = true; plain(); } }, 400);
+      navigator.serviceWorker.ready.then(reg=>{
+        if(done) return;
+        done = true; clearTimeout(fallback);
+        if(reg && reg.showNotification) reg.showNotification("Rest is up", opts);
+        else plain();
+      }).catch(()=>{ if(!done){ done = true; clearTimeout(fallback); plain(); } });
+    } else plain();
+  }catch(e){}
+}
+/* Came back to the app after the rest had already run out. The phone alert is pointless
+   now — it would be telling you about a moment that has passed — but the clock should not
+   pretend it never happened, so the timer is marked as having reached its target. */
+function restAlertCatchUp(){
+  const rt = S.active && S.active.restTimer;
+  if(!rt || rt.alerted) return;
+  if(restAlertMode() === "off") return;
+  if((Date.now() - rt.start) / 1000 < restTargetSec()) return;
+  rt.alerted = true;
+  saveQuiet();
+}
 function recordRestIfRunning(){
+  clearRestAlert();
   const rt = S.active && S.active.restTimer;
   if(!rt) return;
   const sec = Math.floor((Date.now()-rt.start)/1000);
@@ -10358,6 +10451,7 @@ function startRest(e, s){
   recordRestIfRunning();
   S.active.restTimer = {start: Date.now(), e, s, min: true};
   save();
+  scheduleRestAlert();
   showRestUI(true);
   applyRestLocks();
   voiceSync();                 // nothing said during a rest is a set
@@ -20899,6 +20993,17 @@ function prefsScreenHTML(){
       {v:"up",   t:"Count up",   d:"A stopwatch from zero."},
       {v:"down", t:"Count down", d:"From the rest that set earned, then into negative overtime."}
     ], "data-prefrestclock", p.restClock === "down" ? "down" : "up");
+  const na = restAlertMode();
+  h += setChoice("When the rest is up", [
+      {v:"off",    t:"Nothing",  d:"The clock runs and never interrupts you."},
+      {v:"buzz",   t:"Buzz",     d:"A vibration and a line on screen the moment the rest reaches its target."},
+      {v:"notify", t:"Notify my phone", d:"The same, plus a notification you get with the phone locked or on another app."}
+    ], "data-prefrestalert", na,
+    na === "notify"
+      ? ((typeof Notification !== "undefined" && Notification.permission === "granted")
+          ? "Notifications are allowed, so this will reach you with the screen off. It is scheduled by the app while it is open — a phone that suspends it hard may hold the alert until you come back."
+          : "Notifications are not allowed yet. Tap <b>Notify my phone</b> again to ask for permission — without it you will still get the buzz and the line on screen.")
+      : "Rest targets come from the set you just did, so a heavy triple gets longer than a set of fifteen.");
   h += setChoice("When a set falls well short", [
       {v:"on",  t:"Ask me",    d:"One tap to say why. The answer changes the advice, not just the mark."},
       {v:"off", t:"Don't ask", d:"Logs the set and says nothing."}
@@ -32853,11 +32958,27 @@ function bind(){
      nothing already logged moves, and no exercise that states its own behaviour is
      touched. */
   const setPref = (k, v, msg)=>{ trainPrefs()[k] = v; save(); queueSync(); render(); toast(msg); };
+  document.querySelectorAll("[data-prefrestalert]").forEach(b=> b.onclick = async ()=>{
+    const v = b.dataset.prefrestalert;
+    setPref("restAlert", v,
+      v === "off" ? "The rest clock will not interrupt you"
+      : v === "buzz" ? "A buzz when the rest is up"
+      : "A notification when the rest is up");
+    /* Permission is asked for at the moment it is chosen, which is the only moment it
+       makes sense: a browser will not grant it without a tap, and asking on any other
+       screen is the kind of prompt people refuse on principle. */
+    if(v === "notify" && typeof Notification !== "undefined" && Notification.permission === "default"){
+      try{ await Notification.requestPermission(); }catch(e){}
+      render();
+    }
+    /* A rest already running picks the new setting up now rather than at the next set. */
+    scheduleRestAlert();
+  });
   document.querySelectorAll("[data-prefrestclock]").forEach(b=> b.onclick=()=>{
     setPref("restClock", b.dataset.prefrestclock,
       b.dataset.prefrestclock === "down" ? "Rest clock counts down" : "Rest clock counts up");
     /* A clock already running has to change shape now, not at the next rest. */
-    if(S.active && S.active.restTimer) showRestUI(S.active.restTimer.min);
+    if(S.active && S.active.restTimer){ showRestUI(S.active.restTimer.min); scheduleRestAlert(); }
   });
   document.querySelectorAll("[data-prefsides]").forEach(b=> b.onclick=()=> setPref("sides", b.dataset.prefsides,
     b.dataset.prefsides === "both" ? "A set now covers both limbs"
@@ -43570,7 +43691,12 @@ setTimeout(flushReports, 2500);
 /* Coming back to the app after a while: pull the account's copy, in case the last
    session was logged on another device. */
 document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState === "visible" && accountAuth()) accountPull().then(ok=>{ if(ok) render(); });
+  if(document.visibilityState !== "visible") return;
+  if(accountAuth()) accountPull().then(ok=>{ if(ok) render(); });
+  /* A timer set with setTimeout does not survive a phone that suspends the page, so
+     coming back re-arms the one that is still ahead of us and quietly settles the one
+     that is already behind. See scheduleRestAlert(). */
+  try{ restAlertCatchUp(); scheduleRestAlert(); }catch(e){}
 });
 </script>
 </body>
