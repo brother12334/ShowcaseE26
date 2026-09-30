@@ -2320,6 +2320,8 @@ body.onboarding #app{padding:0}
 .rem-head .seg{width:auto;flex:0 0 auto;margin:0}
 .rem-head .seg button{padding:7px 15px;font-size:12.5px}
 .rem-row .sub{margin:0 0 7px}
+.rem-at{margin-left:auto;font:10.5px var(--mono);letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);flex-shrink:0}
 .rem-when{font-size:12.5px;line-height:1.5;color:var(--faint)}
 .rem-when b{color:var(--ink)}
 .sync-warn{
@@ -3263,6 +3265,7 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .wd-go{color:var(--faint);font-size:16px;flex-shrink:0}
 /* B1. The same line as the weigh-in prompt, in the recovery colour rather than the accent,
    because it is asking about the body rather than about a number. */
+.sore-due{border-left:2px solid var(--back)}
 .sore-row{padding:10px 0;border-top:1px solid var(--line)}
 .sore-row:first-child{border-top:0}
 .sore-m{font-size:13.5px;margin-bottom:7px}
@@ -5890,7 +5893,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.3";
+const APP_VERSION = "35.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -13959,6 +13962,154 @@ function readinessToday(A, g){
   if(!reasons.length) return null;
   return {cut: READY_SET_CUT[Math.min(reasons.length, READY_SET_CUT.length) - 1], reasons};
 }
+/* =====================================================================
+   B1 / B1a — WHEN SORENESS IS ASKED, AND OF WHICH MUSCLES
+
+   Two questions wear the same words and are not the same reading. "Is it still sore"
+   ASKED ON THE WAY IN says what you are carrying into the next exposure. Asked on the
+   rest day the window says peak soreness falls on, it says what the last exposure
+   actually cost. The second is the one that catches a muscle being overreached, because
+   a pre-session reading two days later routinely arrives after the soreness has faded
+   and reports nothing at all.
+
+   So both are asked, and the rules below exist to make sure each trained muscle is asked
+   EXACTLY ONCE around each exposure — never twice, never not at all.
+
+   RULE 1, WHO IS IN SCOPE. A muscle is worth asking about on a given day if today's
+   session makes it a PRIMARY target — some exercise carries at least
+   DOMS_MUSCLE_THRESHOLD of its sets for that muscle — or if its own check day falls
+   today. Front delts picking up a fraction of a set on a leg day are never asked: an
+   incidental share is not an exposure, and a question with nothing behind it teaches
+   people to dismiss the ones that do.
+
+   RULE 2, ON A DAY YOU TRAIN IT. Asked in one short batch at the start, before the first
+   set is logged, alongside sleep and energy. Once per muscle per session however many
+   exercises hit it — and again for a second session on the same day, because an evening
+   session after a morning one is a real second exposure and the honest answer to "how
+   sore are you walking in" has changed. An exercise added after the batch is asked
+   inline, the first time a set of it is logged, rather than being swept up at the end:
+   a reading taken after the work is a reading about the work, which is the other
+   question.
+
+   RULE 3, ON A DAY YOU DO NOT. The check falls on lastSessionDate + the muscle's own
+   recovery window rounded up to whole days, and only where that session was a real
+   exposure (DOMS_CHECK_MIN_SETS effective sets or more) and the muscle is still part of
+   the programme. If that day passes unasked — the app was not opened — it is dropped
+   rather than asked late: soreness is a same-day reading and a guess about Tuesday
+   recorded on Thursday is worse than no reading. Everything falling due together is one
+   screen.
+
+   RULE 4, PRECEDENCE. A day you train the muscle beats a day you do not, and nothing is
+   asked twice in one day. A prompt you skip is recorded as skipped, so it is not asked
+   again that day and so the performance read can tell "no answer" from "answered zero".
+
+   RULE 5, WHAT IS KEPT. The value, the date, and WHICH RULE ASKED — because "still sore
+   two days after training" and "sore walking into the next session" are different
+   sentences, and the one the app shows you should be the one that happened. */
+const DOMS_MUSCLE_THRESHOLD = 0.5;   // share of a set that makes a muscle a primary target
+const DOMS_CHECK_MIN_SETS   = 3;     // effective sets before an exposure earns a rest-day check
+const SORE_BY_PRE  = "pre-session";
+const SORE_BY_PEAK = "rest-day-peak";
+
+// Rule 1(a). The muscles one movement makes a primary target.
+function domsPrimaryOf(name){
+  const mm = musclesFor(name) || {};
+  return MKEYS.filter(m=> (mm[m] || 0) >= DOMS_MUSCLE_THRESHOLD);
+}
+// …and the muscles a whole session does, session-wide.
+function domsPrimaries(entries){
+  const out = {};
+  (entries || []).forEach(e=> domsPrimaryOf(e && e.name).forEach(m=> out[m] = true));
+  return MKEYS.filter(m=> out[m]);
+}
+/* Already answered, or already declined, today. Both count: a question you waved away is
+   a question you have been asked, and asking it again an hour later is nagging. */
+function soreAskedFor(g, d){
+  const day = d || todayStr();
+  const rec = (S.sore || {})[day];
+  if(rec && rec[g] != null) return true;
+  const sk = (S.soreSkip || {})[day];
+  return !!(sk && sk[g]);
+}
+/* The last session that gave this muscle real work, with how much of it, counted the way
+   every other reader in the app counts effective sets. */
+function domsLastExposure(g){
+  const ss = S.sessions || [];
+  for(let i = ss.length - 1; i >= 0; i--){
+    const s = ss[i];
+    if(!s || !Array.isArray(s.entries)) continue;
+    let eff = 0;
+    s.entries.forEach(e=>{
+      if(!e || !Array.isArray(e.sets)) return;
+      const mm = musclesFor(e.name) || {};
+      const c = mm[g] || 0;
+      if(c <= 0) return;
+      let warms = null;
+      try{ warms = entryWarmups(e); }catch(err){ warms = null; }
+      e.sets.forEach((st, si)=>{
+        if(!isWorkingSet(st)) return;
+        let one = 1;
+        try{ one = setEffective(e, si, warms).v; }catch(err){ one = 1; }
+        eff += c * one;
+      });
+    });
+    if(eff > 0) return {date: s.date, eff};
+  }
+  return null;
+}
+/* Rule 1(b). The calendar day this muscle's soreness is worth asking about, which is the
+   day its own recovery window runs out — rounded UP to whole days, because a question
+   arrives on a date and not at an hour. */
+function domsCheckDayFor(g){
+  const x = domsLastExposure(g);
+  if(!x || x.eff < DOMS_CHECK_MIN_SETS) return null;
+  const hrs = ((GROUPS[g] || {}).recov) || 48;
+  const base = Date.parse(x.date + "T12:00:00");
+  if(!base) return null;
+  return new Date(base + Math.ceil(hrs / 24) * DAY_MS).toLocaleDateString("en-CA");
+}
+/* Rule 3. Everything whose check falls today and has not already been asked. Nothing is
+   returned for a day whose check has been and gone: see the rule above. */
+function domsDueToday(){
+  const today = todayStr();
+  return MKEYS.filter(m=>{
+    if(soreAskedFor(m, today)) return false;
+    if(!(planCycleVolume(m) > 0)) return false;       // no longer part of the programme
+    return domsCheckDayFor(m) === today;
+  });
+}
+/* Rule 4. A prompt gone past without an answer, so it is not asked again today and the
+   performance read can tell an unanswered exposure from a zero. */
+function soreSkipMark(list){
+  if(!Array.isArray(list) || !list.length) return;
+  if(!S.soreSkip || typeof S.soreSkip !== "object") S.soreSkip = {};
+  const d = todayStr();
+  const rec = Object.assign({}, S.soreSkip[d] || {});
+  let n = 0;
+  list.forEach(g=>{ if(!soreAskedFor(g, d)){ rec[g] = true; n++; } });
+  if(n){ S.soreSkip[d] = rec; saveQuiet(); }
+}
+/* Rule 5. The value AND which question produced it, kept side by side with the log rather
+   than inside it, so every existing reader of S.sore keeps working unchanged. */
+function soreWrite(g, v, by){
+  if(!S.sore || typeof S.sore === "string") S.sore = {};
+  if(!S.sore || typeof S.sore !== "object") S.sore = {};
+  if(!S.soreBy || typeof S.soreBy !== "object") S.soreBy = {};
+  const d = todayStr();
+  const rec = Object.assign({}, S.sore[d] || {});
+  const src = Object.assign({}, S.soreBy[d] || {});
+  if(v == null){ delete rec[g]; delete src[g]; }
+  else { rec[g] = v; src[g] = by || SORE_BY_PRE; }
+  if(Object.keys(rec).length) S.sore[d] = rec; else delete S.sore[d];
+  if(Object.keys(src).length) S.soreBy[d] = src; else delete S.soreBy[d];
+  /* Answering it is answering it: a muscle marked skipped earlier in the day and then
+     answered is not skipped. */
+  if(v != null && S.soreSkip && S.soreSkip[d]){
+    const sk = Object.assign({}, S.soreSkip[d]);
+    delete sk[g];
+    if(Object.keys(sk).length) S.soreSkip[d] = sk; else delete S.soreSkip[d];
+  }
+}
 /* The most recent soreness rating for a muscle, from the pre-session taps (B1). Null
    until the user has answered for it. */
 function soreBefore(g){
@@ -14536,18 +14687,37 @@ const CUT_SETS_OVER      = [2, 3]; // how many to cut when overreached
 const DELOAD_MUSCLES     = 2;      // this many overreached at once means deload everything
 const HOLD_CYCLES_BEFORE_PROBE = 2;
 
-/* The soreness a muscle averaged over one cycle, from the pre-session taps. Null when
-   nothing was tapped, which is different from zero and has to stay different. */
-function soreAvgOver(g, fromMs, toMs){
+/* THE WORST READING IN THE CYCLE, NOT THE AVERAGE OF THEM.
+
+   An average is the wrong statistic for this. Two readings a cycle — one walking in, one
+   on the day the window says soreness peaks — and a muscle that was very sore on the peak
+   day and fine four days later averages to "a little", which is a sentence about nothing.
+   Soreness is a ceiling reading: what it cost you at its worst is the thing that says
+   whether the volume is landing or piling up.
+
+   Which reading it was travels with it, because "still sore two days after training" and
+   "sore walking into the next session" are different findings and the app should say the
+   one that happened. Null when nothing was tapped, which is not zero and never becomes it. */
+function soreSignalOver(g, fromMs, toMs){
   const log = (S.sore && typeof S.sore === "object") ? S.sore : {};
-  const vals = [];
+  const by  = (S.soreBy && typeof S.soreBy === "object") ? S.soreBy : {};
+  let best = null, bestBy = null, bestDay = null;
   Object.keys(log).forEach(d=>{
     const at = Date.parse(d + "T12:00:00") || 0;
     if(at < fromMs || at > toMs) return;
     const v = log[d] && log[d][g];
-    if(typeof v === "number") vals.push(v);
+    if(typeof v !== "number") return;
+    if(best == null || v > best){
+      best = v;
+      bestBy = (by[d] && by[d][g]) || SORE_BY_PRE;
+      bestDay = d;
+    }
   });
-  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+  return best == null ? null : {v: best, by: bestBy, day: bestDay};
+}
+function soreAvgOver(g, fromMs, toMs){
+  const sig = soreSignalOver(g, fromMs, toMs);
+  return sig ? sig.v : null;
 }
 function jointMaxOver(g, fromMs, toMs){
   const log = (S.joint && typeof S.joint === "object") ? S.joint : {};
@@ -14571,7 +14741,7 @@ function jointMaxOver(g, fromMs, toMs){
 function decideForMuscle(g, cycle){
   /* cycle: {V, trendPct, sore, joint, prev} — assembled by cycleReview() so this stays
      a pure decision and can be tested on made-up numbers. */
-  const {V, trendPct, sore, joint, prev} = cycle;
+  const {V, trendPct, sore, joint, prev, soreBy} = cycle;
   const soreBad  = sore != null && sore >= SORE_OVER;
   const soreOk   = sore == null || sore <= SORE_OK;
   const jointBad = joint != null && joint >= JOINT_OVER;
@@ -14582,6 +14752,10 @@ function decideForMuscle(g, cycle){
   if((fell && fellBefore) || (soreBad && soreBefore) || jointBad){
     const why = jointBad ? "joint pain on its own lifts"
       : (fell && fellBefore) ? "the lift fell two cycles running"
+      /* Named for the question that produced it: soreness still there on the day the
+         recovery window runs out is a different statement from soreness carried into the
+         next session, and somebody reading this deserves to know which. */
+      : soreBy === SORE_BY_PEAK ? "still sore when the recovery window was up, two cycles running"
       : "real soreness two cycles running";
     return {k:"over", V, why,
             observe:{mrv:V},
@@ -14729,6 +14903,10 @@ function muscleCycles(g, opts){
     out.push({i, from:b.from, to:b.to, days, V, trendPct: deload ? null : pct,
               exposures: mine.length, usable: usable.length, deload,
               sore: soreAvgOver(g, b.from, b.to),
+              /* WHICH soreness reading that was (Rule 5). A ceiling set on the rest-day
+                 check and one set walking into the next session mean different things,
+                 and the finding should say the one that happened. */
+              soreBy: (soreSignalOver(g, b.from, b.to) || {}).by || null,
               joint: jointMaxOver(g, b.from, b.to)});
   });
   return out;
@@ -16990,6 +17168,37 @@ function plannedReminders(){
             + "compare against." + today});
     }
   }
+  /* THE REST-DAY SORENESS CHECK. Sent at the hour that check is asked at, on a day one
+     falls due, and only for muscles the day's own session will not ask about itself — see
+     domsRemindFor(). Today if the hour is still ahead, otherwise tomorrow, which is what
+     makes it arrive without the app having been opened in between.
+
+     ONE FOLLOW-UP AND NO MORE. REMINDER_RETRY_MINUTES later, as its own kind, so the
+     service can hold both at once; and both fall away the moment the check is answered,
+     because the next post simply leaves them out. Unanswered by the end of the day it is
+     dropped, not carried — Rule 3 does not ask about Tuesday on Wednesday. */
+  (()=>{
+    const now = Date.now();
+    const today = todayStr();
+    const tmr = new Date(now + DAY_MS).toLocaleDateString("en-CA");
+    const at = (dayStr)=>{
+      const d = new Date(dayStr + "T00:00:00");
+      d.setMinutes(domsCheckMin());
+      return d.getTime();
+    };
+    let day = null;
+    if(at(today) > now + 60000 && domsRemindFor(today, true).length) day = today;
+    else if(domsRemindFor(tmr, false).length) day = tmr;
+    if(!day) return;
+    const ms = domsRemindFor(day, day === today).map(m=> gName(m).toLowerCase());
+    if(!ms.length) return;
+    const title = "How sore is your " + joinList(ms.slice(0, 3)) + "?";
+    const body = "It is " + (ms.length === 1 ? "a day" : "the day") + " after your recovery "
+      + "window, which is when soreness peaks if it is going to. One tap each.";
+    out.push({kind:"sore",  at: at(day), title, body});
+    out.push({kind:"sore2", at: at(day) + REMINDER_RETRY_MINUTES * 60000,
+              title: "Still worth a tap", body: body});
+  })();
   /* THE REST CLOCK, WHICH IS THE ONE REMINDER THAT IS NOT A TIME OF DAY.
 
      The alert that matters most is the one least able to fire itself. It was a setTimeout
@@ -21423,7 +21632,24 @@ function prefsScreenHTML(){
 // HOW THE TRAINING ITSELF IS RUN: the rules that change your programme or how it is judged.
 function prefsSessionHTML(){
   const p = trainPrefs();
-  let h = setChoice("Warm-up sets", [
+  /* THE HOUR THE REST-DAY SORENESS CHECK IS ASKED AT.
+
+     Here rather than under Reminders, even though a notification goes with it: that whole
+     card is behind whether push works on this phone, and this is not a notification
+     setting. The check happens on a rest day whether or not anything is ever sent to you,
+     and the hour it happens at is a fact about how your training is measured — which is
+     what this page is. */
+  let h = setBlock("Rest-day soreness check",
+    "On the day a muscle's recovery window runs out — which is when soreness peaks if it is "
+    + "going to — Element 26 asks how it feels. " + (S.domsCheckTime
+      ? "Answering at the same time each day keeps your readings comparable, which is why it is "
+        + "one hour rather than whenever you happen to open the app."
+      : "Whatever time you answer the first one is the time it will ask from then on, because "
+        + "answering at the same hour each day keeps the readings comparable."),
+    `<div class="duo"><input class="timein" type="time" id="domsTimeIn"
+       value="${esc(domsCheckTime())}"><span class="set-unit">${
+       S.domsCheckTime ? "set from your first answer" : "not set yet"}</span></div>`);
+  h += setChoice("Warm-up sets", [
       {v:"auto",     t:"Add them",  d:"A ramp worked out before the first big lift of the day."},
       {v:"planOnly", t:"Plan only", d:"Only the warm-ups your programme wrote."},
       {v:"manual",   t:"Off",       d:"No warm-up rows at all."}
@@ -22685,24 +22911,49 @@ function pfSteps(){ return (PF && PF.steps) || ["hero", "ready"]; }
    today's session trains come first — those are the ones where the answer changes what
    the session should be — then whatever else is still carrying work from the last few
    days. */
-const PF_SORE_MAX = 4;
+const PF_SORE_MAX = 6;
+/* RULE 2, THE BATCH. What today's session makes a primary target, plus anything whose own
+   check day happens to fall today — that second group would otherwise be asked by the
+   rest-day prompt, and asking it here instead is what Rule 4's precedence means.
+
+   It is scope that decides, not recency. The old list was "every muscle with 1.5
+   effective sets in the last 72 hours", which on a push day asked about quads, and a
+   question with nothing behind it is how people learn to dismiss the ones that matter.
+
+   ASKED ONCE PER SESSION, NOT ONCE PER DAY. A muscle already answered today is not asked
+   again — unless this is a second session that trains it again, which is a real second
+   exposure with a genuinely different answer, and S.active.soreAsked is what tells the
+   two apart. */
 function pfSoreMuscles(fresh){
   /* FIXED WHEN THE FLOW OPENS, not recomputed on every draw. Answering the first muscle
-     makes soreAskedToday() true, which emptied the list underneath the person mid-tap and
-     took the other three rows off the screen. The question is asked once; the list it is
-     asking about does not get to change while it is open. */
+     would otherwise empty the list underneath the person mid-tap and take the other rows
+     off the screen. The question is asked once; the list it is asking about does not get
+     to change while it is open. */
   if(!fresh && PF && Array.isArray(PF.soreList)) return PF.soreList;
-  if(soreAskedToday()) return [];
-  const all = soreAskMuscles();
-  if(!all.length) return [];
-  let today = {};
-  try{
-    ((S.active && S.active.entries) || []).forEach(e=>{
-      const mm = musclesFor(e && e.name) || {};
-      Object.keys(mm).forEach(g=>{ if(mm[g] >= 0.5) today[g] = true; });
-    });
-  }catch(err){ today = {}; }
-  return all.slice().sort((a,b)=> (today[b] ? 1 : 0) - (today[a] ? 1 : 0)).slice(0, PF_SORE_MAX);
+  const a = S.active;
+  let prim = [];
+  try{ prim = domsPrimaries((a && a.entries) || []); }catch(err){ prim = []; }
+  let due = [];
+  try{ due = domsDueToday(); }catch(err){ due = []; }
+  const askedHere = (a && a.soreAsked) || {};
+  const seen = {};
+  const list = prim.concat(due).filter(g=>{
+    if(seen[g]) return false;
+    seen[g] = true;
+    if(askedHere[g]) return false;              // this session has already asked it
+    /* Answered earlier today by another session or by the rest-day prompt — unless THIS
+       session trains it, in which case walking in again is a new question. */
+    if(soreAskedFor(g) && prim.indexOf(g) < 0) return false;
+    return true;
+  });
+  return list.slice(0, PF_SORE_MAX);
+}
+/* RULE 4. Moving off the soreness step without answering is an answer of its own: not
+   asked again today, and recorded so the performance read can tell "no reading" from
+   "answered none". */
+function pfSoreLeave(){
+  if(!PF || !Array.isArray(PF.soreList)) return;
+  try{ soreSkipMark(PF.soreList); }catch(e){}
 }
 function pfAddGymStep(){
   if(!PF || PF.steps.indexOf("gym") > -1) return;
@@ -22873,6 +23124,7 @@ function pfNext(){
   const steps = pfSteps();
   const at = steps.indexOf(PF.step);
   const next = steps[at + 1];
+  if(PF.step === "sore") pfSoreLeave();     // Rule 4: whatever was not answered was passed
   if(!next) return pfFinish();
   PF.step = next;
   pfDraw();
@@ -23060,12 +23312,14 @@ function pfDraw(){
        0 records a shrug as data. */
     if(PF.sore[g] === n) delete PF.sore[g]; else PF.sore[g] = n;
     /* Written as it is tapped rather than at the end, so a flow abandoned halfway still
-       keeps what you said. */
-    if(!S.sore || typeof S.sore !== "object") S.sore = {};
-    const d = todayStr();
-    const rec = Object.assign({}, S.sore[d] || {});
-    if(PF.sore[g] == null) delete rec[g]; else rec[g] = PF.sore[g];
-    if(Object.keys(rec).length) S.sore[d] = rec; else delete S.sore[d];
+       keeps what you said — and tagged with the question that asked it (Rule 5). */
+    soreWrite(g, PF.sore[g] == null ? null : PF.sore[g], SORE_BY_PRE);
+    /* Marked on the SESSION as well as the day. One session asks a muscle once; a second
+       session later the same day gets to ask again. */
+    if(S.active){
+      if(!S.active.soreAsked || typeof S.active.soreAsked !== "object") S.active.soreAsked = {};
+      if(PF.sore[g] == null) delete S.active.soreAsked[g]; else S.active.soreAsked[g] = true;
+    }
     save(); queueSync();
     pfDraw();
   });
@@ -23491,6 +23745,7 @@ function viewToday(){
 
   h += plateStrip();
   h += weighDueHTML();
+  h += soreDueHTML();
   h += planWeekStripHTML();
 
   /* THE SESSION LIVES IN ITS OWN TAB NOW. What Today has to say while one is running is
@@ -30238,6 +30493,177 @@ function openBodyLog(dateStr){
    you straight to the sheet, and "not today" silences it until tomorrow rather than
    forever, because the honest state tomorrow is still that it is due. */
 let WEIGH_SNOOZE = null;
+/* =====================================================================
+   RULE 3 — THE CHECK ON THE DAY THE WINDOW RUNS OUT
+
+   Chest trained on Monday with a 48-hour window is asked about on Wednesday, and Wednesday
+   is a day you are not training chest — so there is no session to put the question in
+   front of. This is that question, and it is the only one that appears anywhere but the
+   pre-workout flow.
+
+   It is not the Today prompt that used to live here. That one asked about anything trained
+   in the last 72 hours, on any day, whether or not there was a reading worth taking; it was
+   removed for good reason. This fires on one day per exposure, for muscles whose window
+   says today is when soreness peaks, and it is gone the moment it is answered or waved
+   away. Everything due together is one card.
+
+   If the day passes without the app being opened, nothing is asked later: a soreness
+   reading is a same-day reading, and Thursday's guess about Tuesday is worse than no
+   reading at all. */
+/* RULE 2, THE OTHER HALF. The batch at the start can only ask about the exercises that
+   were there when it ran. Add a movement at the rack — or train a day that was rebuilt
+   for a gym after the flow — and a muscle becomes a primary target of this session that
+   nobody has been asked about.
+
+   So the first set logged of such a movement asks, inline, for that muscle alone. The
+   first set, not the last and not the finish screen: a reading taken after the work is a
+   reading about the work, which is the other question entirely.
+
+   The set is written before the sheet opens. The spec's order is "ask, then save", and
+   the reason to invert it is that the sheet can be dismissed, backgrounded or lost to a
+   reload — and a logged set that vanished because the app wanted to ask something is a
+   far worse failure than a reading taken four seconds late. The answer still lands before
+   the rest of the exposure, which is what the reading means. */
+function soreAskInline(ei){
+  const a = S.active;
+  if(!a || !a.entries || !a.entries[ei]) return;
+  if(!a.soreAsked || typeof a.soreAsked !== "object") a.soreAsked = {};
+  let want = [];
+  try{
+    want = domsPrimaryOf(a.entries[ei].name).filter(g=>
+      !a.soreAsked[g] && !soreAskedFor(g));
+  }catch(e){ return; }
+  if(!want.length) return;
+  const draw = ()=>{
+    showModal(`<h3>Anything still sore?</h3>
+      <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Before the
+        first set of ${esc(a.entries[ei].name)}. From the last few days, not from this set — it is
+        what tells Element 26 whether your volume is landing or piling up.</div>
+      ${want.map(g=> `<div class="sore-row">
+        <div class="sore-m">${esc(gName(g))}</div>
+        <div class="sore-taps">${SORE_WORDS.map((w, v)=>
+          `<button class="sore-t${(S.sore[todayStr()]||{})[g] === v ? " on" : ""}"
+             data-sinl="${esc(g)}:${v}">${esc(w)}</button>`).join("")}</div>
+      </div>`).join("")}
+      <button class="btn" id="sinlDone" style="margin-top:14px">Done</button>`);
+    const m = $("#modal");
+    m.querySelectorAll("[data-sinl]").forEach(b=> b.onclick = ()=>{
+      const [g, v] = b.dataset.sinl.split(":");
+      const n = parseInt(v, 10);
+      const had = (S.sore[todayStr()] || {})[g];
+      soreWrite(g, had === n ? null : n, SORE_BY_PRE);
+      if(had === n) delete a.soreAsked[g]; else a.soreAsked[g] = true;
+      save(); queueSync();
+      draw();
+    });
+    m.querySelector("#sinlDone").onclick = ()=>{
+      // whatever was not answered is recorded as passed over, not asked again today
+      soreSkipMark(want);
+      hideModal();
+    };
+  };
+  draw();
+}
+/* =====================================================================
+   THE HOUR THE REST-DAY CHECK IS ASKED AT
+
+   Soreness read at 7am on the way out of bed and soreness read at 6pm after a day of
+   walking around are not the same measurement, and a reading that moves with whatever
+   time you happened to open the app is a reading whose changes say nothing. So every
+   rest-day check is asked at ONE time, and that time is yours rather than a number this
+   app picked: the clock time you answered the FIRST one at is the time all the rest are
+   asked at from then on.
+
+   Until there has been a first one there is a default, because something has to be
+   scheduled before anything has been answered.
+
+   THE CARD DOES NOT APPEAR BEFORE THAT HOUR. It would be the easiest thing in the world
+   to show it all day and take whatever arrives, and it would quietly undo the whole
+   point: an answer at 8am and an answer at 8pm compared against each other is noise
+   wearing the shape of a trend. It opens DOMS_CHECK_WINDOW_MIN early and stays up for the
+   rest of the day, which is a window wide enough to be answerable and narrow enough to
+   stay comparable. */
+const DOMS_CHECK_TIME_DEFAULT = "18:00";
+const DOMS_CHECK_WINDOW_MIN   = 30;     // how early the check opens, either side of the hour
+const REMINDER_RETRY_MINUTES  = 60;     // one follow-up if the first went unanswered
+function domsCheckTime(){
+  const v = S.domsCheckTime;
+  return /^\d{1,2}:\d{2}$/.test(String(v || "")) ? String(v) : DOMS_CHECK_TIME_DEFAULT;
+}
+function domsCheckMin(){
+  const m = /^(\d{1,2}):(\d{2})$/.exec(domsCheckTime());
+  return m ? Math.min(23, +m[1]) * 60 + Math.min(59, +m[2]) : 18 * 60;
+}
+// Whether the window has opened yet today.
+function domsCheckOpen(){
+  const n = new Date();
+  return (n.getHours() * 60 + n.getMinutes()) >= (domsCheckMin() - DOMS_CHECK_WINDOW_MIN);
+}
+/* The first answer sets the hour. Returns the time it learned, or null if it already knew
+   one — which is also what tells the card whether to explain itself. */
+function domsCheckTimeLearn(){
+  if(S.domsCheckTime) return null;
+  const n = new Date();
+  S.domsCheckTime = String(n.getHours()).padStart(2, "0") + ":" +
+                    String(n.getMinutes()).padStart(2, "0");
+  return S.domsCheckTime;
+}
+/* WHAT IS DUE ON A GIVEN DAY, for a day that may not be today — which is what scheduling a
+   reminder for this evening or tomorrow evening needs. `strict` adds the two conditions
+   that only make sense about today: that it has not already been asked, and that the
+   window has opened. */
+function domsDueOn(dayStr, strict){
+  return MKEYS.filter(m=>{
+    if(!(planCycleVolume(m) > 0)) return false;
+    if(domsCheckDayFor(m) !== dayStr) return false;
+    if(strict && soreAskedFor(m, dayStr)) return false;
+    return true;
+  });
+}
+/* RULE 4 AGAIN, ONE DAY AHEAD. A muscle the session planned for that day trains as a
+   primary target is asked in that session's own batch, so no reminder is sent for it. */
+function domsCoveredByPlan(dayStr){
+  try{
+    const today = todayStr();
+    let wid = null;
+    if(dayStr === today) wid = isRestToday() ? null : todaysWorkoutId();
+    else if(dayStr === new Date(Date.now() + DAY_MS).toLocaleDateString("en-CA"))
+      wid = restDueNotToday() ? null : ROTATION[S.pointer];
+    if(!wid) return [];
+    return domsPrimaries(resolvedProgram(wid).map(x=> x.chosen));
+  }catch(e){ return []; }
+}
+/* Everything due on a day that the day's own session will not already have asked about. */
+function domsRemindFor(dayStr, strict){
+  const covered = domsCoveredByPlan(dayStr);
+  return domsDueOn(dayStr, strict).filter(m=> covered.indexOf(m) < 0);
+}
+function soreDueHTML(){
+  let due = [];
+  try{ due = domsDueToday(); }catch(e){ return ""; }
+  if(!due.length) return "";
+  // asked at one hour, so today's answer and last week's mean the same thing
+  if(!domsCheckOpen()) return "";
+  const first = !S.domsCheckTime;
+  return `<div class="card sore-due">
+    <div class="lc-k"><i></i>How did that land?</div>
+    ${first ? `<div class="sub" style="margin:0 0 6px">Whatever time you answer this first one
+      is the time Element 26 will ask from then on — answering at a consistent hour gives a far
+      more reliable reading than whenever you happen to pick the phone up.</div>` : ""}
+    <div class="sub" style="margin:0 0 4px">${due.length === 1
+      ? esc(nmUp(gName(due[0]))) + " is at the end of its recovery window today, which is when "
+        + "soreness peaks if it is going to. One tap."
+      : "These are at the end of their recovery windows today, which is when soreness peaks "
+        + "if it is going to. One tap each."}</div>
+    ${due.map(g=> `<div class="sore-row">
+      <div class="sore-m">${esc(gName(g))}</div>
+      <div class="sore-taps">${SORE_WORDS.map((w, v)=>
+        `<button class="sore-t" data-sdue="${esc(g)}:${v}">${esc(w)}</button>`).join("")}</div>
+    </div>`).join("")}
+    <div style="text-align:center;margin-top:11px">
+      <button class="nb-link" id="soreDueSkip">Not now</button></div>
+  </div>`;
+}
 function weighDueHTML(){
   if(!tracksWeight()) return "";
   if(WEIGH_SNOOZE === todayStr()) return "";
@@ -30278,9 +30704,6 @@ function weighDueHTML(){
    THE DAY FLAGS are the other half: illness, unusual stress and eating less all change
    what a session says about your volume, and exposureSkip() already knows to throw those
    sessions out of the performance read. It just needed somewhere to be told. */
-const SORE_ASK_HOURS   = 72;    // a muscle trained inside this window is worth asking about
-const SORE_ASK_MAX     = 6;     // never ask about more muscles than this at once
-const SORE_ASK_MIN_SETS = 1.5;  // effective sets in the window before it is worth asking
 const SORE_WORDS = ["none", "a little", "sore", "very sore"];
 const DAY_FLAG_FIELDS = [
   /* "Ill" is a capital I and two lower-case Ls, which in this typeface is three identical
@@ -30301,23 +30724,11 @@ const DAY_FLAG_FIELDS = [
    question belongs in the pre-workout flow and nowhere else. The day flags moved with it:
    ill, stressed or eating less are facts about the session you are ABOUT to log, and
    exposureSkip() reads them against that session. See the "sore" step in pfDraw(). */
-/* The muscles worth asking about, hardest-trained first: anything that has taken real
-   work inside SORE_ASK_HOURS. The pre-workout step narrows this further — see
-   pfSoreMuscles(). */
-function soreAskMuscles(){
-  const now = Date.now();
-  let wk = null;
-  try{ wk = windowStats(now - SORE_ASK_HOURS*3600e3, now + 1); }catch(e){ return []; }
-  if(!wk) return [];
-  return MKEYS.filter(m=> wk[m] && wk[m].eff >= SORE_ASK_MIN_SETS)
-    .sort((a,b)=> wk[b].eff - wk[a].eff)
-    .slice(0, SORE_ASK_MAX);
-}
-function soreAskedToday(){
-  const d = todayStr();
-  const rec = (S.sore || {})[d];
-  return !!(rec && Object.keys(rec).length);
-}
+/* soreAskMuscles() and soreAskedToday() lived here. Both are gone: the first asked
+   "what has been trained lately", which is not the question any more — domsPrimaries()
+   and domsDueToday() decide scope now — and the second was a once-a-DAY latch, which
+   Rule 2 replaces with a once-a-SESSION one so an evening session after a morning one can
+   ask again. See the B1/B1a block. */
 function bodyLogHTML(){
   if(!tracksWeight()) return "";
   const list = bodyLogList();
@@ -33154,6 +33565,10 @@ function bind(){
       /* Last, and only after the rest clock is already running, so answering the
          question doesn't eat into the rest it just started timing. */
       if(st.done) await maybeAskWhy(ei, si);
+      /* RULE 2's other half: the first set of a movement the pre-session batch never saw,
+         because it was added at the rack or swapped in for what this gym has. Asked here
+         and nowhere later — see soreAskInline(). */
+      if(st.done) try{ soreAskInline(ei); }catch(e){}
     };
   });
   /* Sub-sets: the drops, mini-sets and bursts inside a single set. They live on the set
@@ -34520,6 +34935,29 @@ function bind(){
       render();
     }
   });
+  /* RULE 3's taps. Written the moment one is pressed, tagged as the peak-day reading, and
+     the card redraws itself away once every muscle on it has been answered. */
+  document.querySelectorAll("#app [data-sdue]").forEach(b=> b.onclick = ()=>{
+    const [g, v] = b.dataset.sdue.split(":");
+    soreWrite(g, parseInt(v, 10), SORE_BY_PEAK);
+    // the first one answered is the hour every later one is asked at
+    const learned = domsCheckTimeLearn();
+    pushSyncSchedule();
+    save(); queueSync(); render();
+    if(learned) toast("Rest-day checks will come around " + fmtMinOfDay(domsCheckMin())
+      + " from now on \u2014 the same hour each time keeps the readings comparable", "good");
+    else toast(gName(g) + ": " + SORE_WORDS[parseInt(v, 10)], "good");
+  });
+  const _sds = $("#soreDueSkip");
+  if(_sds) _sds.onclick = ()=>{
+    /* Waved away, and recorded as waved away: not asked again today, and the performance
+       read can tell an unanswered exposure from an answered zero. */
+    let due = [];
+    try{ due = domsDueToday(); }catch(e){ due = []; }
+    soreSkipMark(due);
+    pushSyncSchedule();          // nothing more is due today, so nothing more is scheduled
+    render();
+  };
   const poff = $("#pushOffBtn");
   if(poff) poff.onclick = async ()=>{
     PUSH_BUSY = true; render();
@@ -34559,6 +34997,14 @@ function bind(){
     }
     S.remindWake = on; save(); queueSync(); render(); pushSyncSchedule();
   });
+  const dct = $("#domsTimeIn");
+  if(dct) dct.onchange = ()=>{
+    if(!/^\d{1,2}:\d{2}$/.test(dct.value)) return;
+    S.domsCheckTime = dct.value;
+    save(); queueSync(); render();
+    pushSyncSchedule();
+    toast("Rest-day soreness checks moved to " + fmtMinOfDay(domsCheckMin()), "good");
+  };
   const sti = $("#sleepTargetIn");
   if(sti) sti.onchange = ()=>{
     const v = parseFloat(sti.value);

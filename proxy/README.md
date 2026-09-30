@@ -225,8 +225,9 @@ The app detects this and says so rather than presenting a switch that fails sile
 
 ### What actually gets sent
 
-Four kinds, and nothing else. Three are switched in **Reminders**; the fourth is switched
-on the workout-screen page, because that is where you would look for it:
+Six kinds, and nothing else. Three are switched in **Reminders**, the rest alert on the
+workout-screen page, and the two soreness ones follow the check itself, whose hour is set
+under **How training is run**:
 
 | kind | when | what it says |
 |---|---|---|
@@ -234,6 +235,8 @@ on the workout-screen page, because that is where you would look for it:
 | `bed` | your night-start time, the one the app already uses | a nudge to start the sleep clock. Not sent on a night you have already answered. |
 | `wake` | roughly when you get up | a prompt to log the night while you can still remember it. |
 | `rest` | the second a rest between sets reaches its target | that the rest is up, and what is next. Posted when the clock starts and withdrawn the moment the next set is logged. |
+| `sore` | the hour you answer rest-day soreness checks at, on a day one falls due | how sore a muscle is on the day its recovery window runs out, which is when soreness peaks if it is going to. |
+| `sore2` | an hour after `sore`, if it went unanswered | the one follow-up, and the last. Both are withdrawn the moment the check is answered, and neither is sent on a day the session's own pre-workout batch will ask. |
 
 ### The rest alert is the one that needs the second
 

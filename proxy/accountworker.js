@@ -158,7 +158,10 @@ const VAPID_TTL = "86400";
 /* The kinds of reminder that exist. Named here only so a client cannot invent an
    unbounded set of them and fill the namespace one key at a time; what each one MEANS is
    entirely the app's business and this service never looks. */
-const SCHED_KINDS = ["train", "bed", "wake", "rest"];
+/* "sore" is the rest-day soreness check and "sore2" its one follow-up an hour later. Two
+   kinds rather than one because exactly one reminder is stored per kind, and the retry has
+   to be able to sit alongside the first rather than replace it. */
+const SCHED_KINDS = ["train", "bed", "wake", "rest", "sore", "sore2"];
 /* "rest" is the one kind that cannot wait for the next minute, so the cron looks this far
    AHEAD for it as well as behind, and sleeps out the remainder before sending. Wider than
    the cron interval on purpose: a tick 61 seconds before a deadline should catch it too,
