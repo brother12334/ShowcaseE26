@@ -3601,8 +3601,26 @@ nav .nav-ic.catch{animation:navCatch .52s cubic-bezier(.34,1.32,.5,1) both}
    instantly, which on a phone reads as a flicker rather than as navigation: nothing
    tells you the content changed on purpose. Content only, never the nav — a nav bar that
    animates with the page reads as the whole app lurching. */
-@keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-#app.view-in{animation:viewIn var(--t-mid) var(--ease) both}
+@keyframes viewIn{
+  from{opacity:0;transform:translate3d(var(--vx,0px),9px,0)}
+  to{opacity:1;transform:none}
+}
+/* The cards arrive in the order you read them rather than all at once, which is what
+   makes a screen feel assembled instead of dumped. Six steps of 22ms is 110ms end to
+   end \u2014 under the threshold where a stagger stops reading as one movement and starts
+   reading as a queue. Everything past the sixth card is below the fold on any phone, so
+   it comes in on the last beat rather than earning a delay of its own.
+
+   `backwards`, not `both`: the from-state applies during the delay and the element is
+   left entirely alone once it lands. `both` would pin transform:none forever and take
+   the press compression off any row that happens to sit at the top level. */
+#app.view-in > *{animation:viewIn .3s var(--ease) backwards}
+#app.view-in > *:nth-child(1){animation-delay:0ms}
+#app.view-in > *:nth-child(2){animation-delay:22ms}
+#app.view-in > *:nth-child(3){animation-delay:44ms}
+#app.view-in > *:nth-child(4){animation-delay:66ms}
+#app.view-in > *:nth-child(5){animation-delay:88ms}
+#app.view-in > *:nth-child(n+6){animation-delay:110ms}
 /* Anything you can press gets the same small compression. It was on .btn and the nav
    already; the rows and cards that are also buttons had nothing, so half the app
    answered a tap and half did not. */
@@ -4945,7 +4963,7 @@ body.cele-open{overflow:hidden}
     transition-duration:.01ms!important;
     scroll-behavior:auto!important;
   }
-  #app.view-in{animation:none}
+  #app.view-in > *{animation:none}
   .nb-in,.nb-deep,.nb-why{animation:none}
   .nb-meter i{animation:none;width:var(--w)}
   .nb-spark-l{animation:none;stroke-dashoffset:0}
@@ -5908,7 +5926,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.8";
+const APP_VERSION = "35.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7058,6 +7076,19 @@ const EX_ALIASES = {
 // because canonEx() runs during module evaluation, while `let S` is still in its
 // temporal dead zone, and even `typeof S` throws there.
 let USER_ALIASES = null;
+/* ONE NAME, NORMALISED ONCE.
+
+   canonEx() is the single most-called function in the app: every muscle lookup, every
+   record, every plan comparison, every volume figure goes through it, and a screen with
+   a year of training behind it asks it the same few dozen questions tens of thousands of
+   times. It is pure — the same name with the same renames in force always gives the same
+   answer — so the answer is kept.
+
+   The cache is emptied whenever the renames change, which is exactly what
+   invalidateTableOrigin() already marks, and it drops itself if it ever grows past a few
+   thousand entries so a long import cannot turn it into a leak. */
+let EX_CANON = new Map(), EX_CANON_AL = null;
+function invalidateCanon(){ EX_CANON.clear(); EX_CANON_AL = USER_ALIASES; }
 function nrmRaw(n){ return String(n==null?"":n).trim().toLowerCase().replace(/\s+/g," "); }
 /* Differences that are spelling, not movement. Deliberately conservative: it collapses
    plurals and abbreviations, and it never merges two names that describe different
@@ -7087,6 +7118,18 @@ function aliasHop(k){
   return null;
 }
 function canonEx(n){
+  const raw = String(n == null ? "" : n);
+  /* A rename can be written straight into S.exAliases and the binding re-pointed, so
+     identity is checked as well as the explicit invalidation. */
+  if(EX_CANON_AL !== USER_ALIASES) invalidateCanon();
+  const hit = EX_CANON.get(raw);
+  if(hit !== undefined) return hit;
+  const out = canonExRaw(raw);
+  if(EX_CANON.size > 4000) EX_CANON.clear();
+  EX_CANON.set(raw, out);
+  return out;
+}
+function canonExRaw(n){
   let k = nrmRaw(n);
   // alias first (a rename may point at a name that then needs normalising), then
   // normalise, then alias again in case normalising revealed a known old name.
@@ -7112,7 +7155,7 @@ function canonIndex(o){
    Built lazily, because the tables it reads are declared much further down the file
    while renames are loaded during migrate(), long before those tables exist. */
 let TABLE_ORIGIN = null;
-function invalidateTableOrigin(){ TABLE_ORIGIN = null; }
+function invalidateTableOrigin(){ TABLE_ORIGIN = null; invalidateCanon(); }
 /* Which exercises the program runs on more than one day, cached. Declared up here with
    the other boot-time state for the same reason TABLE_ORIGIN is: migrate() runs while
    the file is still evaluating and clears this cache, and a `let` further down the file
@@ -9143,7 +9186,7 @@ function switchProfile(id){
 function migrate(){
   // Renames you've made yourself have to be live before ANY name comparison happens.
   if(!S.exAliases || typeof S.exAliases !== "object") S.exAliases = {};
-  USER_ALIASES = S.exAliases;
+  USER_ALIASES = S.exAliases; invalidateCanon();
   /* Where you train. Both are absent for everybody who installed before this existed,
      and absent means "never asked" — see checkGymAtStart(). */
   if(!S.exMuscles || typeof S.exMuscles !== "object") S.exMuscles = {};
@@ -16342,18 +16385,20 @@ function syncWorkoutTab(){
 // One way in and out of a tab, so the highlight, the scroll position and the nav reveal
 // never disagree about which one you are on.
 function goTab(t){
+  const from = TAB;
   TAB = t;
   syncWorkoutTab();
   document.querySelectorAll("nav button").forEach(x=> x.classList.toggle("on", x.dataset.tab === t));
   render(); window.scrollTo(0, 0); showNav();
+  if(from !== t) replayViewIn(from);
 }
 document.querySelectorAll("nav button").forEach(b=>{
   b.onclick = ()=>{
-    const changed = TAB !== b.dataset.tab;
+    const from = TAB;
     TAB=b.dataset.tab;
     document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));
     render(); window.scrollTo(0,0); showNav();
-    if(changed) replayViewIn();
+    if(from !== TAB) replayViewIn(from);
   };
 });
 /* ---------- tab bar behaviour ----------
@@ -22158,6 +22203,14 @@ function render(){
      ends in another tab or on another device, so both are settled before anything is
      painted. */
   syncWorkoutTab();
+  /* THE ARRIVAL ANIMATION BELONGS TO THE ARRIVAL, NOT TO EVERY REDRAW.
+
+     It is carried by the cards themselves, and render() builds new cards every time, so
+     a class left on the container would start the whole run again on every tick of a set
+     and every panel that opens. It is cleared here and re-applied by replayViewIn(),
+     which runs AFTER the render that changed tab \u2014 so exactly one render animates, and
+     it is the one you asked for. */
+  app.classList.remove("view-in");
   if(TAB==="today") app.innerHTML = viewToday();
   else if(TAB==="workout") app.innerHTML = viewWorkoutTab();
   else if(TAB==="history") app.innerHTML = RECORDS_OPEN ? viewRecords() : viewHistory();
@@ -26141,9 +26194,21 @@ function bodyToggle(k){ BODY_OPEN[k] = !BODY_OPEN[k]; render(); }
    all: the animation is considered already played. Removing the class, forcing a reflow
    by reading offsetWidth, then re-adding it is the standard way to make it fire again,
    and it is why this is a function rather than a classList.add at each call site. */
-function replayViewIn(){
+const TAB_ORDER = ["today", "workout", "history", "body", "program", "sync"];
+function replayViewIn(from){
   const el = document.getElementById("app");
   if(!el) return;
+  /* WHICH WAY THE SCREEN CAME FROM. The tab bar is a row, so a move to the right should
+     arrive from the right: the animation carries the same information your thumb just
+     used, and the app stops feeling like a set of unrelated screens sharing a frame.
+     14px, not a full slide \u2014 enough to read as direction, short enough that nothing is
+     still travelling when your eye gets there. */
+  let dx = 0;
+  if(from && from !== TAB){
+    const a = TAB_ORDER.indexOf(from), b = TAB_ORDER.indexOf(TAB);
+    if(a > -1 && b > -1) dx = b > a ? 14 : -14;
+  }
+  el.style.setProperty("--vx", dx + "px");
   el.classList.remove("view-in");
   void el.offsetWidth;
   el.classList.add("view-in");
@@ -33955,7 +34020,7 @@ function bind(){
      through the same path the nav buttons use so the tab highlight, the scroll reset and
      the nav reveal all behave identically. */
   document.querySelectorAll("[data-goto]").forEach(b=> b.onclick=()=>{
-    goTab(b.dataset.goto); replayViewIn();
+    goTab(b.dataset.goto);          // goTab runs the arrival animation itself
   });
   const _pm = $("#planMatch");
   if(_pm) _pm.onclick = ()=>{
