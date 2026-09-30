@@ -2810,6 +2810,10 @@ nav button{
    the moment it existed, with its own JS convinced it was hidden. */
 nav button[hidden]{display:none}
 nav button svg{width:22px;height:22px;display:block;flex-shrink:0}
+/* Rendered, so the switch is real; a hair of opacity, so nobody ever sees it; no pointer
+   events and out from under everything, so nobody ever hits it. */
+#hapHost{position:fixed;left:0;bottom:0;width:1px;height:1px;overflow:hidden;
+  opacity:.004;pointer-events:none;z-index:-1}
 /* Icon-only is the one change that reliably makes an app harder to learn, so each icon
    keeps a micro-label. It still reads as an icon bar; it just doesn't need decoding. */
 nav .nav-lbl{
@@ -5859,13 +5863,21 @@ body.cele-open{overflow:hidden}
 <div class="ai-full" id="aiFull" hidden><div class="ai-full-in" id="aiFullIn"></div></div>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 <div id="toasts" aria-live="polite" aria-atomic="false"></div>
+<!-- iOS HAS NO navigator.vibrate. Not a degraded one, none: Safari has never shipped the
+     Vibration API and an installed web app on iOS inherits that. The one control Apple DOES
+     play a system haptic for is the switch it added in Safari 17.4, so this is a real switch,
+     rendered (a hidden element plays nothing) and invisible, that haptic() clicks when there
+     is no vibrator to talk to. It gives one texture rather than the patterns below, which is
+     one more than silence. -->
+<div id="hapHost" aria-hidden="true"><label id="hapLabel" for="hapSwitch"></label><input
+  id="hapSwitch" type="checkbox" switch tabindex="-1"></div>
 
 <script>
 "use strict";
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "34.3";
+const APP_VERSION = "34.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9653,6 +9665,24 @@ function toast(msg, kind, opts){
   opts = opts || {};
   const host = $("#toasts");
   if(!host){ return; }                       // before the shell paints, nothing to do
+  /* THE APP ALREADY KNOWS WHAT IT IS SAYING. Every message is classified good, warn or
+     plain to pick its icon, so the haptic reads the same classification and can never
+     drift from the words. A plain one says nothing: the press was already answered.
+
+     AND NEITHER DOES ONE THAT FOLLOWS A REAL ANSWER. Half the toasts in the app are raised
+     BY something that has already spoken with its own shape — the rest alert buzzing and
+     then saying "rest is up", a set ticking and then reporting itself. Two buzzes for one
+     event reads as a fault. A toast inside half a second of any shaped haptic therefore
+     stays quiet; a plain tap does not count, because "pressed" then "done" is two different
+     facts and worth feeling as two. */
+  try{
+    const hk = kind || toastKindOf(msg);
+    /* A WARNING IS NEVER HELD BACK. It is the one message you most need to feel, and the
+       cost of it arriving close behind something else is a double buzz — which is a great
+       deal cheaper than a refusal nobody noticed. Only the confirmations wait their turn. */
+    if(hk === "warn" || hk === "bad") haptic("warn");
+    else if(hk === "good" && Date.now() - HAP_RICH >= 500) haptic("good");
+  }catch(e){}
   const k = kind || toastKindOf(msg);
   /* The same message twice in a row is one message. Tapping Save twice should not build
      a tower of identical notices, and a repeated warning is not more true. */
@@ -10092,7 +10122,10 @@ function checkPR(ei, si, anchorEl){
   const had = st.pr || null;
   if(pr) st.pr = pr; else delete st.pr;
   // only animate when it's newly earned, so re-renders don't spam the float
-  if(pr && pr !== had && anchorEl) prFloat(anchorEl, pr);
+  if(pr && pr !== had){
+    haptic("pr");
+    if(anchorEl) prFloat(anchorEl, pr);
+  }
   return pr;
 }
 // Re-evaluate every done set of an exercise. Editing set 1 upward can promote or
@@ -10370,6 +10403,103 @@ function restTargetFor(entry, st){
    Fired once per rest: `alerted` is stamped on the timer, so coming back to a rest that
    is already over does not set it off again in your ear. */
 let REST_ALERT_T = null;
+/* =====================================================================
+   HAPTICS
+
+   A phone that answers you is a phone you trust. The rest alert already buzzed, and that
+   was the whole of it: everything else — a set ticked, a plan changed, an exercise
+   deleted, a personal record — happened in silence under your thumb while you were looking
+   at a barbell rather than the screen.
+
+   THE PATTERNS ARE A VOCABULARY, not decoration. Each one is shaped like the thing it is
+   reporting, so the hand learns them without being taught:
+
+     tap/nudge   one short pulse. You pressed a thing; the thing noticed.
+     open        a knock and a soft tail — something came up over the page.
+     tick        short, gap, shorter. A set landing: down, and settled.
+     undo        the tick backwards, ending long. Something came off.
+     remove      four falling pulses. Gone, and it sounds gone.
+     good        quiet then firm — a thing that worked.
+     warn        two hard pulses around a long gap. The one you feel through a pocket.
+     pr          three rising knocks and a flourish. Earned, and it should feel earned.
+     finish      the same shape, longer, once per session. The full stop.
+     start       a roll into the work.
+     rest        the alert itself, unchanged, because people already know that one.
+
+   HOW IT REACHES EVERYTHING. Two routes, no third: a delegated pointerdown that gives every
+   button in the app the plain tap, and explicit calls at the dozen moments that deserve
+   their own shape. toast() carries its own — the app already classifies every message as
+   good, warn or plain, so its haptics come free and cannot drift from what it says.
+
+   ANDROID VIBRATES; iOS DOES NOT. See the switch in the shell for what iOS gets instead. */
+const HAPTIC = {
+  tap:    [9],
+  nudge:  [14],
+  open:   [11, 26, 6],
+  close:  [7],
+  tick:   [16, 34, 10],
+  undo:   [10, 30, 26],
+  remove: [34, 26, 20, 22, 12, 18, 6],
+  good:   [12, 30, 24],
+  warn:   [26, 70, 26],
+  pr:     [10, 34, 12, 34, 16, 34, 64],
+  finish: [22, 50, 24, 50, 28, 50, 120],
+  start:  [18, 40, 42],
+  rest:   [120, 80, 120]
+};
+function hapticMode(){
+  const v = trainPrefs().haptics;
+  return (v === "off" || v === "light") ? v : "full";
+}
+/* The switch trick, and it is exactly a trick: a real click on a real control, which iOS
+   answers with its own haptic. It cannot play a pattern, so every kind feels the same
+   there — stated plainly in the setting rather than pretended otherwise. */
+function hapticIOS(){
+  try{
+    const l = document.getElementById("hapLabel");
+    if(!l) return false;
+    l.click();
+    return true;
+  }catch(e){ return false; }
+}
+let HAP_AT = 0;     // the last PLAIN tap, and nothing else
+let HAP_RICH = 0;   // the last one with a shape to it — see toast()
+function haptic(kind){
+  const mode = hapticMode();
+  if(mode === "off") return false;
+  let pat = HAPTIC[kind] || HAPTIC.tap;
+  // "light" is the whole vocabulary spoken quietly: the shape goes, the answer stays
+  if(mode === "light") pat = [Math.min(12, pat[0] || 10)];
+  const now = Date.now();
+  /* ONE PRESS, ONE TAP — and only that. A control can raise pointerdown and then a
+     synthesised click, which is one press felt twice, so a plain tap inside 45ms of the
+     LAST PLAIN TAP is dropped.
+
+     It is deliberately not "inside 45ms of any haptic". That was the first version, and it
+     meant a press landing just after a toast or a ticked set went unanswered — the tap
+     blocked by something that came BEFORE it, which is exactly backwards. A richer kind
+     arriving after a tap needs no guard at all: vibrate() replaces the running pattern, so
+     the better answer simply takes over. */
+  if(kind === "tap"){
+    if(now - HAP_AT < 45) return false;
+    HAP_AT = now;
+  } else HAP_RICH = now;
+  try{ if(navigator.vibrate && navigator.vibrate(pat)) return true; }catch(e){}
+  return hapticIOS();
+}
+/* EVERY BUTTON IN THE APP, WITHOUT TOUCHING EVERY BUTTON IN THE APP. On pointerdown rather
+   than click, because the answer has to arrive under the finger that is still down — a
+   haptic after the render reads as the app being slow, not as the app replying.
+
+   `data-haptic` on any control overrides the kind, and "off" opts out entirely. */
+const HAP_SEL = 'button, [role="button"], .linklike, .ch, .chip, .plate, .feel-btn, .seg button';
+document.addEventListener("pointerdown", e=>{
+  const t = (e.target && e.target.closest) ? e.target.closest(HAP_SEL) : null;
+  if(!t || t.disabled || t.id === "hapLabel") return;
+  const k = (t.dataset && t.dataset.haptic) || "";
+  if(k === "off") return;
+  haptic(k || "tap");
+}, {passive:true, capture:true});
 function restAlertMode(){
   const v = trainPrefs().restAlert;
   return v === "buzz" || v === "notify" ? v : "off";
@@ -10398,7 +10528,7 @@ function fireRestAlert(){
      scheduled push. Both carry the tag "e26-rest", so one arriving anyway replaces this
      notification rather than adding a second one. */
   pushSyncSchedule();
-  try{ if(navigator.vibrate) navigator.vibrate([120, 80, 120]); }catch(e){}
+  haptic("rest");
   const en = S.active.entries[rt.e];
   const what = en && en.name ? en.name : "your next set";
   toast("Rest is up — " + what, "good");
@@ -21163,6 +21293,18 @@ function prefsScreenHTML(){
             + "Reminders on</button>.";
         })()
       : "Rest targets come from the set you just did, so a heavy triple gets longer than a set of fifteen.");
+  const hm = hapticMode();
+  const canBuzz = typeof navigator !== "undefined" && !!navigator.vibrate;
+  h += setChoice("Buzz when you press things", [
+      {v:"full",  t:"Full",  d:"A different shape for each thing \u2014 a set landing, a record, something deleted."},
+      {v:"light", t:"Light", d:"One short pulse, whatever happened."},
+      {v:"off",   t:"Off",   d:"Nothing vibrates except the rest alert, which has its own setting."}
+    ], "data-prefhaptic", hm,
+    canBuzz
+      ? "Every button answers under your thumb, and the ones that matter answer differently."
+      : "This phone has no vibration Element 26 can drive \u2014 iOS has never offered one to a web app. "
+        + "It uses the one haptic Safari does play, so you will feel something on a press, but the same "
+        + "something every time.");
   h += setChoice("When a set falls well short", [
       {v:"on",  t:"Ask me",    d:"One tap to say why. The answer changes the advice, not just the mark."},
       {v:"off", t:"Don't ask", d:"Logs the set and says nothing."}
@@ -32800,6 +32942,7 @@ function bind(){
         }
       }
       st.done = !st.done;
+      haptic(st.done ? "tick" : "undo");
       if(st.done){
         const row = el.parentElement;
         const wIn = row.querySelector('[data-f="weight"]');
@@ -33101,6 +33244,7 @@ function bind(){
     const i = parseInt(b.dataset.exskip,10);
     if(confirm("Skip "+S.active.entries[i].name+" today? It won't appear in this session's log.")){
       harvestActive();
+      haptic("remove");
       // remembered, so no later reconciliation with the plan puts it back under you
       planDrop(S.active, i);
       S.active.entries.splice(i,1);
@@ -33154,6 +33298,13 @@ function bind(){
      nothing already logged moves, and no exercise that states its own behaviour is
      touched. */
   const setPref = (k, v, msg)=>{ trainPrefs()[k] = v; save(); queueSync(); render(); toast(msg); };
+  document.querySelectorAll("[data-prefhaptic]").forEach(b=> b.onclick = ()=>{
+    const v = b.dataset.prefhaptic;
+    setPref("haptics", v,
+      v === "off" ? "Nothing will buzz" : v === "light" ? "One short pulse on a press" : "Full haptics on");
+    // and it answers in the setting it was just set to, which is the only honest preview
+    haptic(v === "off" ? null : "pr");
+  });
   document.querySelectorAll("[data-prefrestalert]").forEach(b=> b.onclick = async ()=>{
     const v = b.dataset.prefrestalert;
     setPref("restAlert", v,
@@ -34861,6 +35012,7 @@ function startWorkout(wid){
   S.active.planSnap = planSnapOf(slots);
   S.active.planSig  = JSON.stringify(S.active.planSnap);
   save();
+  haptic("start");
   goTab("workout");                 // the session has its own tab; open it
   /* And then the door: energy, time and which room, asked once, on one screen, before
      the first set — rather than as a sheet, a toast and two buttons parked at the top of
@@ -34986,7 +35138,7 @@ function planRowAt(a, id){
   const key = id.slice(0, at), want = parseInt(id.slice(at + 1), 10);
   let n = -1;
   for(let j = 0; j < a.entries.length; j++){
-    if(nrm(a.entries[j].name) === key){ n++; if(n === want) return j; }
+    if(planRowKey(a.entries[j]) === key){ n++; if(n === want) return j; }
   }
   return -1;
 }
@@ -35013,7 +35165,7 @@ const planStr  = v => String(v == null ? "" : v);
 function planSnapFromRows(a){
   const seen = {};
   return a.entries.map((en, i)=>{
-    const key = nrm(en.name);
+    const key = planRowKey(en);
     seen[key] = (seen[key] == null) ? 0 : seen[key] + 1;
     return {
       id: en.planKey || (key + "#" + seen[key]),
@@ -35039,13 +35191,22 @@ function planSnapFromRows(a){
    and a plan that asks for fewer. Rather than guessing — which is what made the first pass
    hold half the reconciliation back — the session records what it did, and everything it
    did not do follows the plan. */
+/* THE NAME A ROW ANSWERS TO AS FAR AS THE PLAN IS CONCERNED, which is not always the name
+   on it. A movement swapped for what this gym actually has — or swapped by hand at the
+   rack — keeps `swapFrom`, and THAT is the plan's name for the slot it is standing in.
+
+   Matching on the visible name instead is what orphaned a swapped exercise from its own
+   slot: the row belonged to nothing, so nothing in the plan reached it. Change its sets,
+   its reps, make it half of a superset — the edit landed on a slot with no row, and the
+   workout card carried on showing what it showed before, with no way to tell you why. */
+function planRowKey(en){ return nrm((en && en.swapFrom) || (en && en.name) || ""); }
 function planSlotIdOfRow(a, i){
   const en = a.entries[i];
   if(!en) return null;
   if(en.planKey) return en.planKey;
-  const key = nrm(en.name);
+  const key = planRowKey(en);
   let n = -1;
-  for(let j = 0; j <= i; j++) if(nrm(a.entries[j].name) === key) n++;
+  for(let j = 0; j <= i; j++) if(planRowKey(a.entries[j]) === key) n++;
   return key + "#" + n;
 }
 function planDrop(a, i){
@@ -35523,6 +35684,7 @@ function finishWorkout(){
     return;
   }
   if(a.restTimer){ a.restTimer = null; hideRestUI(); }
+  haptic("finish");
   a.entries.forEach(e=>{ e.sets = e.sets.filter(st=>st.done || st.reps || st.weight); });
   a.entries = a.entries.filter(e=>e.sets.length);
   a.finishedAt = Date.now();
@@ -43119,6 +43281,7 @@ $("#modalBg").addEventListener("click", e=>{ if(e.target.id==="modalBg") hideMod
    formatting and the "why" that a native dialog can't, and it doesn't get suppressed
    by "prevent this page from creating more dialogs" after a few taps. */
 function askConfirm(opts){
+  haptic("open");
   return new Promise(resolve=>{
     let settled = false;
     const done = v=>{
