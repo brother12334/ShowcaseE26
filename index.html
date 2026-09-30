@@ -4791,6 +4791,11 @@ body.cele-open{overflow:hidden}
 .nb-w-b{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 0}
 .nb-w-t{font-size:14px;line-height:1.4;overflow-wrap:anywhere}
 .nb-w-s{font:11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.nb-settled{
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  margin:8px 2px 0;color:var(--faint);font-size:12.5px;line-height:1.5;
+}
+.nb-settled>span{flex:1 1 180px}
 .nb-w-did{
   font-style:normal;margin-left:7px;padding:1px 5px;border-radius:5px;
   border:1px solid var(--acc-line);color:var(--acc);
@@ -5882,7 +5887,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "34.5";
+const APP_VERSION = "34.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11344,6 +11349,35 @@ function quietClean(){
   });
   if(n) saveQuiet();
   return n;
+}
+/* PUT DOWN, AND THEN IT STOPPED BEING TRUE.
+
+   The "put down for now" list is built from findings that CURRENTLY FIRE and happen to be
+   quieted — which means a finding that resolves while it is down does not move to the
+   bottom of the list or get a line, it simply is not there any more. Three of them one
+   week and one the next, with nothing anywhere to say what happened to the other two.
+
+   And it resolves for good reasons: the programme grew to cover the muscle, the fix was
+   parked until after a deload, the shortfall closed. All of those are the app working. But
+   a thing you explicitly asked to keep and then cannot find is indistinguishable from a
+   thing the app lost, and the second one is what it looks like.
+
+   So a record whose finding has gone quiet on its own is reported as exactly that. It is
+   named, it is not offered as a thing to bring back — there is nothing to bring back — and
+   one tap clears the records so the line does not become furniture. */
+function quietSettled(A){
+  const q = quietMap();
+  const shown = {};
+  (A && A.weak ? A.weak : []).forEach(w=> shown[quietKey(w)] = true);
+  ((A && A.weak && A.weak.quiet) ? A.weak.quiet : []).forEach(w=> shown[quietKey(w)] = true);
+  return Object.keys(q).filter(k=>{
+    const r = q[k];
+    if(!r || Date.now() - (r.at || 0) >= QUIET_DAYS * DAY_MS) return false;   // expired: quietClean has it
+    return !shown[k];
+  }).map(k=>{
+    const m = k.slice(0, k.lastIndexOf("|"));
+    return {key: k, muscle: m, name: (GROUPS[m] || MUSCLES[m] || {}).name || m};
+  });
 }
 function quietDaysLeft(r){
   return Math.max(0, Math.ceil((QUIET_DAYS * DAY_MS - (Date.now() - (r.at || 0))) / DAY_MS));
@@ -26237,6 +26271,16 @@ function viewBody(){
       }).join("")}</div>`;
     }
   }
+  const settled = enoughWP ? quietSettled(A) : [];
+  if(settled.length){
+    const names = joinList([...new Set(settled.map(x=> x.name.toLowerCase()))]);
+    h += `<div class="nb-settled">
+      <span>${nmUp(names)} ${settled.length === 1 ? "has" : "have"} settled since you put
+        ${settled.length === 1 ? "it" : "them"} down — nothing is being found there now, so
+        there is nothing waiting to come back.</span>
+      <button class="linklike" data-quietdone="1">Clear</button>
+    </div>`;
+  }
   h += `</div>`;
 
   /* AFTER the findings, not among them. Everything above is "here is something to do
@@ -33966,6 +34010,17 @@ function bind(){
     save(); queueSync(); render();
     toast("Back in the list");
   });
+  /* Clearing what has settled. The records are the only thing removed — if one of those
+     findings ever comes back it will be raised in the ordinary way, unquieted, which is
+     the right outcome for something that resolved two months ago. */
+  const _qd = $("#app [data-quietdone]");
+  if(_qd) _qd.onclick = ()=>{
+    const A2 = bodyAnalysis();
+    const gone = quietSettled(A2);
+    gone.forEach(x=> delete quietMap()[x.key]);
+    save(); queueSync(); render();
+    toast(gone.length === 1 ? "Cleared" : gone.length + " cleared", "good");
+  };
   /* The asymmetry rule, switched from the section that shows its state. Writing the
      same preference the Settings segment writes, rather than a second flag that could
      drift out of step with it. */
