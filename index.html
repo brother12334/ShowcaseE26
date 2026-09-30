@@ -5908,7 +5908,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.7";
+const APP_VERSION = "35.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10644,6 +10644,70 @@ document.addEventListener("pointerdown", e=>{
     return;
   }
 }, {passive:true, capture:true});
+/* THE TAP THAT NEVER BECOMES A CLICK.
+
+   A press can be felt, heard and lit and still do nothing, because on iOS a touch only
+   becomes a `click` if WebKit decides it was a click. It withholds one when the finger
+   drifts a pixel or two, when a tap lands close behind another one, when the element
+   moves under the finger mid-press, and while the main thread is still busy with the
+   render the LAST press asked for. None of that reaches the page: `pointerdown` and
+   `pointerup` both fire, the sound plays, the button compresses, and the handler is
+   simply never called. From the gym that is a broken button.
+
+   So the press is completed here when the browser declines to complete it. On pointerup
+   after a real tap — same element, no drift, no long hold — the click is given 140ms to
+   arrive on its own, and if it does not, it is dispatched. A late native click for a
+   press already answered is swallowed, so nothing can happen twice.
+
+   Deliberately narrow:
+     • touch only. A mouse or trackpad always gets its click.
+     • buttons and things carrying an onclick. Native controls — inputs, labels, selects,
+       links — have activation behaviour of their own and are left to the browser.
+     • the element must still be in the document. If the render already ran, the click
+       landed, and this has nothing to do.                                            */
+const TAP_SKIP = 'input, select, textarea, label, summary, a[href], [contenteditable="true"]';
+function tapTarget(node){
+  for(let n = node, up = 0; n && n.nodeType === 1 && up < 10; up++, n = n.parentElement){
+    if(n.matches && n.matches(TAP_SKIP)) return null;
+    if(typeof n.onclick === "function" || (n.matches && n.matches('button, [role="button"]'))) return n;
+  }
+  return null;
+}
+let TAP = null;
+document.addEventListener("pointerdown", e=>{
+  if(e.pointerType === "mouse" || e.isPrimary === false){ TAP = null; return; }
+  const n = tapTarget(e.target);
+  TAP = n ? {n, x: e.clientX, y: e.clientY, at: Date.now(), done: false, synth: 0} : null;
+}, {passive:true, capture:true});
+document.addEventListener("pointercancel", ()=>{ TAP = null; }, {passive:true, capture:true});
+document.addEventListener("pointerup", e=>{
+  const t = TAP;
+  if(!t || e.pointerType === "mouse") return;
+  if(Date.now() - t.at > 700) { TAP = null; return; }          // a long press is not a tap
+  if(Math.abs(e.clientX - t.x) > 12 || Math.abs(e.clientY - t.y) > 12){ TAP = null; return; }
+  setTimeout(()=>{
+    if(t !== TAP || t.done) return;
+    if(!t.n.isConnected || t.n.disabled || t.n.getAttribute("aria-disabled") === "true") return;
+    t.done = true; t.synth = Date.now(); t.firing = true;
+    try{ t.n.click(); }catch(err){}
+    t.firing = false;
+  }, 140);
+}, {passive:true, capture:true});
+document.addEventListener("click", e=>{
+  const t = TAP;
+  if(!t) return;
+  const mine = e.target === t.n || (t.n.contains && t.n.contains(e.target));
+  if(!mine) return;
+  /* the browser got there first: nothing to stand in for */
+  if(!t.done){ t.done = true; return; }
+  /* and if it arrives after the stand-in, it is the same press a second time. The
+     stand-in's own click is the one exception, and it says so rather than being told
+     apart by `isTrusted`, which is a property of how a test dispatches events and not
+     of what happened to the finger. */
+  if(t.synth && !t.firing && Date.now() - t.synth < 900){
+    e.stopPropagation(); e.preventDefault();
+  }
+}, true);
 function restAlertMode(){
   const v = trainPrefs().restAlert;
   return v === "buzz" || v === "notify" ? v : "off";
