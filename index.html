@@ -5893,7 +5893,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.4";
+const APP_VERSION = "35.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10405,7 +10405,8 @@ let REST_ALERT_T = null;
 
    Four files, and what each one is for is the whole design:
 
-     press   every ordinary press — a button, a card, a row, a tab
+     press   every ordinary press — a button, a card, a row, a tab. Six of these: the
+             app sounds different depending on which tab you are on, see SND_TAB.
      pop     a press that LANDS something: a set ticked, an option chosen, a switch moved
      notice  anything the app says back to you, which is to say every toast
      tap     the shadow springing open on the splash, both times it does it
@@ -10426,13 +10427,42 @@ let REST_ALERT_T = null;
    sound here rides on a press and so is allowed. The intro is the one exception and is
    handled where it is played. */
 const SND_FILES = {press:"sound/press.mp3", pop:"sound/pop.mp3", notice:"sound/notice.mp3",
-                   tap:"sound/tap.mp3", intro:"sound/intro.mp3"};
+                   tap:"sound/tap.mp3", intro:"sound/intro.mp3",
+                   "press-today":   "sound/press-today.mp3",
+                   "press-workout": "sound/press-workout.mp3",
+                   "press-history": "sound/press-history.mp3",
+                   "press-body":    "sound/press-body.mp3",
+                   "press-program": "sound/press-program.mp3"};
 /* HOW LOUD EACH ONE SHOULD END UP, not how much to turn it down. These are four files
    from four sources and their peaks differ by a factor of five — measured here: 0.94,
    0.75, 0.20, 0.51. A fixed volume per kind would make one of them startling and another
    inaudible, so each is measured at decode and brought to the level its job wants. Swap a
    file for another one tomorrow and it lands at the same loudness as the one it replaced. */
-const SND_LEVEL = {press:.45, pop:.5, notice:.5, tap:.55, intro:.7};
+const SND_LEVEL = {press:.45, pop:.5, notice:.5, tap:.55, intro:.7,
+                   "press-today":.42, "press-workout":.42, "press-history":.42,
+                   "press-body":.42, "press-program":.42};
+/* EACH TAB HAS ITS OWN PRESS, and the assignment is by what each one sounds like rather
+   than by the order they arrived in. Measured: body length and how bright the click is.
+
+     workout   the shortest and deepest of them (58ms, 294Hz). It is pressed more than
+               everything else in the app put together, once per set, so it has to be
+               tight and it must not be shrill.
+     today     warm, middling (100ms, 338Hz) — the screen you land on.
+     history   middling (97ms, 383Hz).
+     body      the longest and roundest (149ms, 362Hz). Presses here are occasional and
+               exploratory, so it can afford to be the one with a tail on it.
+     program   the brightest and crispest (92ms, 829Hz). Editing a plan is a precise,
+               deliberate act and it should sound like one.
+     settings  the original thin tick, which suits a list of switches.
+
+   A tab button plays the sound of the tab it is GOING to, not the one you are leaving, so
+   moving through the bar is a run of the app's own voices rather than one repeated. */
+const SND_TAB = {today:"press-today", workout:"press-workout", history:"press-history",
+                 body:"press-body", program:"press-program", sync:"press"};
+function pressSound(tab){
+  const k = SND_TAB[tab || (typeof TAB !== "undefined" ? TAB : "today")];
+  return (k && SND_FILES[k]) ? k : "press";
+}
 function soundOn(){ return trainPrefs().sound !== "off"; }
 let SND_AC = null, SND_BUF = {}, SND_LOAD = {};
 function sndCtx(){
@@ -10540,10 +10570,12 @@ function soundCut(){
   SND_LIVE.forEach(x=>{ try{ x.stop(); }catch(e){} });
   SND_LIVE = [];
 }
-// Everything but the splash pair, warmed as soon as sound is wanted, so the first press has it.
+/* Warmed as soon as sound is wanted, and only what this screen can actually play: six
+   press sounds fetched for a session spent on one tab is five files nobody hears. The
+   others arrive as you arrive at them — see goTab(). */
 function sndWarm(){
   if(!soundOn()) return;
-  ["press","pop","notice"].forEach(sndLoad);
+  [pressSound(), "pop", "notice"].forEach(sndLoad);
 }
 /* EVERY PRESSABLE THING IN THE APP, WITHOUT TOUCHING EVERY PRESSABLE THING IN THE APP.
 
@@ -10585,7 +10617,9 @@ document.addEventListener("pointerdown", e=>{
     // one press, one sound: pointerdown and the click it becomes are the same press
     if(now - SND_AT < 45) return;
     SND_AT = now;
-    sound(k || ((n.matches && n.matches(SND_POP_SEL)) ? "pop" : "press"));
+    // a tab button is answered in the voice of the tab it is about to open
+    const dest = (n.dataset && n.dataset.tab) || null;
+    sound(k || ((n.matches && n.matches(SND_POP_SEL)) ? "pop" : pressSound(dest)));
     return;
   }
 }, {passive:true, capture:true});
@@ -16182,6 +16216,8 @@ function syncWorkoutTab(){
 // never disagree about which one you are on.
 function goTab(t){
   TAB = t;
+  // the tab you are arriving at has its own press sound; fetch it as you arrive
+  try{ if(soundOn()) sndLoad(pressSound(t)); }catch(e){}
   syncWorkoutTab();
   document.querySelectorAll("nav button").forEach(x=> x.classList.toggle("on", x.dataset.tab === t));
   render(); window.scrollTo(0, 0); showNav();
