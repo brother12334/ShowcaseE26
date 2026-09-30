@@ -5926,7 +5926,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.9";
+const APP_VERSION = "36.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14366,9 +14366,31 @@ function growthByMuscle(now){
     if(!b[m].sets){ out[m] = {score:55, note:"first block on record, nothing to compare against yet", isNew:true}; return; }
     const strP = b[m].best > 0 ? (a[m].best - b[m].best)/b[m].best : 0;
     const volP = b[m].vol  > 0 ? (a[m].vol  - b[m].vol )/b[m].vol  : 0;
-    const raw = strP*0.7 + volP*0.3;
+    /* TRAINING LESS IS NOT THE SAME AS GETTING WEAKER.
+
+       Volume used to sit alongside strength as a co-equal term, and because a three-week
+       window holds only a handful of sessions, ONE missed session moves it 30%. At the
+       old weighting that was worth 36 points against a 20-point strength gain, so
+       somebody whose every lift was up 7% could open this map and find all eighteen
+       muscles red the morning after a session they skipped \u2014 and find it had said the
+       opposite the day before, because a single session leaving the window tips many
+       muscles at once.
+
+       The card asks which muscles are getting stronger, and the honest answer to that is
+       the strength signal. So volume may now only REINFORCE the direction strength has
+       already set, never contradict it: it adds when strength is holding or up, subtracts
+       when strength is down, and does nothing when the two disagree. It is also capped,
+       because a fortnight off is a fact about your diary and not a fact about your
+       muscle.
+
+       What this deliberately still catches: strength falling, which turns red whether you
+       trained more or less. That is the thing worth knowing. */
+    const volAdj = Math.max(-0.15, Math.min(0.15, volP));
+    const raw = strP*0.7 + (strP >= 0 ? Math.max(0, volAdj) : Math.min(0, volAdj))*0.3;
     out[m] = {score: Math.max(0, Math.min(100, Math.round(50 + raw*400))), strP, volP,
-              bestNow:a[m].best, bestPrev:b[m].best};
+              bestNow:a[m].best, bestPrev:b[m].best,
+              /* so the note can say "you trained it less" instead of "losing ground" */
+              lighter: strP >= -0.02 && volP <= -0.12};
   });
   return out;
 }
@@ -16086,7 +16108,19 @@ function weakPoints(A){
     const g = A.grow[m];
     if(!g || g.score === null || g.isNew) return;
     if(A.wk[m].sets < L(m).mev) return;              // rule 1 already owns this case
-    if(g.score >= 45) return;
+    /* A STALL IS STRENGTH NOT MOVING, NOT A QUIETER FORTNIGHT.
+
+       This used to read the blended growth score, which carried a volume term \u2014 so a
+       muscle whose top set had not changed by a single pound could be reported as
+       "stalled, take a lighter week" purely because one session fell out of the three-week
+       window, and a muscle that really had gone flat with volume steady was missed
+       entirely. Both were the same mistake: asking a stimulus number a question about
+       response.
+
+       The gate is now the strength trend itself. Volume is already a precondition on the
+       line above \u2014 that is what "despite adequate volume" means \u2014 so what is left to
+       test is whether the lift moved. */
+    if(!(g.strP <= 0.005)) return;
     const dropped = g.strP < -0.02;
     /* Sessions since the deload ended, for this muscle. Under two of them there is no
        read yet: the comparison is mostly the block that the deload was the answer to. */
@@ -25816,10 +25850,13 @@ function muscleMetric(A, m, metric){
     const g = A.grow[m];
     if(g.score==null) return {v:null, txt:" ", color:C_NONE, glow:0, note:g.note};
     const color = ramp([[0,C_BAD],[.45,C_FLAT],[.55,C_FLAT],[1,C_OK]], g.score/100);
+    /* The red band is answered first: a muscle whose strength is genuinely down is never
+       excused as having merely been trained less. */
     const note = g.isNew ? g.note
+      : g.score<45 ? "losing ground vs the last block"
+      : g.lighter ? "holding, on less work than the block before"
       : g.score>=65 ? "growing, strength trending up"
-      : g.score>=45 ? "holding steady"
-      : "losing ground vs the last block";
+      : "holding steady";
     return {v:g.score, txt:(g.isNew?"new":(g.strP>=0?"+":"")+Math.round((g.strP||0)*100)+"%"), color, glow:Math.abs(g.score-50)/50, note};
   }
   const v = A.inj[m].score;
