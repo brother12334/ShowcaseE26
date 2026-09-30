@@ -5865,7 +5865,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "34.2";
+const APP_VERSION = "34.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23637,6 +23637,7 @@ function viewActiveSession(){
     </div>`;
   }
   h += planEditsCardHTML(a);
+  h += planHeldCardHTML(a);
 
   let finLab = false;
   const tips = focusTipsFor(a.workoutId), tipsSeen = new Set();
@@ -24701,7 +24702,7 @@ function viewFocusSession(){
       <span class="num sub" style="font-size:15px">${a.entries.length?ei+1:0} / ${a.entries.length}</span>
     </div>
     ${plateLoaderHTML(a)}
-  </div>` + planEditsCardHTML(a);
+  </div>` + planEditsCardHTML(a) + planHeldCardHTML(a);
   if(!en){
     h += `<div class="empty nb-empty">
       <div class="nb-empty-t">That's everything</div>
@@ -33065,6 +33066,20 @@ function bind(){
   document.querySelectorAll("[data-goto]").forEach(b=> b.onclick=()=>{
     goTab(b.dataset.goto); replayViewIn();
   });
+  const _pm = $("#planMatch");
+  if(_pm) _pm.onclick = ()=>{
+    const a = S.active;
+    if(!a) return;
+    a.planDropped = [];
+    delete a.orderOwn;
+    a.entries.forEach(en=> delete en.setsOwn);
+    /* Straight back through the catch-up path: dropping the snapshot makes the next pass
+       read this session's own rows as its base and reconcile the lot against the plan,
+       which is precisely what "match my plan" means. */
+    delete a.planSnap; delete a.planSig;
+    save(); render();
+    toast("Matched to your plan", "good");
+  };
   const _pe = $("#planEditsOk");
   if(_pe) _pe.onclick = ()=>{ if(S.active){ S.active.planEdits = []; save(); render(); } };
   document.querySelectorAll("[data-coachoff]").forEach(b=> b.onclick=()=>{
@@ -35167,8 +35182,30 @@ function syncActivePlan(){
      than adopting the plan and losing the change that is sitting there unapplied. */
   const catchUp = !Array.isArray(a.planSnap);
   const base = catchUp ? planSnapFromRows(a) : a.planSnap;
-  a.planSnap = now;
-  a.planSig  = sig;
+  /* THE SNAPSHOT IS BANKED AT THE END, NOT HERE.
+
+     It used to be written the moment the difference was noticed, before a single change
+     had been applied — which made any failure permanent rather than momentary. One throw
+     anywhere below (and the caller swallows throws, because a reconciler must never take
+     the screen down with it) left the session recorded as having caught up with a plan it
+     had not caught up with, and `planSig === sig` then made every later render return
+     immediately. The change was not late, it was gone, and nothing short of starting a new
+     session would bring it back. Written last, a failure costs one render: the next one
+     sees the same difference and tries again. */
+  const news = [];
+  let moved = false;
+  /* AND A FAILED PASS PUTS THE SESSION BACK AS IT FOUND IT.
+
+     Not banking the snapshot is only half of it: a pass that threw after applying some of
+     its changes leaves the session half-reconciled, and the retry then reads the SAME base
+     and applies the same deltas a second time. A set count raised from three to four came
+     back as five. So the rows are taken first and restored on a throw, which makes a
+     failed pass a true no-op and the retry an honest repeat. One clone per pass that has
+     something to do, which is a handful per session, not per render. */
+  const undo = JSON.stringify(a.entries);
+  const undoFocus = a.focusIdx;
+  const undoRest  = (a.restTimer && a.restTimer.e != null) ? a.restTimer.e : null;
+  try{
 
   const B = {}, N = {};
   base.forEach(x=> B[x.id] = x);
@@ -35191,9 +35228,7 @@ function syncActivePlan(){
   const roster = !catchUp || !boxed;
   const counts = !catchUp || !boxed;
   const side = (a.entries.find(en=> en.startSide) || {}).startSide || startSideFor(a.workoutId);
-  const news = [];
   const kept = {};                       // plan positions whose old movement you had worked
-  let moved = false;
   /* The rest clock and the focus cursor both address an entry by INDEX, so every insert
      and removal has to carry them, or the clock ends up counting down somebody else's
      exercise and the focus view jumps a card. */
@@ -35325,7 +35360,29 @@ function syncActivePlan(){
 
   /* 4 — AND IN THE PLAN'S ORDER. Last, so it sorts the roster the three steps above
      have already settled rather than a list that is about to change again. */
-  try{ if(planOrderFix(a, now, news, catchUp)) moved = true; }catch(e){}
+  if(planOrderFix(a, now, news, catchUp)) moved = true;
+
+  /* 5 — AND EVERY ROW LEARNS WHICH SLOT IT IS. A session built before slots were stamped
+     is matched by name and position, which is the fragile way to do it: two rows of the
+     same movement, or one renamed, and the match walks. Stamping as we go means it is done
+     by identity from the next pass onward. */
+  planRowIds(a, now).forEach((id, i)=>{ if(id && a.entries[i]) a.entries[i].planKey = id; });
+
+  }catch(err){
+    /* Not silent, and not banked. The next render reads the same difference and has
+       another go; the note is here so a bug report can say which pass failed and why. */
+    try{
+      a.entries = JSON.parse(undo);
+      a.focusIdx = undoFocus;
+      if(a.restTimer && undoRest != null) a.restTimer.e = undoRest;
+    }catch(e2){}
+    a.planFail = {at: Date.now(), why: String((err && err.message) || err).slice(0, 160)};
+    saveQuiet();
+    return;
+  }
+  a.planSnap = now;
+  a.planSig  = sig;
+  if(a.planFail) delete a.planFail;
 
   if(!moved){ saveQuiet(); return; }
   if(a.focusIdx != null) a.focusIdx = Math.max(0, Math.min(a.focusIdx, Math.max(0, a.entries.length - 1)));
@@ -35346,6 +35403,60 @@ function planEditsSay(news){
 }
 /* What changed and when, on the session itself, because a toast is gone in three seconds
    and the question "why is this card not what I started" outlives it. */
+/* =====================================================================
+   WHAT THIS SESSION IS KEEPING THAT YOUR PLAN NO LONGER SAYS
+
+   Every deliberate deviation the session records — a skip, an order you arranged, a set
+   count you changed at the rack, a time box — is a thing syncActivePlan() will not
+   overrule. That is right, and it is invisible, which is not: change the plan, look at the
+   card, see no change, and there is nothing anywhere to say the session is holding its own
+   answer on purpose rather than failing to notice yours.
+
+   So it says. Only where the held decision actually produces a difference right now — a
+   marker with nothing behind it is not worth a card — and with one tap to drop the lot and
+   take the plan as it stands. The time box is listed but not overruled: it has its own undo
+   on its own card, and two buttons for one action is how you end up unsure which you
+   pressed.                                                                             */
+function planHeldBack(a){
+  if(!a || !a.workoutId || !Array.isArray(a.entries)) return null;
+  let slots, now;
+  try{ slots = planSlotList(a.workoutId); now = planSnapOf(slots); }catch(e){ return null; }
+  const held = [];
+  const dropped = Array.isArray(a.planDropped) ? a.planDropped : [];
+  const gone = now.filter(c=> dropped.indexOf(c.id) > -1 && planRowAt(a, c.id) < 0);
+  if(gone.length) held.push(gone.length === 1
+    ? esc(gone[0].name) + ", which you skipped"
+    : gone.length + " exercises you skipped");
+  let counts = 0;
+  now.forEach(c=>{
+    const j = planRowAt(a, c.id);
+    if(j < 0) return;
+    if(a.entries[j].setsOwn && a.entries[j].sets.length !== c.sets) counts++;
+  });
+  if(counts) held.push(counts === 1 ? "a set count you changed at the rack"
+                                    : counts + " set counts you changed at the rack");
+  if(a.orderOwn){
+    const ids = planRowIds(a, now);
+    const rank = {}; now.forEach((c, i)=> rank[c.id] = i);
+    let last = -1, out = false;
+    ids.forEach(id=>{ if(id == null || rank[id] == null) return;
+      if(rank[id] < last) out = true; last = rank[id]; });
+    if(out) held.push("the order you put them in");
+  }
+  if(a.timeBox) held.push("the cut to " + a.timeBox.min + " minutes");
+  return held.length ? held : null;
+}
+function planHeldCardHTML(a){
+  const held = planHeldBack(a);
+  if(!held) return "";
+  return `<div class="card tb-card">
+    <div class="lc-k"><i></i>Keeping your answer, not your plan's</div>
+    <div class="sub" style="margin:0">This session is holding ${joinList(held)}${
+      a.timeBox ? " — the cut is put back from its own card above" : ""}. Everything else on
+      this card follows your programme as you change it.</div>
+    <div style="text-align:center;margin-top:10px"><button class="nb-link" id="planMatch">Match my plan</button></div>
+  </div>`;
+}
 function planEditsCardHTML(a){
   const list = (a && Array.isArray(a.planEdits)) ? a.planEdits : [];
   if(!list.length) return "";
