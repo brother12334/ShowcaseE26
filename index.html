@@ -2812,9 +2812,24 @@ nav{
      the slack the buttons already carry, and max() keeps the plain 7px on hardware with
      no inset at all. */
   padding:7px 0 max(7px, calc(var(--sab) - 12px));z-index:40;
-  transform:translate3d(0,calc(var(--navY,0px) - var(--navGap,0px)),0);
+  /* THE TWO OFFSETS ARE NOT THE SAME KIND OF THING AND MUST NOT SHARE A TRANSITION.
+
+     --navY is the auto-hide, and it SHOULD slide: it is a deliberate movement you can see
+     coming. --navGap is a correction for browser chrome, and it should never animate at
+     all — it is not a movement, it is the bar being told where the bottom of the screen
+     actually is. Sharing one transform meant a one-pixel correction started a 260ms
+     animation of the whole bar, and a tap that lands during an animation lands where the
+     button WAS. On a phone that reads as the nav ignoring you, intermittently, for no
+     reason you could ever reproduce on demand.
+
+     So the correction moved to `bottom`, which nothing transitions, and the transform
+     carries only the slide. */
+  bottom:var(--navGap, 0px);
+  transform:translate3d(0,var(--navY,0px),0);
   transition:transform .26s cubic-bezier(.4,0,.2,1);
   will-change:transform;
+  /* No double-tap-to-zoom delay on the one control people hit fastest. */
+  touch-action:manipulation;
 }
 nav button{
   background:none;border:none;color:var(--faint);cursor:pointer;flex:1;min-width:0;
@@ -5893,7 +5908,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.6";
+const APP_VERSION = "35.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -16301,8 +16316,17 @@ let refreshNavBounds = ()=>{};
   const HIDE_AFTER = 90;   // stay put until you're properly into the page
   const DEADZONE   = 8;    // ignore jitter and iOS rubber-banding
   let lastY = 0, hidden = false, docH = 0;
+  /* DECLARED HERE, NOT WHERE THEY ARE USED. refreshNavBounds() runs the moment it is
+     defined, a dozen lines below, and it calls setHidden() — which reads navHeld. A `let`
+     further down would still be in its temporal dead zone at that point, and `typeof` does
+     NOT save you from one: it throws like any other read. That trap has taken this file
+     down before. */
+  let navHeld = false, navPend = null, gapNow = 0, heldHide = null;
   const setHidden = v=>{
     if(v === hidden) return;
+    /* Same rule as the correction: not while a finger is on it. Sliding the bar away from
+       under a thumb mid-press is the most direct way there is to lose a tap. */
+    if(navHeld){ heldHide = v; return; }
     hidden = v;
     nav.style.setProperty("--navY", v ? "calc(100% + 2px)" : "0px");
   };
@@ -16404,6 +16428,15 @@ let refreshNavBounds = ()=>{};
     || /iPad|iPhone|iPod/.test(navigator.platform || "")
     || (/Mac/.test(navigator.platform || "") && (navigator.maxTouchPoints || 0) > 1);
   let typing = false;
+  /* AND IT HOLDS STILL WHILE YOU ARE TOUCHING IT. Between a finger going down and coming
+     up, the bar does not move for any reason: a correction that arrives mid-tap moves the
+     button out from under the thumb that is already on it, and the click never happens.
+     Anything measured during that window is applied the moment the finger leaves. */
+  const putGap = g=>{
+    if(g === gapNow) return;
+    gapNow = g;
+    nav.style.setProperty("--navGap", g + "px");
+  };
   const anchorNav = ()=>{
     if(!vv) return;
     let gap = 0;
@@ -16411,8 +16444,23 @@ let refreshNavBounds = ()=>{};
       const strip = Math.round(window.innerHeight - (vv.height + vv.offsetTop));
       if(vv.offsetTop < 1 && strip > 0 && strip <= 90) gap = strip;
     }
-    nav.style.setProperty("--navGap", gap + "px");
+    /* A CORRECTION UNDER FOUR PIXELS IS NOISE, NOT A CORRECTION. iOS reports the visual
+       viewport to sub-pixel accuracy and it wobbles by a pixel as momentum settles; acting
+       on every one of those moved the bar continuously for no visible benefit. */
+    if(Math.abs(gap - gapNow) < 4 && !(gap === 0 && gapNow !== 0)) return;
+    if(navHeld){ navPend = gap; return; }
+    putGap(gap);
   };
+  nav.addEventListener("pointerdown", ()=>{ navHeld = true; }, {passive:true});
+  const navRelease = ()=>{
+    if(!navHeld) return;
+    navHeld = false;
+    if(navPend != null){ putGap(navPend); navPend = null; }
+    if(heldHide != null){ const v = heldHide; heldHide = null; setHidden(v); }
+  };
+  nav.addEventListener("pointerup", navRelease, {passive:true});
+  nav.addEventListener("pointercancel", navRelease, {passive:true});
+  window.addEventListener("pointerup", navRelease, {passive:true});
   if(vv){
     vv.addEventListener("resize", anchorNav, {passive:true});
     vv.addEventListener("scroll", anchorNav, {passive:true});
