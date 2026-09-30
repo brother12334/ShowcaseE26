@@ -2826,14 +2826,6 @@ nav button{
    the moment it existed, with its own JS convinced it was hidden. */
 nav button[hidden]{display:none}
 nav button svg{width:22px;height:22px;display:block;flex-shrink:0}
-/* Rendered, so the switch is real; a hair of opacity, so nobody ever sees it; no pointer
-   events and out from under everything, so nobody ever hits it. */
-/* Laid out at the size a real switch is, because a control clipped to a pixel is a
-   control the platform may decline to treat as one. Invisible, untouchable, and behind
-   everything: you will never see it, and iOS still counts it as a switch being flipped. */
-#hapHost{position:fixed;left:0;bottom:0;width:52px;height:32px;
-  opacity:.004;pointer-events:none;z-index:-1}
-#hapHost label{display:block;width:52px;height:32px}
 /* Icon-only is the one change that reliably makes an app harder to learn, so each icon
    keeps a micro-label. It still reads as an icon bar; it just doesn't need decoding. */
 nav .nav-lbl{
@@ -5893,21 +5885,18 @@ body.cele-open{overflow:hidden}
 <div class="ai-full" id="aiFull" hidden><div class="ai-full-in" id="aiFullIn"></div></div>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 <div id="toasts" aria-live="polite" aria-atomic="false"></div>
-<!-- iOS HAS NO navigator.vibrate. Not a degraded one, none: Safari has never shipped the
-     Vibration API and an installed web app on iOS inherits that. The one control Apple DOES
-     play a system haptic for is the switch it added in Safari 17.4, so this is a real switch,
-     rendered (a hidden element plays nothing) and invisible, that haptic() clicks when there
-     is no vibrator to talk to. It gives one texture rather than the patterns below, which is
-     one more than silence. -->
-<div id="hapHost" aria-hidden="true"><label id="hapLabel"><input
-  id="hapSwitch" type="checkbox" switch tabindex="-1"></label></div>
+<!-- THE SWITCH TRICK IS GONE. iOS has never shipped the Vibration API, and the one thing
+     Safari does play a haptic for — the switch control added in 17.4 — plays it for a FINGER
+     on that switch, not for a click dispatched from script. A hidden control that does
+     nothing is worse than no control, so it is out, and the setting now says plainly what
+     iOS can and cannot do. See clickPlay() for what an iPhone gets instead. -->
 
 <script>
 "use strict";
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "34.9";
+const APP_VERSION = "35.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10481,25 +10470,80 @@ function hapticMode(){
   const v = trainPrefs().haptics;
   return (v === "off" || v === "light") ? v : "full";
 }
-/* The switch trick, and it is exactly a trick: a real click on a real control, which iOS
-   answers with its own haptic. It cannot play a pattern, so every kind feels the same
-   there — stated plainly in the setting rather than pretended otherwise. */
-function hapticIOS(){
+/* =====================================================================
+   A CLICK YOU CAN HEAR, FOR THE PHONE THAT CANNOT BUZZ
+
+   iOS gives a web app no vibration whatsoever — not a weaker one, none — and there is no
+   way around it. So an iPhone had the whole vocabulary below and no way to feel any of it.
+
+   Sound is the one channel left, and it suits that vocabulary better than it has any right
+   to: the patterns are already rhythms, and a rhythm plays as well through a speaker as
+   through a motor. Each kind gets the same shape in pitch that it has in pulses — a record
+   rises, something deleted falls away, a warning sits low and repeats.
+
+   OFF BY DEFAULT, because an app that starts making noises is an app people uninstall. It
+   rides on the same haptic() call as everything else, so turning it on needs no new wiring
+   anywhere: every button, toast, tick and record in the app already goes through there.
+
+   It obeys the ringer switch, like any web audio, and the setting says so. */
+const CLICK = {
+  tap:    {n:[1800], d:11, v:.030, type:"square"},
+  nudge:  {n:[1500], d:15, v:.035, type:"square"},
+  open:   {n:[900, 1400], d:26, v:.035, type:"triangle"},
+  close:  {n:[760], d:13, v:.028, type:"triangle"},
+  tick:   {n:[2100, 2600], d:24, v:.040, type:"square"},
+  undo:   {n:[1700, 1050], d:28, v:.038, type:"square"},
+  remove: {n:[430, 320, 240], d:52, v:.050, type:"triangle"},
+  good:   {n:[1400, 1900], d:32, v:.040, type:"triangle"},
+  warn:   {n:[520, 520], d:64, v:.055, type:"sawtooth"},
+  pr:     {n:[1046, 1318, 1568, 2093], d:46, v:.045, type:"triangle"},
+  finish: {n:[784, 1046, 1318, 1568, 2093], d:62, v:.048, type:"triangle"},
+  start:  {n:[880, 1174], d:38, v:.040, type:"triangle"},
+  rest:   {n:[1318, 1318, 1568], d:58, v:.055, type:"square"}
+};
+function clickOn(){ return trainPrefs().clicks === "on"; }
+let CLICK_AC = null;
+/* Built on the first press that needs one, never before: a context created at load is one
+   the browser suspends anyway, and one created for somebody who never turns this on is a
+   resource taken for nothing. */
+function clickCtx(){
+  if(CLICK_AC) return CLICK_AC;
+  const C = window.AudioContext || window.webkitAudioContext;
+  if(!C) return null;
+  try{ CLICK_AC = new C(); }catch(e){ CLICK_AC = null; }
+  return CLICK_AC;
+}
+function clickPlay(kind){
+  const ac = clickCtx();
+  if(!ac) return false;
+  // every call site is inside a press, which is the gesture iOS wants before it will play
+  try{ if(ac.state === "suspended") ac.resume(); }catch(e){}
+  const c = CLICK[kind] || CLICK.tap;
   try{
-    const l = document.getElementById("hapLabel");
-    if(!l) return false;
-    l.click();
+    const t0 = ac.currentTime + 0.001, step = c.d / 1000;
+    c.n.forEach((f, i)=>{
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = c.type || "square";
+      const st = t0 + i * step, en = st + step * 0.88;
+      o.frequency.setValueAtTime(f, st);
+      /* Eased in and out: a square wave switched on at full gain is a pop, and a pop is
+         the sound of a bug rather than of a button. */
+      g.gain.setValueAtTime(0.0001, st);
+      g.gain.exponentialRampToValueAtTime(c.v || .04, st + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, en);
+      o.connect(g); g.connect(ac.destination);
+      o.start(st); o.stop(en + 0.02);
+    });
     return true;
   }catch(e){ return false; }
 }
+
 let HAP_AT = 0;     // the last PLAIN tap, and nothing else
 let HAP_RICH = 0;   // the last one with a shape to it — see toast()
 function haptic(kind){
   const mode = hapticMode();
-  if(mode === "off") return false;
-  let pat = HAPTIC[kind] || HAPTIC.tap;
-  // "light" is the whole vocabulary spoken quietly: the shape goes, the answer stays
-  if(mode === "light") pat = [Math.min(12, pat[0] || 10)];
+  const sound = clickOn();
+  if(mode === "off" && !sound) return false;
   const now = Date.now();
   /* ONE PRESS, ONE TAP — and only that. A control can raise pointerdown and then a
      synthesised click, which is one press felt twice, so a plain tap inside 45ms of the
@@ -10514,8 +10558,15 @@ function haptic(kind){
     if(now - HAP_AT < 45) return false;
     HAP_AT = now;
   } else HAP_RICH = now;
+  /* The click is not the buzz's fallback, it is a second channel with its own switch, so
+     somebody can have both, either or neither. */
+  const heard = sound ? clickPlay(kind) : false;
+  if(mode === "off") return heard;
+  let pat = HAPTIC[kind] || HAPTIC.tap;
+  // "light" is the whole vocabulary spoken quietly: the shape goes, the answer stays
+  if(mode === "light") pat = [Math.min(12, pat[0] || 10)];
   try{ if(navigator.vibrate && navigator.vibrate(pat)) return true; }catch(e){}
-  return hapticIOS();
+  return heard;
 }
 /* EVERY BUTTON IN THE APP, WITHOUT TOUCHING EVERY BUTTON IN THE APP. On pointerdown rather
    than click, because the answer has to arrive under the finger that is still down — a
@@ -10550,7 +10601,6 @@ const HAP_SEL = [
 document.addEventListener("pointerdown", e=>{
   let n = e.target;
   for(let up = 0; n && n.nodeType === 1 && up < 10; up++, n = n.parentElement){
-    if(n.id === "hapLabel" || n.id === "hapHost") return;      // the fallback's own control
     const k = (n.dataset && n.dataset.haptic) || "";
     if(k === "off") return;                                    // opted out, here or above
     const hit = (n.matches && n.matches(HAP_SEL)) || typeof n.onclick === "function";
@@ -21397,9 +21447,18 @@ function prefsScreenHTML(){
     ], "data-prefhaptic", hm,
     canBuzz
       ? "Every button answers under your thumb, and the ones that matter answer differently."
-      : "This phone has no vibration Element 26 can drive \u2014 iOS has never offered one to a web app. "
-        + "It uses the one haptic Safari does play, so you will feel something on a press, but the same "
-        + "something every time.");
+      : "<b>Nothing will buzz on this phone.</b> iOS has never given a web app any way to "
+        + "vibrate \u2014 not a weaker one, none \u2014 and there is no way around it. The click below "
+        + "is the one kind of feedback Element 26 can give you here.");
+  h += setChoice("A click you can hear", [
+      {v:"on",  t:"On",  d:"A short tick on every press, and its own sound for a set landing, a record, something deleted."},
+      {v:"off", t:"Off", d:"Silent."}
+    ], "data-prefclick", clickOn() ? "on" : "off",
+    (canBuzz
+      ? "The same vocabulary as the buzz, through the speaker instead \u2014 have both, either, or neither. "
+      : "On an iPhone this is the only feedback there is, and it is the same vocabulary the buzz uses "
+        + "everywhere else: a record rises, something deleted falls away. ")
+    + "It follows your ringer switch, so silencing the phone silences it.");
   h += setChoice("When a set falls well short", [
       {v:"on",  t:"Ask me",    d:"One tap to say why. The answer changes the advice, not just the mark."},
       {v:"off", t:"Don't ask", d:"Logs the set and says nothing."}
@@ -26294,12 +26353,17 @@ function viewBody(){
        all, so pressing the button and coming back to an unchanged list read as the app
        ignoring you. One word, and the first question stops being "did that even work". */
     const didIt = w=>{ try{ return planFixesFor(w.muscle, w.kind).length > 0; }catch(e){ return false; } };
+    /* And WHICH of the two, because "plan changed" on a finding waiting for a session is
+       still a shrug. Untested is the commoner case by far: you press the button, the
+       programme changes, and the muscle does not come round again for days. */
+    const didWord = w=>{ try{ return planFixUntested(w) ? "not trained yet" : "plan changed"; }
+                         catch(e){ return "plan changed"; } };
     h += show.map(w=>`<button class="nb-w sev${w.sev}" data-wp="${A.weak.indexOf(w)}">
       <span class="nb-w-dot"></span>
       <span class="nb-w-b">
         <span class="nb-w-t">${esc(w.act)}</span>
         <span class="nb-w-s">${esc(gName(w.muscle))} \u00b7 ${w.sev>=3?"worth doing soon":w.sev===2?"worth doing":"minor"}${
-          didIt(w) ? `<i class="nb-w-did">plan changed</i>` : ""}</span>
+          didIt(w) ? `<i class="nb-w-did">${didWord(w)}</i>` : ""}</span>
       </span>
       <span class="nb-w-c">\u203a</span>
     </button>`).join("");
@@ -28178,10 +28242,17 @@ function openWeakPoint(idx){
      first question somebody who already pressed one has is "why is this still here". */
   const acted = planFixesFor(g);
   if(acted.length){
+    const untested = (()=>{ try{ return planFixUntested(w); }catch(e){ return false; } })();
     h += `<div class="wd-apply">
-      <div class="wd-apply-k">You have already changed the plan</div>
+      <div class="wd-apply-k">${untested
+        ? "You have changed the plan — it has not been tested yet"
+        : "You have already changed the plan"}</div>
       <div class="wd-diff">${acted.slice(0, 3).map(c=>
         `<div>${esc(planFixLine(c))}</div>`).join("")}</div>
+      ${untested ? `<p>You have not trained ${esc(gName(g).toLowerCase())} since you made that
+        change, so nothing here has been put to the test yet. This reading counts the sets you
+        have <b>logged</b>, ${esc(A.win.short)} — it cannot move until the days carrying the new
+        work come round and you do them. Nothing is wrong; it is waiting for evidence.</p>` : ""}
       <p>${
         /* A FILLED FINDING IS NOT ON THE SCREEN AT ALL — planFixAnswers() takes it off
            the list the moment the programme clears the threshold. So by the time this
@@ -33412,6 +33483,13 @@ function bind(){
      nothing already logged moves, and no exercise that states its own behaviour is
      touched. */
   const setPref = (k, v, msg)=>{ trainPrefs()[k] = v; save(); queueSync(); render(); toast(msg); };
+  document.querySelectorAll("[data-prefclick]").forEach(b=> b.onclick = ()=>{
+    const v = b.dataset.prefclick;
+    setPref("clicks", v, v === "on" ? "A click on every press" : "No click");
+    /* Played after the preference is set, so what you hear is the thing you just chose \u2014
+       and played at all, because a sound setting you cannot hear is a guess. */
+    if(v === "on") clickPlay("pr");
+  });
   document.querySelectorAll("[data-prefhaptic]").forEach(b=> b.onclick = ()=>{
     const v = b.dataset.prefhaptic;
     setPref("haptics", v,
@@ -36306,6 +36384,26 @@ function planFixAnswers(A, w){
   const since = (S.sessions || []).filter(x=> x && x.startedAt > fixes[0].at).length;
   if(since >= ROTATION.length) return false;
   return planAnswersFinding(A, w);
+}
+/* APPLIED, AND NOT YET PUT TO THE TEST.
+
+   There are two reasons an acted-on finding is still standing, and they are not the same
+   news. Either the programme is still short of the threshold on paper — the edit was
+   capped at a sensible step — or the programme now says the right thing and you simply
+   have not trained the muscle since, so the reading, which counts what you have LOGGED,
+   cannot have moved.
+
+   The second one is not a fault at all and should not read like one. It is the app waiting
+   for evidence, and the honest line is "this has not been tested yet". */
+function planFixUntested(w){
+  if(!w) return false;
+  const fixes = planFixesFor(w.muscle, w.kind);
+  if(!fixes.length) return false;
+  const at = fixes[0].at;
+  return !(S.sessions || []).some(s=>
+    s && s.startedAt > at && (s.entries || []).some(en=>
+      muscleFrac(en.name, w.muscle) > 0 &&
+      (en.sets || []).some(st=> st && (st.done || st.reps))));
 }
 function planFixLine(c){
   const ch = (c.changes || [])[0];
