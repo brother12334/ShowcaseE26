@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "28.2";
+const VERSION = "28.3";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -47,6 +47,7 @@ const SHELL_URLS = [
      and a basement gym with no signal must not turn the app mute. */
   "./sound/intro.mp3",
   "./sound/press.mp3",
+  "./sound/tap.mp3",
   "./sound/pop.mp3",
   "./sound/notice.mp3"
 ];

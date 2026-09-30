@@ -5890,7 +5890,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.2";
+const APP_VERSION = "35.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10405,7 +10405,8 @@ let REST_ALERT_T = null;
      press   every ordinary press — a button, a card, a row, a tab
      pop     a press that LANDS something: a set ticked, an option chosen, a switch moved
      notice  anything the app says back to you, which is to say every toast
-     intro   once, over the opening animation
+     tap     the shadow springing open on the splash, both times it does it
+     intro   the swoosh, under the dumbbell falling back through the opening
 
    WHY WEB AUDIO AND NOT <audio>. An HTMLAudioElement cannot be retriggered while it is
    already playing without either cutting itself off or being cloned, and a set of ticks
@@ -10421,14 +10422,14 @@ let REST_ALERT_T = null;
    bug to route around: it is the rule that stops the web autoplaying at people. Every
    sound here rides on a press and so is allowed. The intro is the one exception and is
    handled where it is played. */
-const SND_FILES = {press:"sound/press.mp3", pop:"sound/pop.mp3",
-                   notice:"sound/notice.mp3", intro:"sound/intro.mp3"};
+const SND_FILES = {press:"sound/press.mp3", pop:"sound/pop.mp3", notice:"sound/notice.mp3",
+                   tap:"sound/tap.mp3", intro:"sound/intro.mp3"};
 /* HOW LOUD EACH ONE SHOULD END UP, not how much to turn it down. These are four files
    from four sources and their peaks differ by a factor of five — measured here: 0.94,
    0.75, 0.20, 0.51. A fixed volume per kind would make one of them startling and another
    inaudible, so each is measured at decode and brought to the level its job wants. Swap a
    file for another one tomorrow and it lands at the same loudness as the one it replaced. */
-const SND_LEVEL = {press:.45, pop:.5, notice:.5, intro:.7};
+const SND_LEVEL = {press:.45, pop:.5, notice:.5, tap:.55, intro:.7};
 function soundOn(){ return trainPrefs().sound !== "off"; }
 let SND_AC = null, SND_BUF = {}, SND_LOAD = {};
 function sndCtx(){
@@ -10451,7 +10452,7 @@ function sndLoad(name){
       if(out && typeof out.then === "function") out.then(res, rej);
     }))
     .then(buf=>{
-      SND_BUF[name] = {buf, at: sndLeadIn(buf), gain: sndGain(name, buf)};
+      SND_BUF[name] = Object.assign({buf}, sndScan(name, buf));
       return SND_BUF[name];
     })
     .catch(()=> null);
@@ -10462,27 +10463,28 @@ function sndLoad(name){
    166ms and 78ms. On a press that is latency you can feel; 50ms is the difference between a
    button that answers and one that lags behind your thumb. The lead-in is found once, at
    decode, and every play starts from there instead of from the top of the file. */
-function sndLeadIn(buf){
-  try{
-    const d = buf.getChannelData(0);
-    for(let i = 0; i < d.length; i++){
-      if(Math.abs(d[i]) > 0.005) return Math.max(0, (i / buf.sampleRate) - 0.003);
-    }
-  }catch(e){}
-  return 0;
-}
-function sndGain(name, buf){
+function sndScan(name, buf){
   const want = SND_LEVEL[name] != null ? SND_LEVEL[name] : .5;
-  let peak = 0;
+  let peak = 0, at = 0, best = -1, hit = 0;
   try{
-    for(let c = 0; c < buf.numberOfChannels; c++){
-      const d = buf.getChannelData(c);
-      // every fourth sample: a peak does not hide between two of them at 44.1kHz
-      for(let i = 0; i < d.length; i += 4) if(Math.abs(d[i]) > peak) peak = Math.abs(d[i]);
+    const d = buf.getChannelData(0), sr = buf.sampleRate;
+    // every fourth sample: an absolute peak does not hide between two of them at 44.1kHz
+    for(let i = 0; i < d.length; i += 4) if(Math.abs(d[i]) > peak) peak = Math.abs(d[i]);
+    for(let i = 0; i < d.length; i++){
+      if(Math.abs(d[i]) > 0.005){ at = Math.max(0, i / sr - 0.003); break; }
+    }
+    /* AND WHERE ITS LOUDEST MOMENT IS, in 10ms windows. Not the same thing as where it
+       starts: the swoosh opens on a breath 370ms before it peaks. Lining a sound up with
+       a picture means lining up the moment you HEAR, and for anything with a build that
+       is nowhere near its first sample. */
+    const win = Math.max(1, Math.round(sr * 0.01));
+    for(let i = 0; i + win <= d.length; i += win){
+      let sum = 0;
+      for(let j = i; j < i + win; j++) sum += d[j] * d[j];
+      if(sum > best){ best = sum; hit = i / sr; }
     }
   }catch(e){}
-  if(!(peak > 0.01)) return want;
-  return Math.min(4, want / peak);
+  return {at, hit, gain: (peak > 0.01 ? Math.min(4, want / peak) : want)};
 }
 /* Play now if it is ready, and if it is not, fetch it and DO NOT play it late. A click
    that arrives 300ms after the finger has left is not feedback, it is a noise; the next
@@ -10503,7 +10505,39 @@ function sound(name){
     return true;
   }catch(e){ return false; }
 }
-// Everything but the intro, warmed as soon as sound is wanted, so the first press has it.
+/* SCHEDULED SO THE MOMENT YOU HEAR LANDS ON THE MOMENT YOU SEE. `at` is when the sound's
+   loudest point should arrive, in seconds from now, and the start is worked back from it.
+
+   Refused outright while the audio context is suspended. A suspended context's clock does
+   not advance, so anything scheduled against it fires whenever it is eventually resumed —
+   which for a splash cue means a swoosh arriving over the home screen, minutes later,
+   attached to nothing. Silence is the correct answer there. */
+let SND_LIVE = [];
+function soundCue(name, at){
+  if(!soundOn()) return false;
+  const ac = sndCtx();
+  if(!ac || ac.state !== "running") return false;
+  const s = SND_BUF[name];
+  if(!s) return false;
+  const run = Math.max(0, (s.hit || 0) - (s.at || 0));   // peak, measured from where play starts
+  try{
+    const src = ac.createBufferSource(), g = ac.createGain();
+    src.buffer = s.buf;
+    g.gain.value = s.gain;
+    src.connect(g); g.connect(ac.destination);
+    /* If the cue is sooner than the sound's own build, start further into the file rather
+       than late: the peak still lands on the beat, it just has less run-up. */
+    src.start(ac.currentTime + Math.max(0, at - run), (s.at || 0) + Math.max(0, run - at));
+    SND_LIVE.push(src);
+    return true;
+  }catch(e){ return false; }
+}
+// Anything scheduled and not yet finished, stopped — see the splash being skipped.
+function soundCut(){
+  SND_LIVE.forEach(x=>{ try{ x.stop(); }catch(e){} });
+  SND_LIVE = [];
+}
+// Everything but the splash pair, warmed as soon as sound is wanted, so the first press has it.
 function sndWarm(){
   if(!soundOn()) return;
   ["press","pop","notice"].forEach(sndLoad);
@@ -44699,27 +44733,56 @@ function quoteOfTheDay(){
   /* The check-in waits for the splash either way. Asked over the top of the mark coming
      out of the disc it would be the first thing anybody saw of the app and the last
      thing they wanted; asked after, it is the first thing on a settled screen. */
-  /* THE INTRO, AND THE ONE RULE IT CANNOT GET AROUND.
+  /* THE SOUND OF THE OPENING, ON THE ANIMATION'S OWN CLOCK.
 
-     A browser will not let a page make a noise before it has been touched, and that rule
-     is the reason the web does not autoplay at people. A cold launch has not been touched,
-     so the swoosh over the opening animation is asked for and, on the first run of a
-     session, quietly refused — which is correct, and is why it is not chased.
+     These times are not chosen by ear, they are read off the keyframes above. The shadow
+     and its hole run mkPlate/mkHole over 2.4s and spring open at 11.7% and again at 53%
+     — 0.281s and 1.272s. The mark runs mkFlight over 2s: out at 0.35s, apex at 1.05s,
+     and then the fall, which is fully through the opening by 93.5%, or 1.87s.
 
-     What IS worth doing is not wasting it: the file is fetched now so the moment the audio
-     is allowed it is ready, and if the very first thing you do is tap to skip the splash,
-     that tap is a gesture and the swoosh plays under the fade rather than being lost. */
-  const intro = ()=>{ try{ if(soundOn()) sound("intro"); }catch(e){} };
-  try{ if(soundOn()){ sndLoad("intro"); sndWarm(); } }catch(e){}
-  setTimeout(intro, 60);
+     So the punch lands on each opening, and the swoosh is placed by its LOUDEST MOMENT
+     rather than its first sample — it opens on a breath 370ms before it peaks, and a
+     swoosh whose body arrives after the thing it describes is a different sound. Its peak
+     goes at 1.75s, which is the dumbbell at full speed disappearing into the floor.
+
+     THE ONE RULE NONE OF THIS GETS AROUND: a browser will not let a page make a noise
+     before it has been touched, which is what stops the web autoplaying at people. A cold
+     launch has not been touched, so on a first run this is asked for and refused, and it
+     is not chased. Where audio is allowed, it plays on the beat.
+
+     Scheduled against the elapsed time rather than from zero, so a decode that takes 300ms
+     does not drag the whole sequence 300ms late — a cue whose moment has passed is dropped
+     rather than fired behind the picture. */
+  const SPLASH_CUES = [
+    {snd:"tap",   at:0.281},   // the shadow springs open, before the launch
+    {snd:"tap",   at:1.272},   // and again, to take the mark back
+    {snd:"intro", at:1.750}    // the swoosh peaking as it plunges through
+  ];
+  const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+  const introSeq = ()=>{
+    if(!soundOn()) return;
+    const ac = sndCtx();
+    if(!ac) return;
+    try{ if(ac.state === "suspended") ac.resume(); }catch(e){}
+    Promise.all([sndLoad("tap"), sndLoad("intro")]).then(()=>{
+      const sp2 = document.getElementById("splash");
+      if(!sp2 || sp2.classList.contains("bye")) return;     // skipped while it decoded
+      const now = ((window.performance && performance.now) ? performance.now() : Date.now());
+      const gone = (now - t0) / 1000;
+      SPLASH_CUES.forEach(c=>{ if(c.at > gone + 0.04) soundCue(c.snd, c.at - gone); });
+    }).catch(()=>{});
+  };
+  try{ if(soundOn()){ sndWarm(); introSeq(); } }catch(e){}
   if(!sp){ setTimeout(openingPrompts, 200); return; }
   if(reducedMotion()){ sp.remove(); setTimeout(openingPrompts, 200); return; }
   const bye = ()=>{
     if(!sp.isConnected || sp.classList.contains("bye")) return;
+    // nothing scheduled for an animation nobody is watching any more
+    try{ soundCut(); }catch(e){}
     sp.classList.add("bye");
     setTimeout(()=>{ sp.remove(); openingPrompts(); }, 480);
   };
-  sp.onclick = ()=>{ intro(); bye(); };   // a tap is a gesture, so this one is allowed
+  sp.onclick = bye;
   /* The flight ends at 1.87s and the disc is gone by 2.4s; the screen then sits clean for
      a beat and the quote lands at 2.75s — so this has to leave the quote up long enough to
      actually be read after all that, not cut it off. Tapping anywhere skips straight
