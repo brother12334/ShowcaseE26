@@ -4720,6 +4720,37 @@ body.cele-open{overflow:hidden}
    every one of them is a fade plus a few pixels of travel — enough to give the eye an
    order to read in, not enough to notice as an effect. */
 .nb{display:flex;flex-direction:column;gap:14px}
+/* ===== STEPPING BETWEEN THE FIVE VIEWS OF THE MAP =====
+
+   The drawing does not change between views, only what each muscle is saying, so the
+   colour is the thing that moves. Eighteen shapes crossing from one reading to the next
+   together is the change made visible \u2014 and it is the one moment in the app where an
+   animation carries information rather than decorating it, so it is given real time: 420ms
+   on a curve that leaves quickly and lands softly.
+
+   `fill` and `filter` are both transitioned. The glow is part of the reading (how far
+   from the middle of the scale the muscle sits) and a glow that snapped while its colour
+   slid would read as two separate things happening. */
+/* On the group only. `fill` is inherited, so the shapes inside pick up each interpolated
+   frame for free \u2014 giving them a transition of their own would set them chasing a value
+   that is already moving, which lands late and looks like lag. */
+.bm-fig g.bm-m{transition:fill .42s cubic-bezier(.3,.7,.2,1), filter .42s cubic-bezier(.3,.7,.2,1)}
+/* And the words that name the view travel the way the arrow pointed. */
+/* A section unfolding. Short, and downward, because that is the direction the content
+   arrived from \u2014 a panel that fades in from nowhere reads as a page change rather than as
+   something opening under the heading you just pressed. */
+@keyframes secOpen{from{opacity:0;transform:translateY(-7px)}to{opacity:1;transform:none}}
+.sec-open{animation:secOpen .3s cubic-bezier(.2,.7,.3,1) both}
+.sec-h .sec-x{display:inline-block;transition:transform .26s cubic-bezier(.2,.7,.3,1)}
+.sec-h:active .sec-x{transform:scale(1.25)}
+@keyframes msSwap{from{opacity:0;transform:translateX(var(--mx,0px))}to{opacity:1;transform:none}}
+.ms-swap{animation:msSwap .32s cubic-bezier(.2,.7,.3,1) both}
+@media (prefers-reduced-motion: reduce){
+  .bm-fig g.bm-m{transition:none}
+  .ms-swap{animation:none}
+  .sec-open{animation:none}
+  .sec-h .sec-x{transition:none}
+}
 @keyframes nbIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 /* The Body tab has its own hand-timed cascade, card by card, and it is more specific than
    the generic arrival so it wins where it is used. Scoped to the arrival for the same
@@ -4763,8 +4794,10 @@ body.cele-open{overflow:hidden}
 .nb-says p{margin:7px 0 0;font-size:14.5px;line-height:1.55;color:var(--text)}
 .nb-says .nb-says-2{color:var(--dim);font-size:13px}
 .nb-why{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;
-  flex-direction:column;gap:7px;font-size:13px;line-height:1.5;color:var(--dim);
-  animation:nbIn .26s cubic-bezier(.2,.7,.3,1) both}
+  flex-direction:column;gap:7px;font-size:13px;line-height:1.5;color:var(--dim)}
+/* It used to carry its own entrance, unconditionally, so it re-appeared on every render
+   while it was open. The unfold now belongs to the press that opened it, like every other
+   disclosure on the tab. */
 .nb-link{background:none;border:0;padding:6px 0 0;margin:0;color:var(--acc);font:inherit;font-size:13px;
   cursor:pointer;text-align:left;min-height:24px}
 .nb-link:hover,.nb-link:focus-visible{text-decoration:underline}
@@ -5940,7 +5973,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "36.1";
+const APP_VERSION = "36.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -25911,17 +25944,29 @@ const METRIC_ONELINER = {
    group whose fill and glow come straight from the selected metric. */
 /* `isHead` says whether this is a drilled-in head (tap opens its detail) or a whole
    group at the top level (tap drills in). */
-function bmGroup(key, shapes, A, metric, isHead, selected){
+/* WHAT ONE SHAPE LOOKS LIKE ON THE CURRENT VIEW.
+
+   Pulled out of bmGroup because the map is now recoloured in place when you step from
+   one view to the next \u2014 the shapes do not change, only their colour does, and rebuilding
+   them would throw away the cross-fade. Two callers, one answer: if this lived in both
+   places they would drift, and a figure whose glow disagrees with its fill is the kind of
+   thing nobody notices until it looks cheap. */
+function bmPaint(key, isHead, A, metric, selected){
   const mm = isHead ? regionMetric(A, key, metric) : groupTileMetric(A, key, metric);
   const boost = selected ? 1 : 0;
   const near = (2 + mm.glow*5 + boost*4).toFixed(1);
   const far  = (5 + mm.glow*16 + boost*14).toFixed(1);
-  const style = (mm.glow > 0.05 || selected)
-    ? `filter:drop-shadow(0 0 ${near}px ${mm.color}) drop-shadow(0 0 ${far}px ${mm.color})`
-    : "";
+  return {mm, color: mm.color,
+    filter: (mm.glow > 0.05 || selected)
+      ? `drop-shadow(0 0 ${near}px ${mm.color}) drop-shadow(0 0 ${far}px ${mm.color})` : "",
+    title: regionLabel(key) + ": " + mm.txt};
+}
+function bmGroup(key, shapes, A, metric, isHead, selected){
+  const pt = bmPaint(key, isHead, A, metric, selected);
+  const style = pt.filter ? `filter:${pt.filter}` : "";
   const attr = isHead ? `data-m="${key}"` : `data-g="${key}"`;
   const cls = "bm-m" + (isHead ? " bm-head-shape" : "") + (selected ? " bm-sel" : "");
-  return `<g class="${cls}" ${attr} fill="${mm.color}" style="${style}"><title>${esc(regionLabel(key))}: ${esc(mm.txt)}</title>${shapes}</g>`;
+  return `<g class="${cls}" ${attr} fill="${pt.color}" style="${style}"><title>${esc(pt.title)}</title>${shapes}</g>`;
 }
 /* A whole group's colour at the top level: light grey if nothing trained it this week,
    otherwise the group's own verdict on the selected metric. */
@@ -26220,6 +26265,74 @@ function bodyViewSVG(view, A, metric, label){
   });
   return out + `</svg>`;
 }
+/* STEPPING FROM ONE VIEW TO THE NEXT, WITHOUT REBUILDING THE PAGE.
+
+   The five views share one drawing. Stepping from Progress to Overdoing it does not move
+   a single shape \u2014 it changes what colour each one is \u2014 so the shapes are kept and
+   recoloured, and the colour itself is what animates: eighteen muscles crossing from one
+   reading to the other together, which is the picture the change actually is. Rebuilding
+   the card would replace every node and there would be nothing to cross-fade from.
+
+   Everything else in the card that names the view \u2014 the title and its sentence, the
+   selected muscle's reading, the key, the shortlist \u2014 is rewritten and comes in from the
+   side the arrow pointed, so the words travel the same way your thumb did.
+
+   Returns false if the card is not on screen in the shape this expects, and the caller
+   falls back to a full render. This is an optimisation of a correct path, never a
+   replacement for one. */
+function repaintMuscleMap(dir){
+  const card = document.querySelector("#app .nb-map");
+  if(!card || !BODY_OPEN.nbadv) return false;
+  const figs = card.querySelector(".bm-figs");
+  const mid  = card.querySelector(".ms-mid");
+  if(!figs || !mid) return false;
+  let A;
+  try{ A = bodyAnalysis(); }catch(e){ return false; }
+  const metric = BODY_METRIC;
+  const shapes = figs.querySelectorAll("g.bm-m");
+  if(!shapes.length) return false;
+  shapes.forEach(el=>{
+    if(el.classList.contains("bm-dim")) return;          // muted on purpose, no reading to show
+    const key = el.dataset.g || el.dataset.m;
+    if(!key) return;
+    const pt = bmPaint(key, !el.dataset.g, A, metric, el.classList.contains("bm-sel"));
+    el.setAttribute("fill", pt.color);
+    el.style.filter = pt.filter;
+    const t = el.querySelector("title");
+    if(t) t.textContent = pt.title;
+  });
+  /* The words, arriving from the side the arrow pointed. */
+  const swap = (el, html)=>{
+    if(!el) return;
+    el.innerHTML = html;
+    el.classList.remove("ms-swap");
+    void el.offsetWidth;
+    el.classList.add("ms-swap");
+  };
+  card.style.setProperty("--mx", (dir > 0 ? 16 : -16) + "px");
+  swap(mid, `<b>${esc(metricLabel(metric, A.win))}</b>
+    <span>${esc(metricOneLiner(metric, A.win))}</span>
+    <span class="ms-dots">${METRICS.map(m=>
+      `<i class="${m.id === metric ? "on" : ""}"></i>`).join("")}</span>`);
+  const legend = card.querySelector(".bm-legend");
+  if(legend) swap(legend, metricLegend(metric)
+    + `<span class="bm-lg"><span class="bm-sw" style="background:${C_GREY}"></span>`
+    + ((A.cyc && A.cyc.complete) ? "not trained" : "not trained yet") + `</span>`);
+  /* The selected muscle's reading names the view it came from, so it moves with it. */
+  const sel = card.querySelector(".ms-sel");
+  if(sel && BODY_FOCUS){
+    const wrap = document.createElement("div");
+    wrap.innerHTML = mapSelHTML(A, metric);
+    const fresh = wrap.firstElementChild;
+    if(fresh){ sel.innerHTML = fresh.innerHTML;
+               sel.classList.remove("ms-swap"); void sel.offsetWidth; sel.classList.add("ms-swap"); }
+  }
+  /* The mid-cycle caveat belongs to one view only, so it comes and goes with it. */
+  const say = card.querySelector(".bm-proj-say");
+  if(say) say.hidden = !(metric === "volume" && A.midCycle);
+  bind();
+  return true;
+}
 function bodyFrontSVG(A, metric){ return bodyViewSVG("front", A, metric, "Front"); }
 function bodyBackSVG(A, metric){  return bodyViewSVG("back",  A, metric, "Back");  }
 
@@ -26240,7 +26353,27 @@ let BODY_EXPAND = false; // whether that group is split into its individual head
    comes back tomorrow if the cycle is still behind. */
 let REST_SKIP_DISMISSED = null;
 let BODY_OPEN = {};      // which collapsible sections are expanded
-function bodyToggle(k){ BODY_OPEN[k] = !BODY_OPEN[k]; render(); }
+/* A SECTION THAT OPENS SHOULD LOOK LIKE IT OPENED.
+
+   Every one of these toggles reveals a block that sits directly after the button you
+   pressed \u2014 the sleep catch-up, the "why does it say that", the findings put down for
+   now. render() rebuilds the tab, so the block is a new element every time and the unfold
+   is put on it afterwards, once, for the press that asked for it. Closing is not an
+   opening and gets nothing. Everything else on the screen sits still, which is the whole
+   difference between a section opening and a page reloading. */
+function bodyToggle(k){
+  const open = !BODY_OPEN[k];
+  BODY_OPEN[k] = open;
+  render();
+  if(!open) return;
+  const btn = document.querySelector('#app [data-sec="' + k + '"]');
+  const box = btn && btn.nextElementSibling;
+  if(box && box.nodeType === 1){
+    box.classList.remove("sec-open");
+    void box.offsetWidth;
+    box.classList.add("sec-open");
+  }
+}
 /* Re-running a CSS animation on an element that already has the class does nothing at
    all: the animation is considered already played. Removing the class, forcing a reflow
    by reading offsetWidth, then re-adding it is the standard way to make it fire again,
@@ -27120,9 +27253,12 @@ function viewBody(){
     ${/* Mid-cycle the colours are a projection, and the legend's words are about where
           each muscle is HEADING rather than where it has got to. Said once, under the key,
           because a red muscle four days into a cycle otherwise reads as a verdict. */
-      shownMetric === "volume" && A.midCycle
-        ? `<div class="bm-proj-say">Part-way through the cycle, so these are where each
-            muscle is heading if the days still to come are done as written.</div>` : ""}
+      /* Always in the document, shown for the one view it belongs to. Stepping between
+         views recolours this card in place rather than rebuilding it, and a line that has
+         to be created on arrival cannot be toggled by that path. */
+      `<div class="bm-proj-say"${(shownMetric === "volume" && A.midCycle) ? "" : " hidden"}>Part-way
+          through the cycle, so these are where each muscle is heading if the days still to
+          come are done as written.</div>`}
     ${nbMapPickHTML(A, shownMetric, advanced)}
     <button class="nb-adv" data-sec="nbadv">
       <span>${advanced?"Back to the simple view":"Advanced"}</span>
@@ -34786,7 +34922,11 @@ function bind(){
     const d = parseInt(b.dataset.metricstep, 10) || 1;
     const at = Math.max(0, METRICS.findIndex(m=> m.id === BODY_METRIC));
     BODY_METRIC = METRICS[(at + d + METRICS.length) % METRICS.length].id;
-    render();
+    /* Recoloured in place where that is possible, which is what lets the figures
+       cross-fade; a full render would replace every shape and there would be nothing to
+       fade from. It answers false if the card is not in the shape it expects, and the
+       ordinary path takes over. */
+    if(!repaintMuscleMap(d)) render();
   });
   /* Figure taps. A tap SELECTS a major muscle and nothing more; splitting it into its
      individual heads is an explicit button, not something a second tap does by accident.
