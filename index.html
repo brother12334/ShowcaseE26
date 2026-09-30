@@ -2812,8 +2812,12 @@ nav button[hidden]{display:none}
 nav button svg{width:22px;height:22px;display:block;flex-shrink:0}
 /* Rendered, so the switch is real; a hair of opacity, so nobody ever sees it; no pointer
    events and out from under everything, so nobody ever hits it. */
-#hapHost{position:fixed;left:0;bottom:0;width:1px;height:1px;overflow:hidden;
+/* Laid out at the size a real switch is, because a control clipped to a pixel is a
+   control the platform may decline to treat as one. Invisible, untouchable, and behind
+   everything: you will never see it, and iOS still counts it as a switch being flipped. */
+#hapHost{position:fixed;left:0;bottom:0;width:52px;height:32px;
   opacity:.004;pointer-events:none;z-index:-1}
+#hapHost label{display:block;width:52px;height:32px}
 /* Icon-only is the one change that reliably makes an app harder to learn, so each icon
    keeps a micro-label. It still reads as an icon bar; it just doesn't need decoding. */
 nav .nav-lbl{
@@ -5879,15 +5883,15 @@ body.cele-open{overflow:hidden}
      rendered (a hidden element plays nothing) and invisible, that haptic() clicks when there
      is no vibrator to talk to. It gives one texture rather than the patterns below, which is
      one more than silence. -->
-<div id="hapHost" aria-hidden="true"><label id="hapLabel" for="hapSwitch"></label><input
-  id="hapSwitch" type="checkbox" switch tabindex="-1"></div>
+<div id="hapHost" aria-hidden="true"><label id="hapLabel"><input
+  id="hapSwitch" type="checkbox" switch tabindex="-1"></label></div>
 
 <script>
 "use strict";
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "34.6";
+const APP_VERSION = "34.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10502,13 +10506,49 @@ function haptic(kind){
    haptic after the render reads as the app being slow, not as the app replying.
 
    `data-haptic` on any control overrides the kind, and "off" opts out entirely. */
-const HAP_SEL = 'button, [role="button"], .linklike, .ch, .chip, .plate, .feel-btn, .seg button';
+/* HALF THIS APP IS NOT A <button>. Cards you press, rows that open a day, section headers
+   that expand, plates, swipe actions, the muscle map, the segments in Settings — a
+   selector listing the ones somebody remembered is a selector that covers the screen it
+   was written on and nothing else. That is why it answered while you were logging sets and
+   went quiet everywhere else.
+
+   Two rules instead, and the second is the one that makes it whole:
+
+     1. THE APP'S OWN LIST OF WHAT IS PRESSABLE. There already is one — the CSS rule that
+        gives everything you can press the same small compression on touch. Haptics now read
+        the same list, so a control that LOOKS pressed and a control that FEELS pressed can
+        never be two different sets again.
+     2. ANYTHING WITH A CLICK HANDLER ON IT. This app assigns handlers as `el.onclick = fn`
+        — 389 of them against three addEventListener — and that is readable from the
+        element. So the walk up from whatever was touched fires on the first ancestor that
+        either matches the list or carries a handler at all. Nothing has to be registered,
+        and a control added tomorrow is covered the day it is written. */
+const HAP_SEL = [
+  'button', '[role="button"]', 'a[href]', 'label', 'select', 'summary',
+  'input[type="checkbox"]', 'input[type="radio"]', 'input[type="range"]',
+  '.linklike', '.ch', '.chip', '.seg button',
+  // the app's own "anything you can press" set, kept in step with the CSS above
+  '.wp', '.bm-row', '.sec-h', '.nb-w', '.nb-adv', '.plate', '.feel-btn',
+  '.swap-opt', '.swap-hit', '.ex-ctl button', '.more-btn'
+].join(", ");
 document.addEventListener("pointerdown", e=>{
-  const t = (e.target && e.target.closest) ? e.target.closest(HAP_SEL) : null;
-  if(!t || t.disabled || t.id === "hapLabel") return;
-  const k = (t.dataset && t.dataset.haptic) || "";
-  if(k === "off") return;
-  haptic(k || "tap");
+  let n = e.target;
+  for(let up = 0; n && n.nodeType === 1 && up < 10; up++, n = n.parentElement){
+    if(n.id === "hapLabel" || n.id === "hapHost") return;      // the fallback's own control
+    const k = (n.dataset && n.dataset.haptic) || "";
+    if(k === "off") return;                                    // opted out, here or above
+    const hit = (n.matches && n.matches(HAP_SEL)) || typeof n.onclick === "function";
+    if(!hit) continue;
+    /* AND A CONTROL THAT DOES NOTHING MUST NOT PRETEND IT DID. The app says "this one is
+       not answering you" three ways — the disabled property, aria-disabled, and the
+       classes the press animation already refuses to run for. All three are read here, so
+       a locked plate or a cycle box you cannot press stays as silent as it looks. */
+    if(n.disabled || n.getAttribute("aria-disabled") === "true") return;
+    if(n.classList && (n.classList.contains("inert") || n.classList.contains("locked")
+                       || n.classList.contains("past"))) return;
+    haptic(k || "tap");
+    return;
+  }
 }, {passive:true, capture:true});
 function restAlertMode(){
   const v = trainPrefs().restAlert;
@@ -43294,6 +43334,7 @@ function MODAL_LIVE(){
 // inside it can offer a working "Back". Set by the modals that contain terms.
 let MODAL_REOPEN = null;
 function showModal(html, variant){
+  haptic("open");
   MODAL_DISMISS = null;
   MODAL_REOPEN = null;
   /* A sheet is the right shape for almost everything in this app and the wrong shape for
