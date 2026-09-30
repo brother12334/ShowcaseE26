@@ -5890,7 +5890,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.1";
+const APP_VERSION = "35.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9678,6 +9678,8 @@ function toast(msg, kind, opts){
   opts = opts || {};
   const host = $("#toasts");
   if(!host){ return; }                       // before the shell paints, nothing to do
+  // anything the app says back to you, said out loud as well — one file, every toast
+  try{ sound("notice"); }catch(e){}
   const k = kind || toastKindOf(msg);
   /* The same message twice in a row is one message. Tapping Save twice should not build
      a tower of identical notices, and a repeated warning is not more true. */
@@ -10395,6 +10397,161 @@ function restTargetFor(entry, st){
    Fired once per rest: `alerted` is stamped on the timer, so coming back to a rest that
    is already over does not set it off again in your ear. */
 let REST_ALERT_T = null;
+/* =====================================================================
+   SOUND
+
+   Four files, and what each one is for is the whole design:
+
+     press   every ordinary press — a button, a card, a row, a tab
+     pop     a press that LANDS something: a set ticked, an option chosen, a switch moved
+     notice  anything the app says back to you, which is to say every toast
+     intro   once, over the opening animation
+
+   WHY WEB AUDIO AND NOT <audio>. An HTMLAudioElement cannot be retriggered while it is
+   already playing without either cutting itself off or being cloned, and a set of ticks
+   logged quickly is exactly the case that breaks. Each file is fetched once, decoded once,
+   and every play is a fresh source node off the same buffer — so twenty presses in a row
+   are twenty overlapping sounds with no allocation and no latency.
+
+   DECODED LAZILY, AND ONLY WHEN WANTED. Somebody with sound off never fetches a byte. The
+   service worker precaches the four files, so the first press after an install is as
+   instant as the hundredth and a gym with no signal is not a silent app.
+
+   THE BROWSER WILL NOT LET A PAGE MAKE A NOISE UNTIL IT HAS BEEN TOUCHED, which is not a
+   bug to route around: it is the rule that stops the web autoplaying at people. Every
+   sound here rides on a press and so is allowed. The intro is the one exception and is
+   handled where it is played. */
+const SND_FILES = {press:"sound/press.mp3", pop:"sound/pop.mp3",
+                   notice:"sound/notice.mp3", intro:"sound/intro.mp3"};
+/* HOW LOUD EACH ONE SHOULD END UP, not how much to turn it down. These are four files
+   from four sources and their peaks differ by a factor of five — measured here: 0.94,
+   0.75, 0.20, 0.51. A fixed volume per kind would make one of them startling and another
+   inaudible, so each is measured at decode and brought to the level its job wants. Swap a
+   file for another one tomorrow and it lands at the same loudness as the one it replaced. */
+const SND_LEVEL = {press:.45, pop:.5, notice:.5, intro:.7};
+function soundOn(){ return trainPrefs().sound !== "off"; }
+let SND_AC = null, SND_BUF = {}, SND_LOAD = {};
+function sndCtx(){
+  if(SND_AC) return SND_AC;
+  const C = window.AudioContext || window.webkitAudioContext;
+  if(!C) return null;
+  try{ SND_AC = new C(); }catch(e){ SND_AC = null; }
+  return SND_AC;
+}
+function sndLoad(name){
+  if(SND_BUF[name] || SND_LOAD[name]) return SND_LOAD[name] || Promise.resolve(SND_BUF[name]);
+  const ac = sndCtx();
+  if(!ac || !SND_FILES[name]) return Promise.resolve(null);
+  SND_LOAD[name] = fetch(SND_FILES[name])
+    .then(r=> r.ok ? r.arrayBuffer() : Promise.reject(new Error("no file")))
+    /* decodeAudioData takes a callback on older WebKit and returns a promise everywhere
+       else; both are handled rather than assuming the one this browser has. */
+    .then(ab=> new Promise((res, rej)=>{
+      const out = ac.decodeAudioData(ab, res, rej);
+      if(out && typeof out.then === "function") out.then(res, rej);
+    }))
+    .then(buf=>{
+      SND_BUF[name] = {buf, at: sndLeadIn(buf), gain: sndGain(name, buf)};
+      return SND_BUF[name];
+    })
+    .catch(()=> null);
+  return SND_LOAD[name];
+}
+/* WHERE THE SOUND ACTUALLY STARTS. An MP3 carries a few milliseconds of encoder padding
+   and most files carry a little silence of their own — measured on these four: 22ms, 50ms,
+   166ms and 78ms. On a press that is latency you can feel; 50ms is the difference between a
+   button that answers and one that lags behind your thumb. The lead-in is found once, at
+   decode, and every play starts from there instead of from the top of the file. */
+function sndLeadIn(buf){
+  try{
+    const d = buf.getChannelData(0);
+    for(let i = 0; i < d.length; i++){
+      if(Math.abs(d[i]) > 0.005) return Math.max(0, (i / buf.sampleRate) - 0.003);
+    }
+  }catch(e){}
+  return 0;
+}
+function sndGain(name, buf){
+  const want = SND_LEVEL[name] != null ? SND_LEVEL[name] : .5;
+  let peak = 0;
+  try{
+    for(let c = 0; c < buf.numberOfChannels; c++){
+      const d = buf.getChannelData(c);
+      // every fourth sample: a peak does not hide between two of them at 44.1kHz
+      for(let i = 0; i < d.length; i += 4) if(Math.abs(d[i]) > peak) peak = Math.abs(d[i]);
+    }
+  }catch(e){}
+  if(!(peak > 0.01)) return want;
+  return Math.min(4, want / peak);
+}
+/* Play now if it is ready, and if it is not, fetch it and DO NOT play it late. A click
+   that arrives 300ms after the finger has left is not feedback, it is a noise; the next
+   press gets it. */
+function sound(name){
+  if(!soundOn()) return false;
+  const ac = sndCtx();
+  if(!ac) return false;
+  try{ if(ac.state === "suspended") ac.resume(); }catch(e){}
+  const s = SND_BUF[name];
+  if(!s){ sndLoad(name); return false; }
+  try{
+    const src = ac.createBufferSource(), g = ac.createGain();
+    src.buffer = s.buf;
+    g.gain.value = s.gain;
+    src.connect(g); g.connect(ac.destination);
+    src.start(0, s.at || 0);            // past the silence at the head of the file
+    return true;
+  }catch(e){ return false; }
+}
+// Everything but the intro, warmed as soon as sound is wanted, so the first press has it.
+function sndWarm(){
+  if(!soundOn()) return;
+  ["press","pop","notice"].forEach(sndLoad);
+}
+/* EVERY PRESSABLE THING IN THE APP, WITHOUT TOUCHING EVERY PRESSABLE THING IN THE APP.
+
+   Two rules. The app already declares what is pressable — the CSS rule that gives
+   everything you can press the same small compression on touch — so that list is read
+   here, and what LOOKS pressed and what SOUNDS pressed can never be two different sets.
+   And anything carrying a click handler counts, because this app assigns them as
+   `el.onclick = fn` and that is readable from the element, so a control written tomorrow
+   is covered the day it is written.
+
+   On pointerdown, not click: the sound has to arrive under the finger that is still down.
+
+   `data-snd` on any control names a different file, and "off" opts out. */
+const SND_SEL = [
+  'button', '[role="button"]', 'a[href]', 'label', 'select', 'summary',
+  'input[type="checkbox"]', 'input[type="radio"]',
+  '.linklike', '.ch', '.chip', '.seg button',
+  '.wp', '.bm-row', '.sec-h', '.nb-w', '.nb-adv', '.plate', '.feel-btn',
+  '.swap-opt', '.swap-hit', '.ex-ctl button', '.more-btn'
+].join(", ");
+/* A press that LANDS something gets the softer pop instead of the click: a set ticked, an
+   option chosen out of a set, a switch moved. Everything else is a plain press. */
+const SND_POP_SEL = '.ch, .chip, .seg button, .feel-btn, .chk, [data-done], input[type="checkbox"], input[type="radio"]';
+let SND_AT = 0;
+document.addEventListener("pointerdown", e=>{
+  if(!soundOn()) return;
+  let n = e.target;
+  for(let up = 0; n && n.nodeType === 1 && up < 10; up++, n = n.parentElement){
+    const k = (n.dataset && n.dataset.snd) || "";
+    if(k === "off") return;
+    const hit = (n.matches && n.matches(SND_SEL)) || typeof n.onclick === "function";
+    if(!hit) continue;
+    /* A control that does nothing must not sound as though it did. The app says so three
+       ways, and all three are read. */
+    if(n.disabled || n.getAttribute("aria-disabled") === "true") return;
+    if(n.classList && (n.classList.contains("inert") || n.classList.contains("locked")
+                       || n.classList.contains("past"))) return;
+    const now = Date.now();
+    // one press, one sound: pointerdown and the click it becomes are the same press
+    if(now - SND_AT < 45) return;
+    SND_AT = now;
+    sound(k || ((n.matches && n.matches(SND_POP_SEL)) ? "pop" : "press"));
+    return;
+  }
+}, {passive:true, capture:true});
 function restAlertMode(){
   const v = trainPrefs().restAlert;
   return v === "buzz" || v === "notify" ? v : "off";
@@ -21217,6 +21374,12 @@ function prefsScreenHTML(){
             + "Reminders on</button>.";
         })()
       : "Rest targets come from the set you just did, so a heavy triple gets longer than a set of fifteen.");
+  h += setChoice("Sound", [
+      {v:"on",  t:"On",  d:"A click as you press, a softer one when something lands, and a note when Element 26 says something back."},
+      {v:"off", t:"Off", d:"Silent."}
+    ], "data-prefsound", soundOn() ? "on" : "off",
+    "It follows your ringer switch, so silencing the phone silences it. Nothing here is "
+    + "downloaded until you turn it on, and once it is, it works with no signal.");
   h += setChoice("When a set falls well short", [
       {v:"on",  t:"Ask me",    d:"One tap to say why. The answer changes the advice, not just the mark."},
       {v:"off", t:"Don't ask", d:"Logs the set and says nothing."}
@@ -33239,6 +33402,14 @@ function bind(){
      nothing already logged moves, and no exercise that states its own behaviour is
      touched. */
   const setPref = (k, v, msg)=>{ trainPrefs()[k] = v; save(); queueSync(); render(); toast(msg); };
+  document.querySelectorAll("[data-prefsound]").forEach(b=> b.onclick = ()=>{
+    const v = b.dataset.prefsound;
+    setPref("sound", v, v === "on" ? "Sound on" : "Sound off");
+    /* Fetched the moment it is wanted, and the toast above has already played the first
+       one — or will, on the next press, if this is the very first time and nothing is
+       decoded yet. A sound setting you cannot hear is a guess. */
+    if(v === "on"){ sndWarm(); setTimeout(()=> sound("pop"), 260); }
+  });
   document.querySelectorAll("[data-prefrestalert]").forEach(b=> b.onclick = async ()=>{
     const v = b.dataset.prefrestalert;
     setPref("restAlert", v,
@@ -44528,6 +44699,19 @@ function quoteOfTheDay(){
   /* The check-in waits for the splash either way. Asked over the top of the mark coming
      out of the disc it would be the first thing anybody saw of the app and the last
      thing they wanted; asked after, it is the first thing on a settled screen. */
+  /* THE INTRO, AND THE ONE RULE IT CANNOT GET AROUND.
+
+     A browser will not let a page make a noise before it has been touched, and that rule
+     is the reason the web does not autoplay at people. A cold launch has not been touched,
+     so the swoosh over the opening animation is asked for and, on the first run of a
+     session, quietly refused — which is correct, and is why it is not chased.
+
+     What IS worth doing is not wasting it: the file is fetched now so the moment the audio
+     is allowed it is ready, and if the very first thing you do is tap to skip the splash,
+     that tap is a gesture and the swoosh plays under the fade rather than being lost. */
+  const intro = ()=>{ try{ if(soundOn()) sound("intro"); }catch(e){} };
+  try{ if(soundOn()){ sndLoad("intro"); sndWarm(); } }catch(e){}
+  setTimeout(intro, 60);
   if(!sp){ setTimeout(openingPrompts, 200); return; }
   if(reducedMotion()){ sp.remove(); setTimeout(openingPrompts, 200); return; }
   const bye = ()=>{
@@ -44535,7 +44719,7 @@ function quoteOfTheDay(){
     sp.classList.add("bye");
     setTimeout(()=>{ sp.remove(); openingPrompts(); }, 480);
   };
-  sp.onclick = bye;
+  sp.onclick = ()=>{ intro(); bye(); };   // a tap is a gesture, so this one is allowed
   /* The flight ends at 1.87s and the disc is gone by 2.4s; the screen then sits clean for
      a beat and the quote lands at 2.75s — so this has to leave the quote up long enough to
      actually be read after all that, not cut it off. Tapping anywhere skips straight

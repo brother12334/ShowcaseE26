@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "28.1";
+const VERSION = "28.2";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -41,7 +41,14 @@ const SHELL_URLS = [
   "./manifest.webmanifest",
   "./icon180v2.png",
   "./icon192v2.png",
-  "./icon512v2.png"
+  "./icon512v2.png",
+  /* The interface sounds. Small, four of them, and precached for the same reason the shell
+     is: a click that arrives a beat late because it is being fetched is worse than silence,
+     and a basement gym with no signal must not turn the app mute. */
+  "./sound/intro.mp3",
+  "./sound/press.mp3",
+  "./sound/pop.mp3",
+  "./sound/notice.mp3"
 ];
 
 /* Hosts whose responses must always come from the network. Checked by hostname rather
