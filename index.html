@@ -5907,7 +5907,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "34.8";
+const APP_VERSION = "34.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -39096,12 +39096,15 @@ function progressionFor(sess, entry){
        the reps carry the progress. Saying "add weight: 50 → 50" would be the app asking
        for something its own ceiling forbids. */
     if(from != null && to != null && parseFloat(to) <= parseFloat(from) + 0.01){
-      const mx = rackMaxNow();
+      const rk = rackMaxSrc(), mx = rk.max;
       return {
         name: entry.name, kind: "hold",
         msg: "Hold this load — the rack stops here",
         sub: "You earned the next weight up, and " + fmtLoad(from) + " is the heaviest "
-           + (isFinite(mx) && mx > 0 ? "(your rack ends at " + fmtLoad(mx) + ")" : "one available")
+           + (isFinite(mx) && mx > 0
+              ? "(" + (rk.gym ? "the rack at " + esc(rk.gym) : "your rack") + " ends at "
+                + fmtLoad(mx) + ")"
+              : "one available")
            + ". Keep the load and take the reps higher, or make the set harder: slower "
            + "lowering, a pause, or a longer stretch at the bottom."
       };
@@ -41034,15 +41037,36 @@ function roundLoadable(w, name){
 
    Only for the movements a rack limits: a cable stack and a leg press have their own
    ends and this number says nothing about them. */
-function rackMaxNow(){
-  /* The room you are actually in wins. A rack limit set on a gym is a fact about that
-     building, and it only reached the prescription if that gym happened to have been
-     applied to your preferences — which needs location on, or the gym step in the
-     pre-workout flow. Asked directly here, the session's own gym answers first. */
-  const g = (S.active && S.active.gymId) ? gymById(S.active.gymId) : null;
-  if(g && g.dbMax !== undefined && g.dbMax !== null && g.dbMax !== "") return parseFloat(g.dbMax);
-  return parseFloat(trainPrefs().dbMax);
+/* WHERE THE RACK STOPS, AND WHICH RACK THAT IS.
+
+   The room you are actually in wins. But "the room you are in" was read as the ACTIVE
+   SESSION'S gym and nothing else, so the moment there was no session running the answer
+   fell straight through to your usual kit — and somebody who had told the app their gym's
+   dumbbells end at 50, rather than typing the same number again under their usual kit, had
+   no ceiling at all anywhere outside a workout.
+
+   Which is exactly where the load suggestions live. "Add weight next time: 50 lb to 55 lb"
+   is drawn on the Body tab, hours after the session that earned it, and it was the one
+   screen the ceiling could not reach. Told where the dumbbells stop, the app went on
+   asking for a weight that is not in the building.
+
+   So with no session running it falls back to the gym you last trained in, which is the
+   best available answer to "where will this be performed", before falling back to the
+   usual kit. It returns the gym as well, so a message can name it rather than quoting a
+   number from nowhere. */
+function rackMaxSrc(){
+  const has = g => g && g.dbMax !== undefined && g.dbMax !== null && g.dbMax !== "";
+  let g = (S.active && S.active.gymId) ? gymById(S.active.gymId) : null;
+  if(!has(g)){
+    const ss = S.sessions || [];
+    for(let i = ss.length - 1; i >= 0 && !has(g); i--){
+      if(ss[i] && ss[i].gymId) g = gymById(ss[i].gymId);
+    }
+  }
+  if(has(g)) return {max: parseFloat(g.dbMax), gym: g.name || ""};
+  return {max: parseFloat(trainPrefs().dbMax), gym: ""};
 }
+function rackMaxNow(){ return rackMaxSrc().max; }
 function capToRack(w, name){
   const eq = equipmentOf(name);
   if(eq !== "dumbbell" && eq !== "kettlebell") return w;
