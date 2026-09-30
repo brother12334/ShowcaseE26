@@ -5865,7 +5865,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "34.1";
+const APP_VERSION = "34.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7625,6 +7625,7 @@ function openAddSetSheet(ei){
     const st = {weight:"", reps:"", rpe:"", done:false};
     if(k) st.tech = k;
     en.sets.push(st);
+    en.setsOwn = true;              // this count is yours; the plan does not reset it
     save(); hideModal(); render();
     toast(k === "lengthened" ? "Partials set added \u2014 " + lengthenedWhere(en.name)
         : k ? TECHNIQUES[k].label + " set added"
@@ -20881,6 +20882,46 @@ function planWeekStripHTML(){
   return `<div class="pw-strip"><b>Week ${w.week}${w.of ? " of " + w.of : ""}</b>
     <span>${esc(said.join(" \u00b7 "))}</span></div>`;
 }
+/* =====================================================================
+   WHERE THIS PAGE AND THE WORKOUT CARD DISAGREE, AND WHY
+
+   The Program tab is the plan AS WRITTEN — it is the document you print and hand to a
+   coach, and halving its numbers for a week would make it a record of nothing. The workout
+   card is the plan AS PERFORMED TODAY, which resolvedProgram() projects: a deload cuts the
+   sets, the first weeks back ramp them in, an exercise you reported sore is eased.
+
+   Both are right, and between them they had somebody reading 4x8-12 on one screen and
+   counting two set rows on the other with nothing anywhere to say which was true. So where
+   they differ, this says so, names the reason, and says how many exercises it touches.
+   Nothing on this page changes; it just stops being a silent disagreement. */
+function planVsTodayCardHTML(){
+  const why = [];
+  try{ if(deloadActive()) why.push("you are on a deload"); }catch(e){}
+  try{ if(rampInActive()) why.push("your first weeks back are ramping in"); }catch(e){}
+  try{ if(Object.keys(activeEases() || {}).length) why.push("something you reported sore is being eased"); }catch(e){}
+  if(!why.length) return "";
+  let n = 0;
+  try{
+    DAYS.forEach(wid=>{
+      const raw = S.program[wid] || [];
+      const res = resolvedProgram(wid).filter(x=> !x.isFinisher);
+      raw.forEach((e, i)=>{
+        const r = res[i] && res[i].chosen;
+        if(r && (parseInt(r.sets, 10) || 0) !== (parseInt(e.sets, 10) || 0)) n++;
+      });
+    });
+  }catch(e){ return ""; }
+  if(!n) return "";
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>Written here, lighter today</h3>
+    </div>
+    <div class="sub" style="margin:6px 0 0">This page is your plan as written, which is what it
+      should stay. The workout card is running fewer sets than these numbers on
+      <b>${n} exercise${n === 1 ? "" : "s"}</b> right now, because ${esc(joinList(why))}. Your plan
+      is untouched — the full numbers come back on their own.</div>
+  </div>`;
+}
 function planWeekCardHTML(){
   const n = planWeekNotes();
   if(!n) return "";
@@ -30937,6 +30978,7 @@ function viewProgram(){
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
   h += planKindCardHTML();
+  h += planVsTodayCardHTML();
   h += planWeekCardHTML();
   h += importMetaCardHTML();
   DAYS.forEach(wid=>{
@@ -32880,8 +32922,9 @@ function bind(){
   document.querySelectorAll("[data-addset]").forEach(b=> b.onclick=()=>
     openAddSetSheet(parseInt(b.dataset.addset, 10)));
   document.querySelectorAll("[data-rmset]").forEach(b=> b.onclick=()=>{
-    const sets = S.active.entries[b.dataset.rmset].sets;
-    if(sets.length>1){ sets.pop(); save(); render(); }
+    const en = S.active.entries[b.dataset.rmset];
+    const sets = en.sets;
+    if(sets.length>1){ sets.pop(); en.setsOwn = true; save(); render(); }
   });
 
   const fin = $("#finishBtn");
@@ -32914,6 +32957,10 @@ function bind(){
     const moved = idx.filter((oldI, newI)=> oldI !== newI);
     if(moved.some(doneAt)){ toast("That one's done — its place in the session is set"); return false; }
     harvestActive();
+    /* The order of this session is now yours, not the plan's. The plan can still repair a
+       superset that is pointing at the wrong exercise — that is a false statement rather
+       than an arrangement — but it does not re-sort a session you have arranged. */
+    S.active.orderOwn = true;
     const pos = new Map();
     idx.forEach((oldI, newI)=> pos.set(oldI, newI));
     S.active.entries = idx.map(k=> list[k]);
@@ -33039,6 +33086,8 @@ function bind(){
     const i = parseInt(b.dataset.exskip,10);
     if(confirm("Skip "+S.active.entries[i].name+" today? It won't appear in this session's log.")){
       harvestActive();
+      // remembered, so no later reconciliation with the plan puts it back under you
+      planDrop(S.active, i);
       S.active.entries.splice(i,1);
       if(S.active.focusIdx!=null) S.active.focusIdx = Math.min(S.active.focusIdx, Math.max(0, S.active.entries.length-1));
       save(); render();
@@ -34968,6 +35017,28 @@ function planSnapFromRows(a){
     };
   });
 }
+/* THE SESSION'S OWN DECISIONS, WRITTEN DOWN AT THE MOMENT THEY ARE MADE.
+
+   syncActivePlan() can only leave a deliberate deviation alone if it can TELL. Skipping an
+   exercise and the plan dropping it look identical afterwards; so do a set cut at the rack
+   and a plan that asks for fewer. Rather than guessing — which is what made the first pass
+   hold half the reconciliation back — the session records what it did, and everything it
+   did not do follows the plan. */
+function planSlotIdOfRow(a, i){
+  const en = a.entries[i];
+  if(!en) return null;
+  if(en.planKey) return en.planKey;
+  const key = nrm(en.name);
+  let n = -1;
+  for(let j = 0; j <= i; j++) if(nrm(a.entries[j].name) === key) n++;
+  return key + "#" + n;
+}
+function planDrop(a, i){
+  const id = planSlotIdOfRow(a, i);
+  if(!id) return;
+  if(!Array.isArray(a.planDropped)) a.planDropped = [];
+  if(a.planDropped.indexOf(id) < 0) a.planDropped.push(id);
+}
 /* WHICH PLAN SLOT EACH ROW OF THE SESSION IS, as an array parallel to a.entries. The
    inverse of planRowAt(), taken once rather than per lookup. */
 function planRowIds(a, now){
@@ -35042,8 +35113,9 @@ function planOrderFix(a, now, news, catchUp){
     news.push({k:"edit", name: en.name, how: "paired with " + partner.name});
   }
 
-  // and the re-sort of everything still to come
-  if(!catchUp){
+  /* and the re-sort of everything still to come, unless this session's order is one you
+     arranged yourself or a time box decided */
+  if(!a.orderOwn && !a.timeBox){
     let lastDone = -1;
     a.entries.forEach((en, i)=>{ if(planRowLogged(en)) lastDone = i; });
     const head = a.entries.slice(0, lastDone + 1);
@@ -35101,6 +35173,23 @@ function syncActivePlan(){
   const B = {}, N = {};
   base.forEach(x=> B[x.id] = x);
   now.forEach(x=> N[x.id] = x);
+  /* WHAT A CATCH-UP MAY TOUCH, now that the session says what it decided itself.
+
+     The first version of this held the roster, the set counts and the order back on a
+     catch-up because a missing row could be a skip and a short set count could be a cut.
+     Both are now recorded when they happen, so the guessing is over and the answer to
+     "should a change I made to my plan be in effect" is yes, in every session, including
+     the one open when this arrived.
+
+     A TIME BOX IS THE EXCEPTION, and it is not a guess either. It replaces the session's
+     entries wholesale with a shorter version of them, on purpose, with an undo attached.
+     While one is in force the shape of this session is the time box's and not the plan's.
+
+     Text is still never overwritten by a catch-up: a note or a rest range already on the
+     row is something typed at the rack, and the plan's version of it only fills a blank. */
+  const boxed  = !!a.timeBox;
+  const roster = !catchUp || !boxed;
+  const counts = !catchUp || !boxed;
   const side = (a.entries.find(en=> en.startSide) || {}).startSide || startSideFor(a.workoutId);
   const news = [];
   const kept = {};                       // plan positions whose old movement you had worked
@@ -35115,7 +35204,7 @@ function syncActivePlan(){
 
   // 1 — TAKEN OFF THE DAY
   base.forEach(g=>{
-    if(catchUp) return;                  // see planSnapFromRows(): could be a skip
+    if(!roster) return;
     if(N[g.id]) return;
     const i = planRowAt(a, g.id);
     if(i < 0) return;
@@ -35132,8 +35221,10 @@ function syncActivePlan(){
 
   // 2 — ADDED TO THE DAY
   now.forEach((c, i)=>{
-    if(catchUp) return;                  // see planSnapFromRows(): could be a skip
+    if(!roster) return;
     if(B[c.id]) return;
+    // skipped on purpose: never put back under you, on any pass
+    if((a.planDropped || []).indexOf(c.id) > -1) return;
     if(kept[c.wi]) return;               // this position swapped a movement you had worked
     if(planRowAt(a, c.id) >= 0) return;  // already here: the swap sheet put it in itself
     const chosen = slots.map(x=> x.src);
@@ -35148,7 +35239,7 @@ function syncActivePlan(){
     a.entries.splice(at, 0, en);
     shift(at, 1);
     moved = true;
-    news.push({k:"added", name: c.name});
+    news.push({k:"added", name: c.name, back: catchUp || undefined});
   });
 
   // 3 — CHANGED WHERE IT IS
@@ -35161,12 +35252,10 @@ function syncActivePlan(){
     const said = [];
     /* THE DIFFERENCE, NOT THE NUMBER. 3→4 in the plan means one more set here, so the set
        you added at the rack is still yours and 4 does not quietly become 4 again. */
-    /* NOT THE SET COUNT ON A CATCH-UP EITHER, and for the same reason as the note: with
-       the row as the base, every difference is ambiguous. A time box cut it, "− set"
-       cut it, "+ set" raised it — all three read as a plan that disagrees, and none of
-       them should lose to it. Set counts follow the plan from the next edit onward, once
-       the snapshot this pass stores exists to tell the two apart. */
-    if(!catchUp && c.sets !== b.sets && c.sets > 0){
+    /* A count you set at the rack is yours: "+ set" and "− set" both say so on the row,
+       so a catch-up reading the row as its base does not mistake your decision for the
+       plan's and reset it. */
+    if((counts && !en.setsOwn) && c.sets !== b.sets && c.sets > 0){
       const want = Math.max(1, en.sets.length + (c.sets - b.sets));
       while(en.sets.length < want) en.sets.push({weight:"",reps:"",rpe:"",done:false});
       while(en.sets.length > want){
@@ -35193,13 +35282,14 @@ function syncActivePlan(){
     };
     take("reps", c.reps, b.reps, planStr(en.reps), c.reps ? "reps now " + c.reps : "no rep target");
     take("rpe",  c.rpe,  b.rpe,  planStr(en.rpe),  c.rpe ? "RPE now " + c.rpe : "no RPE target");
-    /* NOT THE NOTE, AND NOT THE REST RANGE, ON A CATCH-UP. Both are editable from the set
-       row mid-session, and on a catch-up the base IS the row — so "the plan says
-       something different" and "you wrote this yourself at the rack" are the same reading,
-       and the plan would win over the thing you just typed. */
-    if(!catchUp) take("note", c.note, b.note, planStr(en.note), "note changed");
+    /* TEXT IS THE ONE THING A CATCH-UP ONLY EVER FILLS IN. Both the note and the rest
+       range are editable from the set row, and on a catch-up the base IS the row — so
+       "the plan says something different" and "you wrote this yourself at the rack" read
+       identically. Writing into a blank loses nothing; writing over a sentence does. */
+    if(!catchUp || !planStr(en.note).trim()) take("note", c.note, b.note, planStr(en.note), "note changed");
     take("sideMode", c.sideMode, b.sideMode, planStr(en.sideMode), "sides changed");
-    if(!catchUp && !planSame(c.rest, b.rest) && planSame(en.rest || null, b.rest)){
+    if((!catchUp || !en.rest) && !planSame(c.rest, b.rest)
+       && (catchUp || planSame(en.rest || null, b.rest))){
       en.rest = c.rest ? c.rest.slice() : undefined;
       said.push(c.rest ? "rest now " + fmtClock(c.rest[0]) + "\u2013" + fmtClock(c.rest[1])
                        : "no rest target");
@@ -35259,7 +35349,9 @@ function planEditsSay(news){
 function planEditsCardHTML(a){
   const list = (a && Array.isArray(a.planEdits)) ? a.planEdits : [];
   if(!list.length) return "";
-  const say = n => n.k === "added" ? "<b>" + esc(n.name) + "</b> added"
+  const say = n => n.k === "added" ? "<b>" + esc(n.name) + "</b> "
+                 + (n.back ? "put back from your plan — skip it again if you meant to leave it out"
+                           : "added")
              : n.k === "gone"    ? "<b>" + esc(n.name) + "</b> taken out"
              : n.k === "order"   ? "the exercises you have not started put back into your plan's order"
              : "<b>" + esc(n.name) + "</b> — " + esc(n.how);
