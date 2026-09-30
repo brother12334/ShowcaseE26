@@ -5893,7 +5893,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.5";
+const APP_VERSION = "35.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10570,12 +10570,18 @@ function soundCut(){
   SND_LIVE.forEach(x=>{ try{ x.stop(); }catch(e){} });
   SND_LIVE = [];
 }
-/* Warmed as soon as sound is wanted, and only what this screen can actually play: six
-   press sounds fetched for a session spent on one tab is five files nobody hears. The
-   others arrive as you arrive at them — see goTab(). */
+/* EVERY PRESS SOUND, UP FRONT. The previous version fetched only the tab you were on and
+   left the rest to arrive as you arrived at them, which was the wrong trade twice over:
+   the six press files are nine to eleven kilobytes each, 53KB for the lot, and the one
+   that arrives as you arrive is by definition not there for the press that took you
+   there. sound() refuses to play late, on purpose — so the first press on every tab was
+   silent, which is exactly the "sometimes no sound" it was supposed to avoid.
+
+   The two long ones stay out of this: the splash pair is fetched by the splash itself,
+   and neither is wanted by a press. */
 function sndWarm(){
   if(!soundOn()) return;
-  [pressSound(), "pop", "notice"].forEach(sndLoad);
+  Object.keys(SND_FILES).forEach(k=>{ if(k !== "intro" && k !== "tap") sndLoad(k); });
 }
 /* EVERY PRESSABLE THING IN THE APP, WITHOUT TOUCHING EVERY PRESSABLE THING IN THE APP.
 
@@ -14065,32 +14071,57 @@ function soreAskedFor(g, d){
   const sk = (S.soreSkip || {})[day];
   return !!(sk && sk[g]);
 }
-/* The last session that gave this muscle real work, with how much of it, counted the way
-   every other reader in the app counts effective sets. */
-function domsLastExposure(g){
+/* THE LAST SESSION THAT GAVE EACH MUSCLE REAL WORK — ALL OF THEM, IN ONE PASS.
+
+   The first version of this took one muscle and walked back through the log until it
+   found it, which is the obvious way to write it and was 4x the cost of the entire Today
+   tab. Nineteen muscles times forty-six sessions times every set, with setEffective()
+   called inside all of it — and it ran on every render, because the rest-day card asks
+   what is due every time it draws. A tap took most of a second on a phone.
+
+   One walk now, newest first, filling in every muscle as it goes and stopping the moment
+   they all have an answer: in practice four or five sessions, not the whole log. Each set
+   is weighed once rather than nineteen times. Cached against the log's own shape, so a
+   render that changes nothing re-reads nothing.
+
+   The lesson is not "cache it". It is that a reader called from a view function is called
+   on every frame of every screen, and the cost has to be paid at that rate. */
+let DOMS_EXP = null, DOMS_EXP_SIG = "";
+function domsExposures(){
   const ss = S.sessions || [];
-  for(let i = ss.length - 1; i >= 0; i--){
-    const s = ss[i];
-    if(!s || !Array.isArray(s.entries)) continue;
-    let eff = 0;
-    s.entries.forEach(e=>{
+  const lastS = ss.length ? ss[ss.length - 1] : null;
+  const sig = ss.length + "|" + (lastS ? (lastS.id || "") + ":" + (lastS.finishedAt || 0) : "");
+  if(DOMS_EXP && DOMS_EXP_SIG === sig) return DOMS_EXP;
+  const out = {};
+  let left = MKEYS.length;
+  for(let i = ss.length - 1; i >= 0 && left > 0; i--){
+    const sn = ss[i];
+    if(!sn || !Array.isArray(sn.entries)) continue;
+    const eff = {};
+    sn.entries.forEach(e=>{
       if(!e || !Array.isArray(e.sets)) return;
-      const mm = musclesFor(e.name) || {};
-      const c = mm[g] || 0;
-      if(c <= 0) return;
+      const mm = musclesFor(e.name);
+      if(!mm) return;
       let warms = null;
       try{ warms = entryWarmups(e); }catch(err){ warms = null; }
       e.sets.forEach((st, si)=>{
         if(!isWorkingSet(st)) return;
         let one = 1;
         try{ one = setEffective(e, si, warms).v; }catch(err){ one = 1; }
-        eff += c * one;
+        // one weighing of the set, shared out across every muscle it feeds
+        Object.keys(mm).forEach(m=>{ if(mm[m] > 0) eff[m] = (eff[m] || 0) + mm[m] * one; });
       });
     });
-    if(eff > 0) return {date: s.date, eff};
+    Object.keys(eff).forEach(m=>{
+      if(out[m] || !(eff[m] > 0)) return;
+      out[m] = {date: sn.date, eff: eff[m]};
+      left--;
+    });
   }
-  return null;
+  DOMS_EXP = out; DOMS_EXP_SIG = sig;
+  return out;
 }
+function domsLastExposure(g){ return domsExposures()[g] || null; }
 /* Rule 1(b). The calendar day this muscle's soreness is worth asking about, which is the
    day its own recovery window runs out — rounded UP to whole days, because a question
    arrives on a date and not at an hour. */
@@ -14103,14 +14134,31 @@ function domsCheckDayFor(g){
   return new Date(base + Math.ceil(hrs / 24) * DAY_MS).toLocaleDateString("en-CA");
 }
 /* Rule 3. Everything whose check falls today and has not already been asked. Nothing is
-   returned for a day whose check has been and gone: see the rule above. */
+   returned for a day whose check has been and gone: see the rule above.
+
+   Memoised for the day, because the card asks on every draw and the answer cannot change
+   between two of them without something else invalidating it — an answer, a skip, or a new
+   session, all of which move one of the two signatures below. */
+let DOMS_DUE = null, DOMS_DUE_SIG = "";
 function domsDueToday(){
   const today = todayStr();
-  return MKEYS.filter(m=>{
+  /* THE WALK FIRST, THEN THE SIGNATURE. Reading DOMS_EXP_SIG before refreshing it compares
+     the new state against a key built from the OLD one — which matches what was stored,
+     hits the cache, and hands back an answer about a log that has since changed. It took a
+     spec to catch, because it only shows when the log changes between two calls. */
+  domsExposures();
+  const sig = today + "|" + DOMS_EXP_SIG + "|" +
+              JSON.stringify((S.sore || {})[today] || {}) + "|" +
+              JSON.stringify((S.soreSkip || {})[today] || {}) + "|" +
+              JSON.stringify(S.program || {}).length;
+  if(DOMS_DUE && DOMS_DUE_SIG === sig) return DOMS_DUE;
+  const out = MKEYS.filter(m=>{
     if(soreAskedFor(m, today)) return false;
-    if(!(planCycleVolume(m) > 0)) return false;       // no longer part of the programme
-    return domsCheckDayFor(m) === today;
+    if(domsCheckDayFor(m) !== today) return false;
+    return planCycleVolume(m) > 0;     // last, because it is the dearest of the three
   });
+  DOMS_DUE = out; DOMS_DUE_SIG = sig;
+  return out;
 }
 /* Rule 4. A prompt gone past without an answer, so it is not asked again today and the
    performance read can tell an unanswered exposure from a zero. */
@@ -16216,8 +16264,6 @@ function syncWorkoutTab(){
 // never disagree about which one you are on.
 function goTab(t){
   TAB = t;
-  // the tab you are arriving at has its own press sound; fetch it as you arrive
-  try{ if(soundOn()) sndLoad(pressSound(t)); }catch(e){}
   syncWorkoutTab();
   document.querySelectorAll("nav button").forEach(x=> x.classList.toggle("on", x.dataset.tab === t));
   render(); window.scrollTo(0, 0); showNav();
