@@ -5885,18 +5885,12 @@ body.cele-open{overflow:hidden}
 <div class="ai-full" id="aiFull" hidden><div class="ai-full-in" id="aiFullIn"></div></div>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 <div id="toasts" aria-live="polite" aria-atomic="false"></div>
-<!-- THE SWITCH TRICK IS GONE. iOS has never shipped the Vibration API, and the one thing
-     Safari does play a haptic for — the switch control added in 17.4 — plays it for a FINGER
-     on that switch, not for a click dispatched from script. A hidden control that does
-     nothing is worse than no control, so it is out, and the setting now says plainly what
-     iOS can and cannot do. See clickPlay() for what an iPhone gets instead. -->
-
 <script>
 "use strict";
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "35.0";
+const APP_VERSION = "35.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9684,24 +9678,6 @@ function toast(msg, kind, opts){
   opts = opts || {};
   const host = $("#toasts");
   if(!host){ return; }                       // before the shell paints, nothing to do
-  /* THE APP ALREADY KNOWS WHAT IT IS SAYING. Every message is classified good, warn or
-     plain to pick its icon, so the haptic reads the same classification and can never
-     drift from the words. A plain one says nothing: the press was already answered.
-
-     AND NEITHER DOES ONE THAT FOLLOWS A REAL ANSWER. Half the toasts in the app are raised
-     BY something that has already spoken with its own shape — the rest alert buzzing and
-     then saying "rest is up", a set ticking and then reporting itself. Two buzzes for one
-     event reads as a fault. A toast inside half a second of any shaped haptic therefore
-     stays quiet; a plain tap does not count, because "pressed" then "done" is two different
-     facts and worth feeling as two. */
-  try{
-    const hk = kind || toastKindOf(msg);
-    /* A WARNING IS NEVER HELD BACK. It is the one message you most need to feel, and the
-       cost of it arriving close behind something else is a double buzz — which is a great
-       deal cheaper than a refusal nobody noticed. Only the confirmations wait their turn. */
-    if(hk === "warn" || hk === "bad") haptic("warn");
-    else if(hk === "good" && Date.now() - HAP_RICH >= 500) haptic("good");
-  }catch(e){}
   const k = kind || toastKindOf(msg);
   /* The same message twice in a row is one message. Tapping Save twice should not build
      a tower of identical notices, and a repeated warning is not more true. */
@@ -10141,10 +10117,7 @@ function checkPR(ei, si, anchorEl){
   const had = st.pr || null;
   if(pr) st.pr = pr; else delete st.pr;
   // only animate when it's newly earned, so re-renders don't spam the float
-  if(pr && pr !== had){
-    haptic("pr");
-    if(anchorEl) prFloat(anchorEl, pr);
-  }
+  if(pr && pr !== had && anchorEl) prFloat(anchorEl, pr);
   return pr;
 }
 // Re-evaluate every done set of an exercise. Editing set 1 upward can promote or
@@ -10422,200 +10395,6 @@ function restTargetFor(entry, st){
    Fired once per rest: `alerted` is stamped on the timer, so coming back to a rest that
    is already over does not set it off again in your ear. */
 let REST_ALERT_T = null;
-/* =====================================================================
-   HAPTICS
-
-   A phone that answers you is a phone you trust. The rest alert already buzzed, and that
-   was the whole of it: everything else — a set ticked, a plan changed, an exercise
-   deleted, a personal record — happened in silence under your thumb while you were looking
-   at a barbell rather than the screen.
-
-   THE PATTERNS ARE A VOCABULARY, not decoration. Each one is shaped like the thing it is
-   reporting, so the hand learns them without being taught:
-
-     tap/nudge   one short pulse. You pressed a thing; the thing noticed.
-     open        a knock and a soft tail — something came up over the page.
-     tick        short, gap, shorter. A set landing: down, and settled.
-     undo        the tick backwards, ending long. Something came off.
-     remove      four falling pulses. Gone, and it sounds gone.
-     good        quiet then firm — a thing that worked.
-     warn        two hard pulses around a long gap. The one you feel through a pocket.
-     pr          three rising knocks and a flourish. Earned, and it should feel earned.
-     finish      the same shape, longer, once per session. The full stop.
-     start       a roll into the work.
-     rest        the alert itself, unchanged, because people already know that one.
-
-   HOW IT REACHES EVERYTHING. Two routes, no third: a delegated pointerdown that gives every
-   button in the app the plain tap, and explicit calls at the dozen moments that deserve
-   their own shape. toast() carries its own — the app already classifies every message as
-   good, warn or plain, so its haptics come free and cannot drift from what it says.
-
-   ANDROID VIBRATES; iOS DOES NOT. See the switch in the shell for what iOS gets instead. */
-const HAPTIC = {
-  tap:    [9],
-  nudge:  [14],
-  open:   [11, 26, 6],
-  close:  [7],
-  tick:   [16, 34, 10],
-  undo:   [10, 30, 26],
-  remove: [34, 26, 20, 22, 12, 18, 6],
-  good:   [12, 30, 24],
-  warn:   [26, 70, 26],
-  pr:     [10, 34, 12, 34, 16, 34, 64],
-  finish: [22, 50, 24, 50, 28, 50, 120],
-  start:  [18, 40, 42],
-  rest:   [120, 80, 120]
-};
-function hapticMode(){
-  const v = trainPrefs().haptics;
-  return (v === "off" || v === "light") ? v : "full";
-}
-/* =====================================================================
-   A CLICK YOU CAN HEAR, FOR THE PHONE THAT CANNOT BUZZ
-
-   iOS gives a web app no vibration whatsoever — not a weaker one, none — and there is no
-   way around it. So an iPhone had the whole vocabulary below and no way to feel any of it.
-
-   Sound is the one channel left, and it suits that vocabulary better than it has any right
-   to: the patterns are already rhythms, and a rhythm plays as well through a speaker as
-   through a motor. Each kind gets the same shape in pitch that it has in pulses — a record
-   rises, something deleted falls away, a warning sits low and repeats.
-
-   OFF BY DEFAULT, because an app that starts making noises is an app people uninstall. It
-   rides on the same haptic() call as everything else, so turning it on needs no new wiring
-   anywhere: every button, toast, tick and record in the app already goes through there.
-
-   It obeys the ringer switch, like any web audio, and the setting says so. */
-const CLICK = {
-  tap:    {n:[1800], d:11, v:.030, type:"square"},
-  nudge:  {n:[1500], d:15, v:.035, type:"square"},
-  open:   {n:[900, 1400], d:26, v:.035, type:"triangle"},
-  close:  {n:[760], d:13, v:.028, type:"triangle"},
-  tick:   {n:[2100, 2600], d:24, v:.040, type:"square"},
-  undo:   {n:[1700, 1050], d:28, v:.038, type:"square"},
-  remove: {n:[430, 320, 240], d:52, v:.050, type:"triangle"},
-  good:   {n:[1400, 1900], d:32, v:.040, type:"triangle"},
-  warn:   {n:[520, 520], d:64, v:.055, type:"sawtooth"},
-  pr:     {n:[1046, 1318, 1568, 2093], d:46, v:.045, type:"triangle"},
-  finish: {n:[784, 1046, 1318, 1568, 2093], d:62, v:.048, type:"triangle"},
-  start:  {n:[880, 1174], d:38, v:.040, type:"triangle"},
-  rest:   {n:[1318, 1318, 1568], d:58, v:.055, type:"square"}
-};
-function clickOn(){ return trainPrefs().clicks === "on"; }
-let CLICK_AC = null;
-/* Built on the first press that needs one, never before: a context created at load is one
-   the browser suspends anyway, and one created for somebody who never turns this on is a
-   resource taken for nothing. */
-function clickCtx(){
-  if(CLICK_AC) return CLICK_AC;
-  const C = window.AudioContext || window.webkitAudioContext;
-  if(!C) return null;
-  try{ CLICK_AC = new C(); }catch(e){ CLICK_AC = null; }
-  return CLICK_AC;
-}
-function clickPlay(kind){
-  const ac = clickCtx();
-  if(!ac) return false;
-  // every call site is inside a press, which is the gesture iOS wants before it will play
-  try{ if(ac.state === "suspended") ac.resume(); }catch(e){}
-  const c = CLICK[kind] || CLICK.tap;
-  try{
-    const t0 = ac.currentTime + 0.001, step = c.d / 1000;
-    c.n.forEach((f, i)=>{
-      const o = ac.createOscillator(), g = ac.createGain();
-      o.type = c.type || "square";
-      const st = t0 + i * step, en = st + step * 0.88;
-      o.frequency.setValueAtTime(f, st);
-      /* Eased in and out: a square wave switched on at full gain is a pop, and a pop is
-         the sound of a bug rather than of a button. */
-      g.gain.setValueAtTime(0.0001, st);
-      g.gain.exponentialRampToValueAtTime(c.v || .04, st + 0.004);
-      g.gain.exponentialRampToValueAtTime(0.0001, en);
-      o.connect(g); g.connect(ac.destination);
-      o.start(st); o.stop(en + 0.02);
-    });
-    return true;
-  }catch(e){ return false; }
-}
-
-let HAP_AT = 0;     // the last PLAIN tap, and nothing else
-let HAP_RICH = 0;   // the last one with a shape to it — see toast()
-function haptic(kind){
-  const mode = hapticMode();
-  const sound = clickOn();
-  if(mode === "off" && !sound) return false;
-  const now = Date.now();
-  /* ONE PRESS, ONE TAP — and only that. A control can raise pointerdown and then a
-     synthesised click, which is one press felt twice, so a plain tap inside 45ms of the
-     LAST PLAIN TAP is dropped.
-
-     It is deliberately not "inside 45ms of any haptic". That was the first version, and it
-     meant a press landing just after a toast or a ticked set went unanswered — the tap
-     blocked by something that came BEFORE it, which is exactly backwards. A richer kind
-     arriving after a tap needs no guard at all: vibrate() replaces the running pattern, so
-     the better answer simply takes over. */
-  if(kind === "tap"){
-    if(now - HAP_AT < 45) return false;
-    HAP_AT = now;
-  } else HAP_RICH = now;
-  /* The click is not the buzz's fallback, it is a second channel with its own switch, so
-     somebody can have both, either or neither. */
-  const heard = sound ? clickPlay(kind) : false;
-  if(mode === "off") return heard;
-  let pat = HAPTIC[kind] || HAPTIC.tap;
-  // "light" is the whole vocabulary spoken quietly: the shape goes, the answer stays
-  if(mode === "light") pat = [Math.min(12, pat[0] || 10)];
-  try{ if(navigator.vibrate && navigator.vibrate(pat)) return true; }catch(e){}
-  return heard;
-}
-/* EVERY BUTTON IN THE APP, WITHOUT TOUCHING EVERY BUTTON IN THE APP. On pointerdown rather
-   than click, because the answer has to arrive under the finger that is still down — a
-   haptic after the render reads as the app being slow, not as the app replying.
-
-   `data-haptic` on any control overrides the kind, and "off" opts out entirely. */
-/* HALF THIS APP IS NOT A <button>. Cards you press, rows that open a day, section headers
-   that expand, plates, swipe actions, the muscle map, the segments in Settings — a
-   selector listing the ones somebody remembered is a selector that covers the screen it
-   was written on and nothing else. That is why it answered while you were logging sets and
-   went quiet everywhere else.
-
-   Two rules instead, and the second is the one that makes it whole:
-
-     1. THE APP'S OWN LIST OF WHAT IS PRESSABLE. There already is one — the CSS rule that
-        gives everything you can press the same small compression on touch. Haptics now read
-        the same list, so a control that LOOKS pressed and a control that FEELS pressed can
-        never be two different sets again.
-     2. ANYTHING WITH A CLICK HANDLER ON IT. This app assigns handlers as `el.onclick = fn`
-        — 389 of them against three addEventListener — and that is readable from the
-        element. So the walk up from whatever was touched fires on the first ancestor that
-        either matches the list or carries a handler at all. Nothing has to be registered,
-        and a control added tomorrow is covered the day it is written. */
-const HAP_SEL = [
-  'button', '[role="button"]', 'a[href]', 'label', 'select', 'summary',
-  'input[type="checkbox"]', 'input[type="radio"]', 'input[type="range"]',
-  '.linklike', '.ch', '.chip', '.seg button',
-  // the app's own "anything you can press" set, kept in step with the CSS above
-  '.wp', '.bm-row', '.sec-h', '.nb-w', '.nb-adv', '.plate', '.feel-btn',
-  '.swap-opt', '.swap-hit', '.ex-ctl button', '.more-btn'
-].join(", ");
-document.addEventListener("pointerdown", e=>{
-  let n = e.target;
-  for(let up = 0; n && n.nodeType === 1 && up < 10; up++, n = n.parentElement){
-    const k = (n.dataset && n.dataset.haptic) || "";
-    if(k === "off") return;                                    // opted out, here or above
-    const hit = (n.matches && n.matches(HAP_SEL)) || typeof n.onclick === "function";
-    if(!hit) continue;
-    /* AND A CONTROL THAT DOES NOTHING MUST NOT PRETEND IT DID. The app says "this one is
-       not answering you" three ways — the disabled property, aria-disabled, and the
-       classes the press animation already refuses to run for. All three are read here, so
-       a locked plate or a cycle box you cannot press stays as silent as it looks. */
-    if(n.disabled || n.getAttribute("aria-disabled") === "true") return;
-    if(n.classList && (n.classList.contains("inert") || n.classList.contains("locked")
-                       || n.classList.contains("past"))) return;
-    haptic(k || "tap");
-    return;
-  }
-}, {passive:true, capture:true});
 function restAlertMode(){
   const v = trainPrefs().restAlert;
   return v === "buzz" || v === "notify" ? v : "off";
@@ -10644,7 +10423,7 @@ function fireRestAlert(){
      scheduled push. Both carry the tag "e26-rest", so one arriving anyway replaces this
      notification rather than adding a second one. */
   pushSyncSchedule();
-  haptic("rest");
+  try{ if(navigator.vibrate) navigator.vibrate([120, 80, 120]); }catch(e){}
   const en = S.active.entries[rt.e];
   const what = en && en.name ? en.name : "your next set";
   toast("Rest is up — " + what, "good");
@@ -21438,27 +21217,6 @@ function prefsScreenHTML(){
             + "Reminders on</button>.";
         })()
       : "Rest targets come from the set you just did, so a heavy triple gets longer than a set of fifteen.");
-  const hm = hapticMode();
-  const canBuzz = typeof navigator !== "undefined" && !!navigator.vibrate;
-  h += setChoice("Buzz when you press things", [
-      {v:"full",  t:"Full",  d:"A different shape for each thing \u2014 a set landing, a record, something deleted."},
-      {v:"light", t:"Light", d:"One short pulse, whatever happened."},
-      {v:"off",   t:"Off",   d:"Nothing vibrates except the rest alert, which has its own setting."}
-    ], "data-prefhaptic", hm,
-    canBuzz
-      ? "Every button answers under your thumb, and the ones that matter answer differently."
-      : "<b>Nothing will buzz on this phone.</b> iOS has never given a web app any way to "
-        + "vibrate \u2014 not a weaker one, none \u2014 and there is no way around it. The click below "
-        + "is the one kind of feedback Element 26 can give you here.");
-  h += setChoice("A click you can hear", [
-      {v:"on",  t:"On",  d:"A short tick on every press, and its own sound for a set landing, a record, something deleted."},
-      {v:"off", t:"Off", d:"Silent."}
-    ], "data-prefclick", clickOn() ? "on" : "off",
-    (canBuzz
-      ? "The same vocabulary as the buzz, through the speaker instead \u2014 have both, either, or neither. "
-      : "On an iPhone this is the only feedback there is, and it is the same vocabulary the buzz uses "
-        + "everywhere else: a record rises, something deleted falls away. ")
-    + "It follows your ringer switch, so silencing the phone silences it.");
   h += setChoice("When a set falls well short", [
       {v:"on",  t:"Ask me",    d:"One tap to say why. The answer changes the advice, not just the mark."},
       {v:"off", t:"Don't ask", d:"Logs the set and says nothing."}
@@ -33127,7 +32885,6 @@ function bind(){
         }
       }
       st.done = !st.done;
-      haptic(st.done ? "tick" : "undo");
       if(st.done){
         const row = el.parentElement;
         const wIn = row.querySelector('[data-f="weight"]');
@@ -33429,7 +33186,6 @@ function bind(){
     const i = parseInt(b.dataset.exskip,10);
     if(confirm("Skip "+S.active.entries[i].name+" today? It won't appear in this session's log.")){
       harvestActive();
-      haptic("remove");
       // remembered, so no later reconciliation with the plan puts it back under you
       planDrop(S.active, i);
       S.active.entries.splice(i,1);
@@ -33483,20 +33239,6 @@ function bind(){
      nothing already logged moves, and no exercise that states its own behaviour is
      touched. */
   const setPref = (k, v, msg)=>{ trainPrefs()[k] = v; save(); queueSync(); render(); toast(msg); };
-  document.querySelectorAll("[data-prefclick]").forEach(b=> b.onclick = ()=>{
-    const v = b.dataset.prefclick;
-    setPref("clicks", v, v === "on" ? "A click on every press" : "No click");
-    /* Played after the preference is set, so what you hear is the thing you just chose \u2014
-       and played at all, because a sound setting you cannot hear is a guess. */
-    if(v === "on") clickPlay("pr");
-  });
-  document.querySelectorAll("[data-prefhaptic]").forEach(b=> b.onclick = ()=>{
-    const v = b.dataset.prefhaptic;
-    setPref("haptics", v,
-      v === "off" ? "Nothing will buzz" : v === "light" ? "One short pulse on a press" : "Full haptics on");
-    // and it answers in the setting it was just set to, which is the only honest preview
-    haptic(v === "off" ? null : "pr");
-  });
   document.querySelectorAll("[data-prefrestalert]").forEach(b=> b.onclick = async ()=>{
     const v = b.dataset.prefrestalert;
     setPref("restAlert", v,
@@ -35215,7 +34957,6 @@ function startWorkout(wid){
   S.active.planSnap = planSnapOf(slots);
   S.active.planSig  = JSON.stringify(S.active.planSnap);
   save();
-  haptic("start");
   goTab("workout");                 // the session has its own tab; open it
   /* And then the door: energy, time and which room, asked once, on one screen, before
      the first set — rather than as a sheet, a toast and two buttons parked at the top of
@@ -35887,7 +35628,6 @@ function finishWorkout(){
     return;
   }
   if(a.restTimer){ a.restTimer = null; hideRestUI(); }
-  haptic("finish");
   a.entries.forEach(e=>{ e.sets = e.sets.filter(st=>st.done || st.reps || st.weight); });
   a.entries = a.entries.filter(e=>e.sets.length);
   a.finishedAt = Date.now();
@@ -43472,7 +43212,6 @@ function MODAL_LIVE(){
 // inside it can offer a working "Back". Set by the modals that contain terms.
 let MODAL_REOPEN = null;
 function showModal(html, variant){
-  haptic("open");
   MODAL_DISMISS = null;
   MODAL_REOPEN = null;
   /* A sheet is the right shape for almost everything in this app and the wrong shape for
@@ -43529,7 +43268,6 @@ $("#modalBg").addEventListener("click", e=>{ if(e.target.id==="modalBg") hideMod
    formatting and the "why" that a native dialog can't, and it doesn't get suppressed
    by "prevent this page from creating more dialogs" after a few taps. */
 function askConfirm(opts){
-  haptic("open");
   return new Promise(resolve=>{
     let settled = false;
     const done = v=>{
