@@ -6056,7 +6056,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "37.0";
+const APP_VERSION = "37.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -15690,7 +15690,12 @@ function specEligibility(m, A){
   } else if(cov.of === 0){
     miss.push({k:"rpe", say:"no rated working sets to read a baseline from"});
   }
-  if(S.deload) miss.push({k:"deload", say:"you are in a deload — start the block after it"});
+  /* deloadActive(), not the raw object. S.deload is a record that outlives the week it
+     describes — it carries an end stamp, and a deload expires on its own after a week so
+     a forgotten toggle cannot quietly halve somebody's training — so asking whether the
+     object exists reports a deload you finished a month ago as one you are in today.
+     Every other reader in the app asks the function; this one now does too. */
+  if(deloadActive()) miss.push({k:"deload", say:"you are in a deload — start the block after it"});
   if(hurtFor(m) || (openFlags() || []).some(f=> f && f.m === m && f.kind === "hurt")){
     miss.push({k:"hurt", say:"there is an open niggle on it"});
   }
@@ -16422,20 +16427,34 @@ function specSetupStep(){
   const allowed = specAllowedMuscles();
   const chosen = SPEC_PICK.slice();
   const pair = chosen.length ? specPairCheck(chosen) : null;
+  const elig = {};
+  allowed.forEach(m=> elig[m] = specEligibility(m, A));
+  /* SOMETHING TRUE OF YOUR WHOLE BODY IS SAID ONCE.
+
+     A deload, or an open injury, is one fact about today — printed under every muscle it
+     becomes fourteen copies of one sentence and the screen stops being readable. If the
+     same first reason is on every row, it is lifted out, and the rows go back to saying
+     what is different about each of them. */
+  const firsts = allowed.map(m=> elig[m].ok ? null : elig[m].miss[0].say);
+  const shared = (firsts.length && firsts[0] && firsts.every(x=> x === firsts[0])) ? firsts[0] : null;
   const rows = allowed.map(m=>{
-    const el = specEligibility(m, A);
+    const el = elig[m];
     const on = chosen.indexOf(m) > -1;
     const base = specBaselineWeekly(m);
+    /* with the shared reason lifted out, a row says the NEXT thing wrong with it, or its
+       own numbers if that was the only thing */
+    const own = shared ? (el.miss.find(x=> x.say !== shared) || null) : (el.ok ? null : el.miss[0]);
     return `<button type="button" class="ch${on?" on":""}${el.ok?"":" ch-thin"}" data-specpick="${m}">
       <span class="ch-tx"><b>${esc(gName(m))}</b><span>${
-        el.ok ? r1(base) + " sets a week now · cost " + (SPEC_SYSTEMIC_COST[m] || 1)
-              : esc(el.miss[0].say)}</span></span></button>`;
+        own ? esc(own.say)
+            : r1(base) + " sets a week now · cost " + (SPEC_SYSTEMIC_COST[m] || 1)}</span></span></button>`;
   }).join("");
   const blocked = Object.keys(SPEC_NOT_ALLOWED).map(m=>
     `<div class="spec-no"><b>${esc(gName(m))}</b> — ${esc(SPEC_NOT_ALLOWED[m])}</div>`).join("");
   showModal(`<h3>Priority block</h3>
     <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">Pick one muscle, or two that
       can share the room. Everything else drops to maintenance for the block.</div>
+    ${shared ? `<div class="spec-warn">${esc(shared.charAt(0).toUpperCase() + shared.slice(1))}.</div>` : ""}
     <div class="ch-list">${rows}</div>
     ${pair && pair.warns && pair.warns.length ? pair.warns.map(w=>
       `<div class="spec-warn">${esc(w)}</div>`).join("") : ""}
