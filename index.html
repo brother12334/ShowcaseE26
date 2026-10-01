@@ -15233,16 +15233,30 @@ const CAL_MRV_HARD_MAX   = 35;     // C2: never calibrate a ceiling past this
 
 function calWeight(blocks){ return Math.min(CAL_WEIGHT_MAX, CAL_WEIGHT_PER_BLOCK * blocks); }
 /* Newest first, each step back worth CAL_RECENCY of the one in front of it. */
+/* `ratios` may be plain numbers or {r, w} \u2014 an observation can carry a weight of its
+   own as well as the recency weight every observation gets. The only thing that does so
+   today is a specialization block: its evidence is real, but it was collected while the
+   rest of the body was cut back, so the recovery it demonstrates is better than the same
+   person would have in an ordinary block. Half weight, and the undiscounted figure is
+   kept separately for the next block on that muscle. */
+function ratioOf(x){ return (x && typeof x === "object") ? x.r : x; }
+function ratioW(x){ return (x && typeof x === "object" && x.w > 0) ? x.w : 1; }
 function weightedRatio(ratios){
   if(!ratios || !ratios.length) return null;
   let num = 0, den = 0, w = 1;
-  for(let i = ratios.length - 1; i >= 0; i--){ num += ratios[i] * w; den += w; w *= CAL_RECENCY; }
+  for(let i = ratios.length - 1; i >= 0; i--){
+    const own = ratioW(ratios[i]);
+    num += ratioOf(ratios[i]) * w * own; den += w * own; w *= CAL_RECENCY;
+  }
   return den > 0 ? num/den : null;
 }
 function calibrationFrom(ratios){
   const avg = weightedRatio(ratios);
   if(avg == null) return 1;
-  const w = calWeight(ratios.length);
+  /* A half-weight observation is half an observation for the purpose of confidence too,
+     rounded up so one discounted block still counts as something. */
+  const n = Math.max(1, Math.round((ratios || []).reduce((t,x)=> t + ratioW(x), 0)));
+  const w = calWeight(n);
   return Math.max(CAL_CLAMP[0], Math.min(CAL_CLAMP[1], 1 + w * (avg - 1)));
 }
 /* Fold one block's observations into the stored calibration for a muscle. `chain` is
@@ -15259,7 +15273,9 @@ function recordObservation(g, which, obs, chain, opts){
      which is the opposite of what it showed. */
   if(opts && opts.atLeast && ratio <= 1) return;
   list.push({ratio, at: Date.now(), obs, chain, atLeast: !!(opts && opts.atLeast),
-             seeded: !!(opts && opts.seeded)});
+             seeded: !!(opts && opts.seeded),
+             w: (opts && opts.weight > 0 && opts.weight <= 1) ? opts.weight : 1,
+             context: (opts && opts.context) || null});
   while(list.length > 8) list.shift();
   rebuildCalibration(g);
 }
@@ -15269,7 +15285,7 @@ function rebuildCalibration(g){
   const out = {};
   let blocks = 0;
   ["mev","mav","mrv"].forEach(which=>{
-    const list = (obs[which] || []).map(x=> x.ratio);
+    const list = (obs[which] || []).map(x=> ({r: x.ratio, w: x.w > 0 ? x.w : 1}));
     out[which] = calibrationFrom(list);
     blocks = Math.max(blocks, list.length);
   });
@@ -15471,6 +15487,784 @@ function cycleReview(){
      it is a lighter week for everything. */
   const over = out.filter(x=> x.k === "over");
   return {list: out, deload: over.length >= DELOAD_MUSCLES, over: over.length};
+}
+
+/* =====================================================================
+   SPECIALIZATION — A PRIORITY BLOCK FOR ONE OR TWO LAGGING MUSCLES
+
+   A time-limited block where one or two muscles are pushed to progressively higher
+   volume while everything else drops toward maintenance. It is gradual, it is watched,
+   and it is reversible.
+
+   WHAT THE RESEARCH ACTUALLY SAYS, because every number below comes from one of these:
+
+     Enes 2024 (MSSE). Trained men specialized their quads, adding 4 or 6 sets every two
+       weeks from a start of 22 and reaching about 52 weekly sets. Both grew more than a
+       group held at 22. ONE muscle was specialized and the rest of their training was
+       limited — which is the condition that makes the rest of this feature necessary
+       rather than optional.
+     Scarpelli 2022. Raising a leg's volume 20% above that person's OWN previous volume
+       beat moving everyone to a fixed "optimal" 22 sets a week. The start multiplier here
+       is relative for that reason: 20% above YOUR baseline, not a number off a chart.
+     J Appl Physiol 2024. +30% against +60% above previous volume, trained men: more was
+       not reliably better, and growth happened across a wide range. So the steps below
+       are earned cycle by cycle from your own response, and nothing climbs on a timer.
+     Pelland 2025/2026 (Sports Med). Diminishing returns as volume rises; in general
+       programmes no detectable extra benefit past roughly 31 weekly fractional sets.
+       Specialization is the one setting with direct support for going past that, and
+       only because the rest of the body has been cut.
+     Remmert 2025. Very little data above about 6 fractional sets per muscle per session.
+       High weekly volume therefore has to come from MORE SESSIONS, not bigger ones —
+       which is why a step that would break the per-session ceiling has to find a day.
+     Bickel 2011. Size holds for a while on far less volume provided the sets stay hard.
+       That is what makes a maintenance cut safe for everything else.
+     Morton 2018. About 1.6 g/kg/day of protein captures most of the benefit, and growth
+       is harder in a deficit — hence the smaller step in fat loss.
+
+   Individual response varies, which is the point of deciding from your own cycles. */
+const SPEC_START_MULT_SINGLE = 1.20;   // Scarpelli: relative to your own baseline
+const SPEC_START_MULT_PAIR   = 1.15;
+const SPEC_MAINT_FRACTION_SINGLE = 0.6;
+const SPEC_MAINT_FRACTION_PAIR   = 0.5;
+const SPEC_STEP_SINGLE  = 2;           // weekly-equivalent sets per 7 days
+const SPEC_STEP_PAIR    = 1.5;
+const SPEC_STEP_FATLOSS = 1;
+const SPEC_MAX_WEEKLY_SINGLE = 40;
+const SPEC_MAX_WEEKLY_PAIR   = 30;
+const SPEC_MAX_WEEKLY_HARD   = 52;     // the highest volume Enes tested
+const SPEC_PER_SESSION_LIMIT = 10;     // C1, unchanged
+const SPEC_ISOLATION_SHARE   = 0.5;    // at least half of what is added
+const SPEC_BLOCK_WEEKS       = 8;
+const SPEC_BLOCK_WEEKS_MIN   = 6;
+const SPEC_BLOCK_WEEKS_MAX   = 10;
+const SPEC_COOLDOWN_WEEKS    = 6;
+const SPEC_CALIBRATION_WEIGHT = 0.5;   // other muscles were cut, so recovery was flattered
+const SPEC_MRV_HEADROOM      = 1.15;   // never past this without a RESPONDING cycle
+const SPEC_RESPOND_PCT       = 1.0;
+const SPEC_DECLINE_PCT       = -2.0;
+const SPEC_HOLD_BEFORE_PROBE = 2;
+const SPEC_CUT_SHARE         = 0.10;   // back to the last responding level minus this
+const SPEC_PAIR_WARN_COST    = 5;
+const SPEC_PAIR_BLOCK_COST   = 6;
+const SPEC_RIR_CONCERN       = 3;      // average reps in reserve above this: effort first
+const SPEC_RECOVERY_CONCERN  = -10;    // the 14-day modifier at or below this
+const SPEC_PROTEIN_G_PER_KG  = 1.6;    // Morton
+const SPEC_NOTE_ABOVE        = 30;     // Pelland: say something past here
+const SPEC_GLOBAL_DECLINE_PCT = -3.0;
+const SPEC_GLOBAL_MUSCLES    = 2;      // this many falling, two cycles, is whole-body
+const SPEC_ILLNESS_MAX_WEEKS = 2;      // the most a pause may extend a block
+const SPEC_MISS_DAYS         = 10;     // B3: exposures further apart than this do not count
+
+/* How much of the whole body a muscle costs to train hard. Used only to decide whether
+   two chosen muscles can sensibly be pushed at once: two cheap muscles leave room for
+   each other, two expensive ones do not leave room for anything. */
+const SPEC_SYSTEMIC_COST = {
+  quads:3, hams:3, glutes:2, lats:2, upper_back:2, chest:2, traps:2,
+  calves:1, delts_front:1, delts_side:1, delts_rear:1, biceps:1, triceps:1, abs:1
+};
+/* Not worth specializing, and the reason is shown rather than the option silently
+   missing. Lower back and neck carry injury risk out of proportion to the payoff;
+   forearms, obliques and adductors get so much indirect work that a dedicated block
+   would mostly be adding fatigue. */
+const SPEC_NOT_ALLOWED = {
+  lower_back: "it takes a share of nearly every heavy lift already, and the injury risk of pushing it directly is out of proportion to what you would gain",
+  neck: "the payoff is small and the risk is not, so it is better trained steadily than in a block",
+  adductors: "they already take a share of every squat, lunge and split squat you do",
+  forearms: "they are worked by every pull and every carry, so a block mostly adds fatigue",
+  obliques: "they take a share of nearly everything that braces, so direct blocks add little"
+};
+function specAllowedMuscles(){
+  return MKEYS.filter(m=> !SPEC_NOT_ALLOWED[m] && SPEC_SYSTEMIC_COST[m] != null);
+}
+function specCost(list){
+  return (list || []).reduce((t,m)=> t + (SPEC_SYSTEMIC_COST[m] || 1), 0);
+}
+/* Two muscles that take a large share of each other's sets need their DIRECT work
+   tracked separately, or each one's indirect credit flatters the other's total. */
+const SPEC_OVERLAP_CREDIT = 0.25;   // a quarter of a set is enough to matter at these volumes
+const SPEC_OVERLAP_SHARE  = 0.5;    // of the movements that train one, this many credit the other
+function specOverlaps(a, b){
+  if(!a || !b) return false;
+  /* Read from the movement library rather than from what you happen to have logged: it
+     is a fact about chest and triceps that pressing trains both, and it is true on the
+     day you install the app. */
+  const probe = (x, y)=>{
+    const lifts = specLibraryNames().filter(n=> muscleFrac(n, x) >= 0.5);
+    if(!lifts.length) return 0;
+    let n = 0;
+    lifts.forEach(l=>{ const mm = musclesFor(l) || {}; if((mm[y] || 0) >= SPEC_OVERLAP_CREDIT) n++; });
+    return n / lifts.length;
+  };
+  return Math.max(probe(a, b), probe(b, a)) >= SPEC_OVERLAP_SHARE;
+}
+function specPairCheck(list){
+  const ms = (list || []).filter(Boolean);
+  if(!ms.length) return {ok:false, why:"nothing picked"};
+  const bad = ms.find(m=> SPEC_NOT_ALLOWED[m]);
+  if(bad) return {ok:false, blocked:true, why: gName(bad) + " cannot be specialized: " + SPEC_NOT_ALLOWED[bad]};
+  if(ms.length === 1) return {ok:true, cost: specCost(ms), warn:null};
+  if(ms.length > 2) return {ok:false, blocked:true, why:"two muscles at most — past that nothing is a priority"};
+  const cost = specCost(ms);
+  const warns = [];
+  if(specOverlaps(ms[0], ms[1])){
+    warns.push(gName(ms[0]) + " and " + gName(ms[1]) + " share a lot of work, so their totals overlap. "
+      + "Their DIRECT sets are tracked separately during the block so neither one's credit flatters the other.");
+  }
+  if(cost >= SPEC_PAIR_BLOCK_COST){
+    return {ok:false, blocked:true, cost, warns,
+      why:"This pair is too much to push at once — together they are most of your hard training, and neither would get "
+        + "the recovery a block needs. Pick one, or pair it with something cheaper.",
+      override:true};
+  }
+  if(cost >= SPEC_PAIR_WARN_COST){
+    warns.unshift("This pair is demanding. Expect slower increases, and keep everything else at maintenance.");
+  }
+  return {ok:true, cost, warns};
+}
+
+/* ---------- ELIGIBILITY ----------
+   A block is decided from your own cycles, so it needs cycles to decide from. */
+const SPEC_MIN_CYCLES = 2;
+const SPEC_RPE_COVERAGE = 0.7;
+const SPEC_ELIG_WEEKS = 6;
+function specEligibility(m, A){
+  const miss = [];
+  const since = Date.now() - SPEC_ELIG_WEEKS * 7 * DAY_MS;
+  const cycles = muscleCycles(m).filter(c=> !c.deload && c.to > since && c.V > 0);
+  if(cycles.length < SPEC_MIN_CYCLES){
+    miss.push({k:"cycles", say: cycles.length + " of " + SPEC_MIN_CYCLES
+      + " completed cycles with " + gName(m).toLowerCase() + " trained in the last " + SPEC_ELIG_WEEKS + " weeks"});
+  }
+  const cov = specRpeCoverage(m, since);
+  if(cov.of > 0 && cov.share < SPEC_RPE_COVERAGE){
+    miss.push({k:"rpe", say: Math.round(cov.share*100) + "% of its working sets have an effort rating, and "
+      + Math.round(SPEC_RPE_COVERAGE*100) + "% is needed to judge whether it is responding"});
+  } else if(cov.of === 0){
+    miss.push({k:"rpe", say:"no rated working sets to read a baseline from"});
+  }
+  if(S.deload) miss.push({k:"deload", say:"you are in a deload — start the block after it"});
+  if(hurtFor(m) || (openFlags() || []).some(f=> f && f.m === m && f.kind === "hurt")){
+    miss.push({k:"hurt", say:"there is an open niggle on it"});
+  }
+  const joint = jointMaxOver(m, Date.now() - 2 * (plannedCycleDays() || 7) * DAY_MS, Date.now() + 1);
+  if(joint != null && joint > 1){
+    miss.push({k:"joint", say:"joint pain on its lifts is at " + joint + " — settle that first"});
+  }
+  const last = cycles[cycles.length - 1];
+  if(last && last.decision && last.decision.k === "over"){
+    miss.push({k:"over", say:"its last cycle came in overreached"});
+  }
+  const cool = specCooldownLeft(m);
+  if(cool > 0) miss.push({k:"cooldown", say:"it finished a block recently — " + cool
+    + " week" + (cool===1?"":"s") + " until it can run another"});
+  return {ok: !miss.length, miss, cycles: cycles.length, rpe: cov};
+}
+/* What share of this muscle's working sets carry an effort rating. */
+function specRpeCoverage(m, since){
+  let rated = 0, of = 0;
+  (S.sessions || []).forEach(sx=>{
+    const at = sx.finishedAt || sx.startedAt || 0;
+    if(at < since) return;
+    (sx.entries || []).forEach(e=>{
+      if(!e || muscleFrac(e.name, m) < 0.5) return;
+      const warms = entryWarmups(e);
+      (e.sets || []).forEach((st, i)=>{
+        if(!isWorkingSet(st) || (warms && warms[i])) return;
+        of++;
+        if(st.rpe !== "" && st.rpe != null && isFinite(parseFloat(st.rpe))) rated++;
+      });
+    });
+  });
+  return {rated, of, share: of ? rated / of : 0};
+}
+function specCooldownLeft(m){
+  const past = (S.specPast || []).filter(b=> b && (b.muscles || []).indexOf(m) > -1);
+  if(!past.length) return 0;
+  const last = past.reduce((t,b)=> Math.max(t, b.endedAt || 0), 0);
+  if(!last) return 0;
+  const weeks = (Date.now() - last) / (7 * DAY_MS);
+  return Math.max(0, Math.ceil(SPEC_COOLDOWN_WEEKS - weeks));
+}
+
+/* ---------- THE PRE-BLOCK CHECK ----------
+   Volume is one input. Before adding more of it, the three things that are commonly the
+   actual limit get asked about, and none of them blocks anything. */
+function specPreCheck(list, A){
+  const out = [];
+  (list || []).forEach(m=>{
+    const rir = specAvgRir(m);
+    if(rir != null && rir > SPEC_RIR_CONCERN){
+      out.push({k:"effort", m, say:"Your sets for " + gName(m).toLowerCase() + " average " + r1(rir)
+        + " reps from failure. Pushing closer to failure — 0 to 3 left — may do more than adding volume, "
+        + "and costs nothing to try first."});
+    }
+    const ex = specDirectExercises(m);
+    if(ex.length === 1){
+      out.push({k:"variety", m, say:"All your direct " + gName(m).toLowerCase() + " work is "
+        + ex[0] + ". A second movement that loads it at long lengths "
+        + "— " + specLongLengthSuggestion(m) + " — gives the block somewhere to put the extra sets."});
+    }
+  });
+  const goal = specNutritionGoal();
+  if(goal === "lose"){
+    out.push({k:"fatloss", say:"You are eating to lose fat, so growth will be slower and the block uses the "
+      + "smaller steps (" + SPEC_STEP_FATLOSS + " set a week). It is still worth running — it is just not the "
+      + "fastest way to grow a muscle."});
+  }
+  const pro = specProteinCheck();
+  if(pro && pro.low){
+    out.push({k:"protein", say:"About " + r1(pro.gPerKg) + " g/kg of protein a day. Around "
+      + SPEC_PROTEIN_G_PER_KG + " g/kg captures most of the benefit for growth, so there is room there."});
+  }
+  const rec = recoveryModifier();
+  if(!rec.thin && rec.mod <= SPEC_RECOVERY_CONCERN){
+    out.push({k:"recovery", say:"Your last two weeks of sleep and stress put recovery at "
+      + rec.mod + ". Recovery, not volume, is the likely limit right now — a block started here tends to "
+      + "end early. Worth fixing first."});
+  }
+  return out;
+}
+function specAvgRir(m){
+  const cycles = Math.max(1, 2) * (plannedCycleDays() || 7);
+  const since = Date.now() - cycles * DAY_MS;
+  let t = 0, n = 0;
+  (S.sessions || []).forEach(sx=>{
+    const at = sx.finishedAt || sx.startedAt || 0;
+    if(at < since) return;
+    (sx.entries || []).forEach(e=>{
+      if(!e || muscleFrac(e.name, m) < 0.5) return;
+      const warms = entryWarmups(e);
+      (e.sets || []).forEach((st,i)=>{
+        if(!isWorkingSet(st) || (warms && warms[i])) return;
+        const r = parseFloat(st.rpe);
+        if(isFinite(r) && r > 0){ t += Math.max(0, 10 - r); n++; }
+      });
+    });
+  });
+  return n ? t / n : null;
+}
+function specDirectExercises(m){
+  const seen = new Set();
+  const since = Date.now() - 2 * (plannedCycleDays() || 7) * DAY_MS;
+  (S.sessions || []).forEach(sx=>{
+    const at = sx.finishedAt || sx.startedAt || 0;
+    if(at < since) return;
+    (sx.entries || []).forEach(e=>{
+      if(e && muscleFrac(e.name, m) >= 0.5) seen.add(e.name);
+    });
+  });
+  return [...seen];
+}
+const SPEC_LONG_LENGTH_HINT = {
+  chest: "a deep dumbbell press or a fly",
+  quads: "a deep squat, a hack squat or leg extensions",
+  hams: "a Romanian deadlift or a seated leg curl",
+  glutes: "a deep split squat or a hip thrust through full range",
+  lats: "a pullover or a full-stretch pulldown",
+  upper_back: "a chest-supported row with the arms fully extended",
+  triceps: "an overhead extension",
+  biceps: "an incline curl, arms hanging behind you",
+  delts_side: "a cable lateral raise from across the body",
+  delts_rear: "a reverse fly or a face pull",
+  calves: "a calf raise with the heels dropped right below the platform",
+  traps: "a shrug with the weight hanging long",
+  abs: "a cable crunch or a hanging leg raise"
+};
+function specLongLengthSuggestion(m){
+  return SPEC_LONG_LENGTH_HINT[m] || "something that loads it in the stretched position";
+}
+/* Does this exercise load the muscle at long lengths? The movement table already says
+   WHERE the stretch is for every movement the app knows (LENGTHENED_WHERE); an exercise
+   with an entry there, that trains this muscle directly, qualifies. */
+function specLengthenedBias(name, m){
+  if(!name) return false;
+  if(muscleFrac(name, m) < 0.5) return false;
+  return !!lengthenedRow(name);
+}
+function specNutritionGoal(){
+  const v = (S.spec && S.spec.goal) || (S.prefs && S.prefs.calGoal) || "";
+  return (v === "lose" || v === "gain" || v === "maintain") ? v : "maintain";
+}
+function specProteinCheck(){
+  const g = parseFloat((S.spec && S.spec.proteinG) != null ? S.spec.proteinG : (S.prefs && S.prefs.proteinG));
+  const kg = specBodyKg();
+  if(!(g > 0) || !(kg > 0)) return null;
+  const per = g / kg;
+  return {gPerKg: per, low: per < SPEC_PROTEIN_G_PER_KG};
+}
+function specBodyKg(){
+  const w = (S.weights || []);
+  const last = w.length ? w[w.length - 1] : null;
+  return last && last.kg > 0 ? last.kg : null;
+}
+
+/* ---------- BASELINE AND STARTING VOLUME ---------- */
+function specBaselineWeekly(m){
+  const cycles = muscleCycles(m).filter(c=> !c.deload && c.V > 0).slice(-3);
+  if(!cycles.length) return 0;
+  const vs = cycles.map(c=> c.V).sort((a,b)=> a-b);
+  const mid = Math.floor(vs.length / 2);
+  return vs.length % 2 ? vs[mid] : (vs[mid-1] + vs[mid]) / 2;
+}
+/* Pure, so the whole table of starting volumes can be tested without a log. */
+function specStartWeekly(baseline, n, L){
+  const mult = n >= 2 ? SPEC_START_MULT_PAIR : SPEC_START_MULT_SINGLE;
+  let v = (baseline || 0) * mult;
+  if(L && L.mav > 0) v = Math.max(v, L.mav);          // never start below the productive range
+  if(L && L.mrv > 0) v = Math.min(v, L.mrv * 0.9);    // and never start at the ceiling
+  /* AND NEVER BELOW WHERE YOU ALREADY WERE.
+
+     The ceiling above is a safety rail, and taken literally it can bite somebody who is
+     already training a muscle at or past their measured ceiling: the block would propose
+     a CUT and call it specialization, which is the opposite of what was asked for and
+     would quietly make the feature untrustworthy. Starting at your own baseline is the
+     floor. If that baseline really is past what you can recover from, the block finds out
+     the same way it finds out everything else \u2014 the first cycle reads overreached and it
+     comes down with a reason attached. */
+  v = Math.max(v, baseline || 0);
+  return Math.round(v);
+}
+function specMaintenanceWeekly(baseline, n, L){
+  const frac = n >= 2 ? SPEC_MAINT_FRACTION_PAIR : SPEC_MAINT_FRACTION_SINGLE;
+  const floor = (L && L.mev > 0) ? L.mev : 0;
+  /* A muscle whose floor is zero by design — front delts, adductors, neck — is allowed
+     to fall to whatever the indirect work gives it. */
+  if(!floor) return 0;
+  return Math.round(Math.max(floor, (baseline || 0) * frac) * 10) / 10;
+}
+function specStepFor(n, goal){
+  if(goal === "lose") return SPEC_STEP_FATLOSS;
+  return n >= 2 ? SPEC_STEP_PAIR : SPEC_STEP_SINGLE;
+}
+function specCeiling(n, over){
+  const base = n >= 2 ? SPEC_MAX_WEEKLY_PAIR : SPEC_MAX_WEEKLY_SINGLE;
+  const want = (over > 0) ? over : base;
+  return Math.min(SPEC_MAX_WEEKLY_HARD, Math.max(base, want));
+}
+
+/* ---------- THE DECISION, EACH CYCLE ----------
+   Overrides B4 for the specialized muscles only. Everything else on the body keeps the
+   ordinary rules. Pure: `st` is the muscle's own record inside the block. */
+function specDecide(cycle, st, cfg){
+  cfg = cfg || {};
+  if(!(cfg.step > 0)) cfg.step = SPEC_STEP_SINGLE;
+  const {trendPct, sore, joint} = cycle || {};
+  const V = cycle.V;
+  const soreBad = sore != null && sore >= 2;
+  const soreOk  = sore == null || sore <= 1;
+  const jointBad = joint != null && joint >= 2;
+  const fell = trendPct != null && trendPct <= SPEC_DECLINE_PCT;
+  const fellBefore = st && st.lastTrend != null && st.lastTrend <= SPEC_DECLINE_PCT;
+  const soreBefore = st && st.lastSore != null && st.lastSore >= 2;
+
+  if((fell && fellBefore) || (soreBad && soreBefore) || jointBad){
+    /* Back to the last level it was actually responding at, minus a slice, and that
+       becomes the ceiling for the rest of the block. A second one ends the block. */
+    const anchor = (st && st.lastRespondV > 0) ? st.lastRespondV : V;
+    const to = Math.max(1, Math.round(anchor * (1 - SPEC_CUT_SHARE)));
+    return {k:"over", to, ceiling: to,
+      why: jointBad ? "joint pain on its own lifts"
+         : (fell && fellBefore) ? "the lift fell two cycles running"
+         : "real soreness two cycles running",
+      say:"Overreached at about " + r1(V) + " sets a week — back to " + to};
+  }
+  if(trendPct != null && trendPct >= SPEC_RESPOND_PCT && soreOk && !jointBad){
+    return {k:"up", add: cfg.step, respondV: V,
+      why:"the lift is still climbing at this volume",
+      say:"Responding — up " + r1(trendPct) + "% at about " + r1(V) + " sets a week"};
+  }
+  if(trendPct != null && trendPct > SPEC_DECLINE_PCT && trendPct < SPEC_RESPOND_PCT && soreOk){
+    const held = ((st && st.heldFor) || 0) + 1;
+    /* Two flat cycles earns ONE probe. If the probe does not respond, the level it
+       probed from becomes the ceiling for the rest of the block — the question has been
+       asked and answered. */
+    if(st && st.probing){
+      return {k:"probeFail", to: Math.round(st.probedFrom || V), ceiling: Math.round(st.probedFrom || V),
+        heldFor: held, why:"the extra set did not move it",
+        say:"That extra set did nothing — back to " + r1(st.probedFrom || V) + " and holding there"};
+    }
+    const probe = held >= SPEC_HOLD_BEFORE_PROBE;
+    return {k:"hold", heldFor: held, probe, add: probe ? cfg.step : 0, probedFrom: V,
+      why: probe ? "flat for two cycles, so worth one step to find out" : "flat, and not costing you anything",
+      say: probe ? "Flat twice — one more step to find out" : "Holding at about " + r1(V) + " sets a week"};
+  }
+  return {k:"unclear", why: trendPct == null ? "not enough usable exposures yet" : "mixed signals",
+    say:"No call this cycle"};
+}
+/* What the decision actually does to the target, with every ceiling applied in order and
+   the reason the ceiling bit recorded. Pure. */
+function specApply(cur, d, st, cfg){
+  cfg = cfg || {};
+  const out = {target: cur, capped: null};
+  if(!d) return out;
+  if(d.k === "over" || d.k === "probeFail"){
+    out.target = d.to;
+    out.ceiling = d.ceiling;
+    return out;
+  }
+  const add = d.add || 0;
+  if(!add) return out;
+  let want = cur + add;
+  const hard = cfg.ceiling;
+  if(st && st.ceiling > 0 && want > st.ceiling){ want = st.ceiling; out.capped = "ceiling set earlier in this block"; }
+  if(want > hard){ want = hard; out.capped = "the weekly ceiling for this block"; }
+  /* Never past calibrated MRV with headroom unless the cycle just RESPONDED. High
+     volumes are earned one cycle at a time. */
+  const roof = (cfg.mrv > 0) ? cfg.mrv * SPEC_MRV_HEADROOM : 0;
+  if(roof && want > roof && d.k !== "up"){ want = Math.min(want, Math.max(cur, roof)); out.capped = "your measured ceiling"; }
+  /* The per-session limit is not negotiable; it is met by adding a session, and if there
+     is nowhere to put one the target holds. */
+  if(cfg.sessions > 0 && want > cfg.sessions * SPEC_PER_SESSION_LIMIT){
+    if(cfg.canAddSession){ out.needSession = true; }
+    else { want = Math.min(want, cfg.sessions * SPEC_PER_SESSION_LIMIT);
+           out.capped = "no room for another session for it, and " + SPEC_PER_SESSION_LIMIT + " sets in one is the limit"; }
+  }
+  out.target = Math.round(want * 10) / 10;
+  return out;
+}
+/* Remmert: weekly volume comes from more sessions, not bigger ones. */
+function specSessionsNeeded(weekly){
+  return Math.max(1, Math.ceil((weekly || 0) / SPEC_PER_SESSION_LIMIT));
+}
+
+/* ---------- WHOLE-BODY FATIGUE ----------
+   The block watches what it is costing everything else, not just what it is buying. */
+function specGlobalFatigue(blk){
+  const why = [];
+  const spec = (blk && blk.muscles) || [];
+  let falling = 0;
+  MKEYS.forEach(m=>{
+    if(spec.indexOf(m) > -1) return;
+    const cs = muscleCycles(m).filter(c=> !c.deload);
+    const a = cs[cs.length-1], b = cs[cs.length-2];
+    if(a && b && a.trendPct != null && b.trendPct != null
+       && a.trendPct <= SPEC_GLOBAL_DECLINE_PCT && b.trendPct <= SPEC_GLOBAL_DECLINE_PCT) falling++;
+  });
+  if(falling >= SPEC_GLOBAL_MUSCLES){
+    why.push(falling + " other muscles have been going backwards for two cycles");
+  }
+  const rec = recoveryModifier();
+  if(!rec.thin && rec.mod <= SPEC_RECOVERY_CONCERN){
+    why.push("recovery has dropped to " + rec.mod + " over the last two weeks");
+  }
+  if(blk && blk.cutSessions > 0 && blk.cycleSessions > 0
+     && blk.cutSessions / blk.cycleSessions >= 0.5){
+    why.push("half the sessions this cycle came in needing lighter work");
+  }
+  return {on: why.length > 0, why};
+}
+
+/* ---------- THE BLOCK ITSELF ----------
+
+   S.spec is the live block and S.specPast is what finished ones left behind. Targets are
+   stored WEEKLY and converted at the point of use, so a cycle that changes length
+   mid-block changes nothing about what was decided. */
+function specActive(){ return (S.spec && S.spec.startedAt && !S.spec.endedAt) ? S.spec : null; }
+function specIsSpecialized(m){
+  const b = specActive();
+  return !!(b && (b.muscles || []).indexOf(m) > -1);
+}
+function specCycleLen(){ return plannedCycleDays() || 7; }
+function specPerCycle(weekly){ return (weekly || 0) * specCycleLen() / 7; }
+
+function specPlan(list, A, opts){
+  const ms = (list || []).filter(Boolean);
+  const n = ms.length;
+  const goal = (opts && opts.goal) || specNutritionGoal();
+  const per = {};
+  ms.forEach(m=>{
+    const L = cycleLandmarks(A, m) || GROUPS[m];
+    const weeklyL = {mev: GROUPS[m].mev, mav: GROUPS[m].mav, mrv: GROUPS[m].mrv};
+    const chain = (A && A.lm && A.lm[m]) || adjustedLandmarks(A, m) || weeklyL;
+    const base = specBaselineWeekly(m);
+    const start = specStartWeekly(base, n, chain);
+    per[m] = {baseline: Math.round(base*10)/10, start, target: start,
+              ceiling: 0, sessions: specSessionsNeeded(start),
+              mrv: chain.mrv || 0, mav: chain.mav || 0,
+              heldFor: 0, probing: false, probedFrom: 0,
+              lastTrend: null, lastSore: null, lastRespondV: 0, history: []};
+  });
+  const maint = {};
+  MKEYS.forEach(m=>{
+    if(ms.indexOf(m) > -1) return;
+    const chain = (A && A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
+    maint[m] = specMaintenanceWeekly(specBaselineWeekly(m), n, chain);
+  });
+  return {muscles: ms, n, goal, per, maint,
+          step: specStepFor(n, goal),
+          ceiling: specCeiling(n, (S.prefs && S.prefs.specCeiling) || 0),
+          weeks: specBlockWeeks(opts && opts.weeks),
+          pair: specPairCheck(ms),
+          pre: specPreCheck(ms, A)};
+}
+function specBlockWeeks(w){
+  const v = parseInt(w, 10);
+  if(!isFinite(v)) return SPEC_BLOCK_WEEKS;
+  return Math.max(SPEC_BLOCK_WEEKS_MIN, Math.min(SPEC_BLOCK_WEEKS_MAX, v));
+}
+function specStart(plan){
+  if(!plan || !plan.muscles.length) return null;
+  if(plan.pair && plan.pair.blocked && !(S.prefs && S.prefs.specOverride)) return null;
+  const cyc = specCycleLen();
+  S.spec = {
+    muscles: plan.muscles.slice(), n: plan.n, goal: plan.goal,
+    startedAt: Date.now(), endedAt: 0, endWhy: "",
+    weeks: plan.weeks, cyclesPlanned: Math.max(1, Math.round(plan.weeks * 7 / cyc)),
+    cyclesDone: 0, pausedAt: 0, pausedMs: 0, extendMs: 0,
+    freeze: 0, overCount: 0, missed: 0,
+    per: plan.per, maint: plan.maint, step: plan.step, ceiling: plan.ceiling,
+    pre: plan.pre, log: [],
+    measures: {start: (opts=>opts)(null), end: null}
+  };
+  S.spec.measures = {start: null, end: null};
+  save(); queueSync();
+  return S.spec;
+}
+/* Every completed cycle: decide for each specialized muscle, then check what the block is
+   costing the rest of the body. One pass, guarded on the cycle's own end stamp. */
+function specRunCycle(endMs){
+  const b = specActive();
+  if(!b) return {done:false, why:"no block"};
+  const stamp = endMs || Date.now();
+  if(b.lastRun && Math.abs(b.lastRun - stamp) < DAY_MS) return {done:false, why:"already run"};
+  if(b.pausedAt) return {done:false, why:"paused"};
+  let A = null;
+  try{ A = bodyAnalysis(); }catch(e){ return {done:false, why:"no analysis"}; }
+  const notes = [];
+  const gf = specGlobalFatigue(b);
+  b.cyclesDone++;
+  b.lastRun = stamp;
+  if(gf.on){
+    /* Freeze everything for a cycle and say why. Twice running ends the block. */
+    b.freeze++;
+    notes.push({k:"global", say:"Progression frozen this cycle — " + gf.why.join(", ") + "."});
+    if(b.freeze >= 2){
+      specEnd("whole-body fatigue did not settle after a frozen cycle");
+      return {done:true, ended:true, notes};
+    }
+    b.log.push({at: stamp, k:"freeze", why: gf.why.join(", ")});
+    save(); return {done:true, notes, frozen:true};
+  }
+  b.freeze = 0;
+  let overNow = 0;
+  b.muscles.forEach(m=>{
+    const st = b.per[m];
+    if(!st) return;
+    const cycles = muscleCycles(m).filter(c=> !c.deload);
+    const cur = cycles[cycles.length - 1];
+    if(!cur || cur.V == null){ notes.push({k:"thin", m, say: gName(m) + ": nothing usable to read this cycle."}); return; }
+    /* 9: the next decision is made on what you ACTUALLY did, not what was planned. */
+    const cfg = {step: b.step, ceiling: b.ceiling, mrv: st.mrv,
+                 sessions: specSessionsNeeded(st.target),
+                 /* Not "is there a spare day" but "is there a day this muscle could
+                    actually go on" \u2014 the recovery-window rule rules some of them out, and
+                    a target raised against a day that will be refused is a target that
+                    cannot be met. */
+                 canAddSession: specSuggestDays(m, st, A).length > 0};
+    const d = specDecide({V: cur.V, trendPct: cur.trendPct, sore: cur.sore, joint: cur.joint}, st, cfg);
+    const res = specApply(cur.V, d, st, cfg);
+    st.lastTrend = cur.trendPct;
+    st.lastSore = cur.sore;
+    if(d.k === "up"){ st.lastRespondV = cur.V; st.heldFor = 0; st.probing = false; }
+    if(d.k === "hold"){ st.heldFor = d.heldFor; st.probing = !!d.probe; st.probedFrom = d.probedFrom; }
+    if(d.k === "probeFail"){ st.probing = false; st.heldFor = 0; }
+    if(d.k === "over"){ overNow++; b.overCount++; st.probing = false; st.heldFor = 0; }
+    if(res.ceiling > 0) st.ceiling = res.ceiling;
+    st.target = res.target;
+    st.sessions = specSessionsNeeded(st.target);
+    st.history.push({at: stamp, V: cur.V, k: d.k, trendPct: cur.trendPct, sore: cur.sore,
+                     to: st.target, why: d.why});
+    const line = gName(m) + " " + specChangeWord(cur.V, st.target) + ": " + d.why
+      + (res.capped ? " (held at " + r1(st.target) + " by " + res.capped + ")" : "")
+      + (res.needSession ? " — needs another session for it" : "");
+    notes.push({k: d.k, m, say: line, need: !!res.needSession});
+    b.log.push({at: stamp, m, k: d.k, V: cur.V, to: st.target, why: d.why});
+  });
+  /* 9: both overreached in the same cycle is not two cuts, it is a deload. */
+  if(overNow >= 2 && b.muscles.length >= 2){
+    notes.push({k:"deload", say:"Both muscles overreached in the same cycle — take the deload now."});
+    S.deload = {startedAt: Date.now(), why:"both specialized muscles overreached"};
+  } else if(b.overCount >= 2){
+    specEnd("a second overreach");
+    save(); return {done:true, ended:true, notes};
+  }
+  if(b.cyclesDone >= b.cyclesPlanned){
+    specEnd("the block ran its length");
+    save(); return {done:true, ended:true, notes};
+  }
+  save(); queueSync();
+  return {done:true, notes};
+}
+function specChangeWord(from, to){
+  const d = Math.round((to - from) * 10) / 10;
+  if(d > 0) return "+" + r1(d) + " sets/week";
+  if(d < 0) return r1(d) + " sets/week";
+  return "held";
+}
+/* Is there a day this muscle is not already on, that could take another session? */
+function specCanAddSession(m, st){
+  const days = (ROTATION || []).filter(w=> w && w !== "rest");
+  if(!days.length) return false;
+  let on = 0;
+  days.forEach(w=>{
+    const list = planSlotList(w) || [];
+    if(list.some(e=> e && muscleFrac(e.name, m) >= 0.5)) on++;
+  });
+  return on < days.length;
+}
+/* WHERE THE EXTRA SETS GO. The day with the least on it, never the day immediately before
+   this muscle's heaviest session if that would not clear its recovery window, and mostly
+   isolation so the extra volume does not cost the whole body. */
+function specSuggestDays(m, st, A){
+  const out = [];
+  const days = (ROTATION || []).map((w,i)=> ({w, i})).filter(x=> x.w && x.w !== "rest");
+  if(!days.length) return out;
+  const load = days.map(d=>{
+    const list = planSlotList(d.w) || [];
+    const sets = list.reduce((t,e)=> t + (parseInt(e.sets,10) || 0), 0);
+    const has = list.some(e=> e && muscleFrac(e.name, m) >= 0.5);
+    return {w: d.w, i: d.i, sets, has};
+  });
+  const need = specSessionsNeeded(st.target) - load.filter(x=> x.has).length;
+  if(need <= 0) return out;
+  const recov = (GROUPS[m] || {}).recov || 48;
+  const free = load.filter(x=> !x.has).sort((a,b)=> a.sets - b.sets);
+  free.forEach(cand=>{
+    if(out.length >= need) return;
+    /* the day right before this muscle's own session, if the gap would not clear its
+       recovery window, is the one day it must not go on */
+    const nextOwn = load.find(x=> x.has && x.i > cand.i);
+    if(nextOwn && (nextOwn.i - cand.i) * 24 < recov) return;
+    out.push({workoutId: cand.w, name: dayName(cand.w),
+              sets: Math.min(SPEC_PER_SESSION_LIMIT, Math.max(2, Math.round(specPerCycle(st.target) / specSessionsNeeded(st.target)))),
+              pick: specIsolationPick(m)});
+  });
+  return out;
+}
+/* At least half of what is added must be isolation, so the extra sets buy the muscle
+   something without buying the whole body fatigue. */
+function specLibraryNames(){
+  const out = [];
+  const eat = lib=> Object.keys(lib || {}).forEach(k=>
+    (lib[k] || []).forEach(e=>{ if(e && e.name) out.push(e.name); }));
+  try{ eat(EX_LIBRARY); }catch(e){}
+  try{ eat(EX_LIBRARY_EXTRA); }catch(e){}
+  return out;
+}
+function specIsolationPick(m){
+  const cands = specLibraryNames().filter(n=> muscleFrac(n, m) >= 0.5 && !isCompound(n));
+  /* 3.7: every session for a specialized muscle should include something that loads it
+     at long lengths, so that is what the suggestion reaches for first. */
+  const lengthened = cands.filter(n=> specLengthenedBias(n, m));
+  return (lengthened[0] || cands[0] || null);
+}
+
+/* ---------- PAUSING, ENDING, AND WHAT COMES AFTER ---------- */
+function specPause(why){
+  const b = specActive();
+  if(!b || b.pausedAt) return false;
+  b.pausedAt = Date.now(); b.pauseWhy = why || "paused";
+  save(); return true;
+}
+function specResume(){
+  const b = specActive();
+  if(!b || !b.pausedAt) return false;
+  const was = Date.now() - b.pausedAt;
+  /* Illness or a run of missed sessions extends the block by the time it cost, up to a
+     limit — a block that keeps extending is not a block. */
+  b.extendMs = Math.min(SPEC_ILLNESS_MAX_WEEKS * 7 * DAY_MS, (b.extendMs || 0) + was);
+  b.pausedMs = (b.pausedMs || 0) + was;
+  b.cyclesPlanned = Math.max(b.cyclesDone + 1,
+    Math.round((b.weeks * 7 * DAY_MS + b.extendMs) / (specCycleLen() * DAY_MS)));
+  b.pausedAt = 0; b.pauseWhy = "";
+  save(); return true;
+}
+function specEnd(why){
+  const b = specActive();
+  if(!b) return null;
+  b.endedAt = Date.now();
+  b.endWhy = why || "finished";
+  const sum = specSummary(b);
+  b.summary = sum;
+  S.specPast = (S.specPast || []).concat([{
+    muscles: b.muscles.slice(), startedAt: b.startedAt, endedAt: b.endedAt,
+    why: b.endWhy, summary: sum
+  }]);
+  /* 5.2: one cycle at about half, same loads, effort capped. */
+  S.deload = {startedAt: Date.now(), why: "the end of a priority block", spec: true, share: 0.5, rpeCap: 7};
+  /* 7: what the block learned, discounted, plus a specialization ceiling kept whole. */
+  specFeedCalibration(b);
+  S.spec = null;
+  save(); queueSync();
+  return sum;
+}
+/* 7: the block's evidence is real but it was collected while the rest of the body was
+   cut, so recovery was flattered. It goes into the ordinary calibration at half weight,
+   and the undiscounted figure is kept separately as the starting point for the NEXT
+   block on that muscle. */
+function specFeedCalibration(b){
+  (b.muscles || []).forEach(m=>{
+    const st = b.per[m]; if(!st) return;
+    const peak = (st.history || []).reduce((t,h)=> Math.max(t, h.V || 0),
+                   Math.max(st.start || 0, st.target || 0, st.lastRespondV || 0));
+    const overAt = (st.history || []).find(h=> h.k === "over");
+    if(overAt){
+      const anchor = st.lastRespondV > 0 ? st.lastRespondV : overAt.V;
+      S.specMrv = Object.assign({}, S.specMrv, {[m]: Math.round(anchor*10)/10});
+      try{
+        const A = bodyAnalysis();
+        const chain = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
+        recordObservation(m, "mrv", anchor, chain.mrv, {weight: SPEC_CALIBRATION_WEIGHT, context:"specialization"});
+      }catch(e){}
+    } else if(peak > 0){
+      S.specMrv = Object.assign({}, S.specMrv, {[m]: Math.round(peak*10)/10});
+      try{
+        const A = bodyAnalysis();
+        const chain = (A.lm && A.lm[m]) || adjustedLandmarks(A, m) || GROUPS[m];
+        recordObservation(m, "mav", peak, chain.mav, {weight: SPEC_CALIBRATION_WEIGHT, context:"specialization", atLeast:true});
+      }catch(e){}
+    }
+  });
+}
+/* 6: what the block did, stated as signals rather than as measured growth — because
+   that is what they are. */
+function specSummary(b){
+  const per = {};
+  (b.muscles || []).forEach(m=>{
+    const st = b.per[m] || {};
+    const h = st.history || [];
+    const counts = {up:0, hold:0, over:0, probeFail:0, unclear:0};
+    h.forEach(x=> counts[x.k] = (counts[x.k] || 0) + 1);
+    const peak = h.reduce((t,x)=> Math.max(t, x.V || 0), st.start || 0);
+    const best = h.filter(x=> x.k === "up").reduce((t,x)=> Math.max(t, x.V || 0), 0);
+    per[m] = {start: st.start, peak: Math.round(peak*10)/10, counts,
+              bestResponding: best ? Math.round(best*10)/10 : null,
+              e1rm: specE1rmChange(m, b.startedAt, b.endedAt || Date.now()),
+              measure: specMeasureChange(b, m)};
+  });
+  return {muscles: b.muscles.slice(), weeks: b.weeks, cycles: b.cyclesDone,
+          why: b.endWhy, per, bodyweight: specWeightChange(b)};
+}
+function specE1rmChange(m, from, to){
+  const exps = muscleExposures(m) || [];
+  const inside = exps.filter(x=> x.at >= from && x.at <= to && x.v > 0);
+  if(inside.length < 2) return null;
+  const a = inside[0].v, z = inside[inside.length-1].v;
+  return a > 0 ? Math.round((z - a) / a * 1000) / 10 : null;
+}
+function specWeightChange(b){
+  const w = (S.weights || []).filter(x=> x && x.kg > 0);
+  const inside = w.filter(x=> new Date(x.d).getTime() >= b.startedAt);
+  if(inside.length < 2) return null;
+  return Math.round((inside[inside.length-1].kg - inside[0].kg) * 10) / 10;
+}
+const SPEC_TAPE = {quads:"mid-thigh", chest:"chest", biceps:"upper arm", calves:"calf",
+                   glutes:"hips", hams:"mid-thigh", lats:"chest", upper_back:"chest"};
+function specMeasureChange(b, m){
+  const a = (b.measures && b.measures.start && b.measures.start[m]);
+  const z = (b.measures && b.measures.end && b.measures.end[m]);
+  if(!(a > 0) || !(z > 0)) return null;
+  return {from: a, to: z, d: Math.round((z - a) * 10) / 10, where: SPEC_TAPE[m] || null};
 }
 
 /* B5 LIVE — WHAT EACH FINISHED CYCLE TEACHES THE LANDMARKS.
@@ -37030,6 +37824,12 @@ function recomputeCycle(announce){
     try{ runCycleCalibration(S.lastCycle.end); }
     catch(e){ S.lmCalRun = {at: Date.now(), cycleEnd: S.lastCycle.end, n: 0,
                             failed: String((e && e.message) || e)}; }
+    /* A priority block decides at the end of a cycle, on the cycle that just closed, and
+       it decides AFTER the calibration so it is reading the same numbers the rest of the
+       app will. Wrapped for the same reason: a block is a feature, a cycle roll-over is
+       the app working. */
+    try{ specRunCycle(S.lastCycle.end); }
+    catch(e){ if(S.spec) S.spec.failed = {at: Date.now(), why: String((e && e.message) || e)}; }
     S.cycleStart = Date.now();
     S.cycleDone = [];
     S.restDays = [];
