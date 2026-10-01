@@ -6108,7 +6108,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "38.0";
+const APP_VERSION = "38.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -15239,9 +15239,33 @@ function soreAvgOver(g, fromMs, toMs){
   const sig = soreSignalOver(g, fromMs, toMs);
   return sig ? sig.v : null;
 }
-function jointMaxOver(g, fromMs, toMs){
+/* SOMETHING YOU SAID HURT CAN ALSO STOP HURTING.
+
+   The joint log is a permanent record of what was said on the day it was said, which is
+   right: it is evidence. But reading it raw means a shoulder that settled a fortnight ago
+   keeps holding weights down, and keeps blocking things, with nothing anybody can do
+   about it but wait. S.jointOk records the day a movement was declared settled, and
+   readings on or before that day are no longer counted as current. Nothing is deleted
+   \u2014 the history is still there to be read, it is just no longer being acted on. */
+function jointClearedAt(exKey){
+  const ok = (S.jointOk && typeof S.jointOk === "object") ? S.jointOk : {};
+  const v = ok[exKey];
+  return (typeof v === "number" && v > 0) ? v : 0;
+}
+function jointSettle(exKey, atMs){
+  if(!exKey) return false;
+  if(!S.jointOk || typeof S.jointOk !== "object") S.jointOk = {};
+  const at = atMs || Date.now();
+  if(S.jointOk[exKey] >= at) return false;
+  S.jointOk[exKey] = at;
+  save(); queueSync();
+  return true;
+}
+/* Every reading still standing for this muscle, so a screen can name the movement and the
+   day instead of asserting a number nobody remembers entering. */
+function jointSourcesFor(g, fromMs, toMs){
   const log = (S.joint && typeof S.joint === "object") ? S.joint : {};
-  let worst = null;
+  const out = [];
   Object.keys(log).forEach(d=>{
     const at = Date.parse(d + "T12:00:00") || 0;
     if(at < fromMs || at > toMs) return;
@@ -15250,10 +15274,20 @@ function jointMaxOver(g, fromMs, toMs){
       const mm = musclesFor(exKey);
       if(!mm || !(mm[g] >= 1)) return;
       const v = rec[exKey];
-      if(typeof v === "number" && (worst == null || v > worst)) worst = v;
+      if(typeof v !== "number") return;
+      if(at <= jointClearedAt(exKey)) return;
+      out.push({exKey, name: prettyExName(exKey), sev: v, day: d, at});
     });
   });
-  return worst;
+  return out.sort((a,b)=> b.sev - a.sev || b.at - a.at);
+}
+function jointLevelWord(sev){
+  const l = HURT_LEVELS.find(x=> x.sev === sev);
+  return l ? l.t.toLowerCase() : ("level " + sev);
+}
+function jointMaxOver(g, fromMs, toMs){
+  const list = jointSourcesFor(g, fromMs, toMs);
+  return list.length ? list[0].sev : null;
 }
 
 /* One muscle's verdict for the cycle that just ended. Pure: everything it needs is in
@@ -15789,9 +15823,24 @@ function specEligibility(m, A){
   if(hurtFor(m) || (openFlags() || []).some(f=> f && f.m === m && f.kind === "hurt")){
     miss.push({k:"hurt", say:"there is an open niggle on it"});
   }
-  const joint = jointMaxOver(m, Date.now() - 2 * (plannedCycleDays() || 7) * DAY_MS, Date.now() + 1);
-  if(joint != null && joint > 1){
-    miss.push({k:"joint", say:"joint pain on its lifts is at " + joint + " — settle that first"});
+  /* NAME IT, OR IT IS NOT A REASON.
+
+     "joint pain on its lifts is at 2" is a number nobody remembers entering, about a lift
+     it does not name, from a day it does not give. It is also, on its own, unactionable:
+     the reading ages out over two cycles and until this there was no way to say it had
+     settled. So it says what was said, about what, and when — and carries the movements
+     so the screen can offer to close them. */
+  const jFrom = Date.now() - 2 * (plannedCycleDays() || 7) * DAY_MS;
+  const jSrc = jointSourcesFor(m, jFrom, Date.now() + 1).filter(x=> x.sev > 1);
+  if(jSrc.length){
+    const top = jSrc[0];
+    miss.push({k:"joint", joint: jSrc,
+      /* Plain text, escaped where it is drawn. A reason that carries its own markup is a
+         reason the next caller has to remember not to escape, and the next caller is the
+         one that forgets. */
+      say: top.name + " on " + fmtDateShort(top.day) + ': you said it "'
+        + jointLevelWord(top.sev) + '"'
+        + (jSrc.length > 1 ? ", and " + (jSrc.length - 1) + " more" : "")});
   }
   const last = cycles[cycles.length - 1];
   if(last && last.decision && last.decision.k === "over"){
@@ -16813,9 +16862,16 @@ function specEligStepHTML(){
   return specHeadHTML("Not enough to go on yet",
       "A block decides from your own cycles, so it needs a couple of them first.")
     + bad.map(x=> `<div class="spec-plan"><div class="spec-row-h"><b>${esc(gName(x.m))}</b></div>
-        <ul class="spec-hist">${x.el.miss.map(z=> `<li>${esc(z.say)}</li>`).join("")}</ul></div>`).join("")
+        <ul class="spec-hist">${x.el.miss.map(z=> `<li>${esc(z.say)}</li>`).join("")}</ul>
+        ${/* A joint reading is the one blocker with something to press. Everything else on
+              this screen needs training, not a button. */
+          (x.el.miss.find(z=> z.k === "joint") || {joint:[]}).joint.map(j=>
+            `<button type="button" class="spec-add" data-specjointok="${esc(j.exKey)}">
+              <span>${esc(j.name)} has settled</span><b>✓</b></button>`).join("")}
+      </div>`).join("")
     + `<div class="spec-note">Two cycles of ordinary training with effort ratings on the working sets is
-        all it takes. Nothing else has to change.</div>`
+        all a volume reading takes. A joint reading clears when you say it has settled — here, or on the
+        niggle itself — and marking it settled while it still hurts is only answering a question wrongly.</div>`
     + specFootHTML("Back to picking", false, true);
 }
 
@@ -17112,6 +17168,17 @@ function bindSpecPage(){
       btn.querySelector("span").textContent = "Added to " + dayName(wid);
       btn.querySelector("b").textContent = "✓";
     }
+  });
+  host.querySelectorAll("[data-specjointok]").forEach(btn=> btn.onclick = ()=>{
+    const k = btn.dataset.specjointok;
+    jointSettle(k, Date.now());
+    /* and the niggle it came from, if one is still open, so the two cannot disagree */
+    (hurtLog() || []).forEach(h=>{ if(h && !h.settled && (h.exKey || nrm(h.ex || "")) === k) h.settled = Date.now(); });
+    save();
+    SPEC_A = null;                                   // the eligibility has just changed
+    toast("Noted — " + prettyExName(k) + " marked settled", "good");
+    if(SPEC_UI.pick.every(m=> specEligibility(m, specAnalysis()).ok)) SPEC_UI.step = 0;
+    renderSpecPage();
   });
   q("[data-specback]", ()=> specBack());
   q("[data-specnext]", ()=> specNext());
@@ -32534,6 +32601,14 @@ function hurtFor(name){
 function jointRecord(exName, level){
   const sev = (HURT_LEVEL_BY[level] || {}).sev;
   if(!(sev > 0)) return;
+  /* SAYING IT HURTS AGAIN UN-SETTLES IT.
+
+     "It has settled" is a statement about the past, and it is held by a cutoff date. A
+     cutoff alone would swallow a complaint made later the same day, which is the one
+     reading nobody can afford to lose: the whole point of the signal is to catch a joint
+     that is getting worse. So a new complaint about a movement withdraws its clearance
+     outright, and the dates stop mattering. */
+  if(S.jointOk && typeof S.jointOk === "object") delete S.jointOk[nrm(exName)];
   if(!S.joint || typeof S.joint !== "object") S.joint = {};
   const d = todayStr();
   if(!S.joint[d] || typeof S.joint[d] !== "object") S.joint[d] = {};
@@ -32673,6 +32748,15 @@ function hurtSettle(id){
   const h = hurtLog().filter(x=> x && x.id === id)[0];
   if(!h) return;
   h.settled = Date.now();
+  /* AND THE SIGNAL IT RAISED SETTLES WITH IT.
+
+     Saying something hurt writes two things: a niggle you can see and close, and a joint
+     reading the volume rules act on. Only the first was closeable, so somebody could mark
+     a shoulder settled, watch the niggle disappear, and still find their training held
+     back by a number with no visible cause and no way to clear it. One action now ends
+     both. Marking it settled when it has not is answering a question wrongly, which is
+     true of every question the app asks. */
+  jointSettle(h.exKey || nrm(h.ex || ""), Date.now());
   save(); queueSync(); render();
   toast("Good — " + HURT_AREA_BY[h.where].t.toLowerCase() + " marked settled");
 }
