@@ -1001,6 +1001,9 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
    Colour is used once, on the header, so three rounds of amber don't shout. */
 .ss-group{border:1px solid var(--line);border-left:3px solid var(--acc-line);padding:12px}
 .ss-hdr{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+/* The pair's own arrows, pushed to the end of the header so they line up with where
+   every other card keeps its controls. */
+.ss-hdr-ctl{margin-left:auto;align-self:center}
 .ss-hdr-t{
   font-family:var(--disp);font-size:14px;font-weight:700;text-transform:uppercase;
   letter-spacing:.08em;color:var(--acc);
@@ -4720,6 +4723,38 @@ body.cele-open{overflow:hidden}
    every one of them is a fade plus a few pixels of travel — enough to give the eye an
    order to read in, not enough to notice as an effect. */
 .nb{display:flex;flex-direction:column;gap:14px}
+/* A menu under the button that opened it. Sized to the content and capped at the screen,
+   because one of these lists two options and another lists five. */
+.dd{
+  position:fixed;z-index:175;min-width:216px;max-width:calc(100vw - 20px);
+  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:5px;
+  box-shadow:0 16px 38px rgba(0,0,0,.52), 0 2px 6px rgba(0,0,0,.4);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  transform-origin:var(--ddo,top left);
+  animation:ddIn .16s cubic-bezier(.2,.8,.3,1) both;
+}
+@keyframes ddIn{from{opacity:0;transform:scale(.95) translateY(-5px)}to{opacity:1;transform:none}}
+@keyframes ddOut{to{opacity:0;transform:scale(.97)}}
+.dd.dd-out{animation:ddOut .12s ease forwards;pointer-events:none}
+.dd-h{
+  font:10.5px var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--faint);
+  padding:8px 11px 6px;
+}
+.dd button{
+  display:block;width:100%;text-align:left;background:none;border:0;color:var(--txt);
+  padding:10px 11px;border-radius:10px;font:inherit;cursor:pointer;
+  transition:background var(--t-fast) ease, transform var(--t-fast) var(--ease);
+}
+.dd button b{display:block;font-size:14.5px;font-weight:600}
+.dd button span{display:block;font-size:12.5px;line-height:1.42;color:var(--faint);margin-top:2px}
+.dd button:active{background:var(--line);transform:scale(.985)}
+.dd button:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+@media (prefers-reduced-motion: reduce){
+  .dd{animation:none}
+  .dd.dd-out{animation:none}
+  .dd button{transition:none}
+}
+
 /* ===== STEPPING BETWEEN THE FIVE VIEWS OF THE MAP =====
 
    The drawing does not change between views, only what each muscle is saying, so the
@@ -5973,7 +6008,7 @@ body.cele-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "36.2";
+const APP_VERSION = "36.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7740,6 +7775,118 @@ function setKindOptions(en){
   out.push({k:"amrap",   t:TECHNIQUES.amrap.label,   d:"As many as you have, at this load."});
   return out;
 }
+/* =====================================================================
+   A MENU UNDER THE BUTTON YOU PRESSED
+
+   Some choices are a sheet: they are a decision, they deserve the screen, and the sheet
+   says so by taking it. Adding a set is not one of those. It is a thing you do between
+   two sets with a bar on your back, you already know which exercise you meant \u2014 you
+   pressed its button \u2014 and a full-screen sheet that names the exercise back at you and
+   waits is three interactions for one.
+
+   So: a small menu, under the button, pointing at it.
+
+   On `body` with fixed positioning rather than inside the card, because a card has
+   `overflow` and a menu that opens inside one gets clipped by it \u2014 which is the usual
+   reason dropdowns on phones end up as sheets in the first place. Flipped above the
+   button when there is no room below, so the last exercise on a long session does not
+   open its menu off the bottom of the screen.
+
+   It closes on a choice, on a tap anywhere else, on Escape, on a scroll, and on any
+   render \u2014 a menu pointing at a button that no longer exists is the kind of thing that
+   survives one refactor and then confuses somebody for a year. */
+let DD = null;
+function closeDropdown(){
+  if(!DD) return;
+  const el = DD.el;
+  DD = null;
+  document.removeEventListener("pointerdown", ddAway, true);
+  document.removeEventListener("keydown", ddKey, true);
+  window.removeEventListener("scroll", closeDropdown, true);
+  window.removeEventListener("resize", closeDropdown);
+  el.classList.add("dd-out");
+  setTimeout(()=>{ if(el.parentNode) el.remove(); }, 130);
+}
+function ddAway(e){
+  if(!DD) return;
+  if(DD.el.contains(e.target) || DD.btn === e.target || DD.btn.contains(e.target)) return;
+  closeDropdown();
+}
+function ddKey(e){ if(e.key === "Escape"){ e.stopPropagation(); closeDropdown(); } }
+/* `items` are {k, t, d}: a value, a title and a line saying what it is. `pick` gets the
+   value. `head` is an optional line above them. */
+function openDropdown(btn, items, pick, head){
+  if(DD && DD.btn === btn){ closeDropdown(); return; }   // a second press closes it
+  closeDropdown();
+  /* The one it replaces goes AT ONCE rather than fading. A menu on its way out still
+     answers querySelector(".dd") and its buttons still carry the previous menu's closure,
+     so a fast second press could put the set on the exercise you opened before this one.
+     Fading out is a courtesy to the eye; it is not allowed to be ambiguous. */
+  document.querySelectorAll(".dd").forEach(n=> n.remove());
+  if(!btn || !items || !items.length) return;
+  const el = document.createElement("div");
+  el.className = "dd";
+  el.setAttribute("role", "menu");
+  el.innerHTML = (head ? `<div class="dd-h">${esc(head)}</div>` : "")
+    /* Carries its value as well as its place, so a caller can find the option it means
+       rather than counting down the list. */
+    + items.map((o, n)=> `<button type="button" role="menuitem" data-ddi="${n}" data-ddk="${esc(o.k || "")}">
+        <b>${esc(o.t)}</b>${o.d ? `<span>${esc(o.d)}</span>` : ""}</button>`).join("");
+  document.body.appendChild(el);
+  const r = btn.getBoundingClientRect();
+  const w = el.offsetWidth;
+  const vh = window.innerHeight, vw = window.innerWidth;
+  const GAP = 8, EDGE = 10;
+  /* Below if it fits, above if it fits better, and whichever side it lands on it is
+     capped to the room actually there and scrolls inside that \u2014 a menu running off the
+     bottom of the screen is worse than a menu you have to scroll, and on the last
+     exercise of a long session there is no side with room for five options. */
+  const roomBelow = vh - r.bottom - GAP - EDGE;
+  const roomAbove = r.top - GAP - EDGE;
+  const up = el.offsetHeight > roomBelow && roomAbove > roomBelow;
+  const room = Math.max(96, up ? roomAbove : roomBelow);
+  el.style.maxHeight = room + "px";
+  const h = Math.min(el.offsetHeight, room);
+  el.style.top = Math.max(EDGE, Math.min(vh - h - EDGE, up ? r.top - GAP - h : r.bottom + GAP)) + "px";
+  /* Aligned to the button's left edge, pulled back inside the screen if that would run
+     it off the right. */
+  el.style.left = Math.max(EDGE, Math.min(vw - w - EDGE, r.left)) + "px";
+  el.style.setProperty("--ddo", up ? "bottom left" : "top left");
+  el.querySelectorAll("[data-ddi]").forEach(b=> b.onclick = ()=>{
+    const o = items[parseInt(b.dataset.ddi, 10)];
+    closeDropdown();
+    if(o) pick(o.k, o);
+  });
+  DD = {el, btn};
+  document.addEventListener("pointerdown", ddAway, true);
+  document.addEventListener("keydown", ddKey, true);
+  window.addEventListener("scroll", closeDropdown, true);
+  window.addEventListener("resize", closeDropdown);
+  const first = el.querySelector("[data-ddi]");
+  if(first) try{ first.focus({preventScroll:true}); }catch(e){}
+}
+/* Adding the set itself, wherever it was asked for. */
+function addSetOfKind(ei, k){
+  const en = S.active && S.active.entries[ei];
+  if(!en) return;
+  const st = {weight:"", reps:"", rpe:"", done:false};
+  if(k) st.tech = k;
+  en.sets.push(st);
+  en.setsOwn = true;              // this count is yours; the plan does not reset it
+  save(); render();
+  toast(k === "lengthened" ? "Partials set added \u2014 " + lengthenedWhere(en.name)
+      : k ? TECHNIQUES[k].label + " set added"
+          : "Set added", "good");
+}
+function openAddSetMenu(btn, ei){
+  const en = S.active && S.active.entries[ei];
+  if(!en) return;
+  openDropdown(btn, setKindOptions(en), k=> addSetOfKind(ei, k),
+    "Goes on the end, empty");
+}
+/* THE SHEET THIS USED TO BE. Kept for anything that needs to ask the question without a
+   button to hang a menu on \u2014 there is nowhere in the app that does today, and when there
+   is, it should ask the same question in the same words. */
 function openAddSetSheet(ei){
   const en = S.active && S.active.entries[ei];
   if(!en) return;
@@ -22292,6 +22439,8 @@ function render(){
      which runs AFTER the render that changed tab \u2014 so exactly one render animates, and
      it is the one you asked for. */
   app.classList.remove("view-in");
+  /* A menu is anchored to a button in the markup that is about to be replaced. */
+  closeDropdown();
   if(TAB==="today") app.innerHTML = viewToday();
   else if(TAB==="workout") app.innerHTML = viewWorkoutTab();
   else if(TAB==="history") app.innerHTML = RECORDS_OPEN ? viewRecords() : viewHistory();
@@ -34064,7 +34213,7 @@ function bind(){
   /* ONE BUTTON, AND IT ASKS. Adding a set and choosing what kind of set it is were two
      controls for one decision, and the second only ever covered one technique. */
   document.querySelectorAll("[data-addset]").forEach(b=> b.onclick=()=>
-    openAddSetSheet(parseInt(b.dataset.addset, 10)));
+    openAddSetMenu(b, parseInt(b.dataset.addset, 10)));
   document.querySelectorAll("[data-rmset]").forEach(b=> b.onclick=()=>{
     const en = S.active.entries[b.dataset.rmset];
     const sets = en.sets;
@@ -43684,10 +43833,27 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
     };
   });
 
+  /* THE PAIR MOVES AS A PAIR.
+
+     Reordering already understood blocks \u2014 entryOrderAfterMove() swaps whole supersets
+     and has done since 34.1 \u2014 but a superset draws as ONE card and that card had no
+     arrows, so the one thing in the session you could not reorder was the one thing that
+     most needs it: two exercises that have to stay together and have to be done at a
+     particular machine. The arrows go on the card, because the card is the unit; moving
+     either leg on its own would break the pair, which is why there is not one per leg.
+
+     Done is done, the same as an ordinary card: once every set on both legs is logged the
+     order it ran in is a fact. */
+  const ssDone = pair.every(p=> p.en.sets.length && p.en.sets.every(x=> x.done));
+  const ssOff = ssDone ? ` disabled aria-disabled="true" title="Already done \u2014 the order it ran in is fixed"` : "";
   let h = `<div class="card ex ss-group">
     <div class="ss-hdr">
       <span class="ss-hdr-t">Superset &middot; ${rounds} round${rounds===1?"":"s"}</span>
       <span class="ss-hdr-n">one set of each, back to back</span>
+      <span class="icon-btns ex-ctl ss-hdr-ctl">
+        <button data-exup="${i}" aria-label="Move this superset earlier"${ssOff}>\u2191</button>
+        <button data-exdown="${i}" aria-label="Move this superset later"${ssOff}>\u2193</button>
+      </span>
     </div>`;
 
   // What the two movements are, once, with their targets and last-time numbers.
