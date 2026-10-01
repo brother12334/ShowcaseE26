@@ -6108,7 +6108,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "38.1";
+const APP_VERSION = "38.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -15870,7 +15870,9 @@ function specRpeCoverage(m, since){
   return {rated, of, share: of ? rated / of : 0};
 }
 function specCooldownLeft(m){
-  const past = (S.specPast || []).filter(b=> b && (b.muscles || []).indexOf(m) > -1);
+  /* A block that was called off before it ran leaves no cooldown behind, for the same
+     reason it leaves no deload: nothing was taken out of you. */
+  const past = (S.specPast || []).filter(b=> b && b.ran !== false && (b.muscles || []).indexOf(m) > -1);
   if(!past.length) return 0;
   const last = past.reduce((t,b)=> Math.max(t, b.endedAt || 0), 0);
   if(!last) return 0;
@@ -17260,9 +17262,15 @@ function specStartFromUI(){
     + ", " + SPEC_SETTING_LABEL[plan.setting] + ", " + plan.weeks + " weeks", "good");
 }
 function specConfirmStop(){
+  const b = specActive();
+  const ran = specRan(b);
   showModal(`<h3>End the block?</h3>
-    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Everything goes back to its
-      normal volume after one lighter cycle. What the block learned is kept either way.</div>
+    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">${ran
+      ? "Everything goes back to its normal volume after one lighter cycle, and "
+        + esc((b.muscles || []).map(gName).join(" and ")) + " waits " + SPEC_COOLDOWN_WEEKS
+        + " weeks before it can be the priority again. What it learned is kept."
+      : "Nothing has been decided yet, so this costs nothing \u2014 no lighter week, no waiting "
+        + "period, and nothing learned from a block that did not run."}</div>
     <div class="btn-row">
       <button class="btn" id="specEndYes">End it</button>
       <button class="btn ghost small" id="closeModal">Keep going</button>
@@ -17368,6 +17376,23 @@ function specDoneCardHTML(last){
     <div class="spec-note">These are signals, not a measurement of muscle growth.</div>
   </div>`;
 }
+/* 3.5: one tap, and it goes on the end of that day where extra work belongs — after the
+   movements the day was built around, never in front of them.
+
+   It is also the ONLY thing in this whole feature that edits your program, which is why
+   it is a button you press rather than something starting a block does: ending the block
+   does not take it away again, because you put it there. */
+function specAddToDay(wid, name, sets){
+  if(!wid || !name) return false;
+  const list = S.program && S.program[wid];
+  if(!Array.isArray(list)) return false;
+  if(list.some(e=> e && nrm(e.name) === nrm(name))) return false;   // already there
+  list.push({name, sets: Math.max(1, Math.min(SPEC_PER_SESSION_LIMIT, sets || 3)),
+             reps: "8-12", rpes: [8, 8, 9].slice(0, Math.max(1, sets || 3))});
+  invalidateMultiDay(); invalidateTableOrigin();
+  save(); queueSync();
+  return true;
+}
 /* 6: optional, and said to be rough. A tape measure moves with body fat and water, which
    is exactly why it is offered as a second signal rather than as the answer. */
 function specAskMeasures(when){
@@ -17438,26 +17463,46 @@ function specResume(){
   });
   save(); return true;
 }
+/* A BLOCK THAT NEVER RAN IS NOT A BLOCK YOU HAVE DONE.
+
+   Ending costs three things: a lighter cycle, six weeks before that muscle can be the
+   priority again, and an observation folded into its landmarks. Every one of those is
+   right for a block that ran \u2014 and absurd for one started and called off before a single
+   cycle closed. Changing your mind in the first week would have bought you a deload you
+   did not need, a six-week lockout, and a "what this muscle can take" reading taken from
+   a block where nothing was taken at all.
+
+   So the test is evidence, not time: did any cycle actually close and get decided on. If
+   not, it is recorded as called off and costs nothing. */
+function specRan(b){
+  if(!b) return false;
+  if((b.cyclesDone || 0) >= 1) return true;
+  return (b.muscles || []).some(m=> (((b.per || {})[m] || {}).history || []).length > 0);
+}
 function specEnd(why){
   const b = specActive();
   if(!b) return null;
+  const ran = specRan(b);
   b.endedAt = Date.now();
-  b.endWhy = why || "finished";
+  b.endWhy = ran ? (why || "finished") : "called off before it ran";
   const sum = specSummary(b);
   b.summary = sum;
   S.specPast = (S.specPast || []).concat([{
     muscles: b.muscles.slice(), startedAt: b.startedAt, endedAt: b.endedAt,
-    why: b.endWhy, summary: sum,
+    why: b.endWhy, summary: sum, ran,
     /* The measurements and the per-muscle record travel with it. The closing tape figure
        is entered AFTER the block ends, and without these the opening one \u2014 taken eight
        weeks earlier \u2014 would be thrown away at the exact moment it became useful. */
     measures: b.measures || null,
     per: b.per
   }]);
-  /* 5.2: one cycle at about half, same loads, effort capped. */
-  S.deload = {startedAt: Date.now(), why: "the end of a priority block", spec: true, share: 0.5, rpeCap: 7};
-  /* 7: what the block learned, discounted, plus a specialization ceiling kept whole. */
-  specFeedCalibration(b);
+  if(ran){
+    /* 5.2: one cycle at about half, same loads, effort capped. */
+    S.deload = {startedAt: Date.now(), why: "the end of a priority block", spec: true,
+                share: SPEC_DELOAD_FRACTION, rpeCap: 7};
+    /* 7: what the block learned, discounted, plus a specialization ceiling kept whole. */
+    specFeedCalibration(b);
+  }
   S.spec = null;
   save(); queueSync();
   return sum;
