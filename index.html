@@ -4782,6 +4782,14 @@ body.spec-open{overflow:hidden}
 .spec-h{font-family:var(--disp);font-size:27px;line-height:1.08;margin:0 0 8px;outline:none}
 .spec-sub{font-size:14px;line-height:1.55;color:var(--dim);margin:0 0 18px}
 .spec-read p{font-size:14px;line-height:1.62;margin:0 0 12px}
+.st-wrap{display:flex;flex-direction:column;gap:8px}
+.st-row{display:flex;gap:10px;align-items:baseline;font-size:13px;line-height:1.5;
+  border-top:1px solid var(--line);padding:8px 0}
+.st-row b{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  min-width:92px;flex-shrink:0}
+.st-bad b{color:var(--bad)}
+.st-warn b{color:var(--warn)}
+.st-good b{color:var(--ok)}
 .spec-opts{display:flex;flex-direction:column;gap:7px;margin-bottom:4px}
 .spec-opt{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;
   background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 14px;
@@ -6110,7 +6118,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "39.0";
+const APP_VERSION = "39.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -48615,6 +48623,126 @@ function quoteOfTheDay(){
   return DAILY_QUOTES[(day + now.getFullYear() * 7) % DAILY_QUOTES.length];
 }
 
+/* =====================================================================
+   #selftest \u2014 THE INVARIANTS THE LIBRARY AND THE MAPPING HAVE TO HOLD
+
+   Every exercise the app can put in front of somebody has to be three things: findable in
+   the library, mapped to muscles, and filed in a slot that the swap shortlists can reach.
+   None of that is checked at build time because there is no build \u2014 this is one file \u2014
+   so it is checked here, on demand, by opening index.html#selftest.
+
+   It is a check, not a test suite: it reads, it never writes, and it reports rather than
+   throwing. A failure here means the plan builder would produce a movement whose volume
+   lands nowhere, which is the one class of bug the Body tab cannot show you.           */
+function selfTestRun(){
+  const fail = [], warn = [];
+  const note = (list, k, detail)=> list.push({k, detail});
+  /* 1. EVERY LIBRARY MOVEMENT MAPS TO MUSCLES. An exercise with no map contributes no
+        volume to anything, so a plan containing it silently under-trains you. */
+  const lib = (typeof specLibraryEntries === "function") ? specLibraryEntries() : [];
+  const seen = new Set();
+  lib.forEach(x=>{
+    if(!x || !x.name) return;
+    const c = canonEx(x.name);
+    if(seen.has(c)) return;
+    seen.add(c);
+    const mm = musclesFor(x.name) || {};
+    const total = MKEYS.reduce((t,m)=> t + (mm[m] || 0), 0);
+    if(!(total > 0)) note(fail, "unmapped", x.name);
+  });
+  /* 2. EVERY CATALOGUE MOVEMENT LANDED WHERE THE CATALOGUE LAST PUT IT.
+
+        Not "in the slot its own row names" \u2014 that invariant is wrong, and writing it
+        down first was how I learned why. A movement can be named by two rows: a coarse
+        one and a specific one, and the specific one is meant to win. Good Morning is
+        listed under `hinge` and again under `lower_back`; Side Plank under `abs` and
+        again under `obliques`. The merge applies rows in order and the last one moves it,
+        which is the documented behaviour and the one that produces the better swap lists.
+
+        Two rows can also disagree through the alias table rather than through spelling:
+        "Back Extension" and "Back Extension Machine" are one movement to canonEx, so the
+        second row moves the first. That is worth seeing, so it is reported as a note
+        rather than passed over in silence. */
+  try{
+    const last = {};
+    EX_CATALOG.forEach(row=>{
+      const c = canonEx(row[0]);
+      if(last[c] && last[c].slot !== row[2]) last[c].moved = true;
+      last[c] = {slot: row[2], name: row[0], moved: !!(last[c] && last[c].moved)};
+    });
+    Object.keys(last).forEach(c=>{
+      const want = last[c];
+      const here = (EX_LIBRARY[want.slot] || []).some(x=> canonEx(x.name) === c);
+      if(!here) note(fail, "slot", want.name + " is not in " + want.slot);
+      else if(want.moved) note(warn, "re-slotted", want.name + " \u2192 " + want.slot);
+    });
+  }catch(e){ note(fail, "catalogue", String((e && e.message) || e)); }
+  /* 3. ONE MOVEMENT, ONE SLOT. The same exercise in two slots is offered as its own
+        alternative, and counted twice by anything that walks the library. */
+  try{
+    const where = {};
+    Object.keys(EX_LIBRARY).forEach(slot=>{
+      (EX_LIBRARY[slot] || []).forEach(x=>{
+        const c = canonEx(x.name);
+        (where[c] = where[c] || []).push(slot);
+      });
+    });
+    Object.keys(where).forEach(c=>{
+      const slots = [...new Set(where[c])];
+      if(slots.length > 1) note(fail, "two slots", c + ": " + slots.join(", "));
+      if(where[c].length > slots.length) note(warn, "duplicate", c);
+    });
+  }catch(e){ note(fail, "slots", String((e && e.message) || e)); }
+  /* 4. MUSCLE SHARES ARE A SHARE OF SOMETHING. A map that sums to zero is unmapped; one
+        that gives a single muscle more than 1 is a weight, not a share, and would inflate
+        that muscle's volume wherever it appears. */
+  try{
+    Object.keys(EX_MUSCLES_ALL || {}).forEach(k=>{
+      const mm = EX_MUSCLES_ALL[k] || {};
+      MKEYS.forEach(m=>{
+        const v = mm[m];
+        if(v != null && !(v >= 0 && v <= 1)) note(fail, "share", k + " " + m + " = " + v);
+      });
+    });
+  }catch(e){ note(fail, "shares", String((e && e.message) || e)); }
+  /* 5. EVERY SLOT THE PROGRAMME BUILDER CAN ASK FOR EXISTS AND IS NOT EMPTY. */
+  try{
+    const need = [...new Set(EX_CATALOG.map(r=> r[2]))];
+    need.forEach(slot=>{
+      if(!(EX_LIBRARY[slot] || []).length) note(fail, "empty slot", slot);
+    });
+  }catch(e){ note(fail, "slot list", String((e && e.message) || e)); }
+  return {fail, warn, lib: seen.size, ok: fail.length === 0};
+}
+function selfTestHTML(r){
+  const row = (x, cls)=> `<div class="st-row ${cls}"><b>${esc(x.k)}</b>${esc(x.detail)}</div>`;
+  return `<div class="st-wrap">
+    <h2 class="spec-h">Self-test</h2>
+    <p class="spec-sub">${r.lib} movements checked \u00b7
+      <b class="${r.ok ? "st-good" : "st-bad"}">${r.ok ? "no failures" : r.fail.length + " failures"}</b>
+      ${r.warn.length ? " \u00b7 " + r.warn.length + " warnings" : ""}</p>
+    ${r.fail.map(x=> row(x, "st-bad")).join("")}
+    ${r.warn.map(x=> row(x, "st-warn")).join("")}
+    ${r.ok && !r.warn.length ? `<div class="st-row st-good"><b>all</b>every movement is mapped,
+      filed in exactly one slot, and reachable from the swap lists</div>` : ""}
+  </div>`;
+}
+function selfTestOpen(){
+  let r = null;
+  try{ r = selfTestRun(); }
+  catch(e){ r = {fail:[{k:"threw", detail:String((e && e.message) || e)}], warn:[], lib:0, ok:false}; }
+  const w = document.getElementById("specFull");
+  const host = document.getElementById("specFullIn");
+  if(!w || !host){ console.log(r); return r; }
+  host.innerHTML = selfTestHTML(r);
+  w.hidden = false;
+  document.body.classList.add("spec-open");
+  /* It is a diagnostic, so it closes the way it opened: change the hash. */
+  host.onclick = ev=>{ if(ev.target === host){ w.hidden = true;
+    document.body.classList.remove("spec-open"); } };
+  return r;
+}
+
 /* ================= BOOT ================= */
 (function(){
   const sp = document.getElementById("splash");
@@ -48667,6 +48795,12 @@ function quoteOfTheDay(){
       SPLASH_CUES.forEach(c=>{ if(c.at > gone + 0.04) soundCue(c.snd, c.at - gone); });
     }).catch(()=>{});
   };
+  /* #selftest is a diagnostic, so it runs instead of the opening rather than after it. */
+  if(/(^|#|&)selftest\b/.test(location.hash || "")){
+    try{ if(sp) sp.remove(); }catch(e){}
+    setTimeout(()=>{ try{ selfTestOpen(); }catch(e){ console.log(e); } }, 0);
+    return;
+  }
   try{ if(soundOn()){ sndWarm(); introSeq(); } }catch(e){}
   if(!sp){ setTimeout(openingPrompts, 200); return; }
   if(reducedMotion()){ sp.remove(); setTimeout(openingPrompts, 200); return; }
