@@ -1184,6 +1184,8 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
 .lf-w s{color:var(--faint)}
 .lf-w b{color:var(--acc);font-weight:400}
 .lf-more{padding:7px 11px;font:11.5px var(--mono);color:var(--faint);background:var(--card2)}
+.lf-pick{display:flex;flex-direction:column;gap:6px;margin:4px 0 12px}
+.lf-nm small{display:block;color:var(--faint);font-size:11px;margin-top:2px}
 .lf-undo{font:11.5px var(--mono);color:var(--faint);margin-top:9px}
 .lf-undo .linklike{margin-left:6px}
 .sess-bar{
@@ -6108,7 +6110,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "38.4";
+const APP_VERSION = "38.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -35679,6 +35681,186 @@ function logFixUndoNow(){
   save(); queueSync();
   return n;
 }
+/* =====================================================================
+   THE OTHER WAY THE NUMBER COMES OUT WRONG: YOU WERE NEVER IN IT
+
+   A dip with nothing on the belt was logged as 0, and a dip with 25 on the belt was
+   logged as 25. Both are the load that was ADDED to the movement, not the load that was
+   moved, and for anything you hang off a bar you are most of it. The symptom is the same
+   as the one-side barbell error \u2014 internally consistent, so nothing looks broken, and an
+   estimated max that reads absurdly low for ever.
+
+   Counting yourself is now a switch on the card (see bwApply), but that only helps from
+   today. This is the same correction applied backwards, and the one thing it has to get
+   right is WHICH bodyweight: not what you weigh now, but what you weighed on the day. A
+   log that spans a year of gaining or losing is rewritten at the wrong figure by any
+   single number, and the trend it produced would be an artefact of this tool rather than
+   of your training.                                                                   */
+function bwFixWeightAt(dateStr){
+  const list = (typeof bodyLogList === "function") ? bodyLogList() : [];
+  const have = list.filter(r=> r && r.w > 0);
+  if(!have.length) return null;
+  const want = Date.parse(dateStr + "T12:00:00") || 0;
+  if(!want) return have[0].w;
+  /* The NEAREST weigh-in in time, not the nearest one before it. "On or before" sounds
+     tidier and is worse: a session five days ago, with a weigh-in four days ago and
+     another twenty-five days before that, would be rewritten at the older figure. The
+     closest reading is the best estimate of what you weighed, whichever side it falls on.
+     Ties go to the earlier one, because a weight recorded before the session is the one
+     you actually carried into it. */
+  let best = null;
+  have.forEach(r=>{
+    const at = Date.parse(r.d + "T12:00:00") || 0;
+    if(!at) return;
+    const gap = Math.abs(at - want);
+    if(!best || gap < best.gap || (gap === best.gap && at < best.at)) best = {at, gap, w: r.w};
+  });
+  return best ? best.w : have[0].w;
+}
+/* Which movements have history that was logged without you in it. */
+function bwFixMoves(){
+  const by = {};
+  (S.sessions || []).forEach(sess=>{
+    (sess.entries || []).forEach(en=>{
+      if(!en || !en.name || entryBwOn(en)) return;      // already counted
+      if(!isBodyweightMove(en.name)) return;
+      const n = (en.sets || []).filter(isWorkingSet).length;
+      if(!n) return;
+      const k = nrm(en.name);
+      if(!by[k]) by[k] = {key: k, name: en.name, sets: 0, sessions: 0};
+      by[k].sets += n;
+      by[k].sessions++;
+    });
+  });
+  return Object.keys(by).map(k=> by[k]).sort((a,b)=> b.sets - a.sets);
+}
+/* Every set it would touch and what each becomes. Nothing is written here. */
+function bwFixCandidates(keys){
+  const want = new Set(keys || []);
+  const out = [];
+  (S.sessions || []).forEach(sess=>{
+    (sess.entries || []).forEach((en, ei)=>{
+      if(!en || !en.name || entryBwOn(en)) return;
+      if(!isBodyweightMove(en.name)) return;
+      if(want.size && !want.has(nrm(en.name))) return;
+      const w = bwFixWeightAt(sess.date);
+      if(!(w > 0)) return;
+      (en.sets || []).forEach((st, si)=>{
+        if(!isWorkingSet(st)) return;
+        const cur = parseFloat(st && st.weight);
+        const from = (isFinite(cur) && cur > 0) ? cur : 0;
+        out.push({id: sess.id, date: sess.date, ei, si, name: en.name,
+                  from, to: Math.round((from + w) * 10) / 10, w});
+      });
+    });
+  });
+  return out;
+}
+function bwFixApply(keys){
+  const cands = bwFixCandidates(keys);
+  if(!cands.length) return 0;
+  const undo = {at: Date.now(), sets: [], entries: []};
+  const touched = new Set();
+  cands.forEach(c=>{
+    const sess = (S.sessions || []).find(x=> x.id === c.id);
+    const en = sess && sess.entries[c.ei];
+    const st = en && en.sets[c.si];
+    if(!st) return;
+    undo.sets.push({id: c.id, ei: c.ei, si: c.si, was: st.weight});
+    st.weight = String(c.to);
+    const mark = c.id + "|" + c.ei;
+    if(!touched.has(mark)){
+      touched.add(mark);
+      undo.entries.push({id: c.id, ei: c.ei, was: en.bwOn == null ? null : en.bwOn});
+      /* Stamped the same way the live switch stamps it, so the history and anything
+         logged from today onward are the same kind of number. */
+      en.bwOn = c.w;
+    }
+  });
+  /* The estimates downstream of those numbers are arithmetic on a figure that has just
+     changed, so they go and are worked out again on the next look. */
+  (S.sessions || []).forEach(sess=>{
+    (sess.entries || []).forEach(en=>{
+      if(!en || !isBodyweightMove(en.name || "")) return;
+      (en.sets || []).forEach(st=>{ if(st) delete st.pr; });
+    });
+  });
+  S.bwFixUndo = undo;
+  save(); queueSync();
+  return undo.sets.length;
+}
+function bwFixUndoNow(){
+  const u = S.bwFixUndo;
+  if(!u) return 0;
+  let n = 0;
+  (u.sets || []).forEach(c=>{
+    const sess = (S.sessions || []).find(x=> x.id === c.id);
+    const st = sess && sess.entries[c.ei] && sess.entries[c.ei].sets[c.si];
+    if(!st) return;
+    st.weight = c.was; n++;
+  });
+  (u.entries || []).forEach(c=>{
+    const sess = (S.sessions || []).find(x=> x.id === c.id);
+    const en = sess && sess.entries[c.ei];
+    if(!en) return;
+    if(c.was == null) delete en.bwOn; else en.bwOn = c.was;
+  });
+  delete S.bwFixUndo;
+  save(); queueSync();
+  return n;
+}
+function openBwFix(){
+  const moves = bwFixMoves();
+  const picked = new Set(moves.map(m=> m.key));
+  const draw = ()=>{
+    const keys = [...picked];
+    const cands = bwFixCandidates(keys);
+    const sessions = new Set(cands.map(c=> c.id)).size;
+    const sample = cands.slice(0, 4);
+    const haveWeight = bwFixWeightAt(todayStr()) > 0;
+    showModal(`<h3>Count yourself in</h3>
+      <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">On a dip or a
+        pull-up you are most of the load. If you logged only what was on the belt \u2014 or 0 when there
+        was nothing on it \u2014 these sets are missing you, and their estimated maxes have read low ever
+        since. Your weight ON THE DAY is used for each one, not today's.</div>
+      ${!haveWeight ? `<div class="sub" style="margin:2px 0 0">No weigh-in on record, so there is no
+        figure to add. Log one under <b>You</b> on the Body tab first.</div>`
+      : !moves.length ? `<div class="sub" style="margin:2px 0 0">Nothing logged that needs it \u2014 every
+        bodyweight movement in your log already counts you.</div>`
+      : `<div class="lf-pick">${moves.map(m=>
+          `<button type="button" class="ch${picked.has(m.key)?" on":""}" data-bwpick="${esc(m.key)}">
+            <span class="ch-tx"><b>${esc(m.name)}</b><span>${m.sets} set${m.sets===1?"":"s"}
+              across ${m.sessions} session${m.sessions===1?"":"s"}</span></span></button>`).join("")}</div>
+        ${cands.length ? `
+          <div class="lf-n"><b>${cands.length}</b> set${cands.length===1?"":"s"} across
+            <b>${sessions}</b> session${sessions===1?"":"s"}</div>
+          <div class="lf-list">${sample.map(c=>
+            `<div class="lf-row"><span class="lf-nm">${esc(c.name)}
+               <small>${esc(fmtDateShort(c.date))}</small></span>
+               <span class="lf-w"><s>${esc(fmtLoad(c.from))}</s> → <b>${esc(fmtLoad(c.to))}</b></span></div>`).join("")}
+            ${cands.length > sample.length ? `<div class="lf-more">and ${cands.length - sample.length} more</div>` : ""}
+          </div>
+          <div class="btn-row" style="margin-top:14px"><button class="btn" id="bwGo" style="flex:1">Fix ${cands.length} set${cands.length===1?"":"s"}</button></div>`
+        : `<div class="sub" style="margin:10px 0 0">Nothing selected.</div>`}`}
+      <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`);
+    const m2 = $("#modal");
+    m2.querySelectorAll("[data-bwpick]").forEach(b=> b.onclick = ()=>{
+      const k = b.dataset.bwpick;
+      if(picked.has(k)) picked.delete(k); else picked.add(k);
+      draw();
+    });
+    const go = m2.querySelector("#bwGo");
+    if(go) go.onclick = ()=>{
+      const n = bwFixApply([...picked]);
+      /* and from now on, so the same movement is not logged without you tomorrow */
+      [...picked].forEach(k=> bwRemember(k, true));
+      save(); hideModal(); render();
+      toast(n ? n + " set" + (n===1?"":"s") + " now count you \u2014 undo it under Your data"
+              : "Nothing to change", "good");
+    };
+  };
+  draw();
+}
 /* THE SHEET. It shows the damage before it touches anything, because a tool that rewrites
    every weight you have ever logged has to be answerable in advance rather than
    explained afterwards. */
@@ -35727,6 +35909,7 @@ function openLogFix(){
 }
 function settingsDataHTML(){
   const u = S.logFixUndo;
+  const bu = S.bwFixUndo;
   return setBlock("Been logging wrong?",
     "A barbell or Smith weight is written as the whole load \u2014 never as one end of it. If you have been typing what is on one side, those sets are about half of what you really lifted, and your estimated maxes have been reading low ever since. This finds them, shows you what each one becomes, and fixes them.",
     `<div class="btn-row" style="margin-top:0">
@@ -35735,6 +35918,16 @@ function settingsDataHTML(){
     (u ? `<div class="lf-undo">${u.sets.length} set${u.sets.length===1?"":"s"} corrected
         ${esc(fmtDateShort(dayStr(u.at)))}
         <button class="linklike" id="logFixUndoBtn">undo that</button></div>` : ""))
+  + setBlock("Dips and pull-ups logged without you",
+    "On a dip or a pull-up you are most of the load, so a set logged as 0 — or as just the 25 on the "
+    + "belt — is missing the part that matters, and its estimated max has read low ever since. This "
+    + "adds you back, using what you weighed on the day of each session rather than what you weigh now.",
+    `<div class="btn-row" style="margin-top:0">
+      <button class="btn ghost small" id="bwFixBtn" style="flex:1">Check my bodyweight sets</button>
+    </div>` +
+    (bu ? `<div class="lf-undo">${bu.sets.length} set${bu.sets.length===1?"":"s"} corrected
+        ${esc(fmtDateShort(dayStr(bu.at)))}
+        <button class="linklike" id="bwFixUndoBtn">undo that</button></div>` : ""))
   + setBlock("Backup and transfer",
     "One file with your whole log in it: every workout, your plan, your split and your settings. It's also how you move an older copy of Element 26 into this one — export there, import here, and it merges into what's already on this account. No passwords or keys are ever written into the file.",
     `<div class="btn-row" style="margin-top:0">
@@ -37632,6 +37825,8 @@ function bind(){
   if(pull) pull.onclick = pullFromGist;
   const lfB = $("#logFixBtn");
   if(lfB) lfB.onclick = openLogFix;
+  const bwB = $("#bwFixBtn");
+  if(bwB) bwB.onclick = openBwFix;
   document.querySelectorAll("#app [data-focusfix]").forEach(b2=> b2.onclick = ()=>{
     const wid = b2.dataset.focusfix;
     const s2 = lastGradedFor(wid);
@@ -37663,6 +37858,12 @@ function bind(){
   const lfU = $("#logFixUndoBtn");
   if(lfU) lfU.onclick = ()=>{
     const n = logFixUndoNow();
+    render();
+    toast(n ? "Put back to what it was" : "Nothing to undo");
+  };
+  const bwU = $("#bwFixUndoBtn");
+  if(bwU) bwU.onclick = ()=>{
+    const n = bwFixUndoNow();
     render();
     toast(n ? "Put back to what it was" : "Nothing to undo");
   };
