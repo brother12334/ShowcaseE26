@@ -6108,7 +6108,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "38.3";
+const APP_VERSION = "38.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -41047,6 +41047,21 @@ function layoffPhrase(l){
     ? l.skipped + " session" + (l.skipped === 1 ? "" : "s") + " missed in a row before this one"
     : l.gap + " days since your previous session";
 }
+/* The position of one movement in two sessions, counted over the list they share. Returns
+   null when the two cannot be compared \u2014 which is a real answer, not a missing one. */
+function runOrderRank(nowSess, wasSess, name){
+  const ran = s=> ((s && s.entries) || []).filter(e=> e && (e.sets || []).some(isWorkingSet));
+  const a = ran(nowSess), b = ran(wasSess);
+  if(!a.length || !b.length) return null;
+  const aKeys = new Set(a.map(e=> nrm(e.name)));
+  const bKeys = new Set(b.map(e=> nrm(e.name)));
+  const aList = a.filter(e=> bKeys.has(nrm(e.name))).map(e=> nrm(e.name));
+  const bList = b.filter(e=> aKeys.has(nrm(e.name))).map(e=> nrm(e.name));
+  const k = nrm(name);
+  const now = aList.indexOf(k), was = bList.indexOf(k);
+  if(now < 0 || was < 0) return null;
+  return {now, was, of: aList.length};
+}
 function downContext(sess, entry, idx, prior){
   const excuses = [], context = [];
 
@@ -41110,8 +41125,28 @@ function downContext(sess, entry, idx, prior){
   if(other.length) context.push("you logged "+other.map(c=>REASON_BY_CODE[c].short).join(" and ")+" on it");
   if(!prior.sameDay) context.push("the comparison comes from a "+widName(prior.sess.workoutId).toLowerCase()+
     " session rather than the same rotation day");
-  const wasIdx = (prior.sess.entries||[]).findIndex(en=> nrm(en.name) === nrm(entry.name));
-  if(wasIdx >= 0 && idx - wasIdx >= 2) context.push("it ran "+(idx-wasIdx)+" places later in the session than last time");
+  /* WHERE IT RAN, COUNTED AGAINST THE SAME LIST BOTH TIMES.
+
+     This compared the raw position in one session's entries against the raw position in
+     the other's, which is only the same question if both sessions contained the same
+     exercises. They rarely do. Skip one, add one, or leave a row in the plan you never
+     logged into, and a movement that genuinely shifted by one place is reported as
+     having shifted by three \u2014 and then offered to somebody as the reason their lift went
+     down, which is a fabricated excuse.
+
+     Position is now counted over the exercises you actually PERFORMED in both sessions.
+     A row with nothing logged into it is not a place in the running order, and an
+     exercise only one of the two sessions contains cannot move anything.
+
+     And it is not asked at all when the comparison comes from a different rotation day:
+     the running order of a different day's template is not a baseline this one moved
+     away from. */
+  if(prior.sameDay){
+    const rank = runOrderRank(sess, prior.sess, entry.name);
+    if(rank && rank.now - rank.was >= 2){
+      context.push("it ran " + (rank.now - rank.was) + " places later in the session than last time");
+    }
+  }
 
   return {excuse: excuses[0] || null, excuses, context};
 }
