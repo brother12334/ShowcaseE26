@@ -6110,7 +6110,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "38.5";
+const APP_VERSION = "39.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10700,6 +10700,62 @@ function repsGuess(entry, st){
   const one = String((entry && entry.reps) || "").match(/(\d+)/);
   return one ? parseInt(one[1],10) : 10;
 }
+/* =====================================================================
+   SECTION 5: THE TIMER KNOWS WHAT KIND OF SET IT JUST WAS
+
+   The pause inside a technique is part of the technique, not a rest period: fifteen
+   seconds between myo-rep mini-sets is the thing that makes it a myo-rep sequence, and a
+   drop set has no pause at all \u2014 the whole point is that the weight comes off and you
+   carry on. Running the exercise's ordinary rest target after each of those turned every
+   technique into a slow version of straight sets.
+
+   So the timer is chosen by what was just logged, and it always says which rule it used,
+   because a clock counting to fifteen when you expected three minutes has to explain
+   itself in the moment rather than in a settings page. */
+const WARMUP_TIMER         = 60;
+const MYO_PAUSE            = 15;    // 10-20
+const REST_PAUSE_PAUSE     = 15;    // 10-20
+const CLUSTER_PAUSE        = 20;    // 15-30
+const TECHNIQUE_END_BONUS  = 30;    // after a sequence, the normal target plus this
+const SUPERSET_TRANSITION  = 15;    // 0-30, between the two exercises of a pair
+const SUPERSET_ROUND_REST  = 90;    // between rounds
+const CIRCUIT_TRANSITION   = 15;
+const CIRCUIT_ROUND_REST   = 120;
+const READINESS_REST_BONUS = 30;    // added to compound targets on a low-readiness day
+const SECOND_ALERT_AFTER   = 60;
+/* `ctx` says where in the session this was: {entries, index, mid} where `mid` is true
+   when the sequence or round is not finished yet. Returns {sec, why} or null to mean
+   "use the ordinary rest target". */
+function techniqueRest(e, si, ctx){
+  if(!e) return null;
+  const warms = entryWarmups(e);
+  if(warms && warms[si]) return {sec: WARMUP_TIMER, why: "warm-up"};
+  const k = setKindFor(e, si);
+  const mid = !!(ctx && ctx.mid);
+  if(k === "dropset" && mid) return {sec: 0, why: "drop the weight, no rest"};
+  if(k === "myoreps" && mid)   return {sec: MYO_PAUSE, why: "myo-rep pause"};
+  if(k === "restpause" && mid) return {sec: REST_PAUSE_PAUSE, why: "rest-pause"};
+  if(k === "cluster" && mid)   return {sec: CLUSTER_PAUSE, why: "cluster pause"};
+  return null;
+}
+/* What a grouping asks for between its parts. Separate from the above because a superset
+   is a property of the SESSION's arrangement rather than of one set. */
+function groupingRest(entries, i, ctx){
+  const e = entries && entries[i];
+  if(!e) return null;
+  if(entryIsCircuit(e)){
+    return (ctx && ctx.roundEnd)
+      ? {sec: CIRCUIT_ROUND_REST, why: "between circuit rounds"}
+      : {sec: CIRCUIT_TRANSITION, why: "to the next station"};
+  }
+  const info = (typeof supersetInfo === "function") ? supersetInfo(entries, i) : null;
+  if(!info || !info.partner) return null;
+  if(info.role === "first") return {sec: SUPERSET_TRANSITION, why: "straight into the next one"};
+  /* second of the pair: the round is over, so this is a real rest. A pair that shares a
+     main muscle rests like the harder of the two rather than like a superset. */
+  if(entryPreFatigued(entries, i)) return null;      // the exercise's own target
+  return {sec: SUPERSET_ROUND_REST, why: "between superset rounds"};
+}
 function restTargetFor(entry, st){
   /* An exercise that declares its own rest window wins. The derived bands below are a
      decent guess for anything custom, but they get two things wrong for this
@@ -14144,13 +14200,177 @@ function setIsWarmup(e, si){ return !!entryWarmups(e)[si]; }
 
 /* What one set contributes to a muscle's effective volume, before the muscle's own
    share is applied. Zero for a warm-up, otherwise its effort credit. */
+/* =====================================================================
+   WHAT ONE SET IS WORTH, BY WHAT KIND OF SET IT WAS
+
+   Up to here every working set counted as one, whatever was done inside it. That is
+   right for a straight set and wrong for the rest: a myo-rep sequence of four mini-sets
+   is more stimulus than one set and less than five, and a drop set is one hard set
+   however many times the weight came off \u2014 which is how the volume literature counts
+   them, and the reason the drop constant below is zero rather than something larger.
+
+   WHAT THE RESEARCH ACTUALLY SUPPORTS, since every number here is a judgement call:
+
+     Drop sets (Fink 2018; S\u00f8dal 2023 meta-analysis). Similar growth to traditional sets,
+       usually in less time. Counted as ONE set, which is what those studies did.
+     Myo-reps and rest-pause. A lot of near-failure work in little time; results look
+       comparable to, sometimes slightly better than, straight sets. How many "sets" a
+       sequence is worth is NOT settled, so the extra credit per mini-set is a named
+       constant and capped, and this comment is the flag that it is a guess.
+     Cluster sets. A cluster set replaces one traditional set; growth is similar at
+       matched volume. One set.
+     Lengthened partials. Similar or slightly more growth than full range on some
+       movements; evidence is early. One set when taken near failure.
+
+   The honest summary of all of it: at matched effort and volume, techniques mostly SAVE
+   TIME rather than add growth. Nothing here should ever be read as a shortcut.          */
+const DROP_SET_BASE          = 1.0;
+const DROP_EXTRA_PER_DROP    = 0;      // the literature counts a drop set as one set
+const DROP_SET_MAX           = 1.5;
+const MINI_SET_VALUE         = 0.25;
+const MYO_MAX                = 1.75;
+const PAUSE_SEGMENT_VALUE    = 0.25;
+const REST_PAUSE_MAX         = 1.75;
+const CIRCUIT_CREDIT_NO_RPE  = 0.5;
+/* How many sub-parts a set actually recorded. The logger stores them as rows under the
+   set \u2014 one per drop, mini-set, burst or cluster \u2014 and an empty row is a row somebody
+   opened and did not use, so it is not a part. */
+function setParts(st){
+  if(!st || !Array.isArray(st.sub)) return 0;
+  return st.sub.filter(r=> r && ((r.reps !== "" && r.reps != null)
+                              || (r.weight !== "" && r.weight != null))).length;
+}
+/* WHICH TECHNIQUE GOVERNS THIS SET'S VALUE.
+
+   A set can carry more than one \u2014 "last set to failure, as a drop set" is two \u2014 and only
+   some of them change what the set is worth. Resolved through techFor() so a technique
+   the PLAN prescribes for the last set counts exactly like one marked by hand, which is
+   the whole point of having both. */
+const SET_VALUE_KINDS = ["dropset", "myoreps", "restpause", "cluster"];
+function setKindFor(e, si){
+  const total = ((e && e.sets) || []).length;
+  const list = (typeof techFor === "function") ? techFor(e, si, total) : [];
+  for(const k of SET_VALUE_KINDS){
+    if(list.some(t=> t && t.k === k)) return k;
+  }
+  const own = setTechOf(e, si);
+  return own || null;
+}
+/* The value of one set BEFORE effort credit and muscle shares. */
+function setTypeValue(e, si){
+  const st = (e && e.sets) ? e.sets[si] : null;
+  if(!st) return 1;
+  const k = setKindFor(e, si);
+  if(k === "dropset"){
+    return Math.min(DROP_SET_MAX, DROP_SET_BASE + DROP_EXTRA_PER_DROP * setParts(st));
+  }
+  if(k === "myoreps"){
+    /* A sequence with fewer than two mini-sets is a straight set with a pause in it. */
+    const n = setParts(st);
+    return n >= 2 ? Math.min(MYO_MAX, 1 + MINI_SET_VALUE * n) : 1;
+  }
+  if(k === "restpause"){
+    const n = setParts(st);
+    return n >= 2 ? Math.min(REST_PAUSE_MAX, 1 + PAUSE_SEGMENT_VALUE * n) : 1;
+  }
+  /* cluster, lengthened partials, AMRAP, to-failure: one set each. A cluster set
+     replaces a traditional set rather than multiplying it. */
+  return 1;
+}
+/* A circuit is the one grouping that changes what a set is worth, because it is very
+   often done for conditioning rather than near failure. With an effort rating it counts
+   like anything else; without one it is credited at half rather than assumed hard. */
+function entryIsCircuit(e){ return !!(e && e.circuit); }
 function setEffective(e, si, warms){
   const st = (e && e.sets) ? e.sets[si] : null;
   if(!st || !isWorkingSet(st)) return {v: 0, unknown: false};
   const w = warms ? warms[si] : setIsWarmup(e, si);
   if(w) return {v: 0, unknown: false, warm: true};
   const c = effortCredit(st);
-  return {v: c.credit * DROPSET_SET_VALUE, unknown: c.unknown};
+  const base = setTypeValue(e, si);
+  if(entryIsCircuit(e) && c.unknown){
+    return {v: CIRCUIT_CREDIT_NO_RPE * base, unknown: true, circuit: true};
+  }
+  return {v: c.credit * base, unknown: c.unknown, kind: setKindFor(e, si) || null};
+}
+/* SECTION 3: WHAT TECHNIQUE WORK COSTS.
+
+   A drop set and a rest-pause are taken past the point a straight set stops, so they cost
+   more recovery than their set value suggests. Two consequences, both deliberately small:
+   they are read as RPE 10 wherever average effort feeds the landmarks, and a muscle whose
+   week is mostly technique work has its ceiling trimmed. The trim is 8%, which is a
+   nudge rather than a verdict \u2014 the evidence that these are more fatiguing is good, the
+   evidence for any particular number is not. */
+const TECHNIQUE_FATIGUE_THRESHOLD = 0.3;
+const TECHNIQUE_MRV_MULTIPLIER    = 0.92;
+const TECHNIQUE_SHARE_MAX         = 0.3;
+/* The three that go past failure. Clusters and lengthened partials do not: a cluster is a
+   straight set with pauses in it, and partials stop where full reps would have. */
+const FAILURE_TECHNIQUES = ["dropset", "myoreps", "restpause"];
+function setGoesToFailure(e, si){
+  return FAILURE_TECHNIQUES.indexOf(setKindFor(e, si)) > -1;
+}
+/* The effort a set should be READ as, which is not always the effort that was typed:
+   a drop set logged at RPE 8 for its first part was still taken to failure. */
+function setEffortRpe(e, si){
+  const st = (e && e.sets) ? e.sets[si] : null;
+  if(!st) return null;
+  if(setGoesToFailure(e, si)) return 10;
+  const r = parseFloat(st.rpe);
+  return r > 0 ? r : null;
+}
+/* The share of a muscle's effective sets, over a window, that came from work taken past
+   failure. Pure over the sessions handed to it so it can be tested on made-up logs. */
+function techniqueShareOver(g, fromMs, toMs, sessions){
+  let tech = 0, all = 0;
+  (sessions || S.sessions || []).forEach(sx=>{
+    const at = sx.finishedAt || sx.startedAt || 0;
+    if(at < fromMs || at > toMs) return;
+    (sx.entries || []).forEach(e=>{
+      const share = muscleFrac(e.name, g);
+      if(!(share > 0)) return;
+      const warms = entryWarmups(e);
+      (e.sets || []).forEach((st, i)=>{
+        const v = setEffective(e, i, warms).v * share;
+        if(!(v > 0)) return;
+        all += v;
+        if(setGoesToFailure(e, i)) tech += v;
+      });
+    });
+  });
+  return {tech, all, share: all > 0 ? tech / all : 0};
+}
+/* The ceiling adjustment that follows from it. 1 when there is nothing to say. */
+function techniqueMrvFactor(g, fromMs, toMs, sessions){
+  const t = techniqueShareOver(g, fromMs, toMs, sessions);
+  return t.share > TECHNIQUE_FATIGUE_THRESHOLD ? TECHNIQUE_MRV_MULTIPLIER : 1;
+}
+
+/* SECTION 4: WHICH SET THE STRENGTH READ COMES FROM.
+
+   The first straight working set, and nothing else. A drop set's later drops, a myo-rep
+   mini-set, a rest-pause burst, a cluster and a set of partials are all performed under
+   conditions that make the load mean something different \u2014 and the second exercise of a
+   superset that shares a muscle is performed pre-fatigued. Reading any of them as a
+   one-rep max estimate turns a technique choice into a strength change.
+
+   It is also why the FIRST set is the one used: the first working set of an exercise has
+   not been affected by how long you rested inside the exercise, so changing your rest
+   cannot move your measured progress. */
+function setIsStraight(e, si){
+  const k = setKindFor(e, si);
+  if(!k) return true;
+  /* AMRAP and to-failure are straight sets with an instruction attached: the load is the
+     load and the reps are real. The five that change the conditions are excluded. */
+  return k === "amrap" || k === "failure";
+}
+/* Is this entry the second half of a superset whose two exercises share a main muscle? */
+function entryPreFatigued(entries, i){
+  const info = (typeof supersetInfo === "function") ? supersetInfo(entries, i) : null;
+  if(!info || info.role !== "second") return false;
+  const mine = entries[i], partner = entries[i - 1];
+  if(!mine || !partner) return false;
+  return MKEYS.some(m=> muscleFrac(mine.name, m) >= 0.5 && muscleFrac(partner.name, m) >= 0.5);
 }
 /* The whole entry, in effective sets, ignoring which muscles they pay into. Used by the
    per-session limit check in C1 and by the logger's own readout. */
@@ -15101,17 +15321,38 @@ function setE1RM(st, add, bodyweight){
   return {v: w * (1 + (reps + rir) / 30), bw: false};
 }
 /* The best usable set of one entry, which is what an exposure is worth. */
-function entryE1RM(e){
+function entryE1RM(e, ctx){
   const add = entryBarAdd(e);
   const warms = entryWarmups(e);
   const anyLoad = (e.sets || []).some(st=> (parseFloat(st.weight) || 0) > 0);
-  let best = null;
+  /* SECTION 4. The strength read comes from STRAIGHT working sets only, and from the
+     first usable one \u2014 not the best of all of them. Taking the best meant a drop set's
+     opening part, a rest-pause burst or a set of partials could become the number the
+     whole progression system is built on, so a technique choice read as a strength
+     change. And using the FIRST one is what makes rest detection safe to act on: the
+     first working set has not been affected by how long you rested inside the exercise,
+     so changing your rest cannot move your measured progress.
+
+     The second of two usable straight sets is allowed to win, and only that far: an
+     opening set with the load plainly misjudged should not be the record of the day. */
+  const usable = [];
   (e.sets || []).forEach((st, i)=>{
     if(!isWorkingSet(st) || warms[i]) return;
+    if(!setIsStraight(e, i)) return;
     const r = setE1RM(st, add, !anyLoad);
-    if(r && (best == null || r.v > best)) best = r.v;
+    if(r) usable.push(r.v);
   });
-  return best;
+  if(!usable.length) return null;
+  /* pre-fatigued by its own superset partner: the load is real, the conditions are not */
+  if(ctx && ctx.entries && entryPreFatigued(ctx.entries, ctx.index)) return null;
+  return Math.max(usable[0], usable.length > 1 ? usable[1] : usable[0]);
+}
+/* Is there any straight working set here at all? An index lift performed only as drop
+   sets has no strength read, and the honest thing is to say so rather than to invent one
+   out of a technique set. */
+function entryHasStraightSet(e){
+  const warms = entryWarmups(e);
+  return (e.sets || []).some((st, i)=> isWorkingSet(st) && !warms[i] && setIsStraight(e, i));
 }
 
 /* B3 EXPOSURES THE PERFORMANCE READ MUST IGNORE.
@@ -15163,7 +15404,7 @@ function muscleExposures(g, opts){
     (sn.entries || []).forEach(e=>{
       const k = nrm(e.name);
       if(lifts.indexOf(k) < 0) return;
-      const v = entryE1RM(e);
+      const v = entryE1RM(e, {entries: sn.entries || [], index: (sn.entries || []).indexOf(e)});
       if(v == null) return;
       const prev = byLift[k];
       const gapDays = prev ? (sn.startedAt - prev.at)/DAY_MS : 0;
