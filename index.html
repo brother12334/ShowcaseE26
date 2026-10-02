@@ -6108,7 +6108,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "38.2";
+const APP_VERSION = "38.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7971,6 +7971,7 @@ function addSetOfKind(ei, k){
   if(!en) return;
   const st = {weight:"", reps:"", rpe:"", done:false};
   if(k) st.tech = k;
+  bwSeedSet(en, st);              // a card does not get two kinds of number in it
   en.sets.push(st);
   en.setsOwn = true;              // this count is yours; the plan does not reset it
   save(); render();
@@ -15164,8 +15165,18 @@ function muscleExposures(g, opts){
       if(v == null) return;
       const prev = byLift[k];
       const gapDays = prev ? (sn.startedAt - prev.at)/DAY_MS : 0;
+      /* TURNING YOUR BODYWEIGHT ON IS NOT A PERSONAL BEST.
+
+         A dip logged as 25 lb and the same dip logged as 210 lb are the same dip. The
+         first exposure after the switch is comparing two different measurements, so it is
+         skipped exactly the way a new exercise is \u2014 one comparison lost, against a
+         700% "gain" that would otherwise be fed to the progression, the records and the
+         calibration. */
+      const bwNow = !!(Number(e.bwOn) > 0);
+      const basisChanged = prev && prev.bw !== bwNow;
       const skip = exposureSkip(sn, g, {gapDays, newExercise: !prev});
-      byLift[k] = {at: sn.startedAt, v};
+      if(basisChanged) skip.push("bodyweight was switched " + (bwNow ? "on" : "off") + " for it");
+      byLift[k] = {at: sn.startedAt, v, bw: bwNow};
       out.push({at: sn.startedAt, date: sn.date, lift: k, v,
                 pct: prev ? (v - prev.v)/prev.v*100 : null, skip, sessionId: sn.id});
     });
@@ -15247,10 +15258,17 @@ function soreAvgOver(g, fromMs, toMs){
    about it but wait. S.jointOk records the day a movement was declared settled, and
    readings on or before that day are no longer counted as current. Nothing is deleted
    \u2014 the history is still there to be read, it is just no longer being acted on. */
+/* Settled is said about a DAY, not about a moment. "It has settled" covers everything up
+   to and including the day you say it \u2014 otherwise saying it at two in the afternoon would
+   leave that same morning's reading standing, which is not what anybody means. A fresh
+   complaint afterwards withdraws the clearance outright (see jointRecord), so this cannot
+   swallow one. */
 function jointClearedAt(exKey){
   const ok = (S.jointOk && typeof S.jointOk === "object") ? S.jointOk : {};
   const v = ok[exKey];
-  return (typeof v === "number" && v > 0) ? v : 0;
+  if(!(typeof v === "number" && v > 0)) return 0;
+  const d = new Date(v);
+  return Date.parse(d.toLocaleDateString("en-CA") + "T00:00:00") + DAY_MS - 1;
 }
 function jointSettle(exKey, atMs){
   if(!exKey) return false;
@@ -15267,15 +15285,25 @@ function jointSourcesFor(g, fromMs, toMs){
   const log = (S.joint && typeof S.joint === "object") ? S.joint : {};
   const out = [];
   Object.keys(log).forEach(d=>{
-    const at = Date.parse(d + "T12:00:00") || 0;
-    if(at < fromMs || at > toMs) return;
+    /* A DAY IS A DAY, NOT MIDDAY.
+
+       The log is keyed by date, and a date was being turned into a timestamp at noon and
+       compared against a window that usually ends at `Date.now()`. So something you said
+       hurt at eight in the morning did not exist until lunchtime \u2014 it was logged, it was
+       stored, and every rule that reads this looked straight past it for four hours. The
+       window is matched against the whole day instead. */
+    const start = Date.parse(d + "T00:00:00") || 0;
+    if(!start) return;
+    const end = start + DAY_MS - 1;
+    if(end < fromMs || start > toMs) return;
+    const at = Date.parse(d + "T12:00:00") || start;
     const rec = log[d] || {};
     Object.keys(rec).forEach(exKey=>{
       const mm = musclesFor(exKey);
       if(!mm || !(mm[g] >= 1)) return;
       const v = rec[exKey];
       if(typeof v !== "number") return;
-      if(at <= jointClearedAt(exKey)) return;
+      if(start <= jointClearedAt(exKey)) return;
       out.push({exKey, name: prettyExName(exKey), sev: v, day: d, at});
     });
   });
@@ -16587,6 +16615,14 @@ function specSuggestDays(m, st, A){
 }
 /* At least half of what is added must be isolation, so the extra sets buy the muscle
    something without buying the whole body fatigue. */
+function specLibraryEntries(){
+  const out = [];
+  const eat = lib=> Object.keys(lib || {}).forEach(k=>
+    (lib[k] || []).forEach(e=>{ if(e && e.name) out.push(e); }));
+  try{ eat(EX_LIBRARY); }catch(e){}
+  try{ eat(EX_LIBRARY_EXTRA); }catch(e){}
+  return out;
+}
 function specLibraryNames(){
   const out = [];
   const eat = lib=> Object.keys(lib || {}).forEach(k=>
@@ -26842,6 +26878,7 @@ function viewActiveSession(){
     h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
       <button class="btn ghost small" data-addset="${ei}">+ set</button>
       <button class="btn ghost small" data-rmset="${ei}">− set</button>
+      ${bwButtonHTML(en, ei)}
     </div></div>`;
   }
 
@@ -27884,6 +27921,7 @@ function viewFocusSession(){
   h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
     <button class="btn ghost small" data-addset="${ei}">+ set</button>
     <button class="btn ghost small" data-rmset="${ei}">− set</button>
+    ${bwButtonHTML(en, ei)}
   </div></div>`;
   if(atEnd){
     h += `<div class="card">
@@ -36392,6 +36430,22 @@ function bind(){
      controls for one decision, and the second only ever covered one technique. */
   document.querySelectorAll("[data-addset]").forEach(b=> b.onclick=()=>
     openAddSetMenu(b, parseInt(b.dataset.addset, 10)));
+  document.querySelectorAll("[data-bw]").forEach(b=> b.onclick=()=>{
+    const ei = parseInt(b.dataset.bw, 10);
+    const en = S.active && S.active.entries[ei];
+    if(!en) return;
+    const turningOn = !entryBwOn(en);
+    if(!bwApply(en, turningOn)) return;
+    bwRemember(en.name, turningOn);
+    save(); render();
+    toast(turningOn
+      ? "Counting you \u2014 " + r1(entryBwOn(en) || 0) + " " + unitWord() + " on every set"
+      : "Back to the weight you added", "good");
+  });
+  document.querySelectorAll("[data-bwneed]").forEach(b=> b.onclick=()=>{
+    toast("Log a weigh-in first \u2014 the app needs to know what you weigh");
+    goTab("body"); BODY_OPEN.you = true; render();
+  });
   document.querySelectorAll("[data-rmset]").forEach(b=> b.onclick=()=>{
     const en = S.active.entries[b.dataset.rmset];
     const sets = en.sets;
@@ -38388,6 +38442,13 @@ function startWorkout(wid){
       });
     })()
   };
+  /* A switch thrown once stays thrown. Somebody who has told the app to count them on
+     dips should not have to say it again every Tuesday \u2014 and the figure is taken fresh
+     each session, so it tracks what you actually weigh rather than what you weighed the
+     day you turned it on. */
+  (S.active.entries || []).forEach(en=>{
+    if(bwRemembered(en.name) && isBodyweightMove(en.name)) bwApply(en, true);
+  });
   S.active.planSnap = planSnapOf(slots);
   S.active.planSig  = JSON.stringify(S.active.planSnap);
   save();
@@ -44480,6 +44541,109 @@ function plateLine(total, name){
 }
 /* What a logged set actually weighed. Blank and bodyweight sets stay at zero rather than
    becoming an empty carriage: "0 reps at 25 lb" is not a thing that happened. */
+/* =====================================================================
+   COUNTING YOURSELF
+
+   A dip with 25 lb on a belt was logged as 25 lb, and a dip with nothing on a belt was
+   logged as nothing at all. Neither is what you lifted. The first understates the set by
+   about 85%, and the second leaves the app scoring the movement on reps alone \u2014 which
+   works, but it cannot be compared with anything and it cannot tell you that you got
+   stronger by losing 4 kg.
+
+   So this is a switch, per exercise: count me. On, every set carries your bodyweight plus
+   whatever you hung off it; off, it goes back exactly as it was. The figure used is
+   stamped when you turn it on, so turning it off always subtracts the same number it
+   added, however much you weigh by then.
+
+   It is opt-in because it has to be. Only you know whether you are doing full dips or
+   half of one off a band, and a number the app invented and then fed into your own
+   strength trend is worse than no number.                                              */
+const BW_MOVE_RE = /\b(dip|pull[- ]?up|chin[- ]?up|push[- ]?up|muscle[- ]?up|inverted row|nordic|sissy squat|pistol|bodyweight|glute bridge|hanging|leg raise|split squat|step[- ]?up|lunge|back extension|hyperextension|plank)\b/i;
+function isBodyweightMove(name){
+  const n = String(name || "");
+  if(!n) return false;
+  if(BW_MOVE_RE.test(n)) return true;
+  /* and anything the movement library itself files under bodyweight */
+  try{
+    const lib = specLibraryEntries ? specLibraryEntries() : null;
+    if(lib){ const hit = lib.find(x=> nrm(x.name) === nrm(n)); if(hit) return hit.gear === "bodyweight"; }
+  }catch(e){}
+  return false;
+}
+/* The newest weigh-in, in the units the weight boxes are already in. */
+function bodyWeightNow(){
+  const list = (typeof bodyLogList === "function") ? bodyLogList() : [];
+  for(const r of list) if(r && r.w > 0) return r.w;
+  return null;
+}
+function entryBwOn(e){
+  const v = Number(e && e.bwOn);
+  return isFinite(v) && v > 0 ? v : 0;
+}
+/* Remembered per movement, so a switch thrown once does not have to be thrown again every
+   session. It is still per ENTRY in the log: what a session recorded is what it recorded. */
+function bwRemembered(name){
+  const k = nrm(name);
+  return !!(S.bwEx && S.bwEx[k]);
+}
+function bwRemember(name, on){
+  if(!S.bwEx || typeof S.bwEx !== "object") S.bwEx = {};
+  const k = nrm(name);
+  if(on) S.bwEx[k] = 1; else delete S.bwEx[k];
+}
+/* Turning it on adds your bodyweight to every set; turning it off takes back exactly what
+   was added. A set left blank becomes your bodyweight on its own, and goes back to blank.
+   Idempotent in both directions, because a button people press in a gym gets pressed
+   twice. */
+function bwApply(e, on, wNow){
+  if(!e) return false;
+  const has = entryBwOn(e);
+  if(on && has) return false;
+  if(!on && !has) return false;
+  if(on){
+    const w = (wNow > 0) ? wNow : bodyWeightNow();
+    if(!(w > 0)) return false;
+    (e.sets || []).forEach(st=>{
+      const cur = parseFloat(st.weight);
+      st.weight = String(Math.round(((isFinite(cur) && cur > 0 ? cur : 0) + w) * 10) / 10);
+    });
+    e.bwOn = w;
+  } else {
+    const w = has;
+    (e.sets || []).forEach(st=>{
+      const cur = parseFloat(st.weight);
+      if(!isFinite(cur)) return;
+      const back = Math.round((cur - w) * 10) / 10;
+      st.weight = back > 0 ? String(back) : "";
+    });
+    delete e.bwOn;
+  }
+  return true;
+}
+/* A set added AFTER the switch was thrown still has to carry it, or one card ends up with
+   two kinds of number in it. */
+/* The button, on movements where counting yourself is the right question to ask and
+   nowhere else. It says the figure it will use, because a button that silently writes 85
+   into six boxes should say 85 first. */
+function bwButtonHTML(e, ei){
+  if(!e || !isBodyweightMove(e.name)) return "";
+  const on = entryBwOn(e);
+  const w = on || bodyWeightNow();
+  if(!(w > 0)){
+    return `<button class="btn ghost small" data-bwneed="${ei}">+ my weight</button>`;
+  }
+  return `<button class="btn ghost small${on?" on":""}" data-bw="${ei}"
+    aria-pressed="${on?"true":"false"}">${on
+      ? "\u2713 you (" + r1(on) + " " + unitWord() + ")"
+      : "+ my weight (" + r1(w) + " " + unitWord() + ")"}</button>`;
+}
+function bwSeedSet(e, st){
+  const w = entryBwOn(e);
+  if(!(w > 0) || !st) return;
+  const cur = parseFloat(st.weight);
+  if(isFinite(cur) && cur > 0) return;
+  st.weight = String(w);
+}
 function setLoad(st, add){
   const w = parseFloat(st && st.weight) || 0;
   return w > 0 ? w + (add || 0) : 0;
@@ -45623,6 +45787,8 @@ function plateArtHTML(b){
   </div>`;
 }
 function plateLineHTML(en, last){
+  /* Nothing to load when most of the weight is you. */
+  if(entryBwOn(en)) return "";
   if(!en || !en.name) return "";
   const typed = (en.sets || []).map(st=> parseFloat(st && st.weight)).find(v=> v > 0);
   /* THE PLATE COUNT HAS TO BE FOR THE LOAD THE BOXES ARE OFFERING.
