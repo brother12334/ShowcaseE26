@@ -6118,7 +6118,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "39.1";
+const APP_VERSION = "39.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8389,6 +8389,38 @@ Object.keys(EX_LIBRARY_EXTRA).forEach(k=>{
 });
 
 /* =====================================================================
+   C2 \u2014 THE PREFERENCE TABLE, AND WHY IT IS FROZEN HERE
+
+   Which exercise fills a slot has always been answered by the ORDER of that slot's list:
+   best first, walk it, take the first thing the gym can do. The order was the table.
+
+   That is fine until the list grows. Below this line the catalogue merges three hundred
+   more movements into the same lists, and a re-slotting row can move a movement from one
+   list into another. So the order of a list is partly curated and partly an accident of
+   how the catalogue happens to be written \u2014 and it changes whenever anybody adds a row.
+   A plan is supposed to be a decision; it should not quietly become a different plan
+   because somebody added a name to an autocomplete.
+
+   So the preference order is captured HERE, after the curated lists and their curated
+   additions and before the catalogue, and that snapshot is what chooses. Adding to the
+   catalogue can widen a swap list and can never change which exercise a plan asks for.
+
+   It is names only: the entry itself is still looked up in EX_LIBRARY at pick time, so a
+   movement the catalogue later moves out of a slot is skipped rather than returned from a
+   slot it no longer belongs to. The self-test reports that case.
+
+   Changing a pick is still possible \u2014 by editing EX_LIBRARY, which is the curated table
+   and where such a decision belongs. The test pins every (slot \u00d7 gear) pick, so a change
+   has to be made on purpose. */
+const EX_PREFERENCE = (function(){
+  const o = {};
+  Object.keys(EX_LIBRARY).forEach(slot=>{
+    o[slot] = Object.freeze((EX_LIBRARY[slot] || []).map(x=> x.name));
+  });
+  return Object.freeze(o);
+})();
+
+/* =====================================================================
    THE CATALOGUE
 
    EX_LIBRARY holds the movements the SWAP shortlist is built from, and it is curated:
@@ -8454,9 +8486,13 @@ const EX_CATALOG = [
   ["Lu Raise","dumbbell","lateral"],
   ["Upright Row","barbell","lateral"],
   ["Cable Upright Row","cable","lateral"],
-  ["Plate Front Raise","barbell","lateral"],
-  ["Dumbbell Front Raise","dumbbell","lateral"],
-  ["Cable Front Raise","cable","lateral"],
+  /* M8 \u2014 FRONT RAISES HAVE THEIR OWN SLOT. They sat in the lateral-raise slot, which
+     is the slot the swap list is built from, so somebody whose cable lateral raise was
+     taken was offered a front raise as the substitute: a different head of a different
+     muscle, in a plan that was short of side delts to begin with. */
+  ["Dumbbell Front Raise","dumbbell","front_delt"],
+  ["Cable Front Raise","cable","front_delt"],
+  ["Plate Front Raise","barbell","front_delt"],
   // ---- rear delt ----
   ["Reverse Pec Deck","machine","rear_delt"],
   ["Bent-Over Dumbbell Reverse Fly","dumbbell","rear_delt"],
@@ -8613,8 +8649,11 @@ const EX_CATALOG = [
   // ---- forearms ----
   ["Wrist Curl","dumbbell","curl"],
   ["Reverse Wrist Curl","dumbbell","curl"],
-  ["Farmer's Carry","dumbbell","shrug"],
-  ["Plate Pinch Hold","bodyweight","shrug"],
+  /* M8 \u2014 CARRIES ARE THEIR OWN JOB. The three in the app were filed under three
+     different slots \u2014 shrug, forearms and obliques \u2014 so no two of them were swaps for
+     each other and each one borrowed a slot it only half belonged to. A static grip hold
+     stays under forearms: it is grip work, and it does not go anywhere. */
+  ["Farmer's Carry","dumbbell","carry"],
   // ---- abs ----
   ["Cable Crunch","cable","abs"],
   ["Machine Crunch","machine","abs"],
@@ -8658,7 +8697,7 @@ const EX_CATALOG = [
   ["Landmine Twist","barbell","obliques"],
   ["Cable Woodchop","cable","obliques"],
   ["Pallof Press","cable","obliques"],
-  ["Suitcase Carry","dumbbell","obliques"],
+  ["Suitcase Carry","dumbbell","carry"],
   ["Side Plank","bodyweight","obliques"],
   ["Russian Twist","plate","obliques"],
   ["Hanging Oblique Raise","bodyweight","obliques"],
@@ -8669,7 +8708,8 @@ const EX_CATALOG = [
   ["Reverse Wrist Curl","dumbbell","forearms"],
   ["Wrist Roller","other","forearms"],
   ["Plate Pinch","plate","forearms"],
-  ["Farmer's Walk","dumbbell","forearms"],
+  ["Plate Pinch Hold","bodyweight","forearms"],
+  ["Farmer's Walk","dumbbell","carry"],
   ["Dead Hang","bodyweight","forearms"],
   ["Kroc Row","dumbbell","pull_horizontal"],
   // ---- adductors ----
@@ -8699,14 +8739,23 @@ const EX_CATALOG = [
   ["Machine Dip","machine","press_horizontal"],
   ["Ring Dip","bodyweight","press_horizontal"],
   ["Weighted Dip","bodyweight","press_horizontal"],
-  ["Decline Push-Up","bodyweight","press_horizontal"],
+  /* M8 \u2014 FEET UP IS AN INCLINE PRESS, whatever the push-up is called. The incline
+     slot's only bodyweight option was "Incline Push-Up", which is hands up: an EASIER
+     flat press, and the catalogue rightly files it under the horizontal slot. That left
+     the incline slot with nothing a bodyweight-only user could do, so the plan asked
+     them for a Smith machine. This is the movement that belongs there. */
+  ["Decline Push-Up","bodyweight","press_incline"],
   ["Seated Barbell Shoulder Press","barbell","press_overhead"],
   ["High Pull","barbell","shrug"],
   ["Lying Dumbbell Lateral Raise","dumbbell","lateral"],
   ["Prone T Raise","dumbbell","rear_delt"],
   ["Prone Y Raise","dumbbell","rear_delt"],
   ["Rear Delt Row","dumbbell","rear_delt"],
-  ["Scapular Pull-Up","bodyweight","pull_vertical"],
+  /* H5 \u2014 a scapular pull-up is retraction and depression at the shoulder blade: the
+     lats barely shorten and the lower traps do the work, which is what its map says. In
+     the vertical-pull slot it was an offered substitute for a lat pulldown, which is not
+     a substitute at all. It belongs with the pull-aparts. */
+  ["Scapular Pull-Up","bodyweight","rear_delt"],
   ["Kneeling Cable Pulldown","cable","pull_vertical"],
   ["Chest-Supported T-Bar Row","machine","pull_horizontal"],
   ["Tate Press","dumbbell","triceps"],
@@ -8753,7 +8802,15 @@ EX_CATALOG.forEach(row=>{
       return false;
     });
   });
-  EX_LIBRARY[slot].push(keep ? Object.assign({}, keep, {gear: keep.gear || gear}) : {name, gear});
+  /* AND THE GEAR COMES FROM THE ROW THAT NAMES THE SLOT. Two catalogue rows can
+     disagree about both: Frog Pump is listed once under hip_thrust as a dumbbell
+     movement and again under glute_iso as a bodyweight one. Keeping the first gear put a
+     "dumbbell" frog pump in the glute slot, which is the one place a bodyweight-only
+     user had a bodyweight option \u2014 so they were handed a cable kickback instead. The
+     cue still travels, because a cue is about the movement; a curated entry's gear is
+     left alone, because that one was written down on purpose. */
+  const gearNow = (keep && keep.cue) ? (keep.gear || gear) : gear;
+  EX_LIBRARY[slot].push(keep ? Object.assign({}, keep, {gear: gearNow}) : {name, gear});
 });
 /* AND ONE PASS OVER WHAT IS LEFT, for the movements the catalogue never mentions. The
    EX_LIBRARY_EXTRA merge above dedupes on swapSquash, which does not know that "Dumbbell
@@ -8837,6 +8894,49 @@ function exSearch(q, limit){
 
    Ordering is deliberate: the heaviest compound goes first, when you are freshest, and
    isolation last. */
+/* H5 \u2014 WHAT EACH SLOT IS FOR, in muscles, so the mapping can be held to it.
+
+   A slot is a job in a session, and the movement filling it has a muscle it is mostly
+   for. These are the muscles that may legitimately come out on top of a movement's map
+   in each slot \u2014 several, not one, where the variation honestly decides: a hinge can be
+   hamstring-led or back-led, a lunge quad-led or glute-led, and a pulldown reads lats
+   while a chin-up can read biceps for somebody built a particular way.
+
+   Only invariant 6 of the self-test reads this. It is not used to choose anything; a
+   mismatch means the mapping has a hole in it, and the point is to be told. */
+const SLOT_MAIN = {
+  press_horizontal: ["chest","triceps"],
+  press_incline:    ["chest","delts_front"],
+  fly:              ["chest"],
+  press_overhead:   ["delts_front","delts_side","triceps"],
+  lateral:          ["delts_side"],
+  front_delt:       ["delts_front"],
+  /* The rear-delt slot is really the upper-back-and-rear-shoulder accessory slot: it
+     holds pull-aparts, prone Y raises and scapular pull-ups as well as reverse flyes,
+     and the lower traps lead several of those honestly. */
+  rear_delt:        ["delts_rear","upper_back","traps"],
+  pull_vertical:    ["lats","upper_back","biceps"],
+  pull_horizontal:  ["upper_back","lats","traps"],
+  lat_iso:          ["lats"],
+  shrug:            ["traps"],
+  carry:            ["forearms","traps","abs","obliques"],
+  squat:            ["quads","glutes"],
+  lunge:            ["quads","glutes"],
+  hinge:            ["hams","glutes","lower_back"],
+  hip_thrust:       ["glutes"],
+  quad_iso:         ["quads"],
+  ham_iso:          ["hams"],
+  calf:             ["calves"],
+  curl:             ["biceps","forearms"],
+  triceps:          ["triceps"],
+  abs:              ["abs","obliques"],
+  obliques:         ["obliques","abs"],
+  forearms:         ["forearms"],
+  neck:             ["neck","traps"],
+  adductors:        ["adductors","glutes"],
+  glute_iso:        ["glutes"],
+  lower_back:       ["lower_back","hams","glutes"]
+};
 const SLOT_REPS  = {heavy:"6-10", second:"8-12", iso:"12-15", abs:"10-15"};
 const SLOT_RPES  = {heavy:[7,8,8,9], second:[7,8,9], iso:[8,9,9,9,9], abs:[9,10,10,10]};
 
@@ -8897,10 +8997,23 @@ function setsForLevel(kind, level){
 function pickExercise(key, gear){
   const list = EX_LIBRARY[key] || [];
   const allowed = GEAR_TIERS[gear] || GEAR_TIERS.full;
+  /* C2. The frozen preference order is consulted first, and it is names \u2014 so each one
+     is looked up in the slot as it stands now. A name the catalogue has since moved
+     elsewhere simply is not found here, and the walk carries on. */
+  const pref = EX_PREFERENCE[key] || [];
+  for(const name of pref){
+    const rec = list.find(x=> swapSquash(x.name) === swapSquash(name));
+    if(rec && allowed.indexOf(rec.gear) > -1) return rec;
+  }
   const hit = list.find(x=>allowed.indexOf(x.gear) > -1);
+  if(hit) return hit;
   // Nothing in your gear can cover this job: fall back to the bodyweight option if the
-  // slot has one, and only then to the head of the list.
-  return hit || list.find(x=>x.gear === "bodyweight") || list[0] || null;
+  // slot has one, preferring a curated one, and only then to the head of the list.
+  for(const name of pref){
+    const rec = list.find(x=> swapSquash(x.name) === swapSquash(name));
+    if(rec && rec.gear === "bodyweight") return rec;
+  }
+  return list.find(x=>x.gear === "bodyweight") || list[0] || null;
 }
 /* =====================================================================
    THE MACHINE IS TAKEN
@@ -10352,10 +10465,26 @@ function prFloat(anchor, label){
    so a heavier set at a different position (or after a session with fewer sets) never
    registered. This scans your entire history plus the sets already logged in this
    session, and reports the first record actually broken.                          */
-function est1RM(w, reps){
-  // Epley, only meaningful in the low-rep range; clamp so 20-rep sets don't inflate
-  if(!(w>0) || !(reps>0)) return 0;
-  return w * (1 + Math.min(reps, 12)/30);
+/* L1 \u2014 ONE DEFINITION OF AN ESTIMATED 1RM, AND EVERY READER USES IT.
+
+   There were two. The records code ran Epley on the reps as logged; the strength trend
+   ran Epley on the reps plus the reps left in the tank. The second is the correct one \u2014
+   every rep-max formula assumes the set was taken to failure \u2014 and the two disagreeing
+   meant a set could be a strength PR and a flat trend at the same time, which is not a
+   judgement anybody could explain.
+
+   So: this function is the arithmetic, it takes REPS TO FAILURE, and nothing else in the
+   app computes an e1RM. Where a caller holds a set rather than a number it goes through
+   e1rmOfSet() or setE1RM(), both of which do the RPE adjustment first.
+
+   The cap is on reps to failure, not on logged reps, because that is what the formula is
+   sensitive to. Epley is linear and drifts high once a set runs long; past fifteen it is
+   no longer an estimate of a single rep. A set logged at 12 with two in reserve is 14 to
+   failure and still inside it. */
+const E1RM_RTF_CAP = 15;
+function est1RM(w, repsToFail){
+  if(!(w>0) || !(repsToFail>0)) return 0;
+  return w * (1 + Math.min(repsToFail, E1RM_RTF_CAP)/30);
 }
 /* WHAT EPLEY ASSUMES, AND WHY THE ESTIMATE READ LOW.
 
@@ -10403,7 +10532,7 @@ function bestEverFor(exName, upToEntry, upToSet){
     seen = true;
     if(w > maxW){ maxW = w; repsAtMaxW = reps; }
     else if(w === maxW && reps > repsAtMaxW){ repsAtMaxW = reps; }
-    const e1 = est1RM(w, reps);
+    const e1 = est1RM(w, repsToFailure(st));
     if(e1 > max1RM){ max1RM = e1; best1RM = {w, reps}; }
     if(!(w>0) && reps > maxRepsBw) maxRepsBw = reps;   // bodyweight rep record
   };
@@ -10456,7 +10585,9 @@ function detectPR(exName, st, ei, si){
   if(w > 0){
     if(w > b.maxW) return "WEIGHT PR";                          // heavier than ever
     if(w === b.maxW && reps > b.repsAtMaxW) return "REP PR";     // same top weight, more reps
-    if(est1RM(w, reps) > b.max1RM * 1.005) return "STRENGTH PR"; // better weight×reps combo
+    // one definition, and it is the RPE-adjusted one: a set with reps in reserve is not
+    // the same evidence as the same set taken to failure, for a record either.
+    if(est1RM(w, repsToFailure(st)) > b.max1RM * 1.005) return "STRENGTH PR";
     return null;
   }
   // bodyweight movement, reps are the record
@@ -10582,7 +10713,7 @@ function sweepSessionPRs(sess){
       seen = true;
       if(w > maxW){ maxW = w; repsAtMaxW = reps; }
       else if(w === maxW && reps > repsAtMaxW){ repsAtMaxW = reps; }
-      const e1 = est1RM(w, reps); if(e1 > max1RM) max1RM = e1;
+      const e1 = est1RM(w, repsToFailure(st)); if(e1 > max1RM) max1RM = e1;
       if(!(w>0) && reps > maxRepsBw) maxRepsBw = reps;
     };
     others.forEach(s=> (s.entries||[]).forEach(en=>{
@@ -10603,7 +10734,7 @@ function sweepSessionPRs(sess){
         if(w > 0){
           if(w > maxW) pr = "WEIGHT PR";
           else if(w === maxW && reps > repsAtMaxW) pr = "REP PR";
-          else if(est1RM(w, reps) > max1RM * 1.005) pr = "STRENGTH PR";
+          else if(est1RM(w, repsToFailure(st)) > max1RM * 1.005) pr = "STRENGTH PR";
         } else if(reps > maxRepsBw) pr = "REP PR";
       }
       if(pr) st.pr = pr; else delete st.pr;
@@ -13193,6 +13324,11 @@ const REGION_ORDER = AREA_ORDER;
 const EX_MUSCLES = {
   // ---- chest ----
   "dumbbell bench press":          {chest:1, delts_front:.5, triceps:.5},
+  /* H5 \u2014 a library movement the tables had no row for. "Neutral-GRIP" put it on the
+     forearm keyword, which has been narrowed; with that gone it mapped to nothing at
+     all, so it is written down. The neutral grip is a little kinder to the shoulder and
+     a little more triceps than a flat press, and that is the whole difference. */
+  "neutral grip dumbbell press":   {chest:1, delts_front:.45, triceps:.55},
   "incline dumbbell bench press":  {chest:1, delts_front:.6, triceps:.4},
   "mid cable fly (on bench)":      {chest:1, delts_front:.3, biceps:.1},
   "cable chest press (on bench)":  {chest:1, delts_front:.4, triceps:.4},
@@ -13246,24 +13382,67 @@ const MUSCLE_KEYWORDS = [
      entirely to chest: chest read over its MRV while the rear delts looked untrained.
      Specific-before-general is load-bearing in this list, not stylistic. */
   [/face pull|rear delt|reverse fly|reverse pec|rear[- ]?delt/,              {delts_rear:1, upper_back:.6, traps:.5}],
+  /* H5 \u2014 THE ORDER OF THIS LIST IS THE RULE, so the exceptions to a general pattern are
+     written above it, each with the name that forced it.
+
+     A triceps-biased press is still a press, and the chest rule below owns "dip" and
+     "push-up" outright: "Tricep Dip Machine", "Triceps Dip" and "Close-Grip Push-Up"
+     were all filed as pure chest work with the triceps taking 0.4, which is the wrong way
+     round for a movement whose whole point is the elbow. */
+  [/tricep[s]?.*(dip|push[- ]?up|press)|(dip|push[- ]?up).*tricep|close[- ]?grip push[- ]?up|diamond push[- ]?up/,
+                                                                            {triceps:1, chest:.5, delts_front:.3}],
+  /* A pike or handstand push-up is an overhead press performed upside down. Matching
+     "push-up" sent it to chest, and the app's own library files it under the overhead
+     press slot, so the two disagreed about the same movement. */
+  [/pike push[- ]?up|handstand push[- ]?up|wall walk/,                       {delts_front:1, delts_side:.4, triceps:.6, abs:.3}],
   [/bench|pec |pec$|\bfly\b|flye|chest press|\bdip|push[- ]?up|guillotine/, {chest:1, delts_front:.4, triceps:.4}],
   [/pulldown|pull[- ]?up|chin[- ]?up|pullover|lat prayer|straight[- ]?arm/,  {lats:1, biceps:.4, upper_back:.4, traps:.3}],
   // Rows are a mid-back movement first and a trap movement second; shrugs are the
   // reverse, so they get their own rule ahead of this one.
   [/shrug/,                                                                 {traps:1, forearms:.3}],
+  /* An upright row is a delt movement with "row" in the name, and the row rule below
+     matches \brow\b. Specific first, as everywhere in this list. */
+  [/upright row|high pull/,                                                 {delts_side:1, traps:.6, biceps:.3, delts_rear:.2}],
   [/\brow\b|row$/,                                                          {upper_back:1, lats:.7, traps:.6, delts_rear:.4, biceps:.4}],
-  [/lateral raise|side raise|upright row/,                                  {delts_side:1, traps:.3}],
+  [/lateral raise|side raise/,                                              {delts_side:1, traps:.3}],
+  /* M8 \u2014 A FRONT RAISE IS NOT A LATERAL RAISE. It was never in this list at all, so it
+     fell through to nothing or to the lateral rule depending on the wording. The front
+     delt is the prime mover and the side head only assists. */
+  [/front raise|frontal raise/,                                             {delts_front:1, delts_side:.3}],
   [/(shoulder|overhead|military|arnold).*(press)|press.*(overhead)/,        {delts_front:1, delts_side:.5, triceps:.5}],
+  /* H5 \u2014 FOREARM WORK BEFORE THE CURL RULE, and named rather than hinted at. /curl/
+     owned every wrist curl in the app; /grip/ was loose enough to file a neutral-GRIP
+     dumbbell press under forearms. Both are fixed by being specific. */
+  [/wrist curl|wrist extension|wrist roller|reverse curl|grip trainer|gripper|plate pinch|dead hang/,
+                                                                            {forearms:1}],
+  /* M8 \u2014 CARRIES. A loaded carry is grip, traps and trunk, not grip alone, and the
+     distance is the set. It sat on /farmer/ inside the forearm rule and lost everything
+     above the wrist. */
+  [/farmer|suitcase carry|loaded carry|\bcarry\b|yoke walk/,                 {forearms:1, traps:.7, abs:.5, quads:.3, lower_back:.3}],
+  /* A reverse Nordic is a knee EXTENSION held under a long lever \u2014 the opposite of the
+     movement it is named after. Above the leg-curl rule, which is above /curl/. */
+  [/reverse nordic|sissy/,                                                  {quads:1}],
+  /* H5 \u2014 LEG CURLS BEFORE ARM CURLS. /curl/ sat above this and swallowed them: a lying
+     leg curl, a Nordic curl and a stability-ball curl were all credited to the biceps,
+     which took the hamstrings out of every plan the tables did not already cover. */
+  [/(leg|lying|seated|standing|kneeling|nordic|stability ball|swiss ball|slider).*(curl)|nordic curl|rdl|romanian|good ?morning|stiff[- ]?leg/,
+                                                                            {hams:1, glutes:.6, lower_back:.4}],
   [/curl/,                                                                 {biceps:1, forearms:.4}],
   [/tricep|skull|pushdown|kickback|overhead extension|close[- ]?grip/,      {triceps:1}],
-  [/wrist|grip|farmer/,                                                    {forearms:1}],
-  [/squat|leg press|lunge|split squat|hack/,                               {quads:1, glutes:.7, adductors:.35, hams:.25, lower_back:.3}],
-  [/leg extension|sissy/,                                                  {quads:1}],
-  [/(leg|lying|seated|nordic).*(curl)|rdl|romanian|good ?morning|stiff[- ]?leg/, {hams:1, glutes:.6, lower_back:.4}],
-  [/hip thrust|glute bridge|kickback.*glute|abduction/,                    {glutes:1, hams:.4}],
+  /* M8 \u2014 SUMO AND WIDE STANCE. Taking the stance out shortens the knee's travel and
+     puts the load through the adductors and the glutes; read as a plain squat or a plain
+     deadlift, both of those went missing and the quads were over-credited. */
+  [/\bsumo\b|wide[- ]?stance|straddle|horse stance/,                         {glutes:1, adductors:.8, quads:.7, hams:.45, lower_back:.45}],
+  [/squat|leg press|lunge|split squat|hack|step[- ]?up/,                    {quads:1, glutes:.7, adductors:.35, hams:.25, lower_back:.3}],
+  [/leg extension/,                                                        {quads:1}],
+  [/hip thrust|glute bridge|kickback.*glute|glute.*kickback|abduction|frog pump/, {glutes:1, hams:.4}],
   [/adduction|adductor|copenhagen/,                                        {adductors:1, glutes:.3}],
   [/calf|calve|soleus/,                                                    {calves:1}],
-  [/deadlift|back extension|hyperextension|erector/,                       {lower_back:1, glutes:.7, hams:.7, traps:.4}],
+  /* A back extension is spinal and hip extension against a short lever. It was reading
+     off the deadlift rule below, which carries traps \u2014 an artifact of holding a bar,
+     and there is no bar here. */
+  [/back extension|hyperextension|roman chair|reverse hyper|erector/,      {lower_back:1, glutes:.6, hams:.6}],
+  [/deadlift|rack pull|pull[- ]?through/,                                  {lower_back:1, glutes:.7, hams:.7, traps:.4}],
   [/crunch|sit[- ]?up|leg raise|ab wheel|hollow|plank|\babs?\b/,           {abs:1, obliques:.3}],
   [/oblique|russian twist|side bend|woodchop/,                             {obliques:1, abs:.4}]
 ];
@@ -13518,6 +13697,9 @@ const EX_MUSCLE_LIB = {
   "single leg hip thrust":          {glutes:1, hams:.6, obliques:.25},
   "machine hip thrust":             {glutes:1, hams:.5, quads:.2},
   "glute bridge":                   {glutes:1, hams:.5},
+  /* H5 \u2014 the app's own library files this under the hip-thrust slot, so it is the glute
+     kickback, not the triceps one. Named, because no keyword can tell them apart. */
+  "cable kickback":                 {glutes:1, hams:.45},
   "frog pump":                      {glutes:1, adductors:.3},
   "cable glute kickback":           {glutes:1, hams:.35},
   "machine glute kickback":         {glutes:1, hams:.3},
@@ -14431,7 +14613,9 @@ function windowStats(from, to, opts){
         const reps = parseFloat(st.reps)||0;
         const w = setLoad(st, eAdd);
         const rpe = effRpe(st);
-        const e1 = w > 0 ? est1RM(w, reps) : reps;   // bodyweight → reps stand in for load
+        // L1: reps to failure, like everywhere else — the trend and the records agree
+        const rtf = repsToFailure(st);
+        const e1 = w > 0 ? est1RM(w, rtf) : rtf;   // bodyweight → reps stand in for load
         const tgt = restTargetFor(e, st);
         /* Drops, mini-sets and bursts are real work and belong in tonnage. They are NOT
            extra sets: one drop set is one hard set however many drops it has, which is
@@ -15326,7 +15510,7 @@ function setE1RM(st, add, bodyweight){
   if(bodyweight) return {v: reps + rir, bw: true};
   const w = setLoad(st, add);
   if(!(w > 0)) return null;
-  return {v: w * (1 + (reps + rir) / 30), bw: false};
+  return {v: est1RM(w, reps + rir), bw: false};
 }
 /* The best usable set of one entry, which is what an exposure is worth. */
 function entryE1RM(e, ctx){
@@ -41425,11 +41609,12 @@ function priorEntryFor(sess, exName, occ){
   return null;
 }
 // Best estimated 1RM across a set list. Bodyweight movements fall back to rep count,
-// which is the only thing that can move on them.
+// which is the only thing that can move on them. L1: reps to failure, as everywhere.
 function topE1RM(sets, add){
   return (sets||[]).reduce((b,st)=>{
     if(!isWorkingSet(st)) return b;
-    const v = est1RM(setLoad(st, add), parseFloat(st.reps)||0) || (parseFloat(st.reps)||0);
+    const rtf = repsToFailure(st);
+    const v = est1RM(setLoad(st, add), rtf) || rtf;
     return v > b ? v : b;
   }, 0);
 }
@@ -43478,6 +43663,8 @@ function openMaxSheet(name){
   m.querySelector("#mxCalc").onclick = ()=>{
     const w = parseFloat(m.querySelector("#mxSw").value);
     const r = parseFloat(m.querySelector("#mxSr").value);
+    /* A set you typed in by hand is taken as a set to failure — which is what the one
+       definition of an e1RM wants, and what somebody entering their best set means. */
     const e1 = est1RM(w, r);
     if(!(e1 > 0)){ toast("A weight and a rep count, and it'll do the rest", "warn"); return; }
     m.querySelector("#mxW").value = String(Math.round(e1 * 2) / 2);
@@ -48712,6 +48899,47 @@ function selfTestRun(){
       if(!(EX_LIBRARY[slot] || []).length) note(fail, "empty slot", slot);
     });
   }catch(e){ note(fail, "slot list", String((e && e.message) || e)); }
+  /* 6. H5 \u2014 THE MAP AND THE SLOT HAVE TO AGREE ABOUT WHAT THE MOVEMENT IS FOR.
+
+        This is the check that finds a mapping gap rather than a mapping error. A slot is
+        a job: `ham_iso` is the slot for hamstring isolation. If the movement sitting in
+        it resolves to biceps, then either the table has no row for it and a keyword
+        guessed \u2014 "Nordic Hamstring Curl" matched /curl/ \u2014 or the row is wrong. Either
+        way the plan says hamstrings and the volume says arms, and nothing else in the
+        app is in a position to notice.
+
+        SLOT_MAIN lists the muscles that can legitimately come out on top for each slot,
+        not one answer, because several slots are honestly ambiguous: a hinge can be
+        hamstring-led or lower-back-led depending on the variation, and both are right. */
+  try{
+    Object.keys(EX_LIBRARY).forEach(slot=>{
+      const allow = SLOT_MAIN[slot];
+      if(!allow){ note(warn, "slot unjudged", slot); return; }
+      (EX_LIBRARY[slot] || []).forEach(x=>{
+        const mm = musclesFor(x.name) || {};
+        let top = null, best = 0;
+        MKEYS.forEach(m=>{ const v = mm[m] || 0; if(v > best){ best = v; top = m; } });
+        if(!top) return;                          // invariant 1 already has this one
+        if(allow.indexOf(top) < 0)
+          note(fail, "slot vs map", x.name + " in " + slot + " reads as " + top);
+      });
+    });
+  }catch(e){ note(fail, "slot vs map", String((e && e.message) || e)); }
+  /* 7. C2 \u2014 THE FROZEN PREFERENCE TABLE STILL POINTS AT MOVEMENTS THAT ARE THERE.
+
+        EX_PREFERENCE is a snapshot of names taken before the catalogue merges, and the
+        merge can move a movement into a different slot. A preference entry that no longer
+        lives in its slot is skipped at pick time rather than returned wrongly, so this
+        costs nothing at runtime \u2014 but it means the curated first choice for that slot is
+        silently no longer available, which is worth being told about. */
+  try{
+    Object.keys(EX_PREFERENCE).forEach(slot=>{
+      (EX_PREFERENCE[slot] || []).forEach(name=>{
+        const here = (EX_LIBRARY[slot] || []).some(x=> swapSquash(x.name) === swapSquash(name));
+        if(!here) note(warn, "preference moved", name + " is no longer in " + slot);
+      });
+    });
+  }catch(e){ note(fail, "preference", String((e && e.message) || e)); }
   return {fail, warn, lib: seen.size, ok: fail.length === 0};
 }
 function selfTestHTML(r){
