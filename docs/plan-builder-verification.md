@@ -456,6 +456,119 @@ them. The cards below it are still the real plan; the card says so in as many wo
 a plan reading 3 × 5 while the set rows ask for 75/85/95% is the app contradicting itself
 with no way for the reader to tell which half is the bug.
 
+## Phase 7 — M4, M5, M6, M10, L2
+
+### M4 — the specialization was reading a field that does not exist
+
+`specBodyKg()` read `S.weights`, which nothing in this codebase has ever written. It
+therefore always returned null, and everything downstream did nothing: the protein check,
+the grams suggested in the box, and the weight change a finished priority block reports.
+There was no visible bug, which is why it survived — a feature that returns "no data"
+looks exactly like a feature with no data.
+
+| Was | Now |
+|---|---|
+| `S.weights[].kg` — a field that is never written | `bodyWeightNow()`, the body log the rest of the app keeps |
+| no unit handling | converted lb→kg once, at the only place that needs kilograms |
+| protein as a single figure, 1.6 g/kg | the range **1.6–2.2 g/kg**, with the grams at that bodyweight |
+| `specWeightChange()` also on `S.weights` | `bodyLogList()`, in the units the person logs in, and printed on the block report |
+
+The brief's acceptance case measures exactly: 180 lb logged with 120 g of protein reads
+**1.47 g/kg** and is flagged low, with "130 to 180 g at your bodyweight" as the range. A
+kilogram logger is not converted twice. With no weigh-in on file it returns null and the
+card says nothing rather than inventing a bodyweight.
+
+### M5 — the time-box, in the brief's order
+
+| Step | What it does | Why it is in this position |
+|---|---|---|
+| 1. supersets | pairs two movements that share no muscle, isolations first | paired work costs no rest of its own, so it is the only step that costs nothing at all |
+| 2. myo-reps | turns an unpairable isolation's last set into a myo-rep set | worth 1.75 straight sets (`setTypeValue`) at about half the time, so it buys back most of a set for a quarter of one |
+| 3. proportional cuts | takes one set off whatever has the most room above the floors of every muscle it trains, then re-measures | the proportion is in the selection: cuts land where the slack is, and nothing goes under MEV |
+| 4. drop a movement | last, and never the last direct movement for a muscle the plan is responsible for | a dropped exercise is the only step that removes a stimulus outright |
+
+Two new pieces of arithmetic make step 2 honest in both currencies the time-box trades in:
+`plannedSetValue()` (a prescribed myo-rep set counts at its own value, so `programWeeklySets`
+does not read it as one set) and `dayMinutes()` (the mini-sets and their breaths are charged
+inside the last set rather than after it).
+
+**Never zero direct work.** The headroom test was necessary and not sufficient: a muscle
+can sit above its floor on indirect credit alone — triceps off presses, biceps off rows —
+and still have nothing in the week that trains it. `DIRECT_SHARE` (0.5, the figure the tune
+pass already used) is now named once, and the last movement above it for a non-optional
+muscle is not available to the drop pass whatever the arithmetic says.
+
+**Measured:** across all 360 builder combinations the superset pass resolves the budget
+before myo-reps are ever needed, so step 2 does not fire in the grid. It is exercised by
+`phase7.mjs` §3 with a day of three chest isolations, where no pair is possible because
+every pair shares the chest — which is the case the step exists for.
+
+### M6 — three separate corrections to the grade
+
+**The comparison.** Progressive overload compared each lift against its single previous
+session, which made the score a function of how good that day happened to be: beating a bad
+Tuesday read as progress, and following a personal best with a strong second-best read as
+regression. It now compares against the **best of the last three exposures**
+(`priorExposures`, in date order across days). The most recent exposure is still kept for
+its context, because "you had been away" is a fact about the gap between then and now.
+
+**The bar, scaled by level** (`GRADE_BANDS`):
+
+| Level | "went up" | still "held" |
+|---|---|---|
+| Beginner | > +1.0% | ≥ −0.5% |
+| Intermediate | > +0.4% | ≥ −1.5% |
+| Advanced | > 0 | ≥ −3.0% |
+
+A beginner adds load almost every session, so matching their recent best is the floor
+rather than an achievement; an advanced lifter can train perfectly for a month and hold.
+The self-test checks the ordering rather than the three numbers, because the ordering is
+the claim.
+
+**What the score is allowed to mark you down for.** Log quality scored the session note
+(1.0) and the daily check-in (1.5), neither of which is a property of the workout — one is
+a diary entry and the other is filled in at breakfast. A session logged perfectly could not
+reach full marks without also writing prose about it. Both are still asked for, and still
+feed what the app can say later; they are no longer graded. The remaining three weights are
+scaled to keep the section worth 10: RPE 4.5, rest 3.5, feel 2.0.
+
+**Efficiency against the person's own budget.** The fixed 40–80 minute window marked down
+somebody who told the builder they have 30 minutes and finished in 29. `sessionBudgetMinutes()`
+reads the figure the builder already stores (`S.meso.minutes`, then the built plan's answers)
+and returns null when nobody has said, in which case the published window still stands in.
+Coming in **under** budget is not penalised at all: a session cut short shows up as missed
+sets in Completion, and docking it twice would mean a 30-minute plan can never score well.
+
+### M10 — the data, and the one save that cannot fail quietly
+
+`navigator.storage.persist()` is requested once on the way in, unawaited, and the answer is
+recorded so Settings can say which storage bucket the device is in rather than claiming a
+grant that is not ours to make.
+
+`save()` now returns whether the write landed — `persist()` always knew and `save()` threw
+it away, so every caller in the app believed its save had worked. For nearly all of them
+that is fine, because the next change tries again. For `finishWorkout()` it is not: the
+session has just moved out of `S.active` into `S.sessions`, and if that did not reach disk
+it exists only in this tab. A failure there now stops the whole post-session chain — no
+celebration, no grade card — behind the one sheet in the app that cannot be dismissed
+(`MODAL_STICKY`, honoured in `hideModal()`), which hands over the whole backup. A
+celebration over a lost session is the worst thing the app could put on a screen.
+
+### L2 — a seven-day week is seven days long
+
+`deloadWindowMs()` returned `(DELOAD_DAYS + 1) * DAY_MS`. The extra day was there to stop a
+deload lapsing mid-session on the seventh day — a real problem solved in the wrong place,
+since the window governs everything the app believes about the week: `deloadActive()` was
+true on day eight, `deloadCovers()` stamped a session the week did not contain, and the
+countdown (which counts to `DELOAD_DAYS`) disagreed with the window by a day. "Day 8 of 7"
+came from here.
+
+The window is now the week, and the day it ends is protected properly: the boundary is taken
+from the **start of the day the deload began** (`deloadEndsAt`), so a deload begun on Tuesday
+evening runs to the end of the following Monday and no session is cut off part-way through.
+The four screens that each did this arithmetic inline against a hard-coded 7 now call
+`deloadDayIn()` and `deloadDaysLeft()`.
+
 ## Audit IDs — what changed and what covers it
 
 | ID | Change | Covered by |
@@ -483,14 +596,37 @@ with no way for the reader to tell which half is the bug.
 | L5 | No muscle above 1.6× chest unless chosen — enforced while tuning, not only checked | `phase5.mjs` §7 |
 | M3 | Deload sets halved, the clock counted in training weeks, a layoff ends the block, beginners on signals only, a meso or a document's own deload replaces the clock | `phase6.mjs` §7–10, `#selftest` 10 |
 | M9 | `prescriptionFor(entry, week)`, `weeks[]`, `blockWeeks`, `model`, `S.programWeek`, 5/3/1 waves off a stored training max | `phase6.mjs` §1–6, §11–16, `#selftest` 9 |
+| M4 | The body log read for real, lb→kg once, protein as a 1.6–2.2 g/kg range, the block's weight change printed | `phase7.mjs` §1, §2, `#selftest` 11 |
+| M5 | Time-box order: supersets → myo-reps → proportional cuts above MEV → drop last; `DIRECT_SHARE` protects the last direct movement | `phase7.mjs` §3, §4, `#selftest` 11 |
+| M6 | Best of the last 3 exposures, bands scaled by level, note and check-in out of the score, efficiency against the stated budget | `phase7.mjs` §5–8, `#selftest` 11 |
+| M10 | `navigator.storage.persist()`, `save()` returns its result, an undismissable export sheet when the finish save fails | `phase7.mjs` §10 |
+| L2 | `deloadWindowMs()` equals `DELOAD_DAYS`, measured from the start of the day it began | `phase7.mjs` §9, `delend.mjs` §2, `#selftest` 11 |
 
-M4, M6, M10 and L2 belong to phase 7 and are not done yet.
+Every audit ID in the brief is now implemented and covered.
 
 ## Open questions
 
 Things where this codebase and the science reference disagree, or where the reference asks
 for something the library cannot currently supply. Recorded rather than guessed at, as the
 reference requires.
+
+**The myo-rep step in the time-box never fires in any measured combination.** M5 puts
+myo-reps second, after supersets, and across all 360 builder combinations the superset pass
+resolves the budget before the myo step is reached — because anything left unpaired at
+that point is a compound, and a myo-rep squat is a safety problem rather than a time
+saving. The step is correct and it is tested directly, but in practice it is reached only
+on a day whose remaining isolations all share a muscle. *Proposed resolution:* keep the
+brief's order — supersets genuinely are the cheaper saving — and leave the step in place
+for the days that need it rather than promoting it above supersets to make it fire.
+
+**"Proportional cuts above MEV" is implemented as largest-headroom-first, re-measured.**
+The brief asks for proportional cuts; the pass takes one set at a time off whichever
+movement has the most room above the floors of every muscle it trains, then re-measures, so
+cuts distribute across the plan in proportion to where the slack is (the largest-remainder
+shape). A literal single-pass proportional scaling would hit the same floors in a different
+order and re-open the 360-combination measurement for no stated gain. *Proposed resolution:*
+keep the iterative form and treat the brief's wording as describing the outcome, not the
+algorithm. Revisit if a combination is ever found where the two differ in result.
 
 **A per-week table shorter than the block repeats.** Reference 2.12.6 says to execute a
 document's per-week numbers exactly and never to invent waves it does not contain, and it
@@ -599,6 +735,6 @@ they are recomputed whenever a session is swept.
 | 4 | Safety — H7, M1, M2 | done — `phase4.mjs` |
 | 5 | Builder, quality check, H9/H10/L5/M11, remove "Change the schedule" | done — `phase5.mjs` |
 | 6 | Periodization (M9) + M3 | done — `phase6.mjs`, invariants 9 and 10 |
-| 7 | M4, M5, M6, M10, L2 | not started |
+| 7 | M4, M5, M6, M10, L2 | done — `phase7.mjs`, invariant 11 |
 | 8 | Streaks + coach view | not started |
 | 9 | Re-measurement, then bump `APP_VERSION` and `sw.js` `VERSION` | not started |

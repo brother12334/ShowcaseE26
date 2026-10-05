@@ -6180,7 +6180,7 @@ body.build-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "41.0";
+const APP_VERSION = "42.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -9915,6 +9915,12 @@ const BUILD_ROUNDS = 6;
    (FREQ_MIN_DAY_SETS, what counts as having trained a muscle on a day, is already
    declared with the window statistics that use it.) */
 const MAX_SETS_PER_EXERCISE_GEN = 5;
+/* What counts as training a muscle DIRECTLY: half a set of credit or more. The same
+   figure the tune pass uses when it decides a muscle has nothing training it (see the
+   "nobody in the plan trains it" rule), and the same one swapAllowed() and the
+   specialization's exercise picker use. Named here because the time-box now needs it
+   too, and three literals in three passes is three chances to disagree. */
+const DIRECT_SHARE = 0.5;
 const MAX_WORKING_SETS_PER_SESSION = 24;
 /* THE MUSCLES A PLAN IS JUDGED ON FOR FREQUENCY AND COVERAGE. The reference's starting
    target table gives direct weekly work to these and marks the rest \u2014 traps, forearms,
@@ -10257,7 +10263,38 @@ function buildFit(program, dayIds, targets, a){
         }
       }
       if(paired) continue;
-      /* b) TAKE A SET off whatever is furthest above its floor. */
+      /* b) MYO-REPS, before any volume comes off.
+
+            M5. A myo-rep set is worth 1.75 straight sets and costs about half of one, so
+            turning the last two sets of an isolation into one myo-rep set buys back most
+            of a set's time for a quarter of a set's volume. That is a better trade than
+            any cut below, which is why it is tried first — and it is a REAL technique
+            with the app's own value behind it (setTypeValue), not an accounting trick.
+
+            Isolations only, and only where there are enough sets to give one up. A
+            myo-rep squat is not a time saving, it is a safety problem: the mini-sets are
+            taken within a breath of failure and the technique is the first thing to go. */
+      const myo = list.map((e, i)=> ({e, i}))
+        .filter(x=> !isCompound(x.e.name) && !x.e.superset && !plannedMyo(x.e)
+                 && (parseInt(x.e.sets, 10) || 0) >= buildMinSets(x.e) + 1)
+        .sort((p2, q2)=> (parseInt(q2.e.sets,10)||0) - (parseInt(p2.e.sets,10)||0))[0];
+      if(myo){
+        myo.e.sets = (parseInt(myo.e.sets, 10) || 0) - 1;
+        if(Array.isArray(myo.e.rpes) && myo.e.rpes.length > 1) myo.e.rpes.pop();
+        myo.e.tech = (Array.isArray(myo.e.tech) ? myo.e.tech.slice() : []).concat([
+          {k: "myoreps", detail: MYO_MINIS + " mini-sets of 3-5, " + MYO_PAUSE + " s between"}]);
+        notes.push(myo.e.name + " runs its last set as myo-reps to save time \u2014 "
+          + MYO_MINIS + " mini-sets after the hard one, which is worth about the set it replaces.");
+        continue;
+      }
+      /* c) TAKE A SET off whatever is furthest above its floor.
+
+            M5 calls this the proportional pass, and the proportion is in the selection:
+            the set always comes off the movement with the most room above the floors of
+            every muscle it trains, measured in sets OF THOSE MUSCLES, and the loop
+            re-measures after each cut. So the cuts spread across the plan in proportion
+            to where the slack actually is instead of hollowing out one movement — and
+            nothing is ever cut to a point where a muscle lands under its MEV. */
       const weekly = programWeeklySets(program, dayIds);
       const room = e=>{
         let worst = Infinity;
@@ -10280,9 +10317,24 @@ function buildFit(program, dayIds, targets, a){
       if(cut){ cut.e.sets = (parseInt(cut.e.sets,10) || 0) - 1;
                if(Array.isArray(cut.e.rpes) && cut.e.rpes.length > 1) cut.e.rpes.pop();
                continue; }
-      /* c) DROP A MOVEMENT, last, and only one whose muscles survive without it. */
+      /* d) DROP A MOVEMENT, last, and only one whose muscles survive without it.
+
+            M5 — AND NEVER THE LAST THING THAT TRAINS A MUSCLE DIRECTLY. The headroom
+            test below is necessary and not sufficient: a muscle can sit comfortably above
+            its floor on indirect credit alone — triceps off presses, biceps off rows —
+            and still be left with nothing in the week that actually trains it. That is a
+            plan with a hole in it the numbers do not show, so the last direct movement for
+            a muscle the plan is responsible for is not available to this pass whatever the
+            arithmetic says. */
+      const directLeft = {};
+      GKEYS.forEach(g=>{ directLeft[g] = 0; });
+      dayIds.forEach(w2=> (program[w2] || []).forEach(e2=>{
+        GKEYS.forEach(g=>{ if(muscleFrac(e2.name, g) >= DIRECT_SHARE) directLeft[g]++; });
+      }));
+      const lastDirect = e=> GKEYS.some(g=> !targets[g].optional
+        && muscleFrac(e.name, g) >= DIRECT_SHARE && directLeft[g] <= 1);
       const drop = list.map((e, i)=> ({e, i, r: room(e)}))
-        .filter(x=> x.r > (parseInt(x.e.sets,10) || 0))
+        .filter(x=> x.r > plannedSetValue(x.e) && !lastDirect(x.e))
         .sort((p, q)=> q.r - p.r)[0];
       /* NOTHING LEFT TO GIVE. Everything that can be paired is paired, every set above a
          floor has gone, and dropping a movement would put a muscle under its minimum. The
@@ -10798,6 +10850,33 @@ function pushPullOf(name){
 }
 /* Minutes a day's prescription asks for, by the same arithmetic projectedDuration() uses
    when there is no history to read: working time plus the rest the plan itself asks for. */
+/* M5 · A PRESCRIBED MYO-REP SET, IN BOTH CURRENCIES THE TIME-BOX TRADES IN.
+
+   A myo-rep set is one hard activation set followed by short mini-sets with a few breaths
+   between them. It is worth more than a straight set and costs far less than two, which
+   is exactly why it belongs in a time-box — and the app already has both halves of that
+   arithmetic for sets somebody LOGS: setTypeValue() values a myo-rep set at up to 1.75
+   sets, and restTargetFor() knows the pause between mini-sets. What it had no notion of
+   was a myo-rep set the PLAN prescribes, which is what the builder needs to be able to
+   choose one, so these two put the planned form on the same footing.
+
+   MYO_MINIS is the number the prescription asks for, and it is the number that earns the
+   1.75: the cap is reached at three, and asking for more would be inventing credit the
+   effective-set model does not give. */
+const MYO_MINIS = 3;
+const MYO_MINI_SECONDS = 10;       // about how long one mini-set takes
+function myoSetValue(){ return Math.min(MYO_MAX, 1 + MINI_SET_VALUE * MYO_MINIS); }
+function plannedMyo(e){
+  return !!(e && Array.isArray(e.tech) && e.tech.some(t=> t && t.k === "myoreps"));
+}
+/* What a programme entry is worth in sets. Straight sets count themselves; an entry
+   whose LAST set is prescribed as myo-reps counts that set at its own value, which is
+   how TECHNIQUES.myoreps.applies = "last" already behaves everywhere else. */
+function plannedSetValue(e){
+  const n = parseInt(e && e.sets, 10) || 0;
+  if(!n) return 0;
+  return plannedMyo(e) ? (n - 1) + myoSetValue() : n;
+}
 function dayMinutes(list){
   let sec = 0;
   (list || []).forEach(e=>{
@@ -10805,16 +10884,19 @@ function dayMinutes(list){
     const rest = Array.isArray(e.rest) ? e.rest[0]
       : (restTargetFor(e, {reps: String(repRange(e.reps) ? repRange(e.reps)[1] : 10)}) || {ideal:[120]}).ideal[0];
     sec += sets * (40 + (e.superset ? 0 : rest));
+    // the mini-sets and their breaths, which happen inside the last set rather than after it
+    if(plannedMyo(e) && sets > 0) sec += MYO_MINIS * (MYO_PAUSE + MYO_MINI_SECONDS);
   });
   return Math.round(sec / 60);
 }
-/* Weekly sets per muscle for a whole programme, fractional credit included. */
+/* Weekly sets per muscle for a whole programme, fractional credit included — fractional
+   in two senses now: a muscle's share of each movement, and what each set of it is worth. */
 function programWeeklySets(program, dayIds){
   const out = {};
   GKEYS.forEach(g=> out[g] = 0);
   (dayIds || Object.keys(program || {})).forEach(wid=>{
     (program[wid] || []).forEach(e=>{
-      const n = parseInt(e.sets, 10) || 0;
+      const n = plannedSetValue(e);
       if(!n) return;
       GKEYS.forEach(g=>{ out[g] += muscleFrac(e.name, g) * n; });
     });
@@ -12152,6 +12234,14 @@ function persist(){
   }
   return true;
 }
+/* M10 — AND THE ANSWER IS HANDED BACK, rather than swallowed.
+
+   persist() has always returned whether the write landed and save() has always thrown
+   that away, so every caller in the app believed its save had worked. For nearly all of
+   them that is fine: the next tick of a checkbox will try again. For ONE of them it is
+   not — the moment a workout is finished is the moment the data has nowhere else to
+   live, and a silent failure there is a session somebody performed and the app has lost.
+   See finishWorkout(). */
 function save(){
   // marks a real user-driven change: advance savedAt so this device wins the merge
   S.savedAt = Date.now();
@@ -12159,11 +12249,75 @@ function save(){
      the next thing you save. Cheap to drop and rebuilt on the next search rather than
      here — a save happens on every tick of a checkbox. */
   invalidateExNames();
-  persist();
+  return persist();
 }
 function saveQuiet(){
   // persist to disk WITHOUT claiming a newer change (migrations, boot housekeeping)
-  persist();
+  return persist();
+}
+/* M10 · ASKING THE BROWSER NOT TO THROW YOUR TRAINING AWAY.
+
+   localStorage in the "best effort" bucket is evictable: a browser short of disk may
+   clear it without asking, and on iOS a web app that has not been opened for some weeks
+   can lose it outright. navigator.storage.persist() moves the origin to the "persistent"
+   bucket, where data is only removed when the person removes it. Installed PWAs are
+   usually granted it without a prompt; a tab may be refused, which is not an error and
+   is not worth a dialogue about — the answer is recorded so Settings can say which
+   bucket this device is in, and the export is the backstop either way.
+
+   Deliberately not awaited by anything: a boot must not wait on a permission check. */
+function requestPersistentStorage(){
+  try{
+    const st = navigator.storage;
+    if(!st || typeof st.persist !== "function") return;
+    const seen = v=>{ S.storagePersisted = !!v; S.storageAsked = Date.now(); saveQuiet(); };
+    if(typeof st.persisted === "function"){
+      st.persisted().then(already=>{
+        if(already){ seen(true); return; }
+        st.persist().then(seen).catch(()=>{});
+      }).catch(()=>{});
+    } else {
+      st.persist().then(seen).catch(()=>{});
+    }
+  }catch(e){ /* an older browser without the API: the export is the backstop */ }
+}
+/* THE SAVE THAT DID NOT LAND, AT THE ONE MOMENT IT CANNOT BE SHRUGGED OFF.
+
+   Storage being full is the usual cause, and the usual cause of THAT is a log that has
+   grown for two years, which means the person it happens to is the person with the most
+   to lose. A toast is not enough here: it disappears, the app carries on looking normal,
+   and the session is gone at the next reload. So this blocks — it is the one modal in
+   the app with no way past it other than writing the file — and it hands over the whole
+   backup, because an export is the only action that can actually save the data from
+   inside a tab that cannot write to disk.
+
+   The session is still in memory and still on the screen behind it. Exporting takes it
+   with everything else. */
+function saveFailedModal(what){
+  const body = `<div class="sub" style="margin:0 0 12px">${esc(what || "Your last change")}
+      could not be written to this device's storage. It is almost always because storage is
+      full — the data is still here, in this tab, and it will be lost if you close it.</div>
+    <div class="sub" style="margin:0 0 12px"><b>Export it now.</b> The file holds your whole
+      log, your programme and your settings, and importing it anywhere brings all of it
+      back. Then clear some space and import the file.</div>`;
+  showModal(`<h3>Save your data to a file</h3>${body}
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn" id="sfExport" style="flex:1">Export everything</button></div>
+    <div class="btn-row">
+      <button class="btn ghost small" id="sfRetry" style="flex:1">Try saving again</button></div>`);
+  MODAL_STICKY = true;             // and it stays until the save works
+  const m = $("#modal");
+  if(!m) return;
+  const ex = m.querySelector("#sfExport");
+  if(ex) ex.onclick = ()=>{
+    try{ exportJSON(); }catch(e){ toast("The export failed too — screenshot this session", "warn"); }
+  };
+  const rt = m.querySelector("#sfRetry");
+  if(rt) rt.onclick = ()=>{
+    persist._warned = false;
+    if(save()){ MODAL_STICKY = false; hideModal(); toast("Saved", "good"); }
+    else toast("Still no room. Export the file first.", "warn");
+  };
 }
 
 /* ================= HELPERS ================= */
@@ -18170,6 +18324,9 @@ function runOneTimeSeeds(){
   /* Not a one-time seed, but it belongs on the same heartbeat: a deload that has run its
      week is closed the next time the app is opened. */
   try{ if(sweepDeload()) queueSync(); }catch(e){}
+  /* M10 — and ask the browser to keep the data, once, on the way in. Asynchronous and
+     unawaited: nothing here waits on a permission check, and a refusal is not an error. */
+  try{ if(!S.storagePersisted) requestPersistentStorage(); }catch(e){}
   if(SEEDS_RUN) return;
   SEEDS_RUN = true;
   let dirty = false;
@@ -18332,7 +18489,13 @@ const SPEC_PAIR_BLOCK_COST   = 6;
 const SPEC_PAIR_KEEP_ALL_MAX = 4;      // a pair past this cannot be run on KEEP_ALL
 const SPEC_RIR_CONCERN       = 3;      // average reps in reserve above this: effort first
 const SPEC_RECOVERY_CONCERN  = -10;    // the 14-day modifier at or below this
-const SPEC_PROTEIN_G_PER_KG  = 1.6;    // Morton
+/* M4 — PROTEIN AS A RANGE, NOT A NUMBER. 1.6 g/kg is where most of the benefit is
+   captured; the useful range runs to about 2.2, and the top of it is the honest answer
+   for somebody in a deficit or carrying a lot of muscle already. A single figure read as
+   a target, which made everything above it look like waste and everything below it look
+   like failure — and 1.6 is a floor, not a target. */
+const SPEC_PROTEIN_G_PER_KG  = 1.6;    // Morton: most of the benefit by here
+const SPEC_PROTEIN_G_PER_KG_HI = 2.2;  // the top of the range worth aiming at
 const SPEC_NOTE_ABOVE        = 30;     // Pelland: say something past here
 /* 6.1 — the more the rest of the body is still doing, the earlier the block has to
    notice it is costing something. [other muscles falling, recovery modifier, share of
@@ -18539,8 +18702,10 @@ function specPreCheck(list, A){
   }
   const pro = specProteinCheck();
   if(pro && pro.low){
-    out.push({k:"protein", say:"About " + r1(pro.gPerKg) + " g/kg of protein a day. Around "
-      + SPEC_PROTEIN_G_PER_KG + " g/kg captures most of the benefit for growth, so there is room there."});
+    out.push({k:"protein", say:"About " + r1(pro.gPerKg) + " g/kg of protein a day, at "
+      + Math.round(pro.g) + " g. The range worth aiming at is "
+      + SPEC_PROTEIN_G_PER_KG + "\u2013" + SPEC_PROTEIN_G_PER_KG_HI + " g/kg \u2014 "
+      + pro.lo + " to " + pro.hi + " g at your bodyweight \u2014 so there is room there."});
   }
   const rec = recoveryModifier();
   if(!rec.thin && rec.mod <= SPEC_RECOVERY_CONCERN){
@@ -18616,12 +18781,33 @@ function specProteinCheck(){
   const kg = specBodyKg();
   if(!(g > 0) || !(kg > 0)) return null;
   const per = g / kg;
-  return {gPerKg: per, low: per < SPEC_PROTEIN_G_PER_KG};
+  /* The range in grams at this bodyweight, so the finding can say what to eat rather than
+     only what the ratio is. Rounded to fives: protein is not measured to the gram and a
+     target of 131 g pretends otherwise. */
+  const lo = Math.round(kg * SPEC_PROTEIN_G_PER_KG / 5) * 5;
+  const hi = Math.round(kg * SPEC_PROTEIN_G_PER_KG_HI / 5) * 5;
+  return {gPerKg: per, g, kg, lo, hi,
+          low: per < SPEC_PROTEIN_G_PER_KG,
+          inRange: per >= SPEC_PROTEIN_G_PER_KG && per <= SPEC_PROTEIN_G_PER_KG_HI,
+          over: per > SPEC_PROTEIN_G_PER_KG_HI};
 }
+/* M4 — THE BODYWEIGHT, FROM THE LOG THE REST OF THE APP KEEPS.
+
+   This read `S.weights`, a field nothing in this codebase has ever written. So it always
+   returned null, and everything downstream of it — the protein check, the grams
+   suggested in the box, the weight change a finished block reports — silently did
+   nothing at all. There was no bug to see, which is why it survived: a feature that
+   returns "no data" looks exactly like a feature with no data.
+
+   The real log is bodyLog()/bodyLogList(), and it stores weights in whatever unit the
+   person's boxes are in. The protein figures are per KILOGRAM, so an app that read 180
+   straight out of a pound log would work out 0.67 g/kg for somebody eating 120 g and
+   call it a deficiency. Converted here, once, at the only place that needs kilograms. */
+function LB_PER_KG(){ return 2.20462; }
 function specBodyKg(){
-  const w = (S.weights || []);
-  const last = w.length ? w[w.length - 1] : null;
-  return last && last.kg > 0 ? last.kg : null;
+  const w = (typeof bodyWeightNow === "function") ? bodyWeightNow() : null;
+  if(!(w > 0)) return null;
+  return unitWord() === "kg" ? w : w / LB_PER_KG();
 }
 
 /* ---------- BASELINE AND STARTING VOLUME ---------- */
@@ -19532,11 +19718,16 @@ function specCheckStepHTML(){
         `<button type="button" data-specgoal="${k}" class="${goal===k?"on":""}">${t}</button>`).join("")}</div>
       <label class="field spec-field"><span>Protein a day, grams</span>
         <input id="specProtein" type="number" inputmode="numeric" min="0" max="500"
-          placeholder="${kg ? "about " + Math.round(kg * SPEC_PROTEIN_G_PER_KG) : "optional"}" value="${esc(pro)}"></label>
+          placeholder="${kg ? (Math.round(kg * SPEC_PROTEIN_G_PER_KG / 5) * 5) + "-"
+            + (Math.round(kg * SPEC_PROTEIN_G_PER_KG_HI / 5) * 5) : "optional"}" value="${esc(pro)}"></label>
       <div class="spec-note">${kg
-        ? "Around " + SPEC_PROTEIN_G_PER_KG + " g/kg captures most of the benefit — about "
-          + Math.round(kg * SPEC_PROTEIN_G_PER_KG) + " g at your bodyweight."
-        : "Around " + SPEC_PROTEIN_G_PER_KG + " g per kg of bodyweight captures most of the benefit."}</div>
+        ? SPEC_PROTEIN_G_PER_KG + "–" + SPEC_PROTEIN_G_PER_KG_HI
+          + " g/kg is the range worth aiming at — about " + (Math.round(kg * SPEC_PROTEIN_G_PER_KG / 5) * 5)
+          + " to " + (Math.round(kg * SPEC_PROTEIN_G_PER_KG_HI / 5) * 5) + " g at your bodyweight. "
+          + "The lower end captures most of the benefit; the upper end is worth it in a deficit."
+        : SPEC_PROTEIN_G_PER_KG + "–" + SPEC_PROTEIN_G_PER_KG_HI
+          + " g per kg of bodyweight is the range worth aiming at. Log a weigh-in and this "
+          + "will say it in grams."}</div>
     </div>`
     + pre.map(x=> `<div class="spec-pre"><b>${esc(specPreTitle(x.k))}</b><span>${esc(x.say)}</span></div>`).join("")
     + specFootHTML("Next", false, true);
@@ -19767,8 +19958,9 @@ function specWhyPageHTML(){
         recovery. That is <i>Focus</i>. But the returns are not zero, which is why <i>Balanced</i> and
         <i>Keep all</i> exist: if your recovery can carry it, keeping the rest of your training is worth
         something too.</p>
-      <p><b>What helps it along.</b> Around 1.6 g/kg of protein a day captures most of the benefit, and
-        growing is harder in a calorie deficit (Morton 2018).</p>
+      <p><b>What helps it along.</b> Protein of 1.6&ndash;2.2 g/kg a day: most of the benefit is
+        captured by the lower end, and the upper end is where to sit if you are in a deficit (Morton
+        2018). Growing is harder in a deficit either way.</p>
       <p>Individual responses vary a great deal — which is exactly why this reads your own cycles rather
         than following a schedule.</p>
     </div>`
@@ -20013,6 +20205,18 @@ function specDoneCardHTML(last){
       </div>`;
     }).join("")}
     ${sum.advice ? `<div class="spec-note">${esc(sum.advice)}</div>` : ""}
+    ${/* M4 — WHAT THE SCALE DID OVER THE BLOCK, which is the context every line above
+         needs. The summary has carried this figure all along and nothing ever printed it,
+         and it was reading a field that did not exist in any case. A lift that went up 4%
+         over a block in which you gained six pounds is a different finding from the same
+         4% at the same weight, and a priority block run through a deficit explains most
+         of what a disappointing one looks like. Said, not interpreted. */
+      sum.bodyweight != null && Math.abs(sum.bodyweight) >= 0.5
+        ? `<div class="spec-note">You were ${esc(fmtLoad(Math.abs(sum.bodyweight)))} ${
+            sum.bodyweight > 0 ? "heavier" : "lighter"} at the end of the block than at the
+            start. Worth reading the lines above next to that — the same lift at a
+            different bodyweight is not the same result.</div>`
+        : ""}
     <div class="spec-note">These are signals, not a measurement of muscle growth.</div>
   </div>`;
 }
@@ -20257,11 +20461,16 @@ function specE1rmChange(m, from, to){
   const a = inside[0].v, z = inside[inside.length-1].v;
   return a > 0 ? Math.round((z - a) / a * 1000) / 10 : null;
 }
+/* M4 — and the same correction for what the block's own weigh-ins did. Reported in the
+   units the person logs in, because this one is a change rather than a figure fed into a
+   per-kilogram formula, and "+1.4 kg" to somebody whose scale reads pounds is a number
+   they have to convert back before it means anything. bodyLogList() is newest-first. */
 function specWeightChange(b){
-  const w = (S.weights || []).filter(x=> x && x.kg > 0);
-  const inside = w.filter(x=> new Date(x.d).getTime() >= b.startedAt);
+  const w = (typeof bodyLogList === "function") ? bodyLogList() : [];
+  const inside = w.filter(x=> x && x.w > 0 && Date.parse(x.d + "T12:00:00") >= b.startedAt)
+                  .slice().reverse();
   if(inside.length < 2) return null;
-  return Math.round((inside[inside.length-1].kg - inside[0].kg) * 10) / 10;
+  return Math.round((inside[inside.length-1].w - inside[0].w) * 10) / 10;
 }
 const SPEC_TAPE = {quads:"mid-thigh", chest:"chest", biceps:"upper arm", calves:"calf",
                    glutes:"hips", hams:"mid-thigh", lats:"chest", upper_back:"chest"};
@@ -29357,8 +29566,7 @@ function lastGradedFor(wid){
    and every button they owned keeps its id so the handlers that bind them are untouched. */
 function deloadNote(){
   if(deloadActive()){
-    const d = S.deload;
-    const daysIn = Math.min(DELOAD_DAYS, Math.floor((Date.now() - d.startedAt) / DAY_MS) + 1);
+    const daysIn = deloadDayIn();
     return {k:"deload", act:true, label:"Deload week, day " + daysIn + " of " + DELOAD_DAYS,
       line:"Every exercise cut to about half its sets, capped at RPE " + DELOAD_RPE_CAP + ".",
       body:`<div class="nt-p">Loads stay exactly where they are. Keeping the weight is what preserves
@@ -32666,7 +32874,7 @@ function viewBody(){
      the answer. Saying so once at the top is what stops somebody reading the list as a
      verdict on a week they were told to take easy. */
   if(deloadActive()){
-    const dleft = Math.max(0, 7 - (Math.floor((Date.now() - S.deload.startedAt) / DAY_MS) + 1));
+    const dleft = deloadDaysLeft();
     h += `<div class="nb-deload nb-in" style="--d:300ms">
       <span class="nb-deload-k">Deload week</span>
       <span>Everything below is judged against your <b>programme</b> rather than this week's
@@ -33613,7 +33821,7 @@ function fxPageChange(A, m, M, w, FIX, plan){
     h += `<div class="fx-why">${esc(spreadWhy(plan, m, M))}</div>`;
   }
   const held = deloadHoldsVolume();
-  const left = held ? Math.max(0, 7 - (Math.floor((Date.now() - S.deload.startedAt)/DAY_MS) + 1)) : 0;
+  const left = held ? deloadDaysLeft() : 0;
   if(held){
     h += `<div class="fx-held"><span class="fx-held-k">Deload week</span>
       <span>Adding volume now is the one thing this week is for avoiding. Element 26 can hold
@@ -34034,7 +34242,7 @@ function openOwnFix(idx){
        will happen and when, because "Apply it" that quietly does something else later is
        worse than either doing it or refusing. */
     const held = deloadHoldsVolume();
-    const left = held ? Math.max(0, 7 - (Math.floor((Date.now() - S.deload.startedAt)/DAY_MS) + 1)) : 0;
+    const left = held ? deloadDaysLeft() : 0;
     h += held
       ? `<div class="fx-held"><span class="fx-held-k">Deload week</span>
           <span>Adding volume now is the one thing this week is for avoiding. Element 26 can
@@ -39287,7 +39495,19 @@ function settingsDataHTML(){
       <button class="btn ghost small" id="exportBtn">Export my data</button>
       <button class="btn ghost small" id="importBtn">Import a file</button>
     </div>
-    <input type="file" id="importFile" accept=".json,application/json" style="display:none">`)
+    <input type="file" id="importFile" accept=".json,application/json" style="display:none">`
+    + /* M10 — WHICH STORAGE BUCKET THIS DEVICE IS IN, because it changes how much the
+         export above matters. Browsers may clear "best effort" storage when the disk runs
+         short, and an installed web app that has not been opened for some weeks can lose
+         it on iOS. Element 26 asks for the persistent bucket on the way in; the answer is
+         not ours to make, so it is reported rather than claimed. */
+      (S.storageAsked ? `<div class="set-help" style="margin-top:9px">${S.storagePersisted
+        ? "This device has granted Element 26 <b>persistent storage</b>: your log is only "
+          + "removed if you remove it."
+        : "This browser has not granted persistent storage, so it may clear this app's data "
+          + "if the device runs short of space. Installing Element 26 to your home screen "
+          + "usually earns it. Either way, an exported file is the copy nobody can clear."
+      }</div>` : ""))
   + `<div class="set-block set-danger">
       <div class="set-name danger">Erase my training data</div>
       <div class="set-help">This deletes your plan and every workout you have logged on this device. Your
@@ -42889,7 +43109,20 @@ function finishWorkout(){
   sessObj.quality = scoreWorkout(sessObj);
   const cycleFinished = recomputeCycle(true);
   S.override = null;
-  save(); render();
+  /* M10 — THE ONE SAVE IN THE APP THAT CANNOT BE ALLOWED TO FAIL QUIETLY.
+     Everywhere else a failed write is recoverable, because the next change will try
+     again. Here the session has just moved out of S.active and into S.sessions, and if
+     that did not reach disk it exists only in this tab: close it and an hour of training
+     is gone. So the write is checked, and a failure stops the whole post-session chain
+     — no celebration, no grade card — behind a sheet that cannot be dismissed until
+     the data is out, because a celebration over a lost session is the worst thing this
+     app could put on a screen. */
+  const wrote = save();
+  render();
+  if(!wrote){
+    try{ saveFailedModal("The workout you just finished"); }catch(e){}
+    return;
+  }
   /* The rotation just moved, so the reminder that was queued is now about a session you
      have already done. Recomputing replaces it, so this needs no cancel first. */
   pushSyncSchedule();
@@ -44679,6 +44912,69 @@ function priorEntryFor(sess, exName, occ){
   }
   return null;
 }
+/* M6 · THE SESSION LENGTH SOMEBODY ACTUALLY SIGNED UP FOR.
+
+   The builder asks for it and writes it into the block; nothing else in the app has ever
+   read it back. Null when nobody has said, which is a real answer and the grade treats
+   it as one rather than inventing a budget. */
+function sessionBudgetMinutes(){
+  const m = Math.round(Number(S.meso && S.meso.minutes));
+  if(isFinite(m) && m >= 20 && m <= 180) return m;
+  const b = Math.round(Number(S.builtPlan && S.builtPlan.answers && S.builtPlan.answers.minutes));
+  if(isFinite(b) && b >= 20 && b <= 180) return b;
+  return null;
+}
+/* M6 · THE LAST FEW TIMES YOU DID IT, NOT JUST THE LAST ONE.
+
+   The grade compared each lift against its single previous session, which makes the
+   score a function of how good THAT day was. Beat a bad Tuesday and the card says you
+   progressed; follow a personal best with a solid-but-not-best session and it says you
+   went backwards. Neither is a fact about training.
+
+   So the comparison is against the best of the last three exposures. It is a harder test
+   and a fairer one: it cannot be gamed by a bad week, it cannot punish you for having had
+   a good one, and "held" against your own recent best is an honest description of a
+   session that matched it.
+
+   In date order, across days: a movement that appears on two days of the rotation has
+   exposures on both, and the most recent three are the most recent three. */
+const GRADE_EXPOSURES = 3;
+function priorExposures(sess, exName, occ, n){
+  occ = occ || 0;
+  const k = nrm(exName);
+  const out = [];
+  const earlier = S.sessions
+    .filter(s => s.id !== sess.id && s.startedAt < sess.startedAt)
+    .sort((a,b)=> b.startedAt - a.startedAt);
+  for(const s of earlier){
+    const hits = (s.entries || []).filter(en => nrm(en.name) === k);
+    if(!hits.length) continue;
+    out.push({entry: hits[Math.min(occ, hits.length - 1)], sess: s,
+              sameDay: s.workoutId === sess.workoutId});
+    if(out.length >= (n || GRADE_EXPOSURES)) break;
+  }
+  return out;
+}
+/* HOW MUCH A SESSION HAS TO MOVE TO COUNT AS MOVING, BY TRAINING AGE.
+
+   M6. A beginner adds load almost every session, so matching their recent best is the
+   floor rather than an achievement. An advanced lifter can train perfectly for a month
+   and hold — their sessions move in fractions of a percent, and grading them against a
+   beginner's expectation marks good training as failure. The bands below are the same
+   shape as the rest of the app's level handling: the expectation falls and the tolerance
+   widens as training age rises.
+
+   `hold` is how far UNDER the recent best still counts as having held. */
+const GRADE_BANDS = {
+  beginner:     {up: 0.010, hold: -0.005},
+  intermediate: {up: 0.004, hold: -0.015},
+  advanced:     {up: 0.000, hold: -0.030}
+};
+function gradeBand(){
+  let lv = "intermediate";
+  try{ lv = inferExperience(); }catch(e){}
+  return GRADE_BANDS[lv] || GRADE_BANDS.intermediate;
+}
 /* The best set in a list, as a self-comparison index rather than as a load. Bodyweight
    movements fall back to rep count, which is the only thing that can move on them.
 
@@ -44924,10 +45220,17 @@ function scoreWorkout(sess){
   })();
 
   /* 2, PROGRESSIVE OVERLOAD ---------------------------------------------------
-     Graded per exercise against the last time you did THAT exercise, rather than
-     against a whole session. A personal record counts as improvement outright: a PR
-     is by definition the best you have ever done that movement, so a comparison that
-     disagrees is the comparison being wrong, not the lift.                          */
+     Graded per exercise against the BEST OF ITS LAST THREE EXPOSURES (M6), rather than
+     against the single session before it or against a whole workout. Comparing against
+     one previous day made the score a function of how good that day happened to be:
+     beating a bad Tuesday read as progress, and following a personal best with a strong
+     second-best read as regression. A personal record counts as improvement outright: a
+     PR is by definition the best you have ever done that movement, so a comparison that
+     disagrees is the comparison being wrong, not the lift.
+
+     How far a session has to move to count as moving is scaled by training age — see
+     GRADE_BANDS. An advanced lifter holding their recent best is good training; a
+     beginner matching theirs has stood still.                                       */
   (()=>{
     const prNames = new Set(prs.map(p=>nrm(p.name)));
     const rows = [];
@@ -44938,14 +45241,25 @@ function scoreWorkout(sess){
       const a = topE1RM(e.sets, entryBarAdd(e));
       if(!a) return;
       const occ = occIndex(entries, i);
-      const prior = priorEntryFor(sess, e.name, occ);
-      const b = prior ? topE1RM(prior.entry.sets, entryBarAdd(prior.entry)) : 0;
+      /* M6 — the best of the last three exposures, and the most recent one kept for its
+         context. The comparison number comes from the best; the EXCUSES come from the
+         session immediately before, because "you had been away" or "you were sore" are
+         facts about the gap between then and now. */
+      const exps = priorExposures(sess, e.name, occ, GRADE_EXPOSURES);
+      const prior = exps[0] || null;
+      let b = 0, bFrom = null;
+      exps.forEach(x=>{
+        const v = topE1RM(x.entry.sets, entryBarAdd(x.entry));
+        if(v > b){ b = v; bFrom = x; }
+      });
       const isPR = prNames.has(nrm(e.name));
       if(!b){ rows.push({name:e.name, kind:isPR?"up":"new", a, pr:isPR}); return; }
       const d = (a - b)/b;
-      let kind = d > 0.004 ? "up" : d >= -0.015 ? "held" : "down";
+      const band = gradeBand();
+      let kind = d > band.up ? "up" : d >= band.hold ? "held" : "down";
       if(isPR) kind = "up";                      // a record beats any comparison
-      const row = {name:e.name, a, b, d, kind, pr:isPR, sameDay:prior.sameDay};
+      const row = {name:e.name, a, b, d, kind, pr:isPR, sameDay:prior.sameDay,
+                   of: exps.length, bestWas: bFrom ? bFrom.sess.date : null};
       if(kind === "down") Object.assign(row, downContext(sess, e, i, prior));
       rows.push(row);
     });
@@ -44956,7 +45270,8 @@ function scoreWorkout(sess){
         ? "Every exercise today is one with no earlier log to beat, so this is the baseline."
         : "No loads logged, so progression can't be measured.");
       add("overload","Progressive overload",20,0,why,
-        "From here on, this section compares each exercise against the last time you did it, whichever day that was.",
+        "From here on, this section compares each exercise against the best of its last "
+          + GRADE_EXPOSURES + " sessions, whichever days those were.",
         {na:true, unlock:"Run the same movements again next time round."});
       return;
     }
@@ -44971,6 +45286,21 @@ function scoreWorkout(sess){
     const earned = 20 * ((up.length + (held.length + excused.length)*0.62)/cmp.length);
     why.push(up.length+" of "+cmp.length+" lifts went up, "+held.length+" held, "+down.length+" went down"+
       (excused.length ? ", and "+excused.length+" came in lower for a reason that isn't going backwards" : "")+".");
+    /* SAID, BECAUSE IT CHANGES HOW THE NUMBERS SHOULD BE READ. "Held" against the best
+       of three sessions is a different statement from "held" against the last one, and
+       somebody comparing this card with last month's is entitled to know which it is. */
+    {
+      const deep = cmp.filter(r=> r.of > 1).length;
+      const band = gradeBand();
+      if(deep) why.push("Each lift is measured against the best of its last "
+        + GRADE_EXPOSURES + " sessions, not just the one before, so a good day cannot be "
+        + "flattered by a bad one before it.");
+      why.push(band.up >= 0.01
+        ? "At your training age the bar for \u201cwent up\u201d is about 1%: loads still move session to session, so matching your best is standing still."
+        : band.up <= 0
+        ? "At your training age matching your recent best counts as going up, and anything within 3% of it counts as holding \u2014 advanced lifts move in fractions of a percent."
+        : "Anything within about 1.5% of your recent best counts as holding.");
+    }
     /* Named explicitly rather than left inside the per-lift excuses, because it applies
        to the whole session and it is the thing somebody most wants to hear on the day
        they come back. */
@@ -44982,7 +45312,8 @@ function scoreWorkout(sess){
     /* "work index", not "est. 1RM": H6 uncapped this reading so that extra reps on the
        same weight show up, which is right for comparing a lift against itself and means
        the number is no longer an estimate of a single rep. */
-    const fmtRow = r=>r.name+" ("+Math.round(r.b)+"→"+Math.round(r.a)+" work index)";
+    const fmtRow = r=>r.name+" ("+Math.round(r.b)+"→"+Math.round(r.a)+" work index"
+      + (r.of > 1 ? ", best of " + r.of : "") + ")";
     if(up.length) why.push("Up: "+up.slice(0,4).map(r=>r.b?fmtRow(r):r.name).join(", ")+
       (up.length>4?" +"+(up.length-4)+" more":"")+".");
     if(down.length) why.push("Down: "+down.slice(0,4).map(fmtRow).join(", ")+
@@ -45260,36 +45591,78 @@ function scoreWorkout(sess){
       return;
     }
     const mins = (sess.finishedAt - sess.startedAt)/60000;
-    // 40-80 min is the practical sweet spot: long enough for real volume, short enough
-    // that quality and focus haven't decayed.
+    /* M6 — AGAINST THE TIME YOU SAID YOU HAD, where you have said.
+
+       This graded every session against a fixed 40-80 minute window, which is a fine
+       population default and the wrong answer for the person who told the plan builder
+       they have 45 minutes: they finished in 44, did everything on the card, and lost
+       marks for it. Their budget is a stated constraint, and a session that fits inside
+       it is efficient BY DEFINITION — that is what the word means.
+
+       Coming in under budget is not penalised at all here. A session that was cut short
+       shows up as missed sets in Completion, which is where it belongs; docking it twice
+       would mean a 30-minute plan can never score well. Going over is what this measures,
+       because that is the failure the budget describes. */
+    const budget = sessionBudgetMinutes();
     let durScore;
-    if(mins >= 40 && mins <= 80) durScore = 1;
-    else if(mins < 40) durScore = Math.max(0.35, mins/40);
-    else durScore = Math.max(0.4, 1 - (mins-80)/90);
+    if(budget){
+      const over = mins - budget * 1.1;              // a tenth of grace on the stated figure
+      durScore = over <= 0 ? 1 : Math.max(0.4, 1 - over / Math.max(20, budget * 0.6));
+    } else {
+      // nobody has said, so the published window stands in
+      if(mins >= 40 && mins <= 80) durScore = 1;
+      else if(mins < 40) durScore = Math.max(0.35, mins/40);
+      else durScore = Math.max(0.4, 1 - (mins-80)/90);
+    }
     const density = nSets / Math.max(1, mins/60);      // working sets per hour
     const denScore = Math.max(0.35, Math.min(1, density/18));
     const earned = 8 * (durScore*0.6 + denScore*0.4);
     why.push(Math.round(mins)+" minutes for "+nSets+" working sets, "+r1(density)+" sets per hour.");
-    why.push(mins < 40 ? "Short session, so there's room for more volume before quality suffers."
-           : mins > 80 ? "Long session. Past about 80 minutes, focus and set quality tend to fall off."
-           : "Duration sits in the productive 40-80 minute window.");
+    if(budget){
+      const over = Math.round(mins - budget);
+      why.push(over > budget * 0.1
+        ? "Your plan is built for " + budget + " minutes a session and this ran "
+          + over + " over."
+        : mins < budget * 0.75
+          ? "Well inside the " + budget + " minutes your plan is built for. Nothing is deducted "
+            + "for finishing early — if sets were missed, that is counted in Completion."
+          : "Inside the " + budget + " minutes your plan is built for.");
+    } else {
+      why.push(mins < 40 ? "Short session, so there's room for more volume before quality suffers."
+             : mins > 80 ? "Long session. Past about 80 minutes, focus and set quality tend to fall off."
+             : "Duration sits in the productive 40-80 minute window.");
+    }
     add("efficiency","Session efficiency",8,earned,why,
       density < 12 ? "Around "+r1(density)+" sets an hour means a lot of standing around. Supersetting unrelated accessories is free time."
+      : (budget && mins > budget * 1.3) ? "This is running well past the " + budget
+        + " minutes the plan was built around. Either the budget has changed — rebuild the "
+        + "plan and say so — or the rests are longer than the card asks for."
       : mins > 95 ? "Split this into two shorter sessions if you can: two 50-minute workouts beat one 100-minute one."
       : null);
   })();
 
-  /* 8, LOG QUALITY ------------------------------------------------------------ */
+  /* 8, LOG QUALITY ------------------------------------------------------------
+
+     M6 — WHAT THIS IS ALLOWED TO MARK YOU DOWN FOR. It used to include the session note
+     and the daily check-in, which are not properties of the workout at all: one is a
+     diary entry and the other is a thing you fill in at breakfast. Scoring them meant a
+     session logged perfectly — every set, every RPE, every rest — could not reach full
+     marks without also writing prose about it, which is the app marking somebody down
+     for not using two optional features. They still earn their keep elsewhere (the note
+     reaches the Body tab and the next grade's context; the check-in drives readiness and
+     the deload signals), and they are still ASKED for — just not graded.
+
+     The three that remain are the ones this section is actually about: whether the
+     session was recorded well enough for everything else on this card to be true. Their
+     weights are scaled up to keep the section worth the same 10 points, in the order
+     that already mattered most — RPE, then rest, then how it felt. */
   (()=>{
     const rpeN = allSets.filter(x=>parseFloat(x.st.rpe)>0).length;
     const restN = allSets.filter(x=>x.st.rest!=null).length;
-    const ci = (S.checkins||{})[sess.date] || {};
     const bits = [
-      {ok: nSets>0 && rpeN/nSets >= 0.8, w:3.5, yes:"RPE logged on "+Math.round(rpeN/Math.max(1,nSets)*100)+"% of sets", no:"RPE missing on "+(nSets-rpeN)+" of "+nSets+" sets"},
-      {ok: nSets>0 && restN/nSets >= 0.6, w:2.5, yes:"rest timed on most sets",      no:"rest times recorded on only "+restN+" of "+nSets+" sets"},
-      {ok: !!sess.feel,                   w:1.5, yes:"session feel rated",           no:"no feel rating"},
-      {ok: !!(sess.note||"").trim(),      w:1.0, yes:"session note written",         no:"no session note"},
-      {ok: !!(ci.sleep || ci.energy || ci.weight), w:1.5, yes:"daily check-in filled in", no:"no daily check-in for this date"}
+      {ok: nSets>0 && rpeN/nSets >= 0.8, w:4.5, yes:"RPE logged on "+Math.round(rpeN/Math.max(1,nSets)*100)+"% of sets", no:"RPE missing on "+(nSets-rpeN)+" of "+nSets+" sets"},
+      {ok: nSets>0 && restN/nSets >= 0.6, w:3.5, yes:"rest timed on most sets",      no:"rest times recorded on only "+restN+" of "+nSets+" sets"},
+      {ok: !!sess.feel,                   w:2.0, yes:"session feel rated",           no:"no feel rating"}
     ];
     const earned = bits.reduce((t,b)=>t + (b.ok?b.w:0), 0);
     const good = bits.filter(b=>b.ok).map(b=>b.yes);
@@ -45298,6 +45671,11 @@ function scoreWorkout(sess){
     if(good.length) why.push("Captured: "+good.join(", ")+".");
     if(missing.length) why.push("Missing: "+missing.join(", ")+".");
     why.push("This is what makes every other section, and your Body map, accurate rather than guesswork.");
+    /* Asked for without being scored, so somebody who reads this list does not conclude
+       the app has stopped caring about either. */
+    if(!(sess.note || "").trim() || !((S.checkins || {})[sess.date] || {}).sleep)
+      why.push("A session note and the day's check-in are not part of this score \u2014 they "
+        + "are not facts about the workout \u2014 but both feed what the app can tell you later.");
     add("logquality","Log quality",10,earned,why,
       missing.length ? "Each missing field is a place the analysis has to guess. RPE and rest are the two that matter most."
       : null);
@@ -48007,7 +48385,7 @@ function deloadActive(){
   if(d.endedAt) return false;
   // a deload is one week and expires on its own; a forgotten toggle should not quietly
   // halve your training for a month
-  return (Date.now() - d.startedAt) < deloadWindowMs();
+  return Date.now() < deloadEndsAt(d.startedAt);
 }
 /* WAS THAT DAY INSIDE A DELOAD?
 
@@ -48021,7 +48399,7 @@ function deloadCovers(dateStr, atMs){
   if(!d || !d.startedAt) return false;
   const at = atMs || (dateStr ? Date.parse(dateStr + "T12:00:00") : NaN);
   if(!isFinite(at)) return false;
-  const end = d.endedAt || (d.startedAt + deloadWindowMs());
+  const end = d.endedAt || deloadEndsAt(d.startedAt);
   return at >= d.startedAt - 12 * 3600e3 && at <= end;
 }
 /* A RAISE THE DELOAD WILL REFUSE, SAID BEFORE YOU PRESS IT RATHER THAN AFTER.
@@ -48046,7 +48424,7 @@ function deloadHoldNote(name, to){
   const pe = findProgramEntry(name);
   const from = (pe && pe.weight != null && pe.weight !== "") ? parseFloat(pe.weight) : NaN;
   if(isFinite(from) && v < from) return null;
-  const left = Math.max(0, 7 - (Math.floor((Date.now() - S.deload.startedAt) / DAY_MS) + 1));
+  const left = deloadDaysLeft();
   return {left, when: left <= 0 ? "from your next session"
                     : left === 1 ? "tomorrow"
                     : "in " + left + " days"};
@@ -48240,12 +48618,47 @@ function deloadEndedRecently(){
   const days = Math.floor((Date.now() - d.endedAt) / DAY_MS);
   return days >= 0 && days <= DELOAD_SHADOW_DAYS ? {days, at: d.endedAt} : null;
 }
-function deloadWindowMs(){ return (DELOAD_DAYS + 1) * DAY_MS; }
+/* L2 — A SEVEN-DAY WEEK IS SEVEN DAYS LONG.
+
+   This returned eight. The extra day was there to stop a deload lapsing in the middle of
+   the seventh day's session, which is a real problem and was solved in the wrong place:
+   the window governs what the whole app believes about the week, so the fix also made
+   deloadActive() true on day eight, deloadCovers() stamp a session the week did not
+   contain, and the countdown everything prints — which counts to DELOAD_DAYS —
+   disagree with the window by a day. "Day 8 of 7" came from here.
+
+   The window is now the week. The day the week ends is still protected, by taking the
+   boundary from the START OF THAT DAY rather than from the clock time the deload was
+   begun: start on Tuesday evening and the week runs to the end of the following Monday,
+   so no session is ever cut off part-way through. */
+function deloadWindowMs(){ return DELOAD_DAYS * DAY_MS; }
+/* The moment a deload stops being in force: midnight at the end of its last day. */
+function deloadEndsAt(startedAt){
+  const d = new Date(startedAt);
+  d.setHours(0, 0, 0, 0);                       // the day it began, from its own start
+  return d.getTime() + deloadWindowMs();
+}
+/* WHICH DAY OF THE WEEK YOU ARE ON, AND HOW MANY ARE LEFT, worked out once.
+
+   Four screens each did this arithmetic inline against a hard-coded 7, which is how the
+   countdown and the window came to disagree — and how changing either one would have
+   left three of the four still saying the old thing. */
+function deloadDayIn(){
+  const d = S.deload;
+  if(!d || !d.startedAt) return 0;
+  const from = deloadEndsAt(d.startedAt) - deloadWindowMs();
+  return Math.min(DELOAD_DAYS, Math.max(1, Math.floor((Date.now() - from) / DAY_MS) + 1));
+}
+function deloadDaysLeft(){
+  const d = S.deload;
+  if(!d || !d.startedAt) return 0;
+  return Math.max(0, Math.floor((deloadEndsAt(d.startedAt) - Date.now()) / DAY_MS));
+}
 function sweepDeload(){
   const d = S.deload;
   if(!d || !d.startedAt || d.endedAt) return false;
-  if(Date.now() - d.startedAt < deloadWindowMs()) return false;
-  d.endedAt = d.startedAt + deloadWindowMs();
+  if(Date.now() < deloadEndsAt(d.startedAt)) return false;
+  d.endedAt = deloadEndsAt(d.startedAt);
   d.ranOut = true;
   S.blockStart = d.endedAt;
   logPlanChange("deload", null, "Deload finished",
@@ -51976,6 +52389,7 @@ function openCycleWrapped(r){
 
 /* ---------- modal ---------- */
 let MODAL_DISMISS = null;
+let MODAL_STICKY = false;
 // Is a sheet up right now? Anything that offers to open one of its own asks first.
 function MODAL_LIVE(){
   const bg = document.getElementById("modalBg");
@@ -51987,6 +52401,10 @@ let MODAL_REOPEN = null;
 function showModal(html, variant){
   MODAL_DISMISS = null;
   MODAL_REOPEN = null;
+  /* M10 — every sheet is dismissable unless it says otherwise, and exactly one says
+     otherwise. Cleared here rather than in hideModal so a stuck flag cannot outlive the
+     sheet that set it and lock the app out of every dialogue after it. */
+  MODAL_STICKY = false;
   /* A sheet is the right shape for almost everything in this app and the wrong shape for
      exactly one thing: the card you get the moment a workout ends. Rather than build a
      second overlay with its own wiring — every `#modal [data-...]` binding in the file
@@ -52012,6 +52430,11 @@ function showModal(html, variant){
   if(c) c.onclick = hideModal;
 }
 function hideModal(){
+  /* THE ONE SHEET WITH NO WAY PAST IT. Every route out of a modal comes through here —
+     the backdrop, the Cancel button, the Escape key, the post-session chain — so this
+     is the only place the block has to be. It is used for a save that failed at the end
+     of a workout, where closing the sheet is closing the only copy of the session. */
+  if(MODAL_STICKY) return;
   $("#modalBg").classList.remove("show");
   document.body.classList.remove("modal-live");
   const d = MODAL_DISMISS;
@@ -53503,6 +53926,32 @@ function selfTestRun(){
         note(fail, k + " block", JSON.stringify(MESO_SHAPE[k]));
     });
   }catch(e){ note(fail, "deload", String((e && e.message) || e)); }
+  /* 11. PHASE 7's CONSTANTS, each of which is a figure the brief names or a shape the
+         rest of the app has to agree with. */
+  try{
+    // L2: the week is the week
+    if(deloadWindowMs() !== DELOAD_DAYS * DAY_MS)
+      note(fail, "deload window", String(deloadWindowMs() / DAY_MS));
+    // M4: protein is a range, and it is the right way up
+    if(!(SPEC_PROTEIN_G_PER_KG === 1.6 && SPEC_PROTEIN_G_PER_KG_HI === 2.2))
+      note(fail, "protein range", SPEC_PROTEIN_G_PER_KG + "-" + SPEC_PROTEIN_G_PER_KG_HI);
+    // M5: a myo-rep set is worth more than a straight set and less than two
+    const myo = myoSetValue();
+    if(!(myo > 1 && myo < 2)) note(fail, "myo value", String(myo));
+    if(plannedSetValue({sets: 3}) !== 3) note(fail, "straight sets", "not 3");
+    if(Math.abs(plannedSetValue({sets: 3, tech: [{k: "myoreps"}]}) - (2 + myo)) > 1e-9)
+      note(fail, "myo sets", String(plannedSetValue({sets: 3, tech: [{k: "myoreps"}]})));
+    if(DIRECT_SHARE !== 0.5) note(fail, "direct share", String(DIRECT_SHARE));
+    /* M6: the bar for progress falls with training age and the tolerance widens. Checked
+       as an ordering rather than as three numbers, because the ordering is the claim. */
+    const lv = ["beginner", "intermediate", "advanced"];
+    for(let i = 1; i < lv.length; i++){
+      const a2 = GRADE_BANDS[lv[i - 1]], b2 = GRADE_BANDS[lv[i]];
+      if(!(b2.up <= a2.up)) note(fail, "grade band up", lv[i] + " expects more than " + lv[i - 1]);
+      if(!(b2.hold <= a2.hold)) note(fail, "grade band hold", lv[i] + " is less forgiving than " + lv[i - 1]);
+    }
+    if(GRADE_EXPOSURES < 2) note(fail, "grade window", String(GRADE_EXPOSURES));
+  }catch(e){ note(fail, "phase7", String((e && e.message) || e)); }
   return {fail, warn, lib: seen.size, ok: fail.length === 0};
 }
 /* The reference calls this runSelfTests(); the file has always called it selfTestRun().
