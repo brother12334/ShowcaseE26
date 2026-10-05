@@ -4972,11 +4972,11 @@ body.news-open{overflow:hidden}
 .st-wrap{display:flex;flex-direction:column;gap:8px}
 .st-row{display:flex;gap:10px;align-items:baseline;font-size:13px;line-height:1.5;
   border-top:1px solid var(--line);padding:8px 0}
-.st-row b{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+.st-row>b{font:10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;
   min-width:92px;flex-shrink:0}
-.st-bad b{color:var(--bad)}
-.st-warn b{color:var(--warn)}
-.st-good b{color:var(--ok)}
+.st-bad>b{color:var(--bad)}
+.st-warn>b{color:var(--warn)}
+.st-good>b{color:var(--ok)}
 .spec-opts{display:flex;flex-direction:column;gap:7px;margin-bottom:4px}
 .spec-opt{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;
   background:var(--card);border:1px solid var(--line);border-radius:13px;padding:13px 14px;
@@ -6313,7 +6313,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "47.2";
+const APP_VERSION = "47.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11823,7 +11823,8 @@ function planQuality(program, split, opts){
     want.forEach(([keys, re, say, n])=>{
       const got = keys ? daysWithSlot(keys) : daysWithName(re);
       if(got < n)
-        add(warn, "missing", "No " + say + (n > 1 ? " on " + n + " days" : "") + " this week.",
+        add(warn, "missing", "Nothing covering " + say.replace(/^(an?|the) /, "")
+          + (n > 1 ? ", on " + n + " days" : "") + " this week.",
           {fix: "add", want: say});
     });
   }catch(e){}
@@ -27074,6 +27075,11 @@ function bindAIImport(){
   const all = (sel, fn)=> host.querySelectorAll(sel).forEach(fn);
   const c = host.querySelector("#closeModal");
   if(c) c.onclick = closeAIImport;
+  /* THIS LIVES ON THE IMPORTER'S OWN PAGE, so it has to be bound by the importer's own
+     binder. It was being bound in bind(), which runs on render() — and the importer page
+     draws itself into #aiFull without one, so the button somebody with no plan is most
+     likely to press had no handler on it at all and did nothing when tapped. */
+  on("aiBuildBtn", ()=>{ closeAIImport(); openBuildPage(); });
 
   on("aiAgain", ()=>{
     AI_IMP = {ob: a.ob, stage:"hero", text:"", files:[], parts:null, busy:false, step:0,
@@ -28063,16 +28069,69 @@ function planQualityCardHTML(){
     <div class="sub" style="margin:4px 0 0">Every muscle inside its range, every session
       inside the caps, nothing unbalanced. Checked against the same targets the Body tab uses.</div>
   </div>`;
-  const row = (x, cls)=> `<div class="st-row ${cls}"><b>${esc(x.k)}</b>${esc(x.msg)}</div>`;
+  const row = (label, msg, cls)=> `<div class="st-row ${cls}"><b>${esc(label)}</b><span>${msg}</span></div>`;
+
+  /* THE SAME SENTENCE, TWELVE TIMES, IS NOT TWELVE FINDINGS.
+
+     This used to print one full-width row per failure, and the commonest failure by far
+     is "<muscle> gets N sets a week, under its floor of M" — so a thin plan produced a
+     wall of near-identical red lines that was work to read and told you one thing:
+     several muscles are short. The volume failures are now gathered into a line each,
+     naming the muscles, and only the findings that are genuinely about different things
+     get a row of their own. Nothing is dropped: the per-muscle numbers are on the Body
+     tab, which is where a number per muscle belongs. */
+  /* The kinds are internal keys. "freq", "pushpull" and "quadham" are not words anybody
+     reads, and the row label is the first thing the eye lands on. */
+  const LABEL = {freq:"Frequency", high:"A lot", long:"Session length", maintenance:"Maintenance",
+                 pushpull:"Push / pull", quadham:"Quads / hams", lengthened:"Stretch",
+                 missing:"Missing", balance:"Balance", budget:"Time", session:"Session",
+                 under:"Not enough", over:"Too much"};
+  const lbl = k=> LABEL[k] || k;
+  const under = q.fail.filter(x=> x.k === "under" && x.muscle);
+  const over  = q.fail.filter(x=> x.k === "over"  && x.muscle);
+  const rest  = q.fail.filter(x=> !((x.k === "under" || x.k === "over") && x.muscle));
+  const nameOf = g=> (GROUPS[g] && GROUPS[g].name) || g;
+  let rows = "";
+  if(under.length === 1) rows += row("Not enough", esc(under[0].msg), "st-bad");
+  else if(under.length) rows += row("Not enough",
+    "<b>" + esc(joinList(under.map(x=> nameOf(x.muscle)))) + "</b> are getting less each week "
+    + "than they need to grow.", "st-bad");
+  if(over.length === 1) rows += row("Too much", esc(over[0].msg), "st-bad");
+  else if(over.length) rows += row("Too much",
+    "<b>" + esc(joinList(over.map(x=> nameOf(x.muscle)))) + "</b> are getting more each week "
+    + "than you can recover from.", "st-bad");
+  rest.forEach(x=> rows += row(lbl(x.k), esc(x.msg), "st-bad"));
+
+  /* The notes are folded. They are things worth knowing, not things to do, and leaving
+     them open meant the first thing the Program tab showed was six paragraphs of caveat. */
+  /* The gap list is twelve near-identical lines saying the same thing about different
+     movements, so it reads as one. */
+  const miss = q.warn.filter(x=> x.k === "missing" && x.want);
+  const otherW = q.warn.filter(x=> !(x.k === "missing" && x.want));
+  let wRows = "";
+  if(miss.length === 1) wRows += row("Missing", esc(miss[0].msg), "st-warn");
+  else if(miss.length) wRows += row("Missing",
+    "Nothing in the week covering <b>" + esc(joinList(miss.map(x=>
+      String(x.want).replace(/^(an?|the) /, "")))) + "</b>.", "st-warn");
+  otherW.forEach(x=> wRows += row(lbl(x.k), esc(x.msg), "st-warn"));
+  const notes = w ? `<details class="adv-fold" style="margin:12px 0 0">
+      <summary>${w} note${w === 1 ? "" : "s"}</summary>
+      <div class="st-wrap" style="margin:8px 0 0">${wRows}</div>
+    </details>` : "";
+
+  const lead = n
+    ? (under.length && !over.length && !rest.length
+        ? (under.length === 1 ? "One muscle is" : under.length + " muscles are") + " getting less than they need."
+        : n + " thing" + (n === 1 ? "" : "s") + " worth fixing.")
+    : "Nothing wrong.";
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
       <span class="dot" style="background:var(--acc)"></span><h3>A look at your plan</h3>
     </div>
-    <div class="sub" style="margin:4px 0 10px">${n ? n + " thing" + (n===1?"":"s") + " worth fixing"
-      : "Nothing wrong"}${w ? (n ? ", and " : "") + w + " note" + (w===1?"":"s") : ""}. This is
-      the same check the builder runs; it is never in your way.</div>
-    <div class="st-wrap" style="margin:0">${q.fail.map(x=> row(x, "st-bad")).join("")}${
-      q.warn.slice(0, 6).map(x=> row(x, "st-warn")).join("")}</div>
+    <div class="sub" style="margin:4px 0 10px">${esc(lead)} This is the same check the builder
+      runs against your plan, and it is never in your way.</div>
+    <div class="st-wrap" style="margin:0">${rows}</div>
+    ${notes}
   </div>`;
 }
 /* =====================================================================
@@ -38853,8 +38912,14 @@ function viewProgram(){
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
   h += planQualityCardHTML();
-  h += restLayoutCardHTML();
-  h += testWeeksCardHTML();
+  /* FOLDED, NOT REMOVED. Where the rest days sit and which weeks are tests are things
+     somebody sets once and then leaves alone for months — but they were two full cards
+     near the top of the tab, between the plan check and the plan itself, every single
+     time anybody opened it. Open the fold and both are exactly as they were. */
+  h += `<details class="adv-fold" id="schedFold"${SCHED_FOLD ? " open" : ""}>
+      <summary>Rest days and testing weeks</summary>
+      ${restLayoutCardHTML()}${testWeeksCardHTML()}
+    </details>`;
   h += planKindCardHTML();
   h += planVsTodayCardHTML();
   h += planWeekCardHTML();
@@ -39090,6 +39155,10 @@ function syncCardHTML(){
    Everything below is the same set of controls, in the same groups, with the same ids —
    the change is what the screen looks like before you touch it. */
 let SET_PAGE = null;                 // which group is open, or null for the grid
+/* Whether the Program tab's schedule fold is open. Held here rather than left to the
+   <details> element, because moving a rest day re-renders the tab — and an element that
+   forgets it was open shuts itself the moment you use what is inside it. */
+let SCHED_FOLD = false;
 /* WHICH WARM-UP RUNG IS SHOWING ITS PLATES, as "entryIndex:rungIndex". One at a time:
    the answer is about the bar in front of you, and two of them open at once is a list to
    read rather than an answer. Not saved — it is a question you ask mid-session and it
@@ -41996,10 +42065,10 @@ function bind(){
     const none = $("#rbNone");
     if(none) none.hidden = shown > 0;
   };
+  const schedF = $("#schedFold");
+  if(schedF) schedF.ontoggle = ()=>{ SCHED_FOLD = schedF.open; };
   const plan = $("#planBtn");
   if(plan) plan.onclick = openPlan;
-  const abb = $("#aiBuildBtn");
-  if(abb) abb.onclick = ()=>{ closeAIImport(); openBuildPage(); };
   const aiB = $("#aiImportBtn");
   if(aiB) aiB.onclick = ()=> openAIImport(false);
   const phB = $("#planHistBtn");
