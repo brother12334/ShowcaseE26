@@ -4969,6 +4969,51 @@ body.news-open{overflow:hidden}
 .spec-h{font-family:var(--disp);font-size:27px;line-height:1.08;margin:0 0 8px;outline:none}
 .spec-sub{font-size:14px;line-height:1.55;color:var(--dim);margin:0 0 18px}
 .spec-read p{font-size:14px;line-height:1.62;margin:0 0 12px}
+/* THE PLAN CARD'S MUSCLE ROWS.
+
+   A row is an element tile laid on its side: the two-letter symbol in a square, the name
+   and a bar showing where the week's sets sit between nothing and the ceiling, and the
+   reading itself on the right as sets-over-floor. The tick on the track is the floor, so
+   a bar short of the tick is a muscle short of the minimum and you can see that without
+   reading either number.
+
+   Colour is the app's existing three verdicts and nothing new: rust for under, copper for
+   in range, amber for over. The whole row is a button. */
+.pv{display:flex;flex-direction:column;gap:5px;margin:12px 0 0}
+.pv-r{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card2);
+  padding:7px 10px 7px 7px;cursor:pointer;
+  transition:border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease)}
+.pv-r:active{transform:scale(.995)}
+.pv-sq{width:34px;height:34px;border-radius:5px;display:flex;align-items:center;justify-content:center;
+  font:14px var(--disp);font-weight:600;flex-shrink:0;border:1px solid var(--line);color:var(--dim)}
+.pv-m{flex:1;min-width:0;display:block}
+.pv-n{display:block;font:10px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--dim);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pv-t{display:block;height:5px;border-radius:3px;background:rgba(255,255,255,.055);
+  margin-top:5px;position:relative;overflow:hidden}
+.pv-f{position:absolute;left:0;top:0;bottom:0;border-radius:3px;
+  transition:width var(--t-slow) var(--ease-out)}
+.pv-k{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--faint)}
+.pv-v{font:11px var(--mono);color:var(--faint);flex-shrink:0;text-align:right;white-space:nowrap}
+.pv-v b{color:var(--text);font-weight:600}
+.pv-r.is-under{border-color:rgba(209,88,79,.34)}
+.pv-r.is-under .pv-sq{background:rgba(209,88,79,.12);border-color:rgba(209,88,79,.5);color:var(--bad)}
+.pv-r.is-under .pv-f{background:var(--bad)}
+.pv-r.is-ok .pv-sq{background:var(--acc-soft);border-color:var(--acc-line);color:var(--acc)}
+.pv-r.is-ok .pv-f{background:var(--acc)}
+.pv-r.is-over{border-color:rgba(201,154,52,.34)}
+.pv-r.is-over .pv-sq{background:rgba(201,154,52,.12);border-color:rgba(201,154,52,.5);color:var(--warn)}
+.pv-r.is-over .pv-f{background:var(--warn)}
+.pv-leg{display:flex;gap:14px;margin-top:11px;font:10px var(--mono);letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);flex-wrap:wrap}
+.pv-leg span{display:flex;align-items:center;gap:5px}
+.pv-leg i{width:8px;height:8px;border-radius:2px;display:inline-block}
+/* The fix sheet's own reading, the same bar at a size you can actually look at. */
+.pf-big{display:block;height:9px;border-radius:5px;background:rgba(255,255,255,.055);
+  margin:12px 0 7px;position:relative;overflow:hidden}
+.pf-scale{display:flex;justify-content:space-between;font:10px var(--mono);color:var(--faint);
+  letter-spacing:.06em}
 .st-wrap{display:flex;flex-direction:column;gap:8px}
 .st-row{display:flex;gap:10px;align-items:baseline;font-size:13px;line-height:1.5;
   border-top:1px solid var(--line);padding:8px 0}
@@ -6313,7 +6358,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "47.3";
+const APP_VERSION = "48.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11857,7 +11902,18 @@ function planQuality(program, split, opts){
         + " does not have.", {wid, name: e.name, fix: "swap"});
   }));
 
-  return {fail, warn, weekly, ok: fail.length === 0,
+  /* THE READING ITSELF, not just what is wrong with it. The Program tab draws a row per
+     muscle — where it sits between its floor and its ceiling — and that needs the same
+     numbers this function already worked out rather than a second, drifting copy of them. */
+  const volume = GKEYS.filter(g=> GROUPS[g] && !GROUPS[g].optional).map(g=>{
+    const L = lm(g) || GROUPS[g];
+    const v = weekly[g] || 0;
+    const top = Math.min(L.mav, L.mrv * 0.9);
+    return {g, name: GROUPS[g].name, v, mev: L.mev, mav: L.mav, mrv: L.mrv, top,
+            state: v + 0.05 < L.mev ? "under" : v > L.mrv + 0.05 ? "over" : "ok",
+            short: Math.max(0, L.mev - v)};
+  });
+  return {fail, warn, weekly, volume, ok: fail.length === 0,
           minutes: dayIds.map(wid=> ({wid, name: dayNameOf(split, wid), mins: dayMinutes(program[wid] || []),
                                       sets: (program[wid]||[]).reduce((t,e)=> t + (parseInt(e.sets,10)||0), 0)}))};
 }
@@ -16229,6 +16285,20 @@ function fmtSet(st){
    used. The plain-English description has not gone anywhere: `where` on each region
    still says "the outer front thigh", which is the thing a beginner actually needs, and
    it says it at the point of asking rather than in place of the name. */
+/* The periodic symbol for each muscle, as the Program tab's plan card draws it. Two
+   letters, capital then lower, the way an element is written — and distinct from each
+   other at a glance, which is why these are not simply the first two letters: Tr is
+   triceps, so traps is Tp, and the three delts are FD / SD / RD rather than three
+   variations on D. */
+const GROUP_SYM = {
+  chest:"Ch", delts_front:"FD", delts_side:"SD", delts_rear:"RD",
+  biceps:"Bi", triceps:"Tr", forearms:"Fo", traps:"Tp",
+  upper_back:"MB", lats:"La", lower_back:"LB", abs:"Ab", obliques:"Ob",
+  glutes:"Gl", quads:"Qu", hams:"Ha", calves:"Ca", adductors:"Ad", neck:"Ne"
+};
+function groupSym(g){
+  return GROUP_SYM[g] || String((GROUPS[g] && GROUPS[g].name) || g).slice(0, 2);
+}
 const GROUPS = {
   // `lc` is the lower-case noun used to build sentences ("add more chest work"). Chest
   // was the only group missing it, which is why its weak-point advice read
@@ -28087,19 +28157,10 @@ function planQualityCardHTML(){
                  missing:"Missing", balance:"Balance", budget:"Time", session:"Session",
                  under:"Not enough", over:"Too much"};
   const lbl = k=> LABEL[k] || k;
-  const under = q.fail.filter(x=> x.k === "under" && x.muscle);
-  const over  = q.fail.filter(x=> x.k === "over"  && x.muscle);
-  const rest  = q.fail.filter(x=> !((x.k === "under" || x.k === "over") && x.muscle));
-  const nameOf = g=> (GROUPS[g] && GROUPS[g].name) || g;
+  /* The volume findings are DRAWN, not listed — see planVolHTML. What is left as a row
+     is everything that is not about a muscle's weekly sets, which is a short list. */
+  const rest = q.fail.filter(x=> !((x.k === "under" || x.k === "over") && x.muscle));
   let rows = "";
-  if(under.length === 1) rows += row("Not enough", esc(under[0].msg), "st-bad");
-  else if(under.length) rows += row("Not enough",
-    "<b>" + esc(joinList(under.map(x=> nameOf(x.muscle)))) + "</b> are getting less each week "
-    + "than they need to grow.", "st-bad");
-  if(over.length === 1) rows += row("Too much", esc(over[0].msg), "st-bad");
-  else if(over.length) rows += row("Too much",
-    "<b>" + esc(joinList(over.map(x=> nameOf(x.muscle)))) + "</b> are getting more each week "
-    + "than you can recover from.", "st-bad");
   rest.forEach(x=> rows += row(lbl(x.k), esc(x.msg), "st-bad"));
 
   /* The notes are folded. They are things worth knowing, not things to do, and leaving
@@ -28119,20 +28180,135 @@ function planQualityCardHTML(){
       <div class="st-wrap" style="margin:8px 0 0">${wRows}</div>
     </details>` : "";
 
-  const lead = n
-    ? (under.length && !over.length && !rest.length
-        ? (under.length === 1 ? "One muscle is" : under.length + " muscles are") + " getting less than they need."
-        : n + " thing" + (n === 1 ? "" : "s") + " worth fixing.")
-    : "Nothing wrong.";
+  const vol = Array.isArray(q.volume) ? q.volume : [];
+  const nUnder = vol.filter(x=> x.state === "under").length;
+  const nOver  = vol.filter(x=> x.state === "over").length;
+  const lead = nUnder
+    ? (nUnder === 1 ? "One muscle is" : nUnder + " muscles are")
+      + " getting less each week than they need to grow."
+    : nOver
+      ? (nOver === 1 ? "One muscle is" : nOver + " muscles are")
+        + " getting more than you can recover from."
+      : "Every muscle is inside its range.";
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
       <span class="dot" style="background:var(--acc)"></span><h3>A look at your plan</h3>
     </div>
-    <div class="sub" style="margin:4px 0 10px">${esc(lead)} This is the same check the builder
-      runs against your plan, and it is never in your way.</div>
-    <div class="st-wrap" style="margin:0">${rows}</div>
+    <div class="sub" style="margin:4px 0 0">${esc(lead)} Each bar is a week's sets; the mark
+      on it is the least that muscle needs. Tap one to see what to do about it.</div>
+    ${planVolHTML(vol)}
+    ${rows ? `<div class="st-wrap" style="margin:14px 0 0">${rows}</div>` : ""}
     ${notes}
   </div>`;
+}
+/* THE SHEET BEHIND A ROW.
+
+   A card that only reports is a card you learn to scroll past, so this says the reading,
+   says what it means in a sentence, and then offers the two things that actually change
+   it: one more set on a movement already training that muscle, which is the cheapest fix
+   there is, or a new movement on a chosen day. Both go through the plan log like every
+   other change to what you are being asked to do. */
+function volEntriesFor(g){
+  const out = [];
+  DAYS.forEach(wid=> (S.program[wid] || []).forEach((e, ei)=>{
+    const f = muscleFrac(e.name, g);
+    if(f > 0) out.push({wid, ei, e, f, sets: parseInt(e.sets, 10) || 0});
+  }));
+  /* The best place for one more set is the movement that gives this muscle the most per
+     set and is currently doing the least of it. */
+  out.sort((a, b)=> (b.f - a.f) || (a.sets - b.sets));
+  return out;
+}
+function openVolFix(g){
+  let q;
+  try{ q = planQuality(S.program, currentSplit(), {gear: (S.setup || {}).gear}); }catch(e){ return; }
+  const x = (q.volume || []).find(v=> v.g === g);
+  if(!x) return;
+  const cands = volEntriesFor(g);
+  const best = cands[0];
+  const ceiling = Math.max(x.mrv, x.v, 1);
+  const pct = Math.max(2, Math.min(100, (x.v / ceiling) * 100));
+  const mark = Math.max(0, Math.min(100, (x.mev / ceiling) * 100));
+  const col = x.state === "under" ? "var(--bad)" : x.state === "over" ? "var(--warn)" : "var(--acc)";
+  const say = x.state === "under"
+    ? "That is under the least this muscle needs before it grows at all. "
+      + (x.short >= 1 ? r1(x.short) + " more set" + (x.short >= 1.95 ? "s" : "") + " a week would reach it."
+                      : "It is within a set of the floor.")
+    : x.state === "over"
+      ? "That is past what you can recover from, so the extra sets cost fatigue without "
+        + "buying growth. Taking some off will make the rest work better."
+      : "That is inside the range where sets pay off \u2014 above the minimum, below the "
+        + "ceiling. Nothing needs doing here.";
+  showModal(`<h3>${esc(x.name)}</h3>
+    <div class="pf-big">
+      <span class="pv-f" style="width:${pct}%;background:${col}"></span>
+      ${x.mev > 0 ? `<span class="pv-k" style="left:${mark}%"></span>` : ""}
+    </div>
+    <div class="pf-scale"><span>0</span><span>${r1(x.mev)} MIN</span><span>${r1(x.mrv)} MAX</span></div>
+    <div class="sub" style="margin:12px 0 0;text-transform:none;letter-spacing:0">
+      Your plan gives ${esc(x.name.toLowerCase())} <b>${r1(x.v)} sets a week</b>. ${esc(say)}</div>
+    ${x.state === "under" && best ? `
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn" id="vfSet" style="flex:1">Add a set to ${esc(best.e.name)}</button></div>
+      <div class="sub" style="margin:6px 0 0;font-size:12px;color:var(--faint);text-transform:none;letter-spacing:0">
+        On ${esc(widName(best.wid))}, where it already does the most for this muscle.</div>` : ""}
+    ${x.state === "under" ? `<div class="btn-row" style="margin-top:${best ? 8 : 14}px">
+        <button class="btn${best ? " ghost" : ""}" id="vfEx" style="flex:1">${
+          best ? "Add an exercise instead" : "Add an exercise for this"}</button></div>` : ""}
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn ghost small" id="closeModal" style="flex:1">Done</button></div>`);
+  const m = $("#modal");
+  if(!m) return;
+  const bSet = m.querySelector("#vfSet");
+  if(bSet) bSet.onclick = ()=>{
+    const e = (S.program[best.wid] || [])[best.ei];
+    if(!e) return;
+    const was = parseInt(e.sets, 10) || 0;
+    e.sets = was + 1;
+    if(Array.isArray(e.rpes) && e.rpes.length === was) e.rpes.push(e.rpes[e.rpes.length - 1]);
+    logPlanChange("sets", best.wid, e.name,
+      ["Sets " + was + " \u2192 " + (was + 1)],
+      {note: "Added from the plan check, for " + GROUPS[g].name.toLowerCase() + "."});
+    save(); hideModal(); render();
+    toast("A set added to " + e.name);
+  };
+  const bEx = m.querySelector("#vfEx");
+  if(bEx) bEx.onclick = ()=>{
+    hideModal();
+    /* Offered on the day that trains this muscle least, because that is where another
+       movement for it does the most good and unbalances the week the least. */
+    const counts = DAYS.map(wid=> ({wid,
+      n: (S.program[wid] || []).reduce((t, e)=> t + muscleFrac(e.name, g) * (parseInt(e.sets,10)||0), 0)}));
+    counts.sort((a, b)=> a.n - b.n);
+    const wid = (counts[0] && counts[0].wid) || DAYS[0];
+    if(wid) openAddExercise(wid);
+  };
+}
+/* ONE ROW PER MUSCLE, in the order the body is laid out rather than worst-first: a list
+   that reorders itself every time you add a set is a list you have to re-read. The ones
+   that are short are red and that is enough to find them. */
+function planVolHTML(vol){
+  if(!vol || !vol.length) return "";
+  const rows = vol.map(x=>{
+    const ceiling = Math.max(x.mrv, x.v, 1);
+    const pct = Math.max(2, Math.min(100, (x.v / ceiling) * 100));
+    const mark = Math.max(0, Math.min(100, (x.mev / ceiling) * 100));
+    return `<button type="button" class="pv-r is-${x.state}" data-vol="${esc(x.g)}"
+        aria-label="${esc(x.name)}, ${r1(x.v)} sets a week of at least ${r1(x.mev)}">
+      <span class="pv-sq">${esc(groupSym(x.g))}</span>
+      <span class="pv-m"><span class="pv-n">${esc(x.name)}</span>
+        <span class="pv-t"><span class="pv-f" style="width:${pct}%"></span>${
+          x.mev > 0 ? `<span class="pv-k" style="left:${mark}%"></span>` : ""}</span>
+      </span>
+      <span class="pv-v"><b>${r1(x.v)}</b>${x.mev > 0 ? "/" + r1(x.mev) : ""}</span>
+    </button>`;
+  }).join("");
+  return `<div class="pv">${rows}</div>
+    <div class="pv-leg">
+      <span><i style="background:var(--bad)"></i>under</span>
+      <span><i style="background:var(--acc)"></i>in range</span>
+      <span><i style="background:var(--warn)"></i>over</span>
+    </div>`;
 }
 /* =====================================================================
    WHERE YOUR REST DAYS GO, AND YOURS IS THE LAST WORD
@@ -42065,6 +42241,7 @@ function bind(){
     const none = $("#rbNone");
     if(none) none.hidden = shown > 0;
   };
+  document.querySelectorAll("[data-vol]").forEach(b=> b.onclick = ()=> openVolFix(b.dataset.vol));
   const schedF = $("#schedFold");
   if(schedF) schedF.ontoggle = ()=>{ SCHED_FOLD = schedF.open; };
   const plan = $("#planBtn");
