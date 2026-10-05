@@ -15,6 +15,7 @@ await p.evaluate(()=>{
   const af=document.getElementById('aiFull'); if(af) af.hidden=true;
   S.setup={name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()};
   S.tourDone=true; S.geo='off'; S.sleepAsked=todayStr();
+  S.priorAsked=Date.now(); S.priorTrainingWeeks=104;
   S.splitId=DEFAULT_SPLIT; applySplit();
   const wid=ROTATION[0];
   const mk=(d,ex)=>({id:"s"+d, workoutId:wid,

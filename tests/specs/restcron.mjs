@@ -1,7 +1,11 @@
 /* The account Worker's cron, run for real against a stub KV and a stub push service.
    The point is the timing: a rest alert has to leave on its own second rather than on the
    minute the cron happens to fire. */
-import worker from appFile('proxy/accountworker.js');
+/* No browser in this one — it runs the worker module directly — so it takes only the
+   path helper. A dynamic import, because a static one needs a literal specifier and the
+   path to the worker is worked out from where this file is. */
+import { fileUrl } from './_e26.mjs';
+const worker = (await import(fileUrl('proxy/accountworker.js'))).default;
 
 let bad = 0;
 const ck = (n, c, extra)=>{ console.log((c ? "  ok  " : "  BROKEN  ") + n + (c ? "" : " :: " + (extra||""))); if(!c) bad++; };

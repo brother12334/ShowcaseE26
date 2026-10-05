@@ -1,4 +1,4 @@
-import { chromium, APP_URL, shot, appFile, fileUrl } from './_e26.mjs';
+import { chromium, APP_URL, shot as shotPath, appFile, fileUrl } from './_e26.mjs';
 const b = await chromium.launch();
 const p = await (await b.newContext({viewport:{width:390,height:900}})).newPage();
 const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('dialog',d=>d.accept());
