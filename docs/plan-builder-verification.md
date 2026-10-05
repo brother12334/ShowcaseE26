@@ -569,6 +569,92 @@ evening runs to the end of the following Monday and no session is cut off part-w
 The four screens that each did this arithmetic inline against a hard-coded 7 now call
 `deloadDayIn()` and `deloadDaysLeft()`.
 
+## Phase 8 — streaks and the coach view
+
+### Weekly-target streaks
+
+Every streak the app could have had was a bad idea except this one. A **daily** streak
+rewards training today whether or not today is a training day, which turns a rest day into
+a broken promise and a deload into a failure. A streak of consecutive sessions punishes a
+three-day plan more than a six-day one. And any streak built on "don't break the chain"
+eventually asks somebody to train on a day they should not.
+
+So the unit is the week and the target is the plan's own:
+
+| State | When | Effect on the run |
+|---|---|---|
+| **hit** | sessions ≥ what the plan asks for **and** ≥ 75% of the week's planned sets | +1, and every 8th earns a grace week (2 banked at most) |
+| **deload** | any session in the week fell inside a deload | counts as hit outright — it is the week the plan asked for |
+| **frozen** | ill (a day flag, or said on the strip) or away (said on the strip) | neither hit nor missed; the run carries across it |
+| **graced** | missed, with a grace week banked | the grace week is spent and the run carries |
+| **miss** | everything else | the run returns to zero |
+| **live** | the week in progress | cannot break anything yet |
+
+`plannedSessionsPerWeek()` reads the layout — a seven-day layout says it outright, any
+other cycle length is pro-rated — and `plannedSetsPerWeek()` averages the prescribed sets
+across the plan's training days. The run is walked **forward** so a grace week is earned
+before it can be spent, which is the only order in which "one per eight" means anything.
+
+**Nothing shames anybody.** No "you broke your streak", no red, no flame, and the chip
+disappears rather than reading zero — a number that only ever goes down is a reason to
+close the app. `streak.mjs` §7 asserts that none of those strings can appear.
+
+Element 26 cannot tell a holiday from a quiet fortnight and does not guess: a missed week
+is tappable, and the two honest reasons ("I was ill", "I was away") are the person's to
+give and to take back. UI: a chip beside the date on Today, a twelve-week strip on History.
+
+### The coach view
+
+A read-only snapshot behind a link, for somebody who has never used Element 26 and is not
+going to install it to read one plan.
+
+**The worker** (`proxy/accountworker.js`, documented in `proxy/README.md`):
+
+| Route | Who | What |
+|---|---|---|
+| `POST /share` | the account | stores a snapshot, returns a 128-bit token once |
+| `GET /share/:token` | anybody with the token | the snapshot and its dates |
+| `DELETE /share/:token` | the account that made it | revokes it immediately |
+| `GET /shares` | the account | what is live, without the snapshots |
+
+The token is the credential (32 hex characters from `crypto.getRandomValues`), the expiry
+is 30 days by default and 90 at most — checked on read *and* written into the KV entry's
+own TTL so a bug in one cannot keep a link alive — and expired, revoked and never-existed
+all answer 404, because a distinct "expired" would confirm a token was once real. Limits:
+1 MB a snapshot, 10 live links an account, 10 creations an hour an account, 120 public
+reads an hour an address. **Deleting the account deletes every link it ever made**, which
+was the worst failure available here: data still being served by a token in somebody's
+chat history for an account that no longer exists to revoke it.
+
+**The snapshot** is assembled field by field from a named list (`shareSnapshot()`), never
+by taking `S` and deleting the private parts — a deny-list grows a hole the moment
+somebody adds a field, and the field that gets added is always the one you would not have
+shared. Always included: the plan, twelve weeks of per-muscle volume against the
+landmarks, the index lifts, records, the streak and the session grades. Off by default and
+chosen one at a time: bodyweight, sleep and check-ins, niggles, notes.
+
+`shareSnapshotSafe()` then searches the finished JSON for anything resembling an account
+id, a 32-hex key, a token or a bearer header, and **refuses the share** rather than
+trimming it: if that ever fires the right response is to fix the snapshot.
+
+**The viewer** (`#share=<token>`) runs instead of the app — before the splash, and
+`render()` itself refuses to draw while `share-view` is on the body, because the app has
+timers, visibility handlers and a sync that all call it on their own schedule and any one
+of them would have replaced a coach's page with somebody else's Today tab mid-read. It
+never touches `S` or localStorage, so a coach reading three clients' links on a borrowed
+laptop stores none of it.
+
+It is also the one screen that has to explain itself to a stranger, so every number
+carries its own sentence — what MEV, MAV and MRV mean, what the session grade compares
+against — and it says plainly **what was not shared**, so a reader knows the difference
+between "no injuries" and "injuries were not shared with me".
+
+**Verified:** `streak.mjs` (8 sections), `share.mjs` (8 sections, every network request
+aborted), and `tests/share-worker.mjs` — the real worker module driven against a mocked
+KV, covering the credential checks, the 128-bit token, the clamped expiry, the
+ownership-checked revoke, the rate limits, the origin allow-list and the
+account-deletion sweep. `node tests/run.js` runs all three.
+
 ## Audit IDs — what changed and what covers it
 
 | ID | Change | Covered by |
@@ -736,5 +822,5 @@ they are recomputed whenever a session is swept.
 | 5 | Builder, quality check, H9/H10/L5/M11, remove "Change the schedule" | done — `phase5.mjs` |
 | 6 | Periodization (M9) + M3 | done — `phase6.mjs`, invariants 9 and 10 |
 | 7 | M4, M5, M6, M10, L2 | done — `phase7.mjs`, invariant 11 |
-| 8 | Streaks + coach view | not started |
+| 8 | Streaks + coach view | done — `streak.mjs`, `share.mjs`, `tests/share-worker.mjs` |
 | 9 | Re-measurement, then bump `APP_VERSION` and `sw.js` `VERSION` | not started |

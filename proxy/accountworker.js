@@ -57,6 +57,59 @@ const ID_RE = /^E26-[0-9A-Z]{4}-[0-9A-Z]{4}$/;
 const KEY_RE = /^[a-f0-9]{32,64}$/;
 const ID_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
+/* ---------------------------------------------------------------------------
+   SHARE LINKS (the coach view)
+
+   A share is a read-only snapshot of somebody's training, addressed by a token and by
+   nothing else. The design rules it follows, in order of how much they matter:
+
+     THE TOKEN IS THE CREDENTIAL, and it is 128 bits from the platform CSPRNG. Not the
+       account id, not a short code, not anything guessable: a link somebody can hand to
+       a coach has to survive being pasted into a chat, which means it has to survive
+       being seen. 32 hex characters is 2^128 — enumerating them is not an attack, it is
+       a physics problem.
+
+     IT EXPIRES BY ITSELF. Thirty days by default, ninety at the most, enforced here and
+       written into the KV entry's own TTL so an unrevoked link cannot outlive its term
+       even if every other part of this worker is wrong. "I shared it once in 2024" must
+       not still be live.
+
+     IT IS A COPY, NOT A WINDOW. The snapshot is stored as it was at the moment of
+       sharing. A coach reading a stale copy is a nuisance; a link that quietly keeps
+       showing whatever the account holds today, for ever, is a different promise from
+       the one the person made when they sent it.
+
+     THE OWNER'S CREDENTIAL NEVER LEAVES. Creating, listing and revoking all need the
+       account key; the public read returns the snapshot and the dates and nothing else
+       — no account id, no name the caller did not put in the snapshot itself.
+
+   What this worker does NOT do is decide what goes in the snapshot. The app assembles it
+   (see shareSnapshot() in index.html) and this stores what it is given, within the size
+   limit. That is deliberate: the rules about what may be shared are product decisions
+   and belong where the person can see them, not buried in an edge function. */
+const SHARE_MAX_BODY = 1024 * 1024;        // 1 MB, per the brief
+const SHARE_DAYS_DEFAULT = 30;
+const SHARE_DAYS_MAX = 90;
+const SHARE_TOKEN_RE = /^[a-f0-9]{32}$/;   // 128 bits
+const SHARES_PER_ACCOUNT = 10;             // a list, not a publishing platform
+const SHARES_PER_HOUR = 10;                // creation, per account
+const SHARE_READS_PER_HOUR = 120;          // public reads, per client address
+function newShareToken() { return randomFrom("0123456789abcdef", 32); }
+/* The per-account index. Kept so /shares can list and DELETE can prove ownership, and
+   pruned on every read — the tokens themselves expire on their own TTL, so an index
+   that never forgot them would be the only place a dead link still appeared. */
+async function shareIndex(env, id) {
+  const raw = await env.E26_ACCOUNTS.get("shares:" + id);
+  let list = [];
+  try { list = JSON.parse(raw || "[]"); } catch (e) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  const now = Date.now();
+  return list.filter(x => x && SHARE_TOKEN_RE.test(x.token) && Number(x.expiresAt) > now);
+}
+async function putShareIndex(env, id, list) {
+  await env.E26_ACCOUNTS.put("shares:" + id, JSON.stringify(list.slice(0, SHARES_PER_ACCOUNT)));
+}
+
 function cors(origin) {
   const ok = ALLOWED_ORIGINS.includes(origin);
   return {
@@ -430,8 +483,15 @@ export default {
       const who = await auth(request, env);
       if (!who) return json({ error: "unauthorized" }, 401, origin);
       await env.E26_ACCOUNTS.delete("data:" + who.id);
+      /* AND EVERY LINK IT EVER HANDED OUT. Deleting the account and leaving a live share
+         link behind would be the worst outcome in this file: data still being served, by
+         a token still in somebody's chat history, for an account that no longer exists to
+         revoke it. The snapshots go first, then the index, then the account. */
+      const shares = await shareIndex(env, who.id);
+      for (const x of shares) await env.E26_ACCOUNTS.delete("share:" + x.token);
+      await env.E26_ACCOUNTS.delete("shares:" + who.id);
       await env.E26_ACCOUNTS.delete("acct:" + who.id);
-      return json({ ok: true }, 200, origin);
+      return json({ ok: true, shares: shares.length }, 200, origin);
     }
 
     /* THE DATA. One blob per account, addressed by the credential and nothing else. */
@@ -461,6 +521,108 @@ export default {
         return json({ ok: true }, 200, origin);
       }
       return json({ error: "method not allowed" }, 405, origin);
+    }
+
+    /* SHARE: CREATE. Authenticated, because this is the account's data leaving it. The
+       token is minted here and returned once in this response — like the account key,
+       there is nowhere else it can be read from afterwards, which is what makes revoking
+       meaningful. */
+    if (path === "/share" && request.method === "POST") {
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+
+      const bucket = "rate:shr:" + who.id + ":" + Math.floor(Date.now() / 3600000);
+      const seen = Number(await env.E26_ACCOUNTS.get(bucket)) || 0;
+      if (seen >= SHARES_PER_HOUR) return json({ error: "too many links created, try again later" }, 429, origin);
+      await env.E26_ACCOUNTS.put(bucket, String(seen + 1), { expirationTtl: 7200 });
+
+      const len = Number(request.headers.get("Content-Length") || 0);
+      if (len > SHARE_MAX_BODY) return json({ error: "too large" }, 413, origin);
+      const text = await request.text();
+      if (text.length > SHARE_MAX_BODY) return json({ error: "too large" }, 413, origin);
+      let body;
+      try { body = JSON.parse(text); } catch (e) { return json({ error: "bad json" }, 400, origin); }
+      if (!body || typeof body !== "object" || !body.data || typeof body.data !== "object") {
+        return json({ error: "bad body" }, 400, origin);
+      }
+      /* Clamped rather than rejected: a client asking for a year gets ninety days and is
+         told what it got, which is friendlier than a 400 and cannot be argued with. */
+      const asked = Number(body.days);
+      /* A term the caller asked for is honoured within the bounds; only a term they did
+         NOT ask for falls back to the default. The order matters: rounding first turned a
+         request for a few hours into zero, which then read as "unspecified" and granted
+         thirty days — a caller asking for the shortest possible link getting the longest
+         one is the wrong way for this to be wrong. */
+      let days = (isFinite(asked) && asked > 0)
+        ? Math.max(1, Math.min(SHARE_DAYS_MAX, Math.round(asked)))
+        : SHARE_DAYS_DEFAULT;
+
+      const list = await shareIndex(env, who.id);
+      if (list.length >= SHARES_PER_ACCOUNT) {
+        return json({ error: "too many live links, revoke one first" }, 409, origin);
+      }
+      const token = newShareToken();
+      const at = Date.now();
+      const expiresAt = at + days * 86400000;
+      const label = String(body.label || "").replace(/\s+/g, " ").trim().slice(0, 40);
+      const rec = { at, expiresAt, data: body.data, label, by: who.id };
+      /* The entry's own TTL is the backstop: the expiry is checked on read AND the key
+         removes itself, so a bug in one cannot keep a link alive. A little slack so a
+         clock skew cannot delete a link a second before its last read. */
+      await env.E26_ACCOUNTS.put("share:" + token, JSON.stringify(rec),
+        { expirationTtl: days * 86400 + 3600 });
+      list.unshift({ token, at, expiresAt, label, size: text.length });
+      await putShareIndex(env, who.id, list);
+      return json({ token, at, expiresAt, days, label }, 201, origin);
+    }
+
+    /* SHARE: LIST. What is live right now, with no snapshot contents — a list screen
+       needs dates and labels, not a megabyte each. */
+    if (path === "/shares" && request.method === "GET") {
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+      const list = await shareIndex(env, who.id);
+      await putShareIndex(env, who.id, list);     // the prune, written back
+      return json({ shares: list }, 200, origin);
+    }
+
+    /* SHARE: READ. The public one, and the only route in this worker that answers without
+       a credential — the token IS the credential. Rate-limited per client address so a
+       leaked link cannot be used to hammer the namespace, and it answers 404 for expired,
+       revoked and never-existed alike: a different answer for "expired" would confirm
+       that a token was once real.
+
+       No account id and no owner name come back. */
+    if (path.startsWith("/share/") && request.method === "GET") {
+      const token = path.slice("/share/".length);
+      if (!SHARE_TOKEN_RE.test(token)) return json({ error: "not found" }, 404, origin);
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      const bucket = "rate:shrd:" + ip + ":" + Math.floor(Date.now() / 3600000);
+      const seen = Number(await env.E26_ACCOUNTS.get(bucket)) || 0;
+      if (seen >= SHARE_READS_PER_HOUR) return json({ error: "too many requests" }, 429, origin);
+      await env.E26_ACCOUNTS.put(bucket, String(seen + 1), { expirationTtl: 7200 });
+
+      const raw = await env.E26_ACCOUNTS.get("share:" + token);
+      if (!raw) return json({ error: "not found" }, 404, origin);
+      let rec;
+      try { rec = JSON.parse(raw); } catch (e) { return json({ error: "not found" }, 404, origin); }
+      if (!rec || !(Number(rec.expiresAt) > Date.now())) return json({ error: "not found" }, 404, origin);
+      return json({ at: rec.at, expiresAt: rec.expiresAt, label: rec.label || "",
+                    data: rec.data }, 200, origin);
+    }
+
+    /* SHARE: REVOKE. The owner's credential, and the owner's own index checked as well,
+       so holding a token is not enough to delete somebody else's link. */
+    if (path.startsWith("/share/") && request.method === "DELETE") {
+      const who = await auth(request, env);
+      if (!who) return json({ error: "unauthorized" }, 401, origin);
+      const token = path.slice("/share/".length);
+      if (!SHARE_TOKEN_RE.test(token)) return json({ error: "not found" }, 404, origin);
+      const list = await shareIndex(env, who.id);
+      if (!list.some(x => x.token === token)) return json({ error: "not found" }, 404, origin);
+      await env.E26_ACCOUNTS.delete("share:" + token);
+      await putShareIndex(env, who.id, list.filter(x => x.token !== token));
+      return json({ ok: true }, 200, origin);
     }
 
     /* PUSH: the service worker's one read. Authorised by the subscription token rather

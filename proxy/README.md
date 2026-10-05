@@ -177,6 +177,65 @@ alone cannot do it. It removes the account record and its data blob, with no sof
 and nothing to restore from. The app asks twice and makes you type your ID before it
 calls this.
 
+## Share links (the coach view)
+
+Four routes, and one of them answers without a credential — so it is worth knowing what
+it will and will not do.
+
+| Route | Who | What |
+|---|---|---|
+| `POST /share` | the account | stores a snapshot, returns a 128-bit token once |
+| `GET /share/:token` | anybody with the token | the snapshot, its dates and its label |
+| `DELETE /share/:token` | the account that made it | revokes it immediately |
+| `GET /shares` | the account | what is live, with dates and sizes, no snapshots |
+
+The rules the worker enforces, whatever the app asks for:
+
+- **The token is the credential.** 32 hex characters from `crypto.getRandomValues`. The
+  account id is never part of it and is never returned by the public read.
+- **It expires.** 30 days by default, 90 at most, clamped here. The expiry is checked on
+  read *and* written into the KV entry's own `expirationTtl`, so a bug in one cannot keep
+  a link alive. A term the caller asks for is honoured within those bounds; only a term
+  they do not ask for gets the default.
+- **1 MB per snapshot**, 10 live links per account, 10 creations an hour per account, 120
+  public reads an hour per client address.
+- **Expired, revoked and never-existed all answer 404.** A distinct "expired" would
+  confirm that a token was once real.
+- **Deleting the account deletes every link it ever made**, snapshots and index both. A
+  live link outliving the account that could revoke it would be the worst failure here.
+- The `Origin` allow-list still governs every one of these routes, the public read
+  included.
+
+What the worker does **not** do is decide what goes in a snapshot. The app assembles it
+(`shareSnapshot()` in `index.html`, built from a named list rather than by deleting the
+private parts of `S`) and checks the result for anything that looks like a credential
+before sending. Those rules are product decisions and belong where the person can see
+them, not in an edge function.
+
+```bash
+# make one (authenticated)
+curl -s -X POST https://element26-accounts.<sub>.workers.dev/share \
+  -H 'Origin: https://your.site' -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer E26-7F42-K9P3.<key>' \
+  -d '{"data":{"v":1,"who":{"name":"Test"}},"days":7,"label":"My coach"}'
+# → {"token":"…32 hex…","expiresAt":…,"days":7,"label":"My coach"}
+
+# read it with nothing but the token
+curl -s https://element26-accounts.<sub>.workers.dev/share/<token> \
+  -H 'Origin: https://your.site'
+
+# and revoke it
+curl -s -X DELETE https://element26-accounts.<sub>.workers.dev/share/<token> \
+  -H 'Origin: https://your.site' -H 'Authorization: Bearer E26-7F42-K9P3.<key>'
+```
+
+The handlers are unit-tested against a mocked KV, including the expiry, the ownership
+checks and the account-deletion sweep:
+
+```bash
+node tests/share-worker.mjs
+```
+
 ## If both halves are lost
 
 The account is gone, and that is the honest trade for having no email and no password.
