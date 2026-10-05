@@ -250,6 +250,23 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
    says "this is today"; the accent outline says "this was a choice", so the strip can be
    read at a glance without a legend. */
 .plate.pickd{box-shadow:0 0 0 2px var(--bg), 0 0 0 3.5px var(--acc)}
+/* The rest-day editor: the cycle in the order it runs, one row per slot. */
+.rl-list{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.rl-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border-top:1px solid var(--line)}
+.rl-row:first-child{border-top:0}
+.rl-rest{background:var(--card2,rgba(255,255,255,.03))}
+.rl-wd{font:11px var(--mono);color:var(--faint);min-width:26px}
+.rl-n{flex:1;font-size:14px}
+.rl-rest .rl-n{color:var(--dim);font-style:italic}
+.rl-btns{display:flex;gap:5px;align-items:center}
+.rl-b{background:none;border:1px solid var(--line);border-radius:7px;color:var(--dim);
+  cursor:pointer;padding:3px 8px;font-size:12.5px;line-height:1.5;min-height:28px}
+.rl-b:hover{color:var(--text);border-color:var(--dim)}
+.rl-add{font-size:12px;color:var(--faint)}
+.rl-x svg{width:13px;height:13px}
+.tw-now{background:var(--acc-soft)}
+.tw-tag{font-style:normal;font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--acc);margin-left:6px}
 /* A REST IS NOT A SMALL WORKOUT.
 
    It used to be the same KIND of object as a training cell — filled, outlined, rounded,
@@ -6122,7 +6139,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "39.5";
+const APP_VERSION = "39.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6284,10 +6301,62 @@ const DEFAULT_SPLIT = "ul4";
 /* A split you built yourself lives on the profile as a whole object rather than a key,
    so it survives without needing an entry in SPLITS. */
 function currentSplit(){
-  if(S && S.customSplit && Array.isArray(S.customSplit.days) && S.customSplit.days.length){
-    return S.customSplit;
+  const sp = (S && S.customSplit && Array.isArray(S.customSplit.days) && S.customSplit.days.length)
+    ? S.customSplit
+    : (SPLITS[(S && S.splitId)] || SPLITS[DEFAULT_SPLIT]);
+  /* YOUR OWN LAYOUT WINS OVER THE ONE THE SPLIT CAME WITH.
+
+     Where the rest days fall is the one part of a split somebody is most likely to
+     disagree with, for reasons no plan and no importer can know: a gym that shuts on
+     Sundays, five-a-side on Thursdays, a job. S.splitLayout is the edited version \u2014 an
+     ordered list of day ids and the word "rest" \u2014 and it is kept keyed to the split it
+     was written for, so switching split or importing a new plan does not leave a layout
+     describing days that no longer exist. */
+  const own = S && S.splitLayout;
+  if(own && Array.isArray(own.layout) && own.layout.length && own.key === splitKeyOf(sp)){
+    const ids = sp.days.map(d=> d.id);
+    const clean = own.layout.filter(k=> k === "rest" || ids.indexOf(k) > -1);
+    /* Every training day has to appear exactly once: an edit that dropped one would
+       quietly delete a day's worth of training from the rotation. */
+    const seen = new Set(clean.filter(k=> k !== "rest"));
+    if(seen.size === ids.length) return Object.assign({}, sp, {layout: clean});
   }
-  return SPLITS[(S && S.splitId)] || SPLITS[DEFAULT_SPLIT];
+  return sp;
+}
+/* Which split a stored layout belongs to. The id for a built-in, the day ids for an
+   import, because an imported split has no id and two imports are not the same split. */
+function splitKeyOf(sp){
+  if(!sp) return "";
+  if(sp.custom || sp.imported) return "custom:" + sp.days.map(d=> d.id).join(",");
+  return "split:" + ((S && S.splitId) || DEFAULT_SPLIT);
+}
+/* The layout as it stands, and where each part of it came from. The editor reads this. */
+function layoutNow(){
+  const sp = currentSplit();
+  return {layout: (sp.layout && sp.layout.length ? sp.layout : sp.days.map(d=> d.id)).slice(),
+          key: splitKeyOf(sp), days: sp.days.slice(),
+          edited: !!(S && S.splitLayout && S.splitLayout.key === splitKeyOf(sp)),
+          fromPlan: !!sp.layoutFromPlan};
+}
+/* Write an edited layout, or clear it and go back to what the split arrived with. */
+function setSplitLayout(list){
+  const sp = (S && S.customSplit && Array.isArray(S.customSplit.days) && S.customSplit.days.length)
+    ? S.customSplit
+    : (SPLITS[(S && S.splitId)] || SPLITS[DEFAULT_SPLIT]);
+  const ids = sp.days.map(d=> d.id);
+  const clean = (list || []).filter(k=> k === "rest" || ids.indexOf(k) > -1);
+  const seen = new Set(clean.filter(k=> k !== "rest"));
+  if(seen.size !== ids.length) return false;          // a day went missing: refuse
+  if(clean.filter(k=> k === "rest").length > 5) return false;
+  S.splitLayout = {key: splitKeyOf(sp), layout: clean, at: Date.now()};
+  applySplit();
+  save(); queueSync();
+  return true;
+}
+function clearSplitLayout(){
+  delete S.splitLayout;
+  applySplit();
+  save(); queueSync();
 }
 function splitName(){ const sp = currentSplit(); return sp.name + (sp.tag ? ", " + sp.tag : ""); }
 
@@ -6296,6 +6365,53 @@ function splitName(){ const sp = currentSplit(); return sp.name + (sp.tag ? ", "
    what each one is called, and this turns that into the four values applySplit() needs.
    Names are optional — anything unnamed falls back to "Day n" and can be renamed in the
    Program tab. */
+const DOW_KEYS = ["sun","mon","tue","wed","thu","fri","sat"];
+/* THE WEEK A DOCUMENT NAMES, as a layout the rest of the app already understands.
+
+   Returns null unless the document actually assigned weekdays \u2014 that is the whole point
+   of it, and inventing a week for a plan that did not write one is how the rest days got
+   moved in the first place.
+
+   One session per weekday. A plan with two sessions on one day is not a seven-slot week,
+   so it falls back to the ordinary spread rather than silently dropping one of them.
+
+   WHAT COUNTS AS A REST. A weekday the document names as rest, and a weekday nothing is
+   assigned to in a week whose training days are all placed. The second is not a guess: if
+   Monday, Tuesday, Thursday and Friday have sessions and the document is a weekly table,
+   Wednesday is not an unknown, it is a day off.
+
+   The layout starts on the first training weekday rather than on Sunday, because slot 0
+   is where the cycle starts and a cycle that opens on a rest day opens on nothing. */
+function weekLayoutFrom(doc, split){
+  const days = (doc && Array.isArray(doc.days)) ? doc.days : [];
+  if(days.length !== split.days.length || !days.length) return null;
+  const byDow = {};
+  let named = 0;
+  days.forEach((d, i)=>{
+    const k = String((d && d.weekday) || "").toLowerCase();
+    const dow = DOW_KEYS.indexOf(k);
+    if(dow < 0) return;
+    if(byDow[dow] != null) { named = -1; return; }      // two sessions on one weekday
+    byDow[dow] = split.days[i].id;
+    named++;
+  });
+  if(named !== days.length) return null;                 // not every session was placed
+  const restNamed = {};
+  (Array.isArray(doc.restWeekdays) ? doc.restWeekdays : []).forEach(k=>{
+    const dow = DOW_KEYS.indexOf(String(k || "").toLowerCase());
+    if(dow > -1 && byDow[dow] == null) restNamed[dow] = true;
+  });
+  const week = [];
+  for(let dow = 0; dow < 7; dow++){
+    week.push(byDow[dow] != null ? byDow[dow] : "rest");
+  }
+  /* Rotate so the cycle opens on a training day. */
+  let start = 0;
+  while(start < 7 && week[start] === "rest") start++;
+  if(start >= 7) return null;
+  const layout = week.slice(start).concat(week.slice(0, start));
+  return {layout, startDow: start, restNamed};
+}
 function buildCustomSplit(nDays, nRests, names){
   const days = [];
   for(let i = 0; i < nDays; i++){
@@ -6584,8 +6700,19 @@ function restDueIndex(){
    already trained or opted out of it. Computed rather than written: nothing is saved
    until the day is actually over, which is what fillMissedRestDays() is for. */
 function scheduledRestToday(){
-  if(restDueIndex() < 0) return false;
   const today = todayStr();
+  /* A PINNED WEEK ANSWERS THIS FROM THE CALENDAR. The due-index machinery counts rests
+     against training days completed, which is how a rest is placed in a cycle that
+     drifts. A plan that names Wednesday as a rest day is not counting anything: it is
+     Wednesday or it is not. */
+  const pinned = weekPinnedToday();
+  if(pinned != null){
+    if(pinned !== "rest") return false;
+    if(restTombstones().indexOf(today) > -1) return false;    // you said you would train
+    if((S.sessions || []).some(x=> x && x.date === today)) return false;
+    return true;
+  }
+  if(restDueIndex() < 0) return false;
   if(restTombstones().indexOf(today) > -1) return false;      // you said you would train
   if((S.sessions || []).some(x=> x && x.date === today)) return false;
   return true;
@@ -11992,7 +12119,28 @@ function queueSync(){
 
 function todaysWorkoutId(){
   if(S.override && S.override.date === todayStr()) return S.override.workoutId;
+  /* A WEEK YOUR PLAN PINNED TO WEEKDAYS IS READ OFF THE CALENDAR.
+
+     The pointer answers "where is the rotation up to", which is the right question for a
+     cycle that drifts and the wrong one for a plan that says Wednesday is Pull. Miss
+     Monday and the pointer still says Monday; your plan does not say to do Monday's
+     session on Wednesday, it says Wednesday is Pull. So the weekday decides, and the
+     missed day is a missed day \u2014 which is what it was. */
+  const pinned = weekPinnedToday();
+  if(pinned && pinned !== "rest") return pinned;
   return ROTATION[S.pointer];
+}
+/* Which slot of a pinned week today is, or null when nothing is pinned. */
+function weekPinnedSlotToday(){
+  const dow = weekPinnedDow();
+  if(dow == null) return null;
+  return (new Date().getDay() - dow + 7) % 7;
+}
+/* What a pinned week has on today: a workout id, "rest", or null when not pinned. */
+function weekPinnedToday(){
+  const i = weekPinnedSlotToday();
+  if(i == null) return null;
+  return CYCLE_LAYOUT[i] || null;
 }
 function altIndex(wid){
   return S.sessions.filter(s=>s.workoutId===wid).length % 2;
@@ -22052,6 +22200,7 @@ function aiSystemPrompt(){
 "1. One entry in 'days' is ONE TRAINING SESSION in the rotation, in the order it is performed. Do not create a day for rest. If the source names its sessions (Push, Pull, Upper A, Chest and Triceps, Day 1), keep those names exactly.",
 "2. If the programme repeats the same sessions every week, describe those sessions once. Put week-to-week differences in 'weeklyChanges' rather than inventing extra days.",
 "3. 'restDaysPerCycle' only when the document actually says how the week is laid out. Otherwise leave it null and set stated.schedule false.",
+"3a. WEEKDAYS. If the document puts its sessions on named days \u2014 'Monday: Push', a weekly table, a column per day \u2014 put that day in each session's 'weekday', and list every day it calls rest or off in 'restWeekdays'. This is the plan's own schedule and the app follows it exactly, so take it only from what is written: no weekday anywhere means empty strings and an empty list.",
 "3b. 'restDaysFlexible' true ONLY where the document says in as many words that the rest days are the lifter's to place \u2014 'take rest days as needed', 'train 4 days a week, any days you like', 'schedule the off days to suit you'. A plan that simply never mentions rest days is NOT saying this: leave it false. Naming fixed days (\u2018Mon/Wed/Fri\u2019) or writing rest into the rotation is the opposite of flexible.",
 "3c. 'daysAnyOrder' true ONLY where the document says the SESSIONS themselves may be performed in any order \u2014 'do these in whatever order suits your week', 'the three workouts can be done on any days'. Listing sessions as Day 1, Day 2, Day 3, or as Push then Pull then Legs, is prescribing an order, not permitting any: leave it false. Silence is false.",
 "4b. 'planKind' IS THE ONE PLACE YOU MAY READ BETWEEN THE LINES, and it is fenced. Everything else in this schema is transcription; this is a classification, and the app needs it to know what somebody is actually running. Fill it in from the sessions themselves: a Push / Pull / Legs rotation is family 'ppl' whether or not those words appear, four sessions alternating upper and lower body is 'upper_lower', one session per muscle group is 'bro_split'. 'named' is different and much stricter: put a published programme's name there ONLY if the document names it — 5/3/1, StrongLifts 5x5, PHUL, PHAT, GZCLP, nSuns, Starting Strength, Candito, Sheiko — and leave it empty if the plan merely resembles one, because 'this looks like 5/3/1' is a guess and the app will show it to the person as a fact. Set 'stated' true only when the document says in words what kind of plan it is, false when you worked it out from the structure, and put what you worked it out FROM in 'evidence' — a heading, a sentence, or 'sessions named Push, Pull, Legs'. Where the shape genuinely does not resolve, 'unclear' is a real answer and a better one than a confident wrong label.",
@@ -22137,6 +22286,10 @@ const AI_PLAN_SCHEMA = {
     defaultRestNote: {type:"STRING",
                       description:"that blanket rest as the document words it, e.g. '2-3 min between sets'"},
     restDaysPerCycle:{type:"INTEGER", nullable:true},
+    /* THE REST DAYS THE DOCUMENT ACTUALLY NAMES, as weekdays. A count says how many; this
+       says which, and where a plan gives both the names are the ones to follow. */
+    restWeekdays:{type:"ARRAY", items:{type:"STRING", enum:["mon","tue","wed","thu","fri","sat","sun"]},
+                  description:"weekdays the document names as rest or off days. Only what it says; empty if it names none."},
     restDaysFlexible:{type:"BOOLEAN",
                       description:"true only if the document says the rest days are the lifter's to place"},
     daysAnyOrder:    {type:"BOOLEAN",
@@ -22179,6 +22332,11 @@ const AI_PLAN_SCHEMA = {
         type:"OBJECT",
         properties:{
           name: {type:"STRING"},
+          /* WHICH DAY OF THE WEEK THE DOCUMENT PUTS THIS SESSION ON. Plans say this far
+             more often than they say a rest-day count, and losing it was how a programme
+             written around somebody's week came back with the rest days moved. */
+          weekday:{type:"STRING", enum:["mon","tue","wed","thu","fri","sat","sun",""],
+                   description:"the weekday this session is assigned to, ONLY if the document names one (a heading like 'Monday - Push', a column, a weekly table). Empty otherwise."},
           notes:{type:"STRING"},
           restSeconds:{type:"INTEGER", nullable:true,
                        description:"a rest period stated for this whole session, in seconds"},
@@ -22237,12 +22395,12 @@ const AI_PLAN_SCHEMA = {
           }
         },
         required:["name","exercises"],
-        propertyOrdering:["name","notes","restSeconds","restNote","exercises"]
+        propertyOrdering:["name","weekday","notes","restSeconds","restNote","exercises"]
       }
     }
   },
   required:["understood","days"],
-  propertyOrdering:["understood","problem","planName","goal","weeks","unit","defaultRestSeconds","defaultRestNote","restDaysPerCycle","restDaysFlexible","daysAnyOrder","stated",
+  propertyOrdering:["understood","problem","planName","goal","weeks","unit","defaultRestSeconds","defaultRestNote","restDaysPerCycle","restWeekdays","restDaysFlexible","daysAnyOrder","stated",
                     "phases","deloadWeeks","testingWeeks","weeklyChanges","progressionRules",
                     "specialInstructions","planNotes","warnings","days"]
 };
@@ -22723,6 +22881,25 @@ function aiPlanToProgram(doc, answers){
   rests = Math.max(0, Math.min(5, isFinite(rests) ? rests : 1));
 
   const split = buildCustomSplit(days.length, rests, names);
+  /* THE PLAN'S OWN WEEK, WHERE IT WROTE ONE DOWN.
+
+     buildCustomSplit() spreads the rests evenly by arithmetic, which is the right answer
+     for a document that gives a count and nothing else and the wrong one for a document
+     that says "Monday Push, Tuesday Pull, Wednesday off". A test user had exactly that: a
+     plan naming its rest days, and an app that read the count, threw the names away and
+     recommended rests of its own two days later.
+
+     So where the document assigns weekdays, the layout IS the week: seven slots, each one
+     the session that belongs on it or a rest. Nothing is inferred \u2014 a day the document
+     leaves blank is a rest only if it SAID so, or if every other day of the week is
+     spoken for. */
+  const weekLayout = weekLayoutFrom(doc, split);
+  if(weekLayout){
+    split.layout = weekLayout.layout;
+    split.startDow = weekLayout.startDow;
+    split.layoutFromPlan = true;
+    split.tag = days.length + " days a week, on your plan's own days";
+  }
   split.name = aiTrim(doc.planName, 32) || "My plan";
   split.tag = days.length + " days a week";
   split.imported = true;
@@ -24619,13 +24796,16 @@ function weekLabelCovers(label, wk){
 }
 /* Everything the document says about the week you are actually in. */
 function planWeekNotes(){
-  const m = S.importMeta, w = planWeekNow();
-  if(!m || !w) return null;
+  const m = S.importMeta || {}, w = planWeekNow();
+  if(!w) return null;
+  /* A testing week somebody added themselves is reason enough for this card, with or
+     without an imported document behind it. */
+  if(!S.importMeta && !testWeeksEdited()) return null;
   const wk = w.week;
   const out = {week: w, phase: null, deload: null, testing: null, changes: []};
   (m.phases || []).forEach(p=>{ if(!out.phase && weekLabelCovers(p.weeks, wk)) out.phase = p; });
   (m.deloadWeeks || []).forEach(p=>{ if(!out.deload && weekLabelCovers(p.week, wk)) out.deload = p; });
-  (m.testingWeeks || []).forEach(p=>{ if(!out.testing && weekLabelCovers(p.week, wk)) out.testing = p; });
+  testWeeksNow().forEach(p=>{ if(!out.testing && weekLabelCovers(p.week, wk)) out.testing = p; });
   (m.weeklyChanges || []).forEach(p=>{ if(weekLabelCovers(p.week, wk)) out.changes.push(p); });
   if(!out.phase && !out.deload && !out.testing && !out.changes.length && !w.of) return null;
   return out;
@@ -24639,7 +24819,11 @@ function planWeekStripHTML(){
   if(!n) return "";
   const said = [];
   if(n.deload)  said.push("your plan calls this a deload");
-  if(n.testing) said.push("testing week");
+  /* With its instruction, not just its name. "Testing week" on its own sends you to
+     another screen to find out what the test IS, on the one day you need to know before
+     you start. */
+  if(n.testing) said.push("testing week" + (n.testing.instruction
+    ? ": " + String(n.testing.instruction).slice(0, 70) : ""));
   n.changes.forEach(c=> said.push(c.change));
   if(!said.length && n.phase) said.push(n.phase.name);
   if(!said.length) return "";
@@ -24711,6 +24895,172 @@ function planWeekCardHTML(){
     <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">What your plan says about this week, in its own words.</div>
     ${body}</div>`;
 }
+/* =====================================================================
+   WHERE YOUR REST DAYS GO, AND YOURS IS THE LAST WORD
+
+   The layout a split arrives with is either arithmetic (an even spread of as many rests
+   as the cycle has) or the plan's own week, where the document named its days. Both are
+   good starting points and neither can know about the gym that shuts on Sunday, the
+   five-a-side on Thursday, or the week somebody actually has.
+
+   So the cycle is editable here, in the order it runs: every training day and every rest
+   in a line, with a rest addable after any day, removable, and movable. The rules are the
+   two that keep a cycle a cycle \u2014 every training day appears exactly once, and the rests
+   stay within a sane count \u2014 and they are enforced in setSplitLayout() rather than in the
+   buttons, so no sequence of taps can produce a programme missing a day.
+
+   Changing the layout is a change to the PLAN, so it goes in the plan history like any
+   other, and "put it back" restores whatever the split arrived with. */
+function restLayoutCardHTML(){
+  const L = layoutNow();
+  const nRest = L.layout.filter(k=> k === "rest").length;
+  const pinned = weekPinnedDow();
+  const row = (k, i)=>{
+    const rest = k === "rest";
+    const wd = slotWeekday(i);
+    return `<div class="rl-row${rest ? " rl-rest" : ""}">
+      <span class="rl-wd">${esc(pinned != null ? wd : "\u00b7")}</span>
+      <span class="rl-n">${rest ? "Rest" : esc(dayName(k))}</span>
+      <span class="rl-btns">
+        ${rest
+          ? `<button class="rl-b" data-rlup="${i}" aria-label="Move this rest earlier">\u2191</button>
+             <button class="rl-b" data-rldown="${i}" aria-label="Move this rest later">\u2193</button>
+             <button class="rl-b rl-x" data-rldel="${i}" aria-label="Remove this rest day">${ICON.close}</button>`
+          : `<button class="rl-b rl-add" data-rladd="${i}" aria-label="Add a rest day after ${esc(dayName(k))}">+ rest</button>`}
+      </span>
+    </div>`;
+  };
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>Rest days</h3>
+    </div>
+    <div class="sub" style="margin:4px 0 10px">${
+      L.fromPlan
+        ? "Your plan names the days, so Element 26 runs them exactly as written."
+        : L.edited
+          ? "Placed by you."
+          : "Spread through the cycle. Move them to wherever your week actually has room."}
+      ${nRest} rest day${nRest === 1 ? "" : "s"} in a ${L.layout.length}-day cycle${
+        pinned != null ? ", pinned to the weekdays your plan names" : ""}.</div>
+    <div class="rl-list">${L.layout.map(row).join("")}</div>
+    ${L.edited ? `<div style="text-align:center;margin-top:10px">
+      <button class="linklike" id="rlReset">put the original schedule back</button></div>` : ""}
+  </div>`;
+}
+/* =====================================================================
+   TESTING WEEKS, AND WHOSE LIST THEY ARE
+
+   A testing week is the week a plan tells you to go and find out what you can lift \u2014 a
+   max attempt, an AMRAP re-test, a timed effort. The importer reads them out of a
+   document and the app has shown them ever since, on Today in the week strip and in the
+   Program tab. What it could not do was let anybody CHANGE them, which left three
+   ordinary things impossible: a plan that never mentioned testing could not have one
+   added, a test that slipped a week could not be moved, and a test somebody had decided
+   against could not be taken off the screen it kept appearing on.
+
+   So the list becomes the person's the moment they touch it. Until then it is the
+   document's, word for word, and `S.testWeeks` does not exist \u2014 which is what keeps a
+   re-import honest: nothing of yours is overwritten because there is nothing of yours
+   yet. After the first edit the stored list is the authority, and "use my plan's list
+   again" throws it away. */
+function testWeeksNow(){
+  if(Array.isArray(S.testWeeks)) return S.testWeeks;
+  return ((S.importMeta || {}).testingWeeks) || [];
+}
+function testWeeksOwn(){
+  if(!Array.isArray(S.testWeeks)){
+    S.testWeeks = (((S.importMeta || {}).testingWeeks) || []).map(x=> ({
+      week: String((x && x.week) || ""), instruction: String((x && x.instruction) || "")}));
+  }
+  return S.testWeeks;
+}
+function testWeeksEdited(){ return Array.isArray(S.testWeeks); }
+/* A week label the app will be able to read back. weekLabelCovers() understands a
+   number, a list, a range and "every 4th"; anything else matches no week at all, which
+   would be a test that never arrives. */
+function testWeekLabelOk(v){
+  const t = String(v || "").trim();
+  if(!t) return false;
+  return /\d/.test(t) && weekLabelCovers(t, parseInt((t.match(/\d+/) || [0])[0], 10));
+}
+function saveTestWeek(i, week, instruction){
+  const list = testWeeksOwn();
+  const row = {week: String(week || "").trim().slice(0, 24),
+               instruction: String(instruction || "").trim().slice(0, 160)};
+  if(!testWeekLabelOk(row.week)) return false;
+  if(i == null || i < 0 || i >= list.length) list.push(row); else list[i] = row;
+  list.sort((a, b)=> (parseInt((String(a.week).match(/\d+/)||[99])[0],10))
+                   - (parseInt((String(b.week).match(/\d+/)||[99])[0],10)));
+  save(); queueSync();
+  return true;
+}
+function removeTestWeek(i){
+  const list = testWeeksOwn();
+  if(i < 0 || i >= list.length) return false;
+  list.splice(i, 1);
+  save(); queueSync();
+  return true;
+}
+function clearTestWeeks(){ delete S.testWeeks; save(); queueSync(); }
+function testWeeksCardHTML(){
+  const list = testWeeksNow();
+  const mine = testWeeksEdited();
+  const now = planWeekNow();
+  const rows = list.map((x, i)=>{
+    const on = now && weekLabelCovers(x.week, now.week);
+    return `<div class="rl-row${on ? " tw-now" : ""}">
+      <span class="rl-wd">${esc(String(x.week || "?"))}</span>
+      <span class="rl-n">${esc(x.instruction || "Test week")}${
+        on ? ` <i class="tw-tag">this week</i>` : ""}</span>
+      <span class="rl-btns">
+        <button class="rl-b" data-twedit="${i}" aria-label="Change this testing week">edit</button>
+        <button class="rl-b rl-x" data-twdel="${i}" aria-label="Remove this testing week">${ICON.close}</button>
+      </span></div>`;
+  }).join("");
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>Testing weeks</h3>
+    </div>
+    <div class="sub" style="margin:4px 0 10px">The weeks you go and find out what you can
+      lift. ${mine ? "This list is yours."
+        : list.length ? "Read from your plan, word for word \u2014 change anything and it becomes yours."
+        : "Your plan doesn't name any. Add one whenever you want a check-in with the numbers."}
+      ${now ? "You are in week " + now.week + (now.of ? " of " + now.of : "") + "." : ""}</div>
+    ${list.length ? `<div class="rl-list">${rows}</div>` : ""}
+    <div class="btn-row" style="margin-top:${list.length ? 10 : 0}px">
+      <button class="btn ghost small" id="twAdd" style="flex:1">Add a testing week</button>
+    </div>
+    ${mine ? `<div style="text-align:center;margin-top:10px">
+      <button class="linklike" id="twReset">use my plan's list again</button></div>` : ""}
+  </div>`;
+}
+function openTestWeekEditor(i){
+  const list = testWeeksNow();
+  const cur = (i != null && i > -1) ? list[i] : null;
+  showModal(`<h3>${cur ? "Change this testing week" : "Add a testing week"}</h3>
+    <div class="sub" style="margin:4px 0 12px">Which week of your programme, and what to do
+      in it. A number ("4"), a few ("4, 8"), a span ("9-10") or a repeat ("every 6th") all
+      work \u2014 the app shows it on Today when that week comes round.</div>
+    <div class="field"><label>Week</label>
+      <input id="twWeek" value="${esc(cur ? cur.week : "")}" placeholder="e.g. 4" autocomplete="off"></div>
+    <div class="field" style="margin-top:10px"><label>What to do</label>
+      <input id="twWhat" value="${esc(cur ? cur.instruction : "")}"
+        placeholder="e.g. work up to a heavy single on the main lifts" autocomplete="off"></div>
+    <div class="btn-row" style="margin-top:16px">
+      <button class="btn" id="twSave" style="flex:1">Save</button></div>
+    <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`);
+  const m = $("#modal");
+  m.querySelector("#twSave").onclick = ()=>{
+    const wk = m.querySelector("#twWeek").value;
+    if(!saveTestWeek(i, wk, m.querySelector("#twWhat").value)){
+      toast("A week number, so the app knows when to show it", "warn");
+      return;
+    }
+    hideModal();
+    toast(cur ? "Testing week updated" : "Testing week added", "good");
+    render();
+  };
+}
 function importMetaCardHTML(){
   const m = S.importMeta;
   if(!m) return "";
@@ -24721,7 +25071,11 @@ function importMetaCardHTML(){
   const body =
     sec("Phases",       (m.phases||[]).map(x=> x.name + (x.weeks ? " · " + x.weeks : "") + (x.focus ? " — " + x.focus : ""))) +
     sec("Deload weeks", (m.deloadWeeks||[]).map(x=> "Week " + x.week + (x.instruction ? " — " + x.instruction : ""))) +
-    sec("Testing weeks",(m.testingWeeks||[]).map(x=> "Week " + x.week + (x.instruction ? " — " + x.instruction : ""))) +
+    /* The testing weeks have a card of their own now, where they can be changed. Listed
+       here only while they are still the document's — two copies of a list somebody can
+       edit is one copy too many. */
+    sec("Testing weeks", testWeeksEdited() ? []
+        : (m.testingWeeks||[]).map(x=> "Week " + x.week + (x.instruction ? " — " + x.instruction : ""))) +
     sec("Week to week", (m.weeklyChanges||[]).map(x=> (x.week ? "Week " + x.week + " — " : "") + x.change)) +
     sec("Progression",  (m.progression||[]).map(x=> (x.applies ? x.applies + " — " : "") + x.rule)) +
     sec("Special instructions", (m.special||[]).map(x=> x)) +
@@ -25356,11 +25710,38 @@ function render(){
    more here than a fixed calendar, because sleep is the binding constraint.        */
 // CYCLE_LAYOUT itself now comes from your split; see applySplit().
 const WEEKDAY_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const WEEKDAY_LONG = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+/* The weekday slot 0 is pinned to, or null when the cycle is free to drift. A layout is
+   pinned only when it came from a plan that named weekdays AND still spans exactly one
+   week \u2014 an edit that added a rest to a seven-slot week makes it eight, at which point it
+   cannot be a week any more and the drift is honest again. */
+function weekPinnedDow(){
+  const sp = currentSplit();
+  if(!sp || sp.startDow == null) return null;
+  if(CYCLE_LAYOUT.length !== 7) return null;
+  return sp.startDow;
+}
 
 /* The date slot 0 of the current cycle is anchored to. Prefers the first training day
    actually logged this cycle, so the strip lines up with what you did rather than with
    when the app happened to roll over. */
 function cycleAnchorDate(){
+  /* A WEEK THE PLAN PINNED TO WEEKDAYS IS ANCHORED TO THE CALENDAR, NOT TO YOU.
+
+     The drift described above is correct for a cycle that does not fit a week, and wrong
+     for one that IS a week: a plan that says Monday Push, Wednesday Pull, Friday Legs
+     means those weekdays every week, and anchoring slot 0 to whenever you happened to
+     start would walk the whole schedule around the calendar. So when the split carries a
+     startDow, slot 0 is pinned to that weekday \u2014 the most recent one, so today sits
+     inside the current week rather than ahead of it. */
+    const pinned = weekPinnedDow();
+  if(pinned != null){
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    const back = (d.getDay() - pinned + 7) % 7;
+    d.setDate(d.getDate() - back);
+    return d;
+  }
   const inCycle = S.sessions
     .filter(x=>x.startedAt >= S.cycleStart && DAYS.indexOf(x.workoutId) > -1)
     .sort((a,b)=>a.startedAt - b.startedAt);
@@ -25432,6 +25813,11 @@ function slotIsPast(i){
 function slotIsLocked(i){
   if(daysFree()) return false;
   if(slotIsPast(i)) return false;              // past owns its own message
+  /* On a pinned week the day that is open is the day it is, not the day the rotation is
+     up to. ROTATION and CYCLE_LAYOUT index differently \u2014 the layout has the rests in it
+     \u2014 so the comparison is made on the workout id. */
+  const pinned = weekPinnedToday();
+  if(pinned != null) return pinned === "rest" ? true : ROTATION[i] !== pinned;
   return i !== S.pointer;
 }
 function plateStrip(){
@@ -35249,6 +35635,8 @@ function viewProgram(){
   <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
+  h += restLayoutCardHTML();
+  h += testWeeksCardHTML();
   h += planKindCardHTML();
   h += planVsTodayCardHTML();
   h += planWeekCardHTML();
@@ -36819,6 +37207,65 @@ function bind(){
       S.cycleManual = true;
       save(); queueSync(); render();
     }
+  };
+  /* THE REST-DAY EDITOR. Every button rewrites the whole layout and hands it to
+     setSplitLayout(), which is the one place the rules live \u2014 so a button can be wrong
+     about what it wants and still cannot produce a cycle missing a day. */
+  const relayout = (list, said)=>{
+    const before = layoutNow().layout.slice();
+    if(!setSplitLayout(list)){ toast("That would leave a training day out of the cycle", "warn"); return; }
+    logPlanChange("schedule", null, "Rest days",
+      [before.map(k=> k === "rest" ? "rest" : dayMeta(k).short).join(" \u2192 ") + "  \u21d2  "
+       + list.map(k=> k === "rest" ? "rest" : dayMeta(k).short).join(" \u2192 ")],
+      {note: said});
+    render();
+  };
+  document.querySelectorAll("[data-rladd]").forEach(btn=> btn.onclick = ()=>{
+    const i = parseInt(btn.dataset.rladd, 10);
+    const list = layoutNow().layout.slice();
+    list.splice(i + 1, 0, "rest");
+    relayout(list, "A rest day added after " + dayName(list[i]) + ".");
+    toast("Rest day added");
+  });
+  document.querySelectorAll("[data-rldel]").forEach(btn=> btn.onclick = ()=>{
+    const i = parseInt(btn.dataset.rldel, 10);
+    const list = layoutNow().layout.slice();
+    if(list[i] !== "rest") return;
+    list.splice(i, 1);
+    relayout(list, "A rest day removed.");
+    toast("Rest day removed");
+  });
+  const moveRest = (i, dir)=>{
+    const list = layoutNow().layout.slice();
+    const j = i + dir;
+    if(list[i] !== "rest" || j < 0 || j >= list.length) return;
+    const t = list[i]; list[i] = list[j]; list[j] = t;
+    relayout(list, "A rest day moved " + (dir < 0 ? "earlier" : "later") + " in the cycle.");
+  };
+  document.querySelectorAll("[data-rlup]").forEach(btn=> btn.onclick = ()=> moveRest(parseInt(btn.dataset.rlup,10), -1));
+  document.querySelectorAll("[data-rldown]").forEach(btn=> btn.onclick = ()=> moveRest(parseInt(btn.dataset.rldown,10), 1));
+  const rlr = $("#rlReset");
+  if(rlr) rlr.onclick = ()=>{
+    const before = layoutNow().layout.slice();
+    clearSplitLayout();
+    logPlanChange("schedule", null, "Rest days",
+      [before.map(k=> k === "rest" ? "rest" : dayMeta(k).short).join(" \u2192 ")],
+      {note: "Put back to the schedule the plan arrived with."});
+    toast("Original schedule restored");
+    render();
+  };
+  const twA = $("#twAdd");
+  if(twA) twA.onclick = ()=> openTestWeekEditor(null);
+  document.querySelectorAll("[data-twedit]").forEach(btn=>
+    btn.onclick = ()=> openTestWeekEditor(parseInt(btn.dataset.twedit, 10)));
+  document.querySelectorAll("[data-twdel]").forEach(btn=> btn.onclick = ()=>{
+    if(removeTestWeek(parseInt(btn.dataset.twdel, 10))){ toast("Testing week removed"); render(); }
+  });
+  const twR = $("#twReset");
+  if(twR) twR.onclick = ()=>{
+    clearTestWeeks();
+    toast("Back to your plan's own list");
+    render();
   };
   const lrev = $("#lastReviewBtn");
   if(lrev) lrev.onclick = ()=> openCycleReview(S.lastReview);
@@ -48615,7 +49062,9 @@ async function gistFetch(path, opts={}){
    not in. `sync` is absent too — the GitHub token is a credential and has no business in
    a file that gets emailed around. */
 const BACKUP_FIELDS = [
-  "setup","splitId","customSplit","program","pointer","cycleStart","cycleDone",
+  /* splitLayout and testWeeks are decisions somebody made about their own programme —
+     where the rest days go and when the tests are — so they travel with it. */
+  "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
