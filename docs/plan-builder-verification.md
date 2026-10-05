@@ -361,6 +361,101 @@ exposure to that movement. `demo` is null everywhere and a self-test invariant f
 any field is thinner than twelve characters or if a demo link ever appears: a link the app
 has not checked is a link it is vouching for.
 
+## Phase 6 — periodization that actually runs
+
+### What was missing
+
+The importer has always read phases, deload weeks, testing weeks, week-to-week changes and
+per-set percentages, and `planWeekNotes()` has put the right week's words on the screen on
+the day. What none of it did was change the session. Week three of a 5/3/1 cycle arrived
+with the same three sets of five the plan started with, and the percentages a strength
+document spends half its pages on sat in a note under the exercise. That is the difference
+between running a twelve-week block and running its first week twelve times.
+
+### The shape of the answer
+
+Everything added here is a **projection**, the same pattern `deloadView()` has always used,
+for the same reason: a block that ends, a week that changes, or a periodization dropped
+must restore the real plan exactly, with nothing to migrate and no half-applied revert.
+
+| Piece | What it does |
+|---|---|
+| `prescriptionFor(entry, week)` | the one entry point. Returns the entry as this week asks for it — sets, reps, per-set loads, effort — and never touches the stored one |
+| `weekView(list, week)` | that, mapped over a day, inserted inside `resolvedProgram()` as `easeView(deloadView(weekView(...)))` |
+| `programWeek()` / `S.programWeek` | the week, counted in one place, written down as it advances in `recomputeCycle` |
+| `planWeekAt(ms)` | the same question about a day in the past, so a logged session is read in the week it was performed in |
+| `S.tms` / `tmFor` / `setTmFor` | training maxes, stored because a TM moves on the programme's schedule rather than on your best session's |
+| `syncWaveState()` | the state the waves own: the TM opened from your max, the per-cycle increase, the reset after a miss |
+| `syncPlannedDeload()` | the plan's own deload week, started for you |
+
+Readers that had to learn something new: `setPrescription` (per-set reps, per-set load, the
+AMRAP flag), `planLoadFor(en, si)` and `planLoadPh` (a set's own load, before the
+"heavier of the plan and last time" rule rather than after it), `pctLoadFor`/`pctWords`
+(a stored TM instead of 90% of a max, and the arithmetic printed accordingly),
+`progressionFor` (a waved lift gets the wave's verdict, never a double-progression raise),
+`projectedDuration` and `trimForSleep` (the week's own set counts).
+
+### 5/3/1, as published
+
+| Week | Set 1 | Set 2 | Set 3 |
+|---|---|---|---|
+| 1 | 65% × 5 | 75% × 5 | 85% × 5+ |
+| 2 | 70% × 3 | 80% × 3 | 90% × 3+ |
+| 3 | 75% × 5 | 85% × 3 | 95% × 1+ |
+| 4 | 40% × 5 | 50% × 5 | 60% × 5 |
+
+The brief's acceptance test, measured: a 200 lb training max gives **130 / 150 / 170** in
+week one, **205** after the cycle (+5 upper, +10 lower), and **180** after a failed AMRAP
+(90% of itself). Week four is the programme's own deload, so `deloadView()` leaves a waved
+entry alone rather than halving a week that has already been cut in loads.
+
+A wave runs **only** where the document names the programme (`/5\s*\/?\s*3\s*\/?\s*1|531|wendler/i`
+on `planKind.named` or `planName`) **and** its model is a percentage wave, **and** the
+movement is a main barbell lift with no per-week table of its own. Wendler's percentages
+are not inferable from three sets of five, and running them on somebody's linear plan would
+substitute a different programme for the one they uploaded. A document's own `weeks[]`
+table always outranks the wave.
+
+The per-cycle increase requires the cycle to have been **trained**: `syncWaveState()`
+counts sessions containing the movement since the TM last moved, and a cycle in which the
+lift was never performed earns nothing. Four weeks away is not four earned increases, and
+coming back to loads 10 lb heavier than the ones you left is the fastest way to miss the
+first session back.
+
+The AMRAP set is found by position — the last set carrying a load, warm-ups aside — not
+through `isWorkingSet()`. A set with 190 lb on the bar and nought reps is exactly the miss
+this rule exists for, and filtering it out would have read the back-off above it as the top
+set and called the session a success.
+
+### M3 — the deload, measured rather than assumed
+
+| Rule | Before | Now |
+|---|---|---|
+| Sets in a deload week | flat 2 | `max(1, round(sets × 0.5))`, so 1→1, 3→2, 4→2, 5→3, 6→3 |
+| The clock | 6 **calendar** weeks since the block started | 6 **training** weeks — calendar weeks with ≥ 2 sessions, deload weeks counted |
+| A layoff | nothing | ≥ 7 days without a session ends the block; `blockStartAt()` restarts at the session they came back on, and no deload is prompted |
+| Beginners | on the clock like everyone else | signals only; `MESO_SHAPE.beginner` is 6 accumulation weeks and no scheduled deload |
+| A built plan | a 6-week clock for everybody | the block's own last week: 4 + 1 for intermediate and advanced, 6 + 0 for a beginner |
+| A document's deload weeks | shown, and prompted by hand | run themselves on the weeks it names, logged as the plan's |
+
+### What the import review now promises
+
+A new card, **"What runs automatically"**, listed before the plan is added: the waves and
+how the training max will move, where the percentages come from when no max is on file, the
+movements carrying a per-week table, the document's deload weeks and the week counter. The
+point is the converse — everything *not* on that list is shown to you on the week it
+applies and executed by nobody but you. The week-to-week sentences, the special
+instructions and the progression rules are prose, and the app does not pretend to run
+prose.
+
+### Where it is said while training
+
+`periodCardHTML()` on the Program tab names the week, the block's shape, each waved or
+tabled movement with this week's percentages, reps and loads, and the training max behind
+them. The cards below it are still the real plan; the card says so in as many words, because
+a plan reading 3 × 5 while the set rows ask for 75/85/95% is the app contradicting itself
+with no way for the reader to tell which half is the bug.
+
 ## Audit IDs — what changed and what covers it
 
 | ID | Change | Covered by |
@@ -386,14 +481,53 @@ has not checked is a link it is vouching for.
 | L3 | Messages name the sets at the load | `phase3.mjs` §1 |
 | L4 | Bodyweight ladders; added load only for pull-ups, chin-ups and dips | `phase3.mjs` §6 |
 | L5 | No muscle above 1.6× chest unless chosen — enforced while tuning, not only checked | `phase5.mjs` §7 |
+| M3 | Deload sets halved, the clock counted in training weeks, a layoff ends the block, beginners on signals only, a meso or a document's own deload replaces the clock | `phase6.mjs` §7–10, `#selftest` 10 |
+| M9 | `prescriptionFor(entry, week)`, `weeks[]`, `blockWeeks`, `model`, `S.programWeek`, 5/3/1 waves off a stored training max | `phase6.mjs` §1–6, §11–16, `#selftest` 9 |
 
-M3, M4, M6, M9, M10, L2 belong to phases 6 and 7 and are not done yet.
+M4, M6, M10 and L2 belong to phase 7 and are not done yet.
 
 ## Open questions
 
 Things where this codebase and the science reference disagree, or where the reference asks
 for something the library cannot currently supply. Recorded rather than guessed at, as the
 reference requires.
+
+**A per-week table shorter than the block repeats.** Reference 2.12.6 says to execute a
+document's per-week numbers exactly and never to invent waves it does not contain, and it
+is silent about what happens in week five of a document that writes four. `weekRowFor()`
+wraps: week 5 runs the table's week 1. The alternative readings are to freeze on the last
+row for ever, or to stop projecting and fall back to the stored card — both of which also
+run numbers the document did not write for that week. Repeating is what a block means and
+what `planWeekNow()` already does with the document's own length, so the two agree.
+*Proposed resolution:* keep the wrap, and say which week of the table is running wherever
+the week is named (`periodCardHTML` does).
+
+**5/3/1's supplemental work is executed as a percentage, not as a named template.**
+Reference 2.12.6 asks for Boring But Big (5×10 at 50–60% TM) and First Set Last to run
+exactly as the document states. A document that writes those rows gets them: the percentage
+lands in `pct`/`pctOf` at import and `pctLoadFor()` works it out off the same stored
+training max, so BBB at 50% of a 205 lb TM is a real load on the card. What the app does
+**not** have is a notion of "this is BBB" — if a document only names the template and
+leaves the numbers to the reader, nothing is executed and the instruction appears as text.
+*Proposed resolution:* leave it. Writing the templates in would be the app supplying
+numbers the document withheld, which is the thing 2.12.6's last line forbids.
+
+**A training max with no max behind it is opened from an estimate.** The reference says
+TM = 90% of the 1RM "or of a tested/estimated max". Where somebody has never entered a max,
+`syncWaveState()` opens the TM from the best estimate in their log and labels it as an
+estimate everywhere it appears; where there is neither, nothing is invented and the set row
+asks. The risk is a first cycle run off an estimate from a set of twelve, which Epley puts
+optimistically. *Proposed resolution:* acceptable as long as it is labelled, which it is,
+and the first exposure's RPE 7 ceiling (H7) already covers the first session either way.
+Worth revisiting if the reference's 2.12.1 note about Epley above 12 reps is ever tightened.
+
+**Exactly seven days between sessions reads as a layoff.** 2.14 says a layoff is "≥ 7
+days", so somebody who trains once a week, on the same weekday, restarts their block every
+session. That is literally seven days with no session, so the rule is being applied as
+written — and it costs them nothing, because a week with one session in it never counts
+toward the deload clock anyway. *Proposed resolution:* leave the threshold at the
+reference's figure rather than quietly moving it to 8, and revisit if a once-a-week user
+ever needs a block at all.
 
 **Three movements the reference's preference table names do not exist for a
 bodyweight-only user, and one slot cannot hold them.** The reference gives the bodyweight
@@ -464,7 +598,7 @@ they are recomputed whenever a session is swept.
 | 3 | Progression — H1–H4, H6, H8, L3, L4, M7 | done — `phase3.mjs` |
 | 4 | Safety — H7, M1, M2 | done — `phase4.mjs` |
 | 5 | Builder, quality check, H9/H10/L5/M11, remove "Change the schedule" | done — `phase5.mjs` |
-| 6 | Periodization (M9) + M3 | not started |
+| 6 | Periodization (M9) + M3 | done — `phase6.mjs`, invariants 9 and 10 |
 | 7 | M4, M5, M6, M10, L2 | not started |
 | 8 | Streaks + coach view | not started |
 | 9 | Re-measurement, then bump `APP_VERSION` and `sw.js` `VERSION` | not started |

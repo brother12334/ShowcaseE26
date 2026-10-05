@@ -9,7 +9,7 @@ const { spawnSync } = require("node:child_process");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
 
-const SPECS = ["selftest", "phase2", "phase3", "phase4", "phase5",
+const SPECS = ["selftest", "phase2", "phase3", "phase4", "phase5", "phase6",
                "restdays", "daypick", "bwsay"];
 const DIR = process.env.E26_SPEC_DIR
   || "/tmp/claude-0/-home-user-ShowcaseE26/cb903a36-3103-5d6a-a18b-78ade397246e/scratchpad";

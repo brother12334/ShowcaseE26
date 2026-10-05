@@ -1112,6 +1112,12 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   padding:6px 9px;margin:0 0 8px;line-height:1.4;
 }
 input.ph-plan::placeholder{color:var(--acc);opacity:.75}
+/* One movement's row in "as it will run": the week's own prescription, under its name,
+   separated by a rule rather than a box so the list reads as a list. */
+.pw-row{
+  padding-top:9px;border-top:1px solid var(--line);
+}
+.pw-row:first-child{border-top:0}
 .pw-deload{
   margin-top:9px;padding:9px 11px;border-radius:9px;
   border:1px solid var(--acc);background:var(--acc-soft);color:var(--text);
@@ -6174,7 +6180,7 @@ body.build-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "40.0";
+const APP_VERSION = "41.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10402,7 +10408,15 @@ function buildPlan(answers){
 
   /* 8. THE BLOCK. Written here so the plan arrives with a start date and a deload clock
         rather than acquiring one the first time something looks at it. */
-  const meso = {start: Date.now(), weeks: DELOAD_EVERY_WEEKS, builtBy: "builder",
+  /* M3/2.13 — THE BLOCK HAS A SHAPE, AND IT IS NOT THE SAME SHAPE FOR EVERYBODY.
+     Accumulation weeks then a deload: four plus one for an intermediate or advanced
+     lifter, and six with no scheduled deload at all for a beginner, whose loads are
+     still light enough that the fatigue a deload clears has not had time to gather.
+     Written into the plan so the deload runs itself (syncPlannedDeload) rather than
+     waiting for the app's generic six-week clock to notice. */
+  const shape = MESO_SHAPE[a.level] || MESO_SHAPE.intermediate;
+  const meso = {start: Date.now(), accum: shape.accum, deload: shape.deload,
+                weeks: shape.accum + shape.deload, builtBy: "builder",
                 level: a.level, goal: a.goal, days: a.days, minutes: a.minutes};
 
   report.quality = q;
@@ -10718,6 +10732,12 @@ function adoptBuiltPlan(r){
   delete S.splitLayout;
   S.program = r.program;
   S.meso = r.meso;
+  /* A BUILT PLAN IS NOT AN IMPORTED ONE, and the imported document's week numbering,
+     phases and deload weeks must not go on governing a programme it did not write. The
+     document itself is kept (S.importSrc) — this is only the app's record of which plan
+     is in force, and the one in force is now this. */
+  S.importMeta = null;
+  delete S.testWeeks;
   S.planStart = Date.now();
   S.blockStart = Date.now();
   S.cycleStart = Date.now();
@@ -15053,7 +15073,7 @@ function resolvedProgram(wid){
      reduced set count on the five ramp-in movements. Both are projections applied here,
      at the single point every session-building path reads through, so neither can ever
      be half-applied to the stored programme. */
-  const main = easeView(deloadView(S.program[wid] || [])).map(e0=>{
+  const main = easeView(deloadView(weekView(S.program[wid] || []))).map(e0=>{
     const rs = rampedSets(e0);
     const e = (rs !== e0.sets)
       ? Object.assign({}, e0, {sets: rs,
@@ -24071,6 +24091,7 @@ function aiSystemPrompt(){
 "12b. 'techniques' is the list of intensity techniques this exercise prescribes. Use ONLY these keys: 'lengthened' (lengthened or stretch partials, partials in the stretched position), 'dropset' (drop sets, strip sets, running the rack), 'myoreps' (myo-reps, myo rep match), 'restpause' (rest-pause, DC-style rest pause), 'cluster' (cluster sets, intra-set rest), 'amrap' (as many reps as possible, reps to technical limit, '8+' or 'AMRAP' in the rep column), 'failure' (taken to failure, to complete failure). For each, 'detail' is the document's own words about how to run it — the number of drops, the mini-set reps, the percentage dropped — verbatim and short, or an empty string if it just names the technique. Do not add a technique because the exercise looks like it would suit one, and do not use 'failure' for an RPE 10 or RIR 0 target that is already captured in the rpe or rir arrays.",
 "13. Sides. 'unilateral' true when the movement trains one limb at a time. 'alternating' is what the document says: 'perRep' for alternating every rep, 'perSet' for one side then the other set by set, 'perRound' for a whole round each side, 'none' if it does not say. 'sideInstruction' is the document's exact instruction, e.g. 'alternate arms every rep, rest after both arms are done'. If it says nothing about how sides are handled, leave alternating 'none' and sideInstruction empty and set stated.sideHandling false.",
 "14. 'kind' classifies the job the movement does in that session: 'heavy' for the main barbell or machine compound it opens with, 'second' for a secondary compound, 'iso' for single-joint or isolation work, 'abs' for direct core work. This is a classification of the movement, not an instruction.",
+"14b. WEEK BY WEEK. Where the document gives this exercise DIFFERENT numbers in different weeks \u2014 a grid, a per-week table, a 5/3/1 wave, 'week 1: 3x10, week 2: 4x10' \u2014 fill 'weeks' with one row per week it names, and put week 1's numbers in the ordinary sets/reps/rpe/percent fields as well. 'percent' is a fraction (0.85), 'percentOf' is what it is of, 'amrapLast' is true where the week's last set is marked AMRAP or '+'. Give rows only for weeks the document actually writes; never extrapolate the pattern forward.",
 "15. 'note' is anything else the document says about that exercise, in one short sentence, in its own words. Never invent coaching cues.",
 "16. Keep the source's exercise order within each session, and keep every exercise it contains. Do not add, drop, rebalance or correct anything, even if you think the programme is poor.",
 "",
@@ -24082,6 +24103,8 @@ function aiSystemPrompt(){
 "• 'progressionRules' — how to add load or reps, in the document's words, with 'increment' as a number when it names one.",
 "• 'specialInstructions' — anything else that governs how the plan is run and does not belong to one exercise.",
 "• 'planNotes' — the document's own framing notes worth keeping.",
+"• 'blockWeeks' — the length of ONE repeating block, where the plan repeats one (a four-week wave run three times is 4, not 12).",
+"• 'model' — how load moves week to week, from the document's own structure. 'pctWave' only where the weeks are percentages of a max or training max.",
 "",
 "'stated' is how the app knows what to ask about. Set each flag true ONLY if the document really addresses that topic anywhere: warmups, rest, effort (RPE/RIR/failure targets), progression, schedule (which days, how many rest days), deload, sideHandling, tempo.",
 "",
@@ -24132,6 +24155,13 @@ const AI_PLAN_SCHEMA = {
     goal:            {type:"STRING",  enum:["muscle","strength","lean","health","unstated"],
                       description:"only if the document states what the programme is for; 'unstated' otherwise"},
     weeks:           {type:"INTEGER", nullable:true},
+    /* M9 \u2014 HOW LONG ONE BLOCK IS, AND HOW IT MOVES. 'weeks' is the whole document;
+       'blockWeeks' is the unit that repeats, which is the number a periodised plan
+       actually runs on \u2014 a 12-week document is often three 4-week blocks. */
+    blockWeeks:      {type:"INTEGER", nullable:true,
+                      description:"the length in weeks of ONE repeating block or mesocycle, if the document has one (a 4-week wave in a 12-week plan is 4). Null when it does not."},
+    model:           {type:"STRING", enum:["double","linear","pctWave","rirRamp","undulating","none","unclear"],
+                      description:"how the document moves load WEEK TO WEEK: 'pctWave' for percentage waves off a max or training max (5/3/1, nSuns, Sheiko), 'linear' for add-weight-every-session, 'double' for add-reps-then-weight, 'rirRamp' for a block that ramps effort, 'undulating' for alternating heavy/light days. 'unclear' unless the document shows it."},
     unit:            {type:"STRING",  enum:["lb","kg","percent","none"]},
     defaultRestSeconds:{type:"INTEGER", nullable:true,
                       description:"a rest period the document states once for the whole plan, in seconds; the low end of a range"},
@@ -24236,13 +24266,34 @@ const AI_PLAN_SCHEMA = {
                   },
                   required:["kind"], propertyOrdering:["kind","detail"]}},
                 progression:    {type:"STRING"},
+                /* M9 \u2014 THE WEEK-BY-WEEK TABLE, WHERE THERE IS ONE. A plan written as a
+                   grid \u2014 week 1 three sets of ten, week 2 four of ten, week 3 four of
+                   twelve \u2014 is a sequence, and transcribing only the first column turns
+                   a twelve-week block into its first week run twelve times. Only rows
+                   the document actually gives. */
+                weeks:{type:"ARRAY", items:{type:"OBJECT",
+                  properties:{
+                    week:     {type:"INTEGER", description:"the week number this row is for, 1-based"},
+                    sets:     {type:"INTEGER", nullable:true},
+                    reps:     {type:"STRING"},
+                    rpe:      {type:"ARRAY", items:{type:"NUMBER"}},
+                    rir:      {type:"ARRAY", items:{type:"NUMBER"}},
+                    percent:  {type:"NUMBER", nullable:true,
+                               description:"this week's percentage as a fraction (0.85 for 85%)"},
+                    percentOf:{type:"STRING", enum:["1rm","tm","unstated"]},
+                    amrapLast:{type:"BOOLEAN",
+                               description:"true when the document marks this week's last set as AMRAP or '+'"},
+                    note:     {type:"STRING"}
+                  },
+                  required:["week"],
+                  propertyOrdering:["week","sets","reps","rpe","rir","percent","percentOf","amrapLast","note"]}},
                 note:           {type:"STRING"}
               },
               required:["name","sets","reps","kind"],
               propertyOrdering:["name","sets","setsArePerSide","reps","rpe","rir","effortNote","kind",
                                 "restSeconds","restNote","tempo","weight","percent","percentOf","weightNote","warmupSets",
                                 "warmupNote","unilateral","alternating","sideInstruction","supersetGroup",
-                                "circuitGroup","techniques","progression","note"]
+                                "circuitGroup","techniques","progression","weeks","note"]
             }
           }
         },
@@ -24252,7 +24303,7 @@ const AI_PLAN_SCHEMA = {
     }
   },
   required:["understood","days"],
-  propertyOrdering:["understood","problem","planName","goal","weeks","unit","defaultRestSeconds","defaultRestNote","restDaysPerCycle","restWeekdays","restDaysFlexible","daysAnyOrder","stated",
+  propertyOrdering:["understood","problem","planName","goal","weeks","blockWeeks","model","unit","defaultRestSeconds","defaultRestNote","restDaysPerCycle","restWeekdays","restDaysFlexible","daysAnyOrder","stated",
                     "phases","deloadWeeks","testingWeeks","weeklyChanges","progressionRules",
                     "specialInstructions","planNotes","warnings","days"]
 };
@@ -24551,14 +24602,7 @@ function aiExercise(x, ctx){
      otherwise whatever the person chose on the questions screen. The old importer wrote
      "a sensible ramp for the movement" when the document said nothing, which is an
      invented prescription wearing a transcription's clothes. */
-  let rpes = (Array.isArray(x.rpe) ? x.rpe : [])
-    .map(n=> Math.round(Number(n) * 2) / 2)
-    .filter(n=> n >= 5 && n <= 10);
-  if(!rpes.length){
-    rpes = (Array.isArray(x.rir) ? x.rir : [])
-      .map(n=> Math.round((10 - Number(n)) * 2) / 2)
-      .filter(n=> n >= 5 && n <= 10);
-  }
+  let rpes = aiEffortList(x);
   const rpeFromPlan = rpes.length > 0;
   if(rpeFromPlan) ctx.effortFromPlan = true;
   if(!rpeFromPlan){
@@ -24679,6 +24723,38 @@ function aiExercise(x, ctx){
 
   const extra = {slotKind: kind, imported: true};
   if(pctSpec){ extra.pct = pctSpec.pct; extra.pctOf = pctSpec.of; }
+  /* M9 — THE DOCUMENT'S OWN WEEK-BY-WEEK NUMBERS, kept in the shape prescriptionFor()
+     reads. Only rows with a week number and something to say in them; a row that repeats
+     week one is still a row, because a table that says so is a table that says so. */
+  const wkRows = (Array.isArray(x.weeks) ? x.weeks : []).map(r=>{
+    if(!r) return null;
+    const wn = Math.round(Number(r.week));
+    if(!(wn >= 1 && wn <= 52)) return null;
+    const row = {week: wn};
+    const st = Math.round(Number(r.sets));
+    if(isFinite(st) && st >= 1 && st <= 12) row.sets = st;
+    const rp = aiTrim(r.reps, 12);
+    if(rp) row.reps = rp;
+    const eff = aiEffortList(r);
+    if(eff && eff.length) row.rpes = eff;
+    const pn = Number(r.percent);
+    if(isFinite(pn) && pn > 0){
+      const f = pn > 1.2 ? pn / 100 : pn;
+      if(f >= 0.3 && f <= 1.2){ row.pct = Math.round(f * 1000) / 1000;
+                                row.pctOf = r.percentOf === "tm" ? "tm" : "1rm"; }
+    }
+    if(r.amrapLast === true) row.amrapLast = true;
+    const nt = aiTrim(r.note, 90);
+    if(nt) row.note = nt;
+    return Object.keys(row).length > 1 ? row : null;
+  }).filter(Boolean);
+  if(wkRows.length) extra.weeks = wkRows.slice(0, 24);
+  /* A WAVE IS ONLY EVER RUN BECAUSE THE DOCUMENT SAYS SO. 5/3/1's percentages are not
+     inferable from three sets of five, and running somebody's linear plan as a wave
+     would replace their whole prescription with a different one — so this needs the
+     document to name the programme, say its model is a percentage wave, AND the movement
+     to be a main barbell lift with no per-week table of its own. */
+  if(!wkRows.length && ctx.wave531 && kind === "heavy" && isBarbellLift(name)) extra.wave = "531";
   if(tech.length) extra.tech = tech.slice(0, 4);
   if(rest) extra.rest = rest;
   if(warmups.length) extra.warmups = warmups.slice(0, 6);
@@ -24709,6 +24785,18 @@ function aiApplyGroups(list, raws){
     const next = aiTrim(raws[i+1] && (raws[i+1].supersetGroup || raws[i+1].circuitGroup), 24);
     if(next && next.toLowerCase() === g.toLowerCase()) list[i].superset = true;
   }
+}
+/* The effort targets a row states, from whichever of the two columns it used. Pulled out
+   of the exercise mapper so a per-WEEK row can be read the same way: a plan whose weeks
+   ramp RIR 3, 2, 1 is stating effort week by week in exactly the same two columns. */
+function aiEffortList(x){
+  const rpe = (Array.isArray(x && x.rpe) ? x.rpe : [])
+    .map(n=> Math.round(Number(n) * 2) / 2)
+    .filter(n=> n >= 5 && n <= 10);
+  if(rpe.length) return rpe;
+  return (Array.isArray(x && x.rir) ? x.rir : [])
+    .map(n=> Math.round((10 - Number(n)) * 2) / 2)
+    .filter(n=> n >= 5 && n <= 10);
 }
 function aiPlanToProgram(doc, answers){
   const ans = answers || {};
@@ -24772,8 +24860,21 @@ function aiPlanToProgram(doc, answers){
   /* A blanket rest stated once for the whole document, carried down to every exercise
      that does not name its own. */
   const planRestSeconds = Math.round(Number(doc.defaultRestSeconds));
+  /* M9 — IS THIS A 5/3/1 DOCUMENT? Two things have to agree: the model is a percentage
+     wave, and the programme is named as the one whose waves these are. Wendler's
+     percentages are specific, published and easy to recognise; running them on a plan
+     that merely happens to use percentages would be substituting a different programme
+     for the one somebody uploaded. */
+  const wave531 = (()=>{
+    const named = String((doc.planKind && doc.planKind.named) || "") + " "
+                + String(doc.planName || "");
+    if(!/\b5\s*[\/\u2044]?\s*3\s*[\/\u2044]?\s*1\b|\b531\b|wendler/i.test(named)) return false;
+    const model = String(doc.model || "");
+    const prog = String((doc.planKind && doc.planKind.progression) || "");
+    return model === "pctWave" || prog === "percentage" || model === "unclear" || model === "";
+  })();
   const shared = {answers: ans, attention, matches, unit, increments, barbell, effortFromPlan: false,
-                  rpeCapped: null,
+                  rpeCapped: null, wave531,
                   planRestSeconds: isFinite(planRestSeconds) ? planRestSeconds : null,
                   planRestNote: aiTrim(doc.defaultRestNote, 40) || ""};
   days.forEach((d, i)=>{
@@ -24823,6 +24924,14 @@ function aiPlanToProgram(doc, answers){
     kind,
     at: Date.now(),
     weeks: (isFinite(Number(doc.weeks)) && Number(doc.weeks) > 0) ? Math.min(104, Math.round(Number(doc.weeks))) : null,
+    /* M9 — the repeating unit, and how load moves inside it. Both only where the
+       document shows them; "unclear" is kept as itself rather than being smoothed into a
+       default, because a guess here would run a periodization nobody wrote. */
+    blockWeeks: (()=>{ const n = Math.round(Number(doc.blockWeeks));
+                       return isFinite(n) && n >= 2 && n <= 52 ? n : null; })(),
+    model: ["double","linear","pctWave","rirRamp","undulating","none"]
+             .indexOf(String(doc.model || "")) > -1 ? String(doc.model) : null,
+    wave: wave531 ? "531" : null,
     unit,
     phases:        arr(doc.phases, p=> p && p.name ? {name: aiTrim(p.name,40), weeks: aiTrim(p.weeks,24), focus: aiTrim(p.focus,120)} : null),
     deloadWeeks:   arr(doc.deloadWeeks, p=> p && p.week ? {week: aiTrim(p.week,24), instruction: aiTrim(p.instruction,160)} : null),
@@ -25866,6 +25975,56 @@ function aiReviewHTML(){
       planRules.map(([k,v])=>`<div class="ai-kv"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("") + `</div>`;
   }
 
+  /* M9 \u00b7 WHAT WILL RUN WITHOUT BEING ASKED, SAID BEFORE THE PLAN IS ADDED.
+
+     The card above is what the document SAYS; this is what Element 26 will DO about it
+     unprompted, which is a different list and the more important one. A plan that starts
+     halving your sets in week five, or changes every load on a lift because a cycle
+     ended, has to have said so at the door \u2014 the alternative is somebody opening the
+     app to a session they do not recognise and reasonably concluding it is broken.
+
+     Everything not on this list is left alone: the week-to-week sentences, the special
+     instructions and the progression rules are shown to you on the week they apply and
+     executed by nobody but you. */
+  const runs = [];
+  const waved = all.filter(e=> e && e.wave === "531");
+  const tabled = all.filter(e=> e && Array.isArray(e.weeks) && e.weeks.length);
+  if(waved.length){
+    runs.push(["5/3/1 waves", waved.length + " main lift" + (waved.length === 1 ? "" : "s")
+      + " \u2014 " + waved.slice(0, 3).map(e=> e.name).join(", ")
+      + ". Each week's loads are percentages of a training max: 65/75/85, then 70/80/90, "
+      + "then 75/85/95, then a 40/50/60 deload. The last set is an AMRAP. The training max "
+      + "goes up 5 lb on upper-body lifts and 10 on lower ones at the end of each cycle, and "
+      + "back to 90% of itself if a top set misses its number \u2014 both said on the card, with "
+      + "the arithmetic."]);
+    runs.push(["Your maxes", "Element 26 needs one number per waved lift to take the percentages "
+      + "from. Where you have never entered a max it starts from the best estimate in your log "
+      + "and labels it as an estimate; where you have neither, the set row says so and asks "
+      + "rather than inventing a weight."]);
+  }
+  if(tabled.length){
+    runs.push(["Week by week", tabled.length + " movement" + (tabled.length === 1 ? "" : "s")
+      + " carry your plan's own per-week numbers, and the session you are handed each week is "
+      + "that week's row. The programme cards keep the whole table."]);
+  }
+  if((m.deloadWeeks || []).length){
+    runs.push(["Deload weeks", "The weeks your document names \u2014 "
+      + m.deloadWeeks.map(x=> "week " + x.week).join(", ")
+      + " \u2014 run themselves: every exercise comes down to about half its sets, all targets are "
+      + "capped at RPE " + DELOAD_RPE_CAP + ", loads stay where they are and increases are held "
+      + "until the week is out. Element 26's own six-week deload clock stands down entirely while "
+      + "your plan has its own."]);
+  }
+  if(m.weeks) runs.push(["The week counter", "Counted from the day you add this plan. A "
+    + m.weeks + "-week document starts again at week 1 when it runs out, which is what repeating "
+    + "a block means \u2014 nothing is lost and nothing stops."]);
+  if(runs.length){
+    h += `<div class="ai-card"><div class="ai-card-h">What runs automatically<span class="ai-tag">Element 26</span></div>
+      <div class="ai-kv-sub" style="margin:2px 0 8px">These are the only parts of your plan Element 26
+        executes on its own. Everything else it shows you and leaves to you.</div>` +
+      runs.map(([k,v])=>`<div class="ai-kv"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("") + `</div>`;
+  }
+
   /* THE QUALITY CHECK, ON SOMEBODY ELSE'S PLAN, WHICH INFORMS AND NEVER BLOCKS.
 
      This document is a programme somebody wrote, often a coach, and an app that refuses
@@ -26506,7 +26665,12 @@ async function aiUsePlan(){
   S.pointer = 0; S.cycleDone = []; S.cycleStart = Date.now(); S.restDays = []; S.cycleManual = true;
   const lines = ["Plan imported: " + r.customSplit.name,
                  "Rotation is now " + DAYS.map(dayName).join(" → ")];
-  if(r.meta && (r.meta.deloadWeeks||[]).length) lines.push("Deload weeks kept from your document");
+  if(r.meta && (r.meta.deloadWeeks||[]).length) lines.push("Deload weeks kept from your document, and run on the weeks it names");
+  if(r.meta && r.meta.wave === "531") lines.push("5/3/1 waves run off a training max per lift");
+  const nWeeks = DAYS.reduce((t, wid)=> t + (S.program[wid] || [])
+    .filter(e=> e && Array.isArray(e.weeks) && e.weeks.length).length, 0);
+  if(nWeeks) lines.push(nWeeks + " movement" + (nWeeks === 1 ? "" : "s")
+    + " carry your plan's own week-by-week numbers");
   if(r.meta && (r.meta.progression||[]).length) lines.push("Progression rules kept from your document");
   logPlanChange("programme", null, r.customSplit.name, lines,
     {note:"Logged workouts were not affected."});
@@ -26672,9 +26836,16 @@ function planKindCardHTML(){
    reasons. A plan that names its length wraps at the end rather than running off it — a
    twelve-week block repeated is what people actually do — and one that names no length
    just keeps counting. */
-function planWeekNow(){
+function planWeekNow(){ return planWeekAt(Date.now()); }
+/* THE SAME QUESTION ABOUT A DAY IN THE PAST, which is what anything reading a logged
+   session has to ask: a set performed in week three was performed in week three when you
+   read it in week nine. Everything that stamps a finding stamps the answer at the time,
+   so the week a session ran in is worked out from the session's own date. */
+function planWeekAt(ms){
   const m = S.importMeta;
-  const wk = Math.floor(weeksSince(planStartAt())) + 1;
+  const at = Number(ms);
+  if(!isFinite(at) || at <= 0) return null;
+  const wk = Math.floor((at - planStartAt()) / (7 * DAY_MS)) + 1;
   if(!(wk > 0)) return null;
   const total = m && m.weeks ? m.weeks : null;
   return {week: total ? ((wk - 1) % total) + 1 : wk, of: total, raw: wk,
@@ -26793,6 +26964,81 @@ function planWeekCardHTML(){
       <span class="dot" style="background:var(--acc)"></span><h3>${esc(head)}</h3>
     </div>
     <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">What your plan says about this week, in its own words.</div>
+    ${body}</div>`;
+}
+/* M9 \u00b7 WHAT RUNS BY ITSELF, LISTED WHERE THE PLAN IS.
+
+   Everything in the section above is a projection: the programme on the screen is the
+   real one, and the session you are handed this week may be a different shape. That is
+   only honest if it is SAID \u2014 a card that reads 3 \u00d7 5 while the set rows ask for
+   75/85/95% is the app contradicting itself, and the person has no way to tell which one
+   is a bug. So this names the week, the block, every movement with a per-week table or a
+   wave behind it, and the training max each wave is working from. */
+function periodWaveList(){
+  const out = [], seen = {};
+  DAYS.forEach(wid=> (S.program[wid] || []).forEach(e=>{
+    if(!e || !e.name) return;
+    const key = nrm(e.name);
+    if(seen[key]) return;
+    const wave = waveFor(e);
+    const rows = Array.isArray(e.weeks) && e.weeks.length ? e.weeks.length : 0;
+    if(!wave && !rows) return;
+    seen[key] = 1;
+    out.push({name: e.name, wave, rows, tm: wave ? tmFor(e.name) : null,
+              now: prescriptionFor(e, programWeek())});
+  }));
+  return out;
+}
+function periodCardHTML(){
+  const list = periodWaveList();
+  const mz = mesoWeekNow();
+  const wk = planWeekNow();
+  if(!list.length && !mz) return "";
+  const head = wk ? "Week " + wk.week + (wk.of ? " of " + wk.of : "") : "This week";
+  let body = "";
+  if(mz){
+    body += `<div class="sub" style="margin:5px 0 0">${
+      mz.shape.deload > 0
+        ? "Week " + mz.week + " of a " + mz.of + "-week block \u2014 " + mz.shape.accum
+          + " building weeks then a deload" + (mz.deload ? ", and this is the deload." : ".")
+        : mz.shape.accum + " building weeks, with no deload scheduled: at your training age "
+          + "an easier week is called by the warning signs rather than by the calendar."}</div>`;
+  }
+  list.forEach(x=>{
+    const n = x.now || {};
+    const loads = Array.isArray(n.setLoads) ? n.setLoads.filter(v=> v > 0) : [];
+    body += `<div class="pw-row" style="margin-top:9px">
+      <b>${esc(x.name)}</b>
+      <div class="sub" style="margin:2px 0 0">${
+        x.wave === "531"
+          ? "5/3/1, week " + esc(String(n.waveWeek || 1)) + " of " + WAVE_531_WEEKS + " \u2014 "
+            + (Array.isArray(n.setPcts) ? n.setPcts.map(v=> Math.round(v * 100) + "%").join(" / ") : "")
+            + (Array.isArray(n.setReps) ? " for " + esc(n.setReps.join(" / ")) : "")
+            + (loads.length ? " \u2014 " + esc(loads.map(v=> fmtLoad(v)).join(" / ")) : "")
+          : "Your plan writes " + x.rows + " week" + (x.rows === 1 ? "" : "s")
+            + " of its own for this movement" + (n.projected === "weeks"
+              ? ": this week is " + esc(String(n.sets || "")) + " \u00d7 " + esc(String(n.reps || "")) : "")
+            + "."}</div>
+      ${x.tm ? `<div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">Training max
+        <b>${esc(fmtLoad(x.tm.w))}</b>${
+          x.tm.src === "set" ? ", yours \u2014 it goes up " + esc(fmtLoad(tmStepFor(x.name)))
+                               + " at the end of each cycle"
+        : x.tm.src === "fromMax" ? ", 90% of the max you entered"
+        : ", 90% of the best estimate in your log"}.
+        <button class="linklike" data-setmax="${esc(x.name)}">change</button></div>` : ""}
+      ${x.wave === "531" && !x.tm ? `<div class="sub" style="margin:2px 0 0">No max on file, so there is
+        nothing to work the percentages out from.
+        <button class="linklike" data-setmax="${esc(x.name)}">Set your ${esc(x.name)} max</button></div>` : ""}
+    </div>`;
+  });
+  if(!body) return "";
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>${esc(head)}, as it will run</h3>
+    </div>
+    <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">The cards below are
+      your plan. This is what Element 26 will actually put in front of you this week, worked out
+      from it \u2014 nothing here is written into the plan, so a block ending restores it exactly.</div>
     ${body}</div>`;
 }
 /* THE CHECK, ON THE PLAN YOU ARE ACTUALLY RUNNING. The same function the builder is
@@ -29114,7 +29360,7 @@ function deloadNote(){
     const d = S.deload;
     const daysIn = Math.min(DELOAD_DAYS, Math.floor((Date.now() - d.startedAt) / DAY_MS) + 1);
     return {k:"deload", act:true, label:"Deload week, day " + daysIn + " of " + DELOAD_DAYS,
-      line:"Every exercise cut to " + DELOAD_SETS + " sets, capped at RPE " + DELOAD_RPE_CAP + ".",
+      line:"Every exercise cut to about half its sets, capped at RPE " + DELOAD_RPE_CAP + ".",
       body:`<div class="nt-p">Loads stay exactly where they are. Keeping the weight is what preserves
         the stimulus; cutting the sets is what buys the recovery. Load increases are blocked this week,
         and next week resumes at full sets without making up what you missed.</div>
@@ -30268,6 +30514,25 @@ function setPrescription(entry, si){
        set. Carried here so deleting that block cost nothing — it is the one part of the
        cue the badge's tooltip and the glossary could not already tell you. */
     out.techDetail = shown.detail || (out.lpWhere || "");
+  }
+
+  /* M9 — A SET THE PLAN WROTE ON ITS OWN. On a percentage wave the three sets are
+     three different prescriptions: 65% for five, 75% for five, 85% for as many as you
+     have. Nothing before this existed could say that — a rep range and an RPE list
+     describe sets that differ in effort, not in instruction — so the wave hands the
+     projection a per-set list and the row reads its own entry out of it. */
+  if(Array.isArray(entry.setReps) && entry.setReps.length){
+    const i = Math.min(si, entry.setReps.length - 1);
+    out.reps = String(entry.setReps[i]);
+    out.wavePct = Array.isArray(entry.setPcts) ? entry.setPcts[i] : null;
+    if(Array.isArray(entry.setLoads) && entry.setLoads[i] != null) out.load = entry.setLoads[i];
+    /* The AMRAP. "5+" is the plan's own notation and it means the number is a floor, so
+       the set ends where the reps do rather than on a count — with the compound effort
+       ceiling still in force, which is what stops this reading as "grind to a miss". */
+    if(entry.amrapLast && i === entry.setReps.length - 1){
+      out.amrap = true;
+      out.why = "as many as you have, stopping one short of a missed rep";
+    }
   }
 
   /* A load that just went up asks for the BOTTOM of the range, not the top. Written
@@ -37574,6 +37839,7 @@ function viewProgram(){
   h += planKindCardHTML();
   h += planVsTodayCardHTML();
   h += planWeekCardHTML();
+  h += periodCardHTML();
   h += importMetaCardHTML();
   DAYS.forEach(wid=>{
     const m = dayMeta(wid);
@@ -38629,7 +38895,7 @@ function settingsPlanHTML(){
       </button>`).join("")}</div>
      <div class="set-says">Your targets are set on the basis that ${esc((GOAL_SCALE[gnow]||{}).note || "")}.</div>`);
   h += setBlock("Deload",
-    "Same loads, every exercise cut to " + DELOAD_SETS + " sets, everything stopped 3-4 reps short of failure. Due every " +
+    "Same loads, every exercise cut to about half its sets, everything stopped 3-4 reps short of failure. Due every " +
     DELOAD_EVERY_WEEKS + " weeks, or earlier if your check-ins and RPE start showing warning signs.",
     `<div class="btn-row" style="margin-top:0">${deloadActive()
       ? `<button class="btn ghost small" id="endDeloadBtn2" style="flex:1">End the deload</button>`
@@ -41875,6 +42141,21 @@ function planEntry(e, isFinisher, wi, chosenList, side){
       // the per-set ramp, frozen at session start so editing the plan mid-workout
       // can't retarget sets you have already done
       rpes: Array.isArray(e.rpes) ? e.rpes.slice() : undefined,
+      /* M9 — THE WEEK'S OWN PER-SET PRESCRIPTION, FROZEN LIKE EVERY OTHER ONE. A waved
+         movement does not have "a" load and "a" rep target: set one is 65% for five and
+         set three is 85% for as many as you have. The list is worked out by
+         prescriptionFor() before the session is built and carried here, so the set rows
+         ask for the right thing and a week boundary crossed mid-session cannot change
+         what is in front of you. */
+      setReps:  Array.isArray(e.setReps)  ? e.setReps.slice()  : undefined,
+      setLoads: Array.isArray(e.setLoads) ? e.setLoads.slice() : undefined,
+      setPcts:  Array.isArray(e.setPcts)  ? e.setPcts.slice()  : undefined,
+      amrapLast: e.amrapLast || undefined,
+      waved:     e.waved     || undefined,
+      waveWeek:  e.waveWeek  || undefined,
+      waveDeload: e.waveDeload || undefined,
+      waveMin:   e.waveMin != null ? e.waveMin : undefined,
+      projected: e.projected || undefined,
       // which warm-up ramp this slot earns: what the plan prescribed if it prescribed
       // anything, otherwise whatever this person's warm-up preference generates
       warm: warmupKindFor(chosenList, wi) || undefined,
@@ -42672,6 +42953,14 @@ function flushHeldCycleReview(){
   return true;
 }
 function recomputeCycle(announce){
+  /* M9 — THE WEEK, THE PLAN'S OWN DELOAD, AND THE WAVES. All three are derived state
+     that has to be brought up to date before anything reads the programme, and this runs
+     on every boot and every finished session, which is exactly when the week can have
+     moved. Each is wrapped on its own: periodization is a feature, and a cycle roll-over
+     is the app working — the same reason the calibration below is wrapped. */
+  try{ advanceProgramWeek(); }  catch(e){}
+  try{ syncPlannedDeload(); }   catch(e){}
+  try{ syncWaveState(); }       catch(e){}
   // the cycle's checkmarks are always derived from actual logged sessions since cycleStart
   const done = [];
   S.sessions
@@ -44602,7 +44891,7 @@ function scoreWorkout(sess){
     const rawPlan = resolvedProgram(sess.workoutId);
     /* GRADED AGAINST THE CARD YOU WERE GIVEN, NOT THE ONE THE DELOAD REPLACED.
 
-       A deload rewrites every exercise down to DELOAD_SETS before the session starts —
+       A deload halves every exercise's set count before the session starts —
        that is the whole week — and this compared what you logged against the FULL
        programme. Six exercises done exactly as prescribed came out as "12 working sets
        logged against 17 planned (71%)", a C− for following the instruction on the screen.
@@ -44627,8 +44916,8 @@ function scoreWorkout(sess){
     const skipped = plan.length - entries.length;
     if(skipped > 0) why.push(skipped+" exercise"+(skipped>1?"s":"")+" from the plan didn't get logged.");
     if(ratio >= 1) why.push("Everything on the card got done.");
-    if(inDeload) why.push("Judged against the deload card — " + DELOAD_SETS +
-      " sets an exercise, capped at RPE " + DELOAD_RPE_CAP + " — rather than your full programme.");
+    if(inDeload) why.push("Judged against the deload card — about half the sets, capped at RPE "
+      + DELOAD_RPE_CAP + " — rather than your full programme.");
     add("completion","Completion",14,earned,why,
       ratio < 1 ? "Unfinished sets are the cheapest points on this card. If time is the constraint, superset the accessories rather than dropping them."
                 : null);
@@ -46051,6 +46340,40 @@ function progressionFor(sess, entry){
   const planned = findProgramEntry(entry.name);
   const target = planned || entry;
 
+  /* M9 — A LIFT ON A WAVE DOES NOT PROGRESS BY DOUBLE PROGRESSION. The load is a
+     percentage of the training max, the training max moves on the cycle's schedule, and
+     every load in the block is recomputed from it the moment it does. Offering "add 5 lb
+     next time" on top of that would be a second progression rule writing a weight into a
+     plan that works its own out — and it would be wrong by week two. So the verdict for
+     these is the wave's own, and what it changes is the TM. */
+  if(waveFor(target)){
+    const r = wave531Read(sess, entry, target);
+    if(!r) return null;
+    const tm = tmFor(target.name);
+    const out = {name: entry.name, kind: "wave", week: r.week, waveWeek: r.waveWeek,
+                 cycle: r.cycle, amrap: r.amrap, min: r.min, miss: r.miss,
+                 tm: tm ? tm.w : null};
+    if(r.miss && tm){
+      out.to = roundWaveLoad(tm.w * TM_FAIL_FACTOR, target.name);
+      out.msg = "Training max comes down: " + fmtLoad(tm.w) + " → " + fmtLoad(out.to);
+      out.sub = "The week-" + r.waveWeek + " top set wanted at least " + r.min + " and got "
+              + r.amrap + ". 5/3/1 answers that by resetting the training max to 90% of "
+              + "itself — the number was ahead of you, and every load in the block is "
+              + "worked out from it.";
+    } else if(r.amrap != null){
+      out.msg = "Top set: " + r.amrap + " rep" + (r.amrap === 1 ? "" : "s")
+              + " at " + Math.round(waveRowFor(r.week).pcts[2] * 100) + "%";
+      out.sub = r.min ? "The week asked for " + r.min + " and you had " + r.amrap
+                      + ". The training max goes up " + fmtLoad(tmStepFor(target.name))
+                      + " at the end of the cycle."
+                      : "The programme's own deload week. Nothing to beat.";
+    } else {
+      out.msg = "Week " + r.waveWeek + " of the wave, done";
+      out.sub = "Loads come from your training max; nothing here is judged on reps.";
+    }
+    return out;
+  }
+
   /* entry and sess, not just the plan: every number this prints has to be traceable to
      the session it is printed under. */
   const bad = impossibleLoadCheck(target, entry, sess);
@@ -46776,6 +47099,8 @@ function restoreSetCuts(){
    one. Clearing the box goes back to the estimate rather than to nothing. */
 function openMaxSheet(name){
   const cur = maxStore()[nrm(name)];
+  const wantsTm = (()=>{ try{ return tmWanted(name); }catch(e){ return false; } })();
+  const curTm = wantsTm ? tmFor(name) : null;
   const est = (()=>{ const b = bestEverFor(name); return b && b.max1RM > 0 ? Math.round(b.max1RM*2)/2 : null; })();
   showModal(`<h3>Your ${esc(name)} max</h3>
     <div class="sub" style="margin:0 0 12px">Your plan writes this lift in percentages, so it
@@ -46792,6 +47117,18 @@ function openMaxSheet(name){
     </div>
     ${est != null ? `<div class="sub" style="margin:10px 0 0">Your log's best estimate is
       <b>${esc(fmtLoad(est))}</b>. Leave the box empty to keep using that.</div>` : ""}
+    ${/* M9 \u2014 AND THE TRAINING MAX, WHERE THE PLAN RUNS ON ONE. It is a different number
+         from the max above and it is not derived from it for long: 5/3/1 moves it +5 or
+         +10 a cycle and resets it when a top set misses, so the one somebody is actually
+         running is theirs to state. Left empty it stays at 90% of the max, which is where
+         the programme itself says to start. */
+      wantsTm ? `<div class="field" style="margin:14px 0 0"><label>Training max</label>
+        <input id="mxTm" inputmode="decimal" value="${curTm && curTm.src === "set" ? esc(String(curTm.w)) : ""}"
+          placeholder="${curTm ? esc(String(curTm.w)) : esc(unitWord())}"></div>
+        <div class="sub" style="margin:6px 0 0">Your plan takes its percentages from this
+          rather than from a true max. Empty keeps it at ${esc(String(Math.round(TM_DEFAULT * 100)))}% of
+          the figure above, which is where 5/3/1 says to start; it then goes up
+          ${esc(fmtLoad(tmStepFor(name)))} at the end of each cycle on its own.</div>` : ""}
     <div class="btn-row" style="margin-top:16px">
       <button class="btn" id="mxSave" style="flex:1">Save</button></div>
     <div class="btn-row"><button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`);
@@ -46809,6 +47146,16 @@ function openMaxSheet(name){
   m.querySelector("#mxSave").onclick = ()=>{
     const v = m.querySelector("#mxW").value.trim();
     setMaxFor(name, v === "" ? 0 : v);
+    const tmBox = m.querySelector("#mxTm");
+    if(tmBox){
+      const tv = tmBox.value.trim();
+      const was = tmStore()[nrm(name)];
+      /* Stated by hand, so the cycle count starts from here: a TM somebody has just
+         corrected has not earned an increase for the cycle it is being corrected in. */
+      setTmFor(name, tv === "" ? 0 : tv,
+        tv === "" ? null : {cycle: waveCycleOf(programWeek()), src: "set",
+                            readAt: (was && was.readAt) || Date.now()});
+    }
     hideModal();
     render();
     toast(v === "" ? "Back to the estimate from your log"
@@ -46947,7 +47294,13 @@ function buildProgression(sess){
        thing the card says, and off one session it is unfounded. It is attached only when
        there is real history behind the movement. */
     const stall = stallVerdict(en.name);
-    if(stall && p.kind !== "up" && conf.band.k === "firm") p.stall = stall;
+    /* A WAVED LIFT CANNOT STALL IN THESE TERMS. Three exposures with no improvement in
+       the top set is the definition of a stall on a plan where you choose the load; on a
+       percentage wave the load is dictated and week two is MEANT to be heavier for fewer
+       reps. 5/3/1's own answer to a lift that is not moving is the TM reset above, which
+       is already in this verdict. */
+    if(p.kind === "wave"){ /* the wave answers for itself */ }
+    else if(stall && p.kind !== "up" && conf.band.k === "firm") p.stall = stall;
     else if(stall && p.kind !== "up") p.stallHeld = true;
 
     /* And a "the load is wrong" verdict off a thinly logged session is withdrawn to an
@@ -47070,6 +47423,26 @@ function pgHeldRowHTML(p, hold){
     </div>
   </div>`;
 }
+/* M9 · WHAT THE WAVE DID, on the card you read after the session. There is nothing to
+   apply here and no button: the training max is the programme's own number and it has
+   already moved, in the plan history, with the arithmetic printed. The row exists so the
+   change is never silent — a load that drops 10% next week with no word said is the
+   single most alarming thing a plan can do. */
+function waveRowsHTML(waves){
+  if(!waves.length) return "";
+  let h = `<div class="rev-head">Your wave${waves.length > 1 ? "s" : ""}, week ${
+    esc(String(waves[0].waveWeek))} of ${WAVE_531_WEEKS}</div>`;
+  waves.forEach(p=>{
+    h += `<div class="pg-row${p.miss ? " pg-held" : ""}" style="cursor:default">
+      <div class="pg-main"><b>${esc(p.name)}</b>
+        <div class="pg-msg">${esc(p.msg)}</div>
+        <div class="pg-sub">${esc(p.sub)}</div>
+      </div>
+      ${p.tm != null ? `<span class="pg-to"><i>TM ${esc(fmtLoad(p.miss && p.to != null ? p.to : p.tm))}</i></span>` : ""}
+    </div>`;
+  });
+  return h;
+}
 function progressionHTML(list){
   if(!list || !list.length) return "";
   const done = list.filter(p=>p.kind === "up" && progressionApplied(p));
@@ -47077,7 +47450,8 @@ function progressionHTML(list){
   const hard = list.filter(p=>p.kind === "toohard" && !progressionApplied(p));
   const hardDone = list.filter(p=>p.kind === "toohard" && progressionApplied(p));
   const stalls = list.filter(p=>p.stall);
-  let h = "";
+  const waves = list.filter(p=>p.kind === "wave");
+  let h = waveRowsHTML(waves);
   if(hard.length){
     /* THE ONE FINDING WITH NOTHING TO PRESS. This block said the prescription could not
        be met at the load in the plan, worked out the load that CAN meet it, printed it
@@ -47689,10 +48063,38 @@ function flagDeloadHeld(f){
 /* The programme as it should be performed right now. Everything that reads the plan for
    a SESSION goes through here; the Program tab still shows the real thing, with a
    banner, because that is the plan you are deloading from. */
+/* HOW MANY SETS A DELOADED EXERCISE KEEPS.
+
+   M3. This was a flat two, which is the right answer for a four-set exercise and the
+   wrong one in both directions either side of it: a movement prescribed for six sets
+   came down by two thirds, and one prescribed for two came down not at all while
+   everything around it halved. 2.14 halves it — round(sets × 0.5), never below one,
+   with 0.5 rounding up — so the week is the same proportion of the plan whatever the
+   plan asks for. DELOAD_SETS stays as the floor for an exercise with no set count. */
+const DELOAD_SET_FRACTION = 0.5;
+function deloadSetsFor(e){
+  const n = parseInt(e && e.sets, 10);
+  if(!(n > 0)) return DELOAD_SETS;
+  return Math.max(1, Math.round(n * DELOAD_SET_FRACTION));
+}
 function deloadView(list){
   if(!deloadActive()) return list;
   return (list || []).map(e=>{
-    const sets = Math.min(DELOAD_SETS, e.sets || DELOAD_SETS);
+    /* A WAVE'S OWN DELOAD WEEK IS ALREADY A DELOAD. 5/3/1 week four is 40/50/60 for
+       three sets of five — the programme has done the cutting, in loads rather than in
+       sets, and halving it again would leave you doing one light set and calling it a
+       week. The projection for that week stands as the plan wrote it. */
+    if(e && e.waveDeload) return e;
+    /* AND IT ONLY CUTS ONCE. Two paths apply this projection to the same list —
+       resolvedProgram() for the session, and the grade, which re-applies it to judge a
+       session performed inside a deload week against the card it was given. That was
+       harmless while the cut was a flat two (two capped at two is two) and is not
+       harmless now that it is a halving: a four-set exercise came out at one set, and
+       the grade marked a session that did exactly what it was asked for as 200% of the
+       plan. The projection stamps `deloaded`, so a list already through it is returned
+       as it is rather than halved again. */
+    if(e && e.deloaded) return e;
+    const sets = deloadSetsFor(e);
     return Object.assign({}, e, {
       sets: sets,
       rpes: Array.isArray(e.rpes)
@@ -47707,9 +48109,22 @@ function weeksSince(ms){ return (Date.now() - ms) / (7 * DAY_MS); }
 /* Anchor for "every 6th week". The first logged session is the honest start of the
    block; a deload resets it, because the next block starts when the last one ended. */
 function blockStartAt(){
-  if(S.deload && S.deload.endedAt) return S.deload.endedAt;
-  if(S.blockStart) return S.blockStart;
-  return S.sessions.length ? S.sessions[0].startedAt : Date.now();
+  const base = (S.deload && S.deload.endedAt) ? S.deload.endedAt
+             : S.blockStart ? S.blockStart
+             : S.sessions.length ? S.sessions[0].startedAt : Date.now();
+  /* M3 — AND A LAYOFF ENDS A BLOCK WHEREVER IT FALLS IN IT. Seven days without a
+     session and the block is over: the fatigue a deload dissipates has gone on its own,
+     and counting the fortnight either side of a holiday as one continuous block is how
+     somebody comes back to a prompt for an easy week. The block restarts at the session
+     they came back on, so the next deload is six training weeks from THERE. */
+  let start = base;
+  let prev = 0;
+  (S.sessions || []).forEach(s=>{
+    if(!s || !s.startedAt || s.startedAt < base) return;
+    if(prev && s.startedAt - prev >= LAYOFF_DELOAD_DAYS * DAY_MS) start = s.startedAt;
+    prev = s.startedAt;
+  });
+  return start;
 }
 /* The early-trigger conditions, read from data the app already collects. Two or more
    and the deload gets pulled forward rather than waiting for week 6. */
@@ -47765,21 +48180,38 @@ function deloadDue(){
      deload weeks has a better one. "planOnly" leaves the prompting to the programme; the
      manual "Start a deload" button in Setup is unaffected either way. */
   if(trainPrefs().deloads !== "auto") return null;
-  const wk = weeksSince(blockStartAt());
-  const signals = deloadSignals();
   if(deloadActive()) return null;
-  if(wk >= DELOAD_EVERY_WEEKS)
-    return {reason: "scheduled", weeks: Math.floor(wk), signals,
-            msg: "You are " + Math.floor(wk) + " weeks into this block. A deload is due."};
+  /* M3 — AND THE PLAN'S OWN SCHEDULE OUTRANKS THE CLOCK ENTIRELY. A document that
+     names its deload weeks, or a block the builder shaped, runs them itself through
+     syncPlannedDeload(); a prompt on top of that would be the app asking for a second
+     easy week in the middle of the one the plan prescribed. */
+  if(docDeloadWeeks().length) return null;
+  const mz = mesoWeekNow();
+  if(mz && mz.shape.deload > 0) return null;
+  const signals = deloadSignals();
+  /* COUNTED IN TRAINING WEEKS, NOT CALENDAR ONES (2.14): a week with at least two
+     sessions in it. Six weeks that contained four sessions is not six weeks of work. */
+  const wk = trainingWeeksInBlock();
+  /* A LAYOFF HAS ALREADY DONE WHAT A DELOAD DOES. */
+  if(layoffNow()) return null;
+  /* 2.13 — A BEGINNER HAS NO SCHEDULED DELOAD. Six weeks in, the loads are still light
+     enough that there is little systemic fatigue to dissipate, and an interrupted month
+     costs more in skill than the easy week returns. The signals below still apply: an
+     actual warning sign is a reason whatever anybody's training age is. */
+  const beginner = (()=>{ try{ return isBeginnerNow(); }catch(e){ return false; } })();
+  if(!beginner && wk >= DELOAD_EVERY_WEEKS)
+    return {reason: "scheduled", weeks: wk, signals,
+            msg: "You are " + wk + " training weeks into this block. A deload is due."};
   if(signals.length >= 2)
-    return {reason: "early", weeks: Math.floor(wk), signals,
-            msg: "Two or more early warning signs are showing. Worth pulling the deload forward."};
+    return {reason: "early", weeks: wk, signals,
+            msg: "Two or more early warning signs are showing. Worth "
+               + (beginner ? "taking an easier week." : "pulling the deload forward.")};
   return null;
 }
 function startDeload(){
   S.deload = {startedAt: Date.now(), endedAt: null, reason: (deloadDue() || {}).reason || "manual"};
   logPlanChange("deload", null, "Deload week", [
-    "Every exercise cut to " + DELOAD_SETS + " sets",
+    "Every exercise cut to about half its sets",
     "All targets capped at RPE " + DELOAD_RPE_CAP,
     "Loads held, increases blocked"
   ], {note: "One week. Week after resumes at the same loads and full set counts; missed volume is not made up."});
@@ -47831,6 +48263,516 @@ function endDeload(){
 }
 
 /* =====================================================================
+   D3b · PERIODIZATION THAT ACTUALLY RUNS
+
+   A periodised programme is a SEQUENCE. Up to here the app could read one — the
+   importer has always captured phases, deload weeks, testing weeks and the week-by-week
+   changes, and planWeekNotes() puts the right week's words in front of you on the day —
+   but it could not EXECUTE one. Week three of a 5/3/1 cycle arrived with the same three
+   sets of five the plan started with, and the percentages the document spent half its
+   pages on were a note under the exercise.
+
+   That is the difference between running a twelve-week block and running its first week
+   twelve times. So three things are added here, and all three are PROJECTIONS rather
+   than edits, for the same reason deloadView() is:
+
+     prescriptionFor(entry, week)   the one entry point. Hands back the entry as this
+                                    week asks for it — sets, reps, per-set loads, effort
+                                    — leaving the stored programme untouched. Ending a
+                                    block, changing a week, or dropping the periodization
+                                    restores the real plan exactly, with nothing to
+                                    migrate and no half-applied revert to clean up.
+
+     the week itself                counted in one place (programWeek), stamped into
+                                    S.programWeek as it advances so the Program tab can
+                                    say which week you are on, and advanced in
+                                    recomputeCycle like every other derived thing.
+
+     the training max               Wendler's TM is a number the programme OWNS: it moves
+                                    +5 or +10 a cycle whatever your one-rep max is doing,
+                                    and a failed AMRAP sends it back to 90% of itself.
+                                    So it is stored (S.tms), with the 90%-of-your-max
+                                    default behind it for anybody who has never set one.
+
+   What it still does not do is execute sentences. "Add a set to the main lifts in week
+   three" is prose, and a plan that says so gets that sentence on the screen in week
+   three — see planWeekStripHTML() — rather than a silent guess at what it meant. The
+   things executed here are the ones a document states as NUMBERS.
+   ===================================================================== */
+
+/* ---------- 1. THE SHAPE OF A BLOCK ----------
+
+   2.13: accumulation weeks, then a deload. A beginner has no scheduled deload at all —
+   the fatigue a deload dissipates takes longer than six weeks to build when the loads
+   are still this light, and a prescribed easy week in month one mostly interrupts the
+   skill learning. Beginners deload on signals, which deloadSignals() already watches. */
+const MESO_SHAPE = {
+  beginner:     {accum: 6, deload: 0},
+  intermediate: {accum: 4, deload: 1},
+  advanced:     {accum: 4, deload: 1}
+};
+function mesoLevel(){
+  const ms = S.meso;
+  if(ms && MESO_SHAPE[ms.level]) return ms.level;
+  try{ return MESO_SHAPE[inferExperience()] ? inferExperience() : "intermediate"; }
+  catch(e){ return "intermediate"; }
+}
+function mesoShape(){
+  const ms = S.meso;
+  const level = mesoLevel();
+  const base = MESO_SHAPE[level] || MESO_SHAPE.intermediate;
+  const accum = Math.round(Number(ms && ms.accum));
+  if(ms && accum >= 2 && accum <= 12)
+    return {accum, deload: ms.deload ? 1 : 0, level, own: true};
+  return {accum: base.accum, deload: base.deload, level, own: !!ms};
+}
+function mesoWeeks(){ const s = mesoShape(); return s.accum + s.deload; }
+/* Where this week sits inside the block, for a plan the app itself built. Null for an
+   imported one: that document's own week numbering is the authority, and a mesocycle the
+   app invented on top of it would be a second clock disagreeing with the first. */
+function mesoWeekNow(){
+  if(!S.meso) return null;
+  if(S.importMeta) return null;
+  const sh = mesoShape();
+  const total = sh.accum + sh.deload;
+  const wk = programWeek();
+  if(!(wk > 0) || !(total > 0)) return null;
+  const inBlock = ((wk - 1) % total) + 1;
+  return {week: inBlock, of: total, block: Math.floor((wk - 1) / total) + 1,
+          deload: sh.deload > 0 && inBlock > sh.accum, shape: sh};
+}
+
+/* ---------- 2. WHICH WEEK THE PROGRAMME IS ON ----------
+
+   planWeekNow() already counts it, wraps it at the plan's stated length and says which
+   pass through you are on. This is the shorter answer the rest of this section wants,
+   plus the written-down copy S.programWeek. */
+function programWeek(){
+  const w = planWeekNow();
+  if(w && w.week > 0) return w.week;
+  const st = S.programWeek;
+  return (st && st.week > 0) ? st.week : 1;
+}
+function programWeekRaw(){ const w = planWeekNow(); return (w && w.raw > 0) ? w.raw : 1; }
+/* Written down when it changes, so the week is a fact about the programme rather than
+   something every screen recomputes from the clock, and so a new week is logged in the
+   plan history like every other change to what you are being asked to do. */
+function advanceProgramWeek(){
+  const w = planWeekNow();
+  if(!w) return false;
+  const prev = S.programWeek;
+  if(prev && prev.raw === w.raw) return false;
+  S.programWeek = {week: w.week, of: w.of || null, raw: w.raw, cycle: w.cycle, at: Date.now()};
+  if(prev && w.raw > prev.raw){
+    const n = planWeekNotes();
+    const said = [];
+    if(n && n.deload)  said.push("your plan calls this a deload week");
+    if(n && n.testing) said.push("your plan asks you to test this week");
+    if(n && n.phase)   said.push(n.phase.name);
+    (n ? n.changes : []).forEach(c=> said.push(String(c.change || "").slice(0, 90)));
+    /* ONLY WHEN THE WEEK BRINGS SOMETHING WITH IT. A plan with no periodization in it
+       passes a week boundary every seven days for ever, and logging "same as last week"
+       into the plan history every time would bury the entries that record real changes
+       under a weekly drip of nothing. The counter itself is on the Program tab. */
+    if(said.length)
+      logPlanChange("week", null, "Week " + w.week + (w.of ? " of " + w.of : ""), said,
+        {note: "Counted from the day this plan started."});
+  }
+  return true;
+}
+
+/* ---------- 3. TRAINING WEEKS, COUNTED RATHER THAN TIMED ----------
+
+   M3. The app's own deload clock said "six weeks since the block started", measured on
+   the calendar — so six weeks containing four sessions earned a deload, and the week you
+   spent in an airport counted as training. 2.14 counts TRAINING weeks: a calendar week
+   with at least two sessions in it. A deload week counts too, because a deload is
+   prescribed work rather than time off, and not counting it would mean the week after a
+   deload is already most of the way to the next one. */
+function trainingWeeksInBlock(){
+  const from = blockStartAt();
+  const seen = {};
+  (S.sessions || []).forEach(s=>{
+    if(!s || !s.startedAt || s.startedAt < from) return;
+    const k = weekStartStr(dayStr(s.startedAt));
+    seen[k] = (seen[k] || 0) + 1;
+  });
+  let n = 0;
+  Object.keys(seen).forEach(k=>{ if(seen[k] >= 2) n++; });
+  const d = S.deload;
+  if(d && d.startedAt && d.startedAt >= from){
+    const k = weekStartStr(dayStr(d.startedAt));
+    if(!(seen[k] >= 2)) n++;
+  }
+  return n;
+}
+/* A LAYOFF ENDS A BLOCK. 2.14: seven days without a session and the block is over —
+   whatever fatigue the deload was for has dissipated on its own, so coming back to a
+   prompt for an easy week is the app asking you to deload from nothing. */
+const LAYOFF_DELOAD_DAYS = 7;
+function lastSessionAt(){
+  let at = 0;
+  (S.sessions || []).forEach(s=>{ if(s && s.startedAt > at) at = s.startedAt; });
+  return at || 0;
+}
+function layoffNow(){
+  const last = lastSessionAt();
+  if(!last) return null;
+  const days = Math.floor((Date.now() - last) / DAY_MS);
+  return days >= LAYOFF_DELOAD_DAYS ? {days, since: last} : null;
+}
+
+/* ---------- 4. WHOSE DELOAD IT IS ----------
+
+   Three clocks could answer "is this week easy", and only one of them may. In order:
+   the document, because a programme that schedules its own deloads has a better opinion
+   than this app's; then the mesocycle, for a plan the builder wrote; then the app's own
+   every-six-training-weeks rule, which exists for a plan that says nothing. */
+function docDeloadWeeks(){
+  const m = S.importMeta || {};
+  return Array.isArray(m.deloadWeeks) ? m.deloadWeeks : [];
+}
+function deloadPrescribedAt(wk){
+  if(!(wk > 0)) return null;
+  const doc = docDeloadWeeks();
+  for(let i = 0; i < doc.length; i++){
+    if(weekLabelCovers(doc[i].week, wk))
+      return {src: "doc", week: wk, label: String(doc[i].week || wk),
+              instruction: String(doc[i].instruction || "")};
+  }
+  if(doc.length) return null;          // the document owns the schedule, and says not this week
+  const mz = mesoWeekNow();
+  if(mz && mz.deload && mz.week === ((wk - 1) % mz.of) + 1)
+    return {src: "meso", week: wk, label: "week " + mz.week + " of " + mz.of,
+            instruction: "The last week of the block."};
+  return null;
+}
+function deloadPrescribedNow(){ return deloadPrescribedAt(programWeek()); }
+/* THE PRESCRIBED WEEK, STARTED FOR YOU. A deload is already a mode with a record behind
+   it, and everything that reads one reads that record — so a plan's own deload week
+   opens the same record the "start a deload" button does, rather than becoming a second
+   kind of deload every screen would have to learn. Stamped with the week so it fires
+   once, and left alone if one is already running. */
+function syncPlannedDeload(){
+  const p = deloadPrescribedNow();
+  if(!p) return false;
+  if(deloadActive()) return false;
+  const d = S.deload;
+  if(d && d.plannedWeek === p.week) return false;     // already run, and already over
+  S.deload = {startedAt: Date.now(), endedAt: null, reason: "plan",
+              plannedWeek: p.week, src: p.src};
+  logPlanChange("deload", null, "Deload week, as your plan asks", [
+    p.src === "doc" ? "Your document names " + p.label + " as a deload"
+                    : "The last week of the block",
+    "Every exercise cut to about half its sets",
+    "All targets capped at RPE " + DELOAD_RPE_CAP,
+    "Loads held, increases blocked"
+  ], {note: p.instruction || "Next week resumes at full sets and the same loads."});
+  save(); queueSync();
+  return true;
+}
+
+/* ---------- 5. TRAINING MAXES ----------
+
+   A training max is not a max. It is a working number a percentage programme owns and
+   advances on its own schedule: +5 lb on an upper-body lift and +10 on a lower one after
+   every cycle, whatever your true max is doing, and back to 90% of itself when a top set
+   misses. That is why it is stored rather than derived — a TM computed as 90% of your
+   best estimate would jump every time you had a good session, which is the one thing a
+   TM exists not to do.
+
+   With nothing stored, 90% of your max stands in, labelled as what it is. */
+const TM_STEP_UPPER = 5;           // lb per cycle, Wendler
+const TM_STEP_LOWER = 10;
+const TM_FAIL_FACTOR = 0.9;        // a missed top set: back to 90% of the current TM
+const TM_LOWER_RE = /squat|deadlift|lunge|hinge|romanian|\brdl\b|leg press|hip thrust|good morning|step[- ]?up|hack|glute/i;
+function tmStore(){
+  if(!S.tms || typeof S.tms !== "object") S.tms = {};
+  return S.tms;
+}
+function tmIsLower(name){ return TM_LOWER_RE.test(String(name || "")); }
+function tmStepFor(name){ return stepInUnits(tmIsLower(name) ? TM_STEP_LOWER : TM_STEP_UPPER); }
+/* The training max for one lift, and where the figure came from — which, as with every
+   other number this app shows, is said wherever it is used.
+     set            you told us, or a cycle has moved it
+     fromMax        90% of a max you entered
+     fromEstimate   90% of the best estimate in your log, which is an estimate twice over */
+function tmFor(name){
+  const rec = tmStore()[nrm(name)];
+  const w = rec && parseFloat(rec.w);
+  if(isFinite(w) && w > 0)
+    return {w: Math.round(w * 2) / 2, src: "set", at: rec.at || null,
+            cycle: rec.cycle > 0 ? rec.cycle : 1, from: null};
+  const mx = maxFor(name);
+  if(!mx) return null;
+  return {w: Math.round(mx.w * TM_DEFAULT * 2) / 2,
+          src: mx.src === "entered" ? "fromMax" : "fromEstimate",
+          at: null, cycle: null, from: mx.w};
+}
+function setTmFor(name, w, extra){
+  const v = parseFloat(w);
+  if(!isFinite(v) || v <= 0){ delete tmStore()[nrm(name)]; }
+  else tmStore()[nrm(name)] = Object.assign({
+    w: Math.round(v * 2) / 2, at: Date.now(), name: String(name || "")}, extra || {});
+  save(); queueSync();
+}
+/* Does this lift want a training max at all? Only one run on a wave, or one whose plan
+   writes its percentages off a TM. Everything else is asking for a one-rep max. */
+function tmWanted(name){
+  const e = findProgramEntry(name);
+  if(e && waveFor(e)) return true;
+  const spec = e ? pctSpecFor(e) : null;
+  return !!(spec && spec.of === "tm");
+}
+
+/* ---------- 6. THE WAVES ----------
+
+   5/3/1 as published. Three working sets off the training max, the last one an AMRAP,
+   and a fourth week at 40/50/60 which is the programme's own deload. Percentages are
+   rounded to loads you can actually make — see roundWaveLoad() — because "172.5 lb" is
+   not a prescription anybody can follow. */
+const WAVE_531 = [
+  {pcts: [0.65, 0.75, 0.85], reps: ["5", "5", "5"], amrapLast: true,  min: 5},
+  {pcts: [0.70, 0.80, 0.90], reps: ["3", "3", "3"], amrapLast: true,  min: 3},
+  {pcts: [0.75, 0.85, 0.95], reps: ["5", "3", "1"], amrapLast: true,  min: 1},
+  {pcts: [0.40, 0.50, 0.60], reps: ["5", "5", "5"], amrapLast: false, min: 0, deload: true}
+];
+const WAVE_531_WEEKS = WAVE_531.length;
+function waveWeekOf(wk){ return ((Math.max(1, Math.round(wk)) - 1) % WAVE_531_WEEKS) + 1; }
+function waveCycleOf(wk){ return Math.floor((Math.max(1, Math.round(wk)) - 1) / WAVE_531_WEEKS) + 1; }
+function waveRowFor(wk){ return WAVE_531[waveWeekOf(wk) - 1]; }
+/* Which wave, if any, governs this exercise. Set at import, from the document: a plan
+   that says 5/3/1 and a main barbell lift. Never inferred from the sets and reps alone —
+   three sets of five is three sets of five in a hundred programmes that are not this
+   one, and running somebody's linear plan as a percentage wave would replace their whole
+   prescription with a different one. */
+function waveFor(entry){
+  const w = entry && entry.wave;
+  return w === "531" ? "531" : null;
+}
+/* A percentage of a training max, put on a bar. roundLoadable() does nothing until
+   somebody has said what plates they own, which is right for a load you typed and wrong
+   for one the app has just multiplied into existence, so it falls back to the smallest
+   step the unit has. Same two-stage rounding as pctLoadFor(). */
+function roundWaveLoad(raw, name){
+  if(!(raw > 0)) return null;
+  const rl = roundLoadable(raw, name);
+  if(rl !== raw) return rl;
+  const step = stepInUnits(5);
+  return Math.max(step, Math.round(raw / step) * step);
+}
+function apply531(entry, wk){
+  const row = waveRowFor(wk);
+  const tm = tmFor(entry.name);
+  const reps = row.reps.map((r, i)=> (row.amrapLast && i === row.reps.length - 1) ? r + "+" : r);
+  const out = Object.assign({}, entry, {
+    sets: row.pcts.length,
+    reps: row.reps[row.reps.length - 1],      // the summary range readers already expect
+    setReps: reps,
+    setPcts: row.pcts.slice(),
+    pct: row.pcts[row.pcts.length - 1],
+    pctOf: "tm",
+    rpes: undefined,
+    rpe: "",
+    amrapLast: !!row.amrapLast,
+    waved: "531",
+    waveWeek: waveWeekOf(wk),
+    waveDeload: !!row.deload,
+    waveMin: row.min,
+    projected: "wave",
+    weight: null
+  });
+  if(tm){
+    out.tm = tm.w;
+    out.tmSrc = tm.src;
+    out.setLoads = row.pcts.map(p=> roundWaveLoad(tm.w * p, entry.name));
+  }
+  return out;
+}
+
+/* ---------- 7. A DOCUMENT'S OWN WEEK-BY-WEEK NUMBERS ----------
+
+   weeks[] is the importer's record of a plan written as a table: week 1 three sets of
+   ten, week 2 four sets of ten, week 3 four of twelve. Where the document gives one, it
+   outranks everything else here, including a wave — the document is the programme. */
+function weekRowFor(entry, wk){
+  const list = entry && entry.weeks;
+  if(!Array.isArray(list) || !list.length || !(wk > 0)) return null;
+  /* A plan shorter than the week you are on repeats: running week 1 of a 4-week table in
+     week 5 is what a block does, and running nothing at all is not an option. */
+  const span = list.reduce((m, r)=> Math.max(m, Math.round(Number(r && r.week)) || 0), 0);
+  const look = span > 0 ? ((wk - 1) % span) + 1 : wk;
+  let hit = null;
+  list.forEach(r=>{ if(r && Math.round(Number(r.week)) === look) hit = r; });
+  return hit;
+}
+function applyWeekRow(entry, row, wk){
+  const out = Object.assign({}, entry, {projected: "weeks", weekRow: row.week});
+  const sets = Math.round(Number(row.sets));
+  if(sets >= 1 && sets <= 12) out.sets = sets;
+  if(row.reps) out.reps = String(row.reps);
+  if(Array.isArray(row.rpes) && row.rpes.length){
+    out.rpes = row.rpes.slice(0, out.sets || row.rpes.length);
+    out.rpe = out.rpes.length > 1
+      ? Math.min.apply(null, out.rpes) + "-" + Math.max.apply(null, out.rpes)
+      : String(out.rpes[0]);
+  }
+  const pct = Number(row.pct);
+  if(isFinite(pct) && pct >= 0.3 && pct <= 1.2){
+    out.pct = pct;
+    out.pctOf = row.pctOf === "tm" ? "tm" : (entry.pctOf || "1rm");
+    out.weight = null;
+  }
+  if(row.amrapLast) out.amrapLast = true;
+  if(row.note) out.weekNote = String(row.note);
+  return out;
+}
+
+/* ---------- 8. THE ONE ENTRY POINT ----------
+
+   Everything that builds a session goes through resolvedProgram(), which goes through
+   here. The projection order matters and reads outwards from the plan: the week's own
+   prescription first, because that IS the plan this week; then the deload, which halves
+   whatever the week asked for; then the ease-off and the ramp-in. */
+function prescriptionFor(entry, week){
+  if(!entry || !entry.name) return entry;
+  const wk = (week > 0) ? Math.round(week) : programWeek();
+  const row = weekRowFor(entry, wk);
+  if(row) return applyWeekRow(entry, row, wk);
+  if(waveFor(entry)) return apply531(entry, wk);
+  return entry;
+}
+function weekView(list, week){
+  const wk = (week > 0) ? Math.round(week) : programWeek();
+  return (list || []).map(e=> prescriptionFor(e, wk));
+}
+/* Does this week ask for something other than what the card says? Used to put a line on
+   the Program tab, which shows the real plan and must say when the week differs. */
+function weekProjects(entry){
+  if(!entry) return null;
+  const p = prescriptionFor(entry, programWeek());
+  return (p && p.projected) ? p : null;
+}
+
+/* ---------- 9. WHAT A WAVE DOES WITH THE SESSION YOU JUST LOGGED ----------
+
+   Two rules, both Wendler's, and both read before they are applied so the grade card and
+   the plan history can never disagree about what happened:
+
+     the cycle ends      TM +5 upper, +10 lower. Once per cycle per lift, stamped on the
+                         TM record so a re-render cannot bump it twice.
+     a top set misses    the AMRAP came in under the week's prescribed minimum, so the TM
+                         is ahead of the lifter: back to 90% of itself, and said plainly.
+                         Not a failure of yours — a number that was set too high. */
+function wave531Read(sess, entry, planned){
+  if(!sess || !entry || !waveFor(planned)) return null;
+  const wk = planWeekAt(sess.startedAt || sess.finishedAt || Date.now());
+  const weekNo = wk ? wk.week : programWeek();
+  const row = waveRowFor(weekNo);
+  const out = {name: planned.name, week: weekNo, waveWeek: waveWeekOf(weekNo),
+               cycle: waveCycleOf(weekNo), min: row.min, amrap: null, miss: false};
+  if(!row.amrapLast || !(row.min > 0)) return out;
+  /* THE AMRAP SET IS THE LAST ONE THE SESSION ATTEMPTED, NOT THE LAST ONE THAT WORKED.
+     isWorkingSet() answers "did this set happen", and a set with a weight on the bar and
+     nought reps is precisely the case this rule exists for — filtering it out would
+     leave the miss invisible and read the back-off above it as the top set instead. So
+     the AMRAP is found by position: the last set carrying a load, warm-ups aside. */
+  const sets = entry.sets || [];
+  let top = null, idx = -1;
+  for(let i = sets.length - 1; i >= 0; i--){
+    const st = sets[i];
+    if(!st) continue;
+    const hasLoad = st.weight != null && st.weight !== "";
+    if(!(hasLoad || isWorkingSet(st))) continue;
+    if(setIsWarmup(entry, i)) continue;
+    top = st; idx = i; break;
+  }
+  if(!top) return out;
+  const reps = parseFloat(top.reps);
+  if(!isFinite(reps)) return out;                       // nothing logged, nothing to judge
+  out.amrap = reps;
+  out.at = idx;
+  out.miss = reps < row.min;
+  return out;
+}
+/* The state the waves own, applied where state is allowed to change: recomputeCycle,
+   which every boot and every finished session already runs. */
+function syncWaveState(){
+  let n = 0;
+  const seen = {};
+  DAYS.forEach(wid=> (S.program[wid] || []).forEach(e=>{
+    if(!e || !e.name || !waveFor(e)) return;
+    const key = nrm(e.name);
+    if(seen[key]) return;
+    seen[key] = 1;
+    const cycle = waveCycleOf(programWeek());
+    let rec = tmStore()[key];
+    /* A WAVE WITH NO TRAINING MAX HAS NOTHING TO RUN OFF. One is opened from the max in
+       your log, which is what the programme itself tells you to do, and written down
+       rather than derived so the cycles can move it. With no max either, nothing is
+       invented: the set row says so and asks (see pctLineHTML). */
+    if(!rec){
+      const tm = tmFor(e.name);
+      if(!tm) return;
+      tmStore()[key] = rec = {w: tm.w, at: Date.now(), name: e.name, cycle,
+                              src: tm.src, of: tm.from || null};
+      logPlanChange("programme", null, e.name,
+        ["Training max set to " + fmtLoad(tm.w)],
+        {note: tm.src === "fromMax"
+          ? "90% of the " + fmtLoad(tm.from) + " max you entered, as 5/3/1 asks."
+          : "90% of the best estimate in your log. Set it properly in the exercise if you know better."});
+      n++;
+    }
+    /* A MISSED TOP SET, read from the sessions since this TM was last touched. */
+    const from = rec.readAt || 0;
+    let miss = null, trained = 0;
+    (S.sessions || []).forEach(s=>{
+      if(!s || !(s.startedAt > from)) return;
+      (s.entries || []).forEach(en=>{
+        if(!en || nrm(en.name) !== key) return;
+        trained++;
+        const r = wave531Read(s, en, e);
+        if(r && r.miss) miss = r;
+      });
+    });
+    rec.readAt = Date.now();
+    if(miss){
+      const to = roundWaveLoad(rec.w * TM_FAIL_FACTOR, e.name);
+      if(to != null && to < rec.w){
+        logPlanChange("programme", null, e.name,
+          ["Training max " + fmtLoad(rec.w) + " → " + fmtLoad(to)],
+          {note: "The week-" + miss.waveWeek + " top set came in at " + miss.amrap
+               + (miss.min ? " against a prescribed " + miss.min : "")
+               + ". 5/3/1 resets the training max to 90% of itself when that happens — the "
+               + "number was ahead of you, which is a thing about the number."});
+        rec.w = to; rec.at = Date.now(); rec.cycle = cycle; rec.src = "set"; rec.reset = Date.now();
+        n++;
+      }
+    } else if(rec.cycle > 0 && cycle > rec.cycle && trained > 0){
+      /* THE CYCLE ENDED, AND IT WAS TRAINED. One bump per cycle, however many cycles
+         have gone by — four weeks away is not four earned increases — and none at all
+         for a cycle in which the lift was never performed. A training max is earned by
+         doing the work the wave asked for; a month of weeks going by on a calendar is
+         not that, and coming back to loads 10 lb heavier than the ones you left is the
+         fastest way to miss the first session back. */
+      const step = tmStepFor(e.name);
+      const to = Math.round((rec.w + step) * 2) / 2;
+      logPlanChange("programme", null, e.name,
+        ["Training max " + fmtLoad(rec.w) + " → " + fmtLoad(to)],
+        {note: "A 5/3/1 cycle is done, so the training max goes up "
+             + fmtLoad(step) + " — " + (tmIsLower(e.name) ? "a lower-body" : "an upper-body")
+             + " lift. Every percentage this week is worked out from the new number."});
+      rec.w = to; rec.at = Date.now(); rec.cycle = cycle; rec.src = "set";
+      n++;
+    } else if(!(rec.cycle > 0)){
+      rec.cycle = cycle;
+    }
+  }));
+  if(n){ save(); queueSync(); }
+  return n;
+}
+
+/* =====================================================================
    D4 · THE SLEEP WINDOW
 
        wake - 8 h        = bedtime
@@ -47877,7 +48819,9 @@ function projectedDuration(wid){
     return Math.round(mins.reduce((a,b)=>a+b,0) / mins.length);
   }
   // no history: estimate from the prescription, sets x (working time + prescribed rest)
-  const list = deloadView(S.program[wid] || []);
+  // Through the same projection the session itself will be built from, so a week that
+  // asks for four sets is not estimated at the three the stored card says.
+  const list = deloadView(weekView(S.program[wid] || []));
   let sec = 0;
   list.forEach(e=>{
     const rest = Array.isArray(e.rest) ? e.rest[0] : 120;
@@ -47902,7 +48846,7 @@ function sleepWindow(wid, startAt){
 /* Which exercises have to go, always from the END, so the compounds that open the
    session are never the ones sacrificed. */
 function trimForSleep(wid, win){
-  const list = deloadView(S.program[wid] || []);
+  const list = deloadView(weekView(S.program[wid] || []));
   if(win.fits) return {keep: list, drop: []};
   let budget = Math.max(0, win.latestEnd - Date.now()) / 60000;
   const keep = [], drop = [];
@@ -49504,10 +50448,18 @@ function pctLoadFor(en){
   const spec = pctSpecFor(en);
   if(!spec) return null;
   const mx = maxFor(en.name);
+  /* M9 — A TRAINING MAX IS A NUMBER THE PROGRAMME OWNS. This used to work it out as
+     90% of your max every time it was asked, which is the right default and the wrong
+     answer for anybody actually running a percentage block: a TM moves on the
+     programme's schedule, not on your best session's. tmFor() hands back the stored one
+     where there is one and that same 90% where there is not, saying which. */
+  const tm = spec.of === "tm" ? tmFor(en.name) : null;
   const out = {pct: spec.pct, of: spec.of, max: mx ? mx.w : null, src: mx ? mx.src : null,
-               ref: null, load: null};
-  if(!mx) return out;
-  out.ref = spec.of === "tm" ? Math.round(mx.w * TM_DEFAULT * 2) / 2 : mx.w;
+               tmSrc: tm ? tm.src : null, ref: null, load: null};
+  const ref = spec.of === "tm" ? (tm ? tm.w : null) : (mx ? mx.w : null);
+  if(ref == null) return out;
+  if(tm && tm.from != null && out.max == null) out.max = tm.from;
+  out.ref = ref;
   /* ROUNDED TWICE, and the second one matters. roundLoadable() deliberately does nothing
      until somebody has said what plates their gym owns — a guess about a plate collection
      is worth less than no guess. That is right for a load somebody typed and wrong for
@@ -49524,13 +50476,30 @@ function pctWords(p){
   const head = Math.round(p.pct * 100) + "% of your "
              + (p.of === "tm" ? "training max" : "one-rep max");
   if(p.load == null) return head + " \u2014 no max on file yet";
-  return head + " \u2014 " + fmtLoad(p.load) + ", off "
-       + (p.of === "tm" ? fmtLoad(p.ref) + " (" + Math.round(TM_DEFAULT * 100) + "% of "
-                          + fmtLoad(p.max) + ")" : fmtLoad(p.max))
-       + (p.src === "estimated" ? ", estimated from your log" : "");
+  /* THE ARITHMETIC, AND WHERE THE NUMBER IT STARTS FROM CAME FROM. A training max the
+     programme has been moving is not 90% of anything any more — printing it as though
+     it were would be describing a number that has since gone up twice. */
+  const base = p.of !== "tm" ? fmtLoad(p.max)
+    : p.tmSrc === "set" ? fmtLoad(p.ref) + " (your training max)"
+    : fmtLoad(p.ref) + " (" + Math.round(TM_DEFAULT * 100) + "% of " + fmtLoad(p.max) + ")";
+  return head + " \u2014 " + fmtLoad(p.load) + ", off " + base
+       + ((p.src === "estimated" || p.tmSrc === "fromEstimate")
+            ? ", estimated from your log" : "");
 }
-function planLoadFor(en){
+function planLoadFor(en, si){
   if(!en || !en.name) return "";
+  /* M9 — THE SET'S OWN LOAD, WHERE THE PLAN GAVE IT ONE. A wave prescribes three
+     different weights in one exercise, so "the load for this movement" is not a question
+     with one answer any more. Asked about a set, it answers for that set; asked about the
+     movement, it answers with the top one, which is the load everything else here — the
+     warm-up ramp, the "plan is behind" line, the progression judgment — means. */
+  const sl = Array.isArray(en.setLoads) ? en.setLoads.filter(v=> v > 0) : null;
+  if(sl && sl.length){
+    const w = (si != null && en.setLoads[si] > 0) ? en.setLoads[si]
+            : Math.max.apply(null, sl);
+    const net0 = w - entryBarAdd(en);
+    return net0 > 0 ? String(r1(net0)) : "";
+  }
   /* THREE PLACES THE PRESCRIBED LOAD CAN BE, and the reason it appeared in none of them.
      A session entry does not carry `weight` — that field holds the per-SET loads you
      type — it carries planWeight, frozen at Start for the warm-up ramp. Reading `weight`
@@ -49671,7 +50640,15 @@ function autoProgCardHTML(){
   </div>`;
 }
 function planLoadPh(en, last, si){
-  const plan = planLoadFor(en);
+  /* M9 — A WAVED SET'S LOAD IS NOT A SUGGESTION, IT IS THE PRESCRIPTION. 85% of the
+     training max is the whole instruction for that set: there is nothing for the "heavier
+     of the plan and what you did last time" rule below to improve on, and applying it
+     would put week three's load in week one's first set. Returned before any of it. */
+  if(Array.isArray(en && en.setLoads) && en.setLoads[si] > 0){
+    const netW = en.setLoads[si] - entryBarAdd(en);
+    if(netW > 0) return String(r1(netW));
+  }
+  const plan = planLoadFor(en, si);
   const did = lastWorkedPh(last, si);
   const forced = appSetLoadPending(en && en.name);
   if(forced != null){
@@ -49832,7 +50809,7 @@ function setRowHTML(en, ei, si, last, idxLabel){
         >W</button>`;
     })()}</span>
     <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(String(planLoadPh(en, last, si)))}"${
-      planLoadPh(en, last, si) === planLoadFor(en) && planLoadFor(en) !== "" ? ` class="ph-plan"` : ""}>
+      planLoadPh(en, last, si) === planLoadFor(en, si) && planLoadFor(en, si) !== "" ? ` class="ph-plan"` : ""}>
     ${rx.rebuild && rx.rebuild.top != null && !st.done
       /* THE TARGET, IN THE BOX THAT ASKS FOR IT. "10" alone never said what 10 was for.
          Absolutely positioned so the caption cannot change the row's height — a rep box
@@ -51122,7 +52099,7 @@ const BACKUP_FIELDS = [
      where the rest days go and when the tests are — so they travel with it. */
   "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
-  "exAliases","stalls","deload","blockStart","planStart","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
+  "exAliases","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
@@ -52477,6 +53454,55 @@ function selfTestRun(){
       }
     });
   }catch(e){ note(fail, "technique", String((e && e.message) || e)); }
+  /* 9. M9 \u2014 THE WAVE TABLE IS THE PUBLISHED ONE.
+
+        Four weeks, three sets, the percentages and reps as Wendler wrote them, the deload
+        last and only the first three weeks carrying an AMRAP. Checked rather than trusted
+        because this table is the one thing in the periodization nobody using the app can
+        verify from the inside: a percentage typed wrong is a load on a bar. */
+  try{
+    const want = [
+      {p: [0.65, 0.75, 0.85], r: ["5","5","5"], amrap: true,  min: 5, deload: false},
+      {p: [0.70, 0.80, 0.90], r: ["3","3","3"], amrap: true,  min: 3, deload: false},
+      {p: [0.75, 0.85, 0.95], r: ["5","3","1"], amrap: true,  min: 1, deload: false},
+      {p: [0.40, 0.50, 0.60], r: ["5","5","5"], amrap: false, min: 0, deload: true}
+    ];
+    if(WAVE_531.length !== want.length) note(fail, "wave weeks", String(WAVE_531.length));
+    want.forEach((w, i)=>{
+      const got = WAVE_531[i] || {};
+      const same = String(got.pcts) === String(w.p) && String(got.reps) === String(w.r)
+                && !!got.amrapLast === w.amrap && (got.min || 0) === w.min
+                && !!got.deload === w.deload;
+      if(!same) note(fail, "wave week " + (i + 1), JSON.stringify(got));
+    });
+    /* And the arithmetic off it, which is the acceptance test from the brief: a 200 lb
+       training max gives 130 / 150 / 170 in week one. */
+    const mk = p=> Math.round(200 * p * 2) / 2;
+    if(mk(0.65) !== 130 || mk(0.75) !== 150 || mk(0.85) !== 170)
+      note(fail, "wave arithmetic", [mk(0.65), mk(0.75), mk(0.85)].join("/"));
+    if(TM_DEFAULT !== 0.9) note(fail, "TM_DEFAULT", String(TM_DEFAULT));
+    if(TM_STEP_UPPER !== 5 || TM_STEP_LOWER !== 10)
+      note(fail, "TM step", TM_STEP_UPPER + "/" + TM_STEP_LOWER);
+    if(TM_FAIL_FACTOR !== 0.9) note(fail, "TM reset factor", String(TM_FAIL_FACTOR));
+  }catch(e){ note(fail, "wave", String((e && e.message) || e)); }
+  /* 10. M3 \u2014 THE DELOAD AND THE BLOCK, AGAINST THE REFERENCE'S OWN FIGURES. */
+  try{
+    if(DELOAD_SET_FRACTION !== 0.5) note(fail, "deload fraction", String(DELOAD_SET_FRACTION));
+    if(DELOAD_RPE_CAP !== 7) note(fail, "deload RPE cap", String(DELOAD_RPE_CAP));
+    if(LAYOFF_DELOAD_DAYS !== 7) note(fail, "layoff days", String(LAYOFF_DELOAD_DAYS));
+    if(DELOAD_EVERY_WEEKS !== 6) note(fail, "deload clock", String(DELOAD_EVERY_WEEKS));
+    // 0.5 rounds up, and nothing ever comes down to nought sets
+    [[1,1],[2,1],[3,2],[4,2],[5,3],[6,3],[7,4]].forEach(([n, want])=>{
+      const got = deloadSetsFor({sets: n});
+      if(got !== want) note(fail, "deload sets", n + " \u2192 " + got + ", wanted " + want);
+    });
+    if(MESO_SHAPE.beginner.deload !== 0) note(fail, "beginner deload", "scheduled");
+    if(MESO_SHAPE.beginner.accum !== 6) note(fail, "beginner block", String(MESO_SHAPE.beginner.accum));
+    ["intermediate","advanced"].forEach(k=>{
+      if(MESO_SHAPE[k].accum !== 4 || MESO_SHAPE[k].deload !== 1)
+        note(fail, k + " block", JSON.stringify(MESO_SHAPE[k]));
+    });
+  }catch(e){ note(fail, "deload", String((e && e.message) || e)); }
   return {fail, warn, lib: seen.size, ok: fail.length === 0};
 }
 /* The reference calls this runSelfTests(); the file has always called it selfTestRun().
