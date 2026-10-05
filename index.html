@@ -6313,7 +6313,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "47.1";
+const APP_VERSION = "47.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7170,7 +7170,9 @@ const GLOSSARY_TIP = {
   rir:"Reps In Reserve: how many more reps you could have done. RIR 2 means you stopped two short.",
   hypertrophy:"Training to make muscle bigger, as opposed to purely stronger. Moderate reps, plenty of sets.",
   unilateral:"One limb at a time — single-arm rows, split squats, one-leg curls.",
-  bilateral:"Both limbs together, the ordinary case: a barbell squat, a bench press, a pulldown."
+  bilateral:"Both limbs together, the ordinary case: a barbell squat, a bench press, a pulldown.",
+  block:"A run of a few weeks that get gradually harder, then one easy week to recover.",
+  trainingmax:"A slightly conservative version of your best lift \u2014 90% of it \u2014 that the percentages are worked out from."
 };
 /* Not esc(): term() runs while this file is still being evaluated (VOL_LANDMARK_SCALE
    calls it), and `const esc` further down is still in its temporal dead zone then. */
@@ -7462,6 +7464,28 @@ const GLOSSARY = {
     <p>Fatigue accumulates faster than you notice. After several hard weeks it starts masking your actual strength, you're stronger than your lifts suggest, you just can't express it. A deload lets the fatigue drain off so the strength shows up.</p>
     <p>The usual recipe: <b>keep the weights, cut the sets by about half</b>, and stop every set well short of ${term("failure","failure")}. Keeping the loads is what preserves the skill and the stimulus; cutting the sets is what buys the recovery.</p>
     <p>Signs you need one: strength going backwards across several lifts at once, high ${term("fatigue","fatigue")} with low ${term("recovery","recovery")} everywhere on the Body tab, poor sleep, and no motivation to train.</p>`},
+
+  block:{title:"Training blocks, and the week count", html:`
+    <div class="gl-def"><b>A few weeks that get gradually harder, then one easy week.</b></div>
+    <p>Training works better in waves than in a straight line. You push a little harder each week, which is what makes you grow, but you cannot keep pushing harder for ever — so after a few weeks you take one easy week, let the tiredness drain off, and start again a bit stronger than last time.</p>
+    <p>That run of weeks is a <b>block</b>. "Week 2 of 5" means you are on the second week of a five-week run, and the fifth week is the easy one. When it finishes you go back to week 1 and the whole thing repeats.</p>
+    <p><b>What changes as the weeks go by:</b></p>
+    <table class="gl-table">
+      <tr><td>Week 1</td><td>Comfortable — stop about 3 reps before you couldn't do another</td></tr>
+      <tr><td>Week 2</td><td>A bit harder — about 2 reps left in you</td></tr>
+      <tr><td>Week 3</td><td>Harder — 1 or 2 reps left</td></tr>
+      <tr><td>Week 4</td><td>Hardest — about 1 rep left</td></tr>
+      <tr><td>Last week</td><td>The easy one: same weights, half the sets</td></tr>
+    </table>
+    <p>The weights on the cards don't change by themselves. What changes is how close to your limit each set is meant to be. Element 26 may also add <b>one set</b> to a muscle that is recovering well — one, not more, and never past what you can recover from.</p>
+    <p><b>If you are new to lifting</b>, none of this applies to you yet. You get a longer run of weeks with no scheduled easy week, because at the start you make progress just by turning up and learning the movements — and an easy week gets suggested when you actually need one rather than on a schedule.</p>
+    <p style="color:var(--faint);font-size:13.5px">The counter starts the day your plan starts. Weeks you don't train still tick by on the calendar, but they don't bring the easy week closer — that's counted from weeks you actually trained, because tiredness is what the easy week is for.</p>`},
+
+  trainingmax:{title:"Training max", html:`
+    <div class="gl-def"><b>A deliberately cautious version of your best lift: 90% of it.</b></div>
+    <p>When a plan says "lift 75% today", 75% of what? Using your true best-ever single is a bad idea — you can't hit it on a tired Tuesday, and the whole plan becomes too heavy. So the percentages are taken from a number slightly below your real max instead.</p>
+    <p>That number is your training max. It goes up by a small, fixed amount each time you finish a cycle, whether or not you tested anything — which is what keeps the weights creeping up steadily rather than in jumps.</p>
+    <p>You can change it any time from the Program tab if it feels too heavy or too light.</p>`},
 
   superset:{title:"Superset", html:`
     <div class="gl-def"><b>Two exercises done back to back with no rest between them.</b></div>
@@ -27939,15 +27963,39 @@ function periodCardHTML(){
   const mz = mesoWeekNow();
   const wk = planWeekNow();
   if(!list.length && !mz) return "";
-  const head = wk ? "Week " + wk.week + (wk.of ? " of " + wk.of : "") : "This week";
+  /* "Week 2 of 5", where the 2 counts inside the block rather than since the plan began.
+     An imported document's own numbering wins where it has one; otherwise the block is the
+     only total that means anything, and a bare "Week 7" invites the question "of what?". */
+  const head = wk
+    ? "Week " + (wk.of ? wk.week + " of " + wk.of
+                : mz ? mz.week + " of " + mz.of
+                : String(wk.week))
+    : "This week";
   let body = "";
   if(mz){
+    /* PLAIN ENGLISH FIRST, THE NAME FOR IT SECOND. This used to open with "Week 2 of a
+       5-week block — 4 building weeks then a deload", which is three pieces of jargon in
+       one line and assumes you already know why a week would be numbered at all. A
+       beginner reading it learns nothing. So: say what happens to you this week, then
+       offer the word for it as a tappable term for anybody who wants it. */
+    const left = Math.max(0, mz.shape.accum - mz.week + 1);
     body += `<div class="sub" style="margin:5px 0 0">${
       mz.shape.deload > 0
-        ? "Week " + mz.week + " of a " + mz.of + "-week block \u2014 " + mz.shape.accum
-          + " building weeks then a deload" + (mz.deload ? ", and this is the deload." : ".")
-        : mz.shape.accum + " building weeks, with no deload scheduled: at your training age "
-          + "an easier week is called by the warning signs rather than by the calendar."}</div>`;
+        ? (mz.deload
+            ? "<b>This is your easy week.</b> Same weights as usual, about half the sets. "
+              + "It is meant to feel easy \u2014 that is how the tiredness drains off, so you "
+              + "come back to week 1 stronger."
+            : "Your sets get a little harder each week for " + mz.shape.accum + " weeks, then "
+              + "week " + mz.of + " is an easy one. "
+              + (left === 1
+                  ? "This is the hardest week \u2014 the easy one is next."
+                  : "After this week, " + (left - 1) + " more before the easy week.")
+              + " Then it starts again.")
+          + ` <span class="linklike" data-term="block" role="button" tabindex="0">What does this mean?</span>`
+        : "Your sets get a little harder each week. There is no easy week booked in: while "
+          + "you are still new, Element 26 will tell you when you need one rather than "
+          + "putting it on the calendar."
+          + ` <span class="linklike" data-term="block" role="button" tabindex="0">What does this mean?</span>`}</div>`;
   }
   list.forEach(x=>{
     const n = x.now || {};
@@ -27956,34 +28004,43 @@ function periodCardHTML(){
       <b>${esc(x.name)}</b>
       <div class="sub" style="margin:2px 0 0">${
         x.wave === "531"
-          ? "5/3/1, week " + esc(String(n.waveWeek || 1)) + " of " + WAVE_531_WEEKS + " \u2014 "
-            + (Array.isArray(n.setPcts) ? n.setPcts.map(v=> Math.round(v * 100) + "%").join(" / ") : "")
-            + (Array.isArray(n.setReps) ? " for " + esc(n.setReps.join(" / ")) : "")
-            + (loads.length ? " \u2014 " + esc(loads.map(v=> fmtLoad(v)).join(" / ")) : "")
-          : "Your plan writes " + x.rows + " week" + (x.rows === 1 ? "" : "s")
-            + " of its own for this movement" + (n.projected === "weeks"
-              ? ": this week is " + esc(String(n.sets || "")) + " \u00d7 " + esc(String(n.reps || "")) : "")
+          ? (loads.length
+               ? "Lift " + esc(loads.map(v=> fmtLoad(v)).join(", then ")) + " today"
+                 + (Array.isArray(n.setReps) ? " \u2014 " + esc(n.setReps.join(", then ")) + " reps" : "")
+                 + ". "
+               : "")
+             + "This is week " + esc(String(n.waveWeek || 1)) + " of " + WAVE_531_WEEKS
+             + " in a 5/3/1 cycle"
+             + (Array.isArray(n.setPcts)
+                 ? " (" + n.setPcts.map(v=> Math.round(v * 100) + "%").join(" / ") + " of your "
+                   + term("trainingmax", "training max") + ")"
+                 : "")
+             + "."
+          : "Your plan writes out " + x.rows + " week" + (x.rows === 1 ? "" : "s")
+            + " of its own for this exercise" + (n.projected === "weeks"
+              ? ", and this week asks for " + esc(String(n.sets || "")) + " sets of "
+                + esc(String(n.reps || "")) : "")
             + "."}</div>
-      ${x.tm ? `<div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">Training max
-        <b>${esc(fmtLoad(x.tm.w))}</b>${
-          x.tm.src === "set" ? ", yours \u2014 it goes up " + esc(fmtLoad(tmStepFor(x.name)))
-                               + " at the end of each cycle"
-        : x.tm.src === "fromMax" ? ", 90% of the max you entered"
-        : ", 90% of the best estimate in your log"}.
-        <button class="linklike" data-setmax="${esc(x.name)}">change</button></div>` : ""}
-      ${x.wave === "531" && !x.tm ? `<div class="sub" style="margin:2px 0 0">No max on file, so there is
-        nothing to work the percentages out from.
-        <button class="linklike" data-setmax="${esc(x.name)}">Set your ${esc(x.name)} max</button></div>` : ""}
+      ${x.tm ? `<div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">Worked out from
+        <b>${esc(fmtLoad(x.tm.w))}</b>, your ${term("trainingmax", "training max")}${
+          x.tm.src === "set" ? " \u2014 it goes up " + esc(fmtLoad(tmStepFor(x.name)))
+                               + " every time you finish a cycle"
+        : x.tm.src === "fromMax" ? ", 90% of the best lift you told us about"
+        : ", 90% of your best lift so far"}.
+        <button class="linklike" data-setmax="${esc(x.name)}">Change it</button></div>` : ""}
+      ${x.wave === "531" && !x.tm ? `<div class="sub" style="margin:2px 0 0">Element 26 needs to know
+        roughly what you can lift on this before it can work the weights out.
+        <button class="linklike" data-setmax="${esc(x.name)}">Tell it your best ${esc(x.name)}</button></div>` : ""}
     </div>`;
   });
   if(!body) return "";
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
-      <span class="dot" style="background:var(--acc)"></span><h3>${esc(head)}, as it will run</h3>
+      <span class="dot" style="background:var(--acc)"></span><h3>${esc(head)}</h3>
     </div>
-    <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">The cards below are
-      your plan. This is what Element 26 will actually put in front of you this week, worked out
-      from it \u2014 nothing here is written into the plan, so a block ending restores it exactly.</div>
+    <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">What this week asks of
+      you. The cards further down are your plan as written; this is the same plan adjusted for the
+      week you are on, and your plan itself is never changed \u2014 so nothing is lost.</div>
     ${body}</div>`;
 }
 /* THE CHECK, ON THE PLAN YOU ARE ACTUALLY RUNNING. The same function the builder is
