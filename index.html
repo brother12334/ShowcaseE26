@@ -246,6 +246,10 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
   color:rgba(0,0,0,.82);font-size:13px;
 }
 .plate.cur small{color:rgba(0,0,0,.55)}
+/* A day you chose for today rather than one the rotation handed you. The ring already
+   says "this is today"; the accent outline says "this was a choice", so the strip can be
+   read at a glance without a legend. */
+.plate.pickd{box-shadow:0 0 0 2px var(--bg), 0 0 0 3.5px var(--acc)}
 /* A REST IS NOT A SMALL WORKOUT.
 
    It used to be the same KIND of object as a training cell — filled, outlined, rounded,
@@ -6118,7 +6122,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "39.4";
+const APP_VERSION = "39.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6428,6 +6432,47 @@ function isRestDay(date){ return restDaysThisCycle().indexOf(date) > -1; }
    rest day nobody earned. */
 function restsFloat(){ return trainPrefs().restMode === "floating"; }
 function daysFree(){ return trainPrefs().dayOrder === "any"; }
+/* WHICH DAY OF YOUR PLAN YOU ARE DOING TODAY, when you have said you choose.
+
+   `S.override` is the mechanism and it has been there all along \u2014 one date, one
+   workout id \u2014 but nothing user-facing ever set it, and the one control that could
+   (tapping a plate) moved S.pointer instead. Those are not the same thing, and the
+   difference is the whole point of this:
+
+     MOVING THE POINTER SPENDS THE DAYS IT PASSES. Skip Pull A to do Legs A and the
+     pointer lands past Pull A, which slotIsPast() then reads as a day the cycle has
+     already had. The day you skipped is gone for the cycle \u2014 which is exactly the hole
+     the fixed rotation exists to close, and it is not what "I'll do legs instead today"
+     means.
+
+     AN OVERRIDE SPENDS NOTHING. The pointer stays where it is. Today's session is the
+     one you picked; the day you stepped over is still unchecked, so recomputeCycle()
+     leaves the pointer on it and it is what comes up next. You have reordered your week,
+     not shortened it.
+
+   It lasts for the day it was set and no longer, so tomorrow is the rotation's business
+   again unless you say otherwise. */
+function pickDayToday(wid){
+  if(!wid || ROTATION.indexOf(wid) < 0) return false;
+  /* The setting is the authority, not the control that happens to be on screen. */
+  if(!daysFree()) return false;
+  if(S.active){ toast("Finish or discard the current workout first"); return false; }
+  const i = ROTATION.indexOf(wid);
+  if(slotIsPast(i)){ toast(dayName(wid) + " is already done this cycle"); return false; }
+  S.override = {date: todayStr(), workoutId: wid, at: Date.now()};
+  save(); queueSync();
+  return true;
+}
+function clearDayPick(){
+  S.override = null;
+  save(); queueSync();
+}
+/* Is today's day one you chose rather than one the rotation handed you? */
+function dayPickedToday(){
+  return !!(S.override && S.override.date === todayStr()
+            && ROTATION.indexOf(S.override.workoutId) > -1
+            && S.override.workoutId !== ROTATION[S.pointer]);
+}
 /* Each rest slot as "how many training days come before it", with a trailing one
    wrapped to the front of the next cycle. Sorted, because the wrap reorders them. */
 function restSchedule(){
@@ -24898,6 +24943,38 @@ function prefsScreenHTML(){
 // HOW THE TRAINING ITSELF IS RUN: the rules that change your programme or how it is judged.
 function prefsSessionHTML(){
   const p = trainPrefs();
+  /* WHICH DAY OF THE PLAN YOU DO TODAY.
+
+     The rotation is the default and stays the default: a plan written as an order is
+     prescribing an order, and the day you are free to skip is the day at the far end
+     that never gets trained. But "the gym's squat rack is full" and "I only have forty
+     minutes" are real, and the honest answer to them is to let somebody move their week
+     around rather than to make them fight the app or log the wrong day.
+
+     The important half is what it does NOT do. Picking a day does not spend the one you
+     stepped over \u2014 see pickDayToday(). The cycle still wants every day in it, and the
+     one you skipped is what comes up next. */
+  let h = setBlock("Which day you train",
+    "Your plan runs as a rotation: one day after another, and each day opens when the "
+    + "cycle reaches it. If your week does not always cooperate, you can choose instead "
+    + "\u2014 tap any day on the strip at the top of Today and that is the session you get. "
+    + "Nothing is lost either way: a day you step over stays next in line, and a day you "
+    + "have already trained this cycle stays done.",
+    `<div class="ob-opts" style="gap:7px">${[
+      ["fixed", "Follow the rotation", "The plan's order. The next day is the next day."],
+      ["any",   "Let me choose the day", "Tap a day on Today to do that one. The day you skip stays next."]
+    ].map(([v,t,sub])=>
+      `<button class="ob-opt${(trainPrefs().dayOrder === v) ? " on" : ""}" data-setdayorder="${v}" style="padding:11px 13px">
+        <span class="ob-opt-t">${esc(t)}</span>
+        <span class="ob-opt-s">${esc(sub)}</span>
+        <span class="ob-tick">${ICON.check}</span>
+      </button>`).join("")}</div>
+     <div class="set-says">${daysFree()
+       ? "Today is " + esc(dayName(todaysWorkoutId())) + (dayPickedToday()
+           ? ", which you picked. " + esc(dayName(ROTATION[S.pointer])) + " is still next."
+           : ", next in the rotation. Tap another on Today to change it.")
+       : "Today is " + esc(dayName(todaysWorkoutId())) + ", because that is where the rotation is."}</div>`);
+
   /* THE HOUR THE REST-DAY SORENESS CHECK IS ASKED AT.
 
      Here rather than under Reminders, even though a notification goes with it: that whole
@@ -24905,7 +24982,7 @@ function prefsSessionHTML(){
      setting. The check happens on a rest day whether or not anything is ever sent to you,
      and the hour it happens at is a fact about how your training is measured — which is
      what this page is. */
-  let h = setBlock("Rest-day soreness check",
+  h += setBlock("Rest-day soreness check",
     "On the day a muscle's recovery window runs out — which is when soreness peaks if it is "
     + "going to — Element 26 asks how it feels. " + (S.domsCheckTime
       ? "Answering at the same time each day keeps your readings comparable, which is why it is "
@@ -25358,7 +25435,12 @@ function slotIsLocked(i){
   return i !== S.pointer;
 }
 function plateStrip(){
-  const cur = S.pointer;
+  /* THE RING GOES ON THE DAY YOU ARE DOING, which is not always the one the pointer is
+     on: a day picked for today (see pickDayToday) is today's session, and the pointer
+     stays behind on the day it stepped over. */
+  const todayWid = todaysWorkoutId();
+  const cur = ROTATION.indexOf(todayWid) > -1 ? ROTATION.indexOf(todayWid) : S.pointer;
+  const picked = dayPickedToday();
   const taken = restDaysThisCycle();
   /* restSchedule() sorts, and the trailing rest wraps to the front, so the n-th rest in
      the LAYOUT is not the n-th in the schedule. This maps one to the other. */
@@ -25469,6 +25551,7 @@ function plateStrip(){
     const past = slotIsPast(i);
     const locked = slotIsLocked(i);
     const cls = "plate" + (i===cur && !restNow && !restNext ?" cur":"") + (done?" done":"")
+              + (picked && i === cur ? " pickd" : "")
               + (past?" past":"") + (locked?" locked":"") + (past||locked?" inert":"");
     /* aria-disabled, and inert to the touch. The label still carries the reason for a
        screen reader; the thumb just gets no response, because there is nothing here to
@@ -25476,7 +25559,9 @@ function plateStrip(){
     html += `<button class="${cls}" data-slot="${i}" style="--c:${m.color}"${
       past||locked?' aria-disabled="true"':""}
       aria-label="${esc(m.name)}, ${wd}${done?", done":past?", already passed this cycle"
-        :locked?", not yet — the rotation is on "+esc(dayName(ROTATION[cur])):""}">${esc(m.short)}<small>${wd}</small>${
+        :locked?", not yet — the rotation is on "+esc(dayName(ROTATION[cur]))
+        :(picked && i === cur) ? ", the day you picked for today"
+        :daysFree() ? ", tap to do this one today" : ""}">${esc(m.short)}<small>${wd}</small>${
       done?'<span class="pcheck">'+ICON.check+'</span>':""}</button>`;
   });
   html += "</div>";
@@ -27172,9 +27257,13 @@ function viewToday(){
     <button class="btn day-open-go ants" id="startBtn">
       <svg class="ants-svg" aria-hidden="true" focusable="false"><rect width="100%" height="100%" rx="7"/></svg>
       Start ${esc(m.name)} workout</button>
-    ${explainHTML("rotation", daysFree()
-      ? "Next up in your rotation. Your plan lets the days be done in any order, so you can tap any day the cycle still has left \u2014 just not one it has already spent."
-      : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them.", "day-open-sub")}
+    ${dayPickedToday()
+      ? `<div class="day-open-sub">You picked this for today. ${esc(dayName(ROTATION[S.pointer]))}
+          is still next in your rotation.
+          <button class="linklike" id="dayPickClear">back to the rotation</button></div>`
+      : explainHTML("rotation", daysFree()
+        ? "Next up in your rotation. You have said you choose your own day, so tap any day on the strip above to do that one today \u2014 the one you step over stays next, and a day the cycle has already had stays done."
+        : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them.", "day-open-sub")}
   </div>`;
   h += noteStackHTML(todayNotes(wid));
   h += readinessNoteHTML(wid);
@@ -36692,6 +36781,22 @@ function bind(){
       /* Inert in the markup, so this only catches a keyboard press. Nothing is said:
          see the note on .plate.inert. */
       if(slotIsPast(slot) || slotIsLocked(slot)) return;
+      /* UNDER FREE CHOICE THIS PICKS TODAY'S SESSION rather than moving the rotation.
+         Tapping the day you are already on puts you back on the rotation, so the control
+         undoes itself and there is no separate "cancel" to find. */
+      if(daysFree()){
+        const wid = ROTATION[slot];
+        if(dayPickedToday() && wid === todaysWorkoutId()){
+          clearDayPick();
+          toast("Back to your rotation \u2014 " + dayName(todaysWorkoutId()) + " today");
+        } else if(pickDayToday(wid)){
+          const skipped = ROTATION[S.pointer];
+          toast(dayName(wid) + " today" + (skipped && skipped !== wid
+            ? " \u2014 " + dayName(skipped) + " is still next" : ""), "good");
+        }
+        render();
+        return;
+      }
       S.pointer = slot;
       S.override = null;
       save(); queueSync(); render();
@@ -36799,6 +36904,12 @@ function bind(){
 
   const start = $("#startBtn");
   if(start) start.onclick = ()=> startWorkout(todaysWorkoutId());
+  const dpc = $("#dayPickClear");
+  if(dpc) dpc.onclick = ()=>{
+    clearDayPick();
+    toast("Back to your rotation \u2014 " + dayName(todaysWorkoutId()) + " today");
+    render();
+  };
   // a standing explanation, put away or asked for again
   document.querySelectorAll("[data-explainoff]").forEach(b=> b.onclick = ()=>{
     EXPLAIN_OPEN[b.dataset.explainoff] = false; render();
@@ -38779,6 +38890,19 @@ function bind(){
                             S.setup || {}, {goal: b.dataset.setgoal});
     save(); queueSync(); render();
     toast("Training for " + ((GOALS[b.dataset.setgoal]||{}).name || "").toLowerCase());
+  });
+  document.querySelectorAll("[data-setdayorder]").forEach(b=> b.onclick = ()=>{
+    const v = b.dataset.setdayorder === "any" ? "any" : "fixed";
+    S.prefs = S.prefs || {};
+    S.prefs.dayOrder = v;
+    /* Going back to the rotation drops any day picked for today: the setting and the
+       state it produced cannot be allowed to disagree, and the rotation's own answer is
+       the one the setting just asked for. */
+    if(v === "fixed" && S.override) S.override = null;
+    save(); queueSync(); render();
+    toast(v === "any"
+      ? "Tap any day on Today to do that one"
+      : "Following your rotation \u2014 " + dayName(todaysWorkoutId()) + " today");
   });
   /* The account card. The ID is copyable in one tap because the whole point of it is
      that people keep it somewhere; the key needs a deliberate reveal, because it is the
