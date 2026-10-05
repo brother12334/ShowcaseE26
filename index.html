@@ -267,6 +267,13 @@ h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter
 .tw-now{background:var(--acc-soft)}
 .tw-tag{font-style:normal;font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
   color:var(--acc);margin-left:6px}
+/* M11: how to do a movement, the first time it comes up. */
+.tq-card{border:1px solid var(--acc-line);border-radius:11px;padding:11px 12px;margin:-4px 0 12px;
+  background:linear-gradient(180deg,var(--acc-soft),transparent)}
+.tq-h{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acc);margin-bottom:7px}
+.tq-row{display:flex;gap:10px;font-size:13.5px;line-height:1.45;padding:3px 0}
+.tq-row b{flex:0 0 76px;color:var(--dim);font-weight:600}
+.tq-row span{flex:1;color:var(--text)}
 /* A REST IS NOT A SMALL WORKOUT.
 
    It used to be the same KIND of object as a training cell — filled, outlined, rounded,
@@ -4795,6 +4802,30 @@ body.cele-open{overflow:hidden}
    and behaves the same wherever it appears. */
 .spec-full{z-index:46}
 body.spec-open{overflow:hidden}
+body.build-open{overflow:hidden}
+/* The builder's preview: the plan as a document, before it is one. */
+.bld-sum{display:flex;align-items:baseline;gap:10px;margin:0 0 14px;font-size:14px}
+.bld-sum span{color:var(--dim);font-size:13px}
+.bld-fails{margin:0 0 14px}
+.bld-day{border:1px solid var(--line);border-radius:11px;padding:11px 12px;margin-bottom:9px}
+.bld-day-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  margin-bottom:7px;font-size:15px}
+.bld-day-h .num{color:var(--dim);font-size:12.5px}
+.bld-ex{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;
+  color:var(--dim);padding:2.5px 0}
+.bld-ex .num{color:var(--faint);white-space:nowrap}
+.bld-ss{font-style:normal;font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--acc)}
+.bld-vol-h{font-family:var(--disp);font-size:13px;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--dim);margin:18px 0 7px;border-bottom:1px solid var(--line);padding-bottom:5px}
+.bld-vols{border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.bld-vol{display:flex;justify-content:space-between;gap:10px;padding:7px 11px;font-size:13.5px;
+  border-top:1px solid var(--line)}
+.bld-vol:first-child{border-top:0}
+.bld-vol .num i{font-style:normal;color:var(--faint);font-size:12px}
+.bld-under{background:rgba(200,80,70,.10)}
+.bld-over{background:rgba(200,150,60,.10)}
+.bld-notes .sub{margin:4px 0}
 .spec-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;min-height:34px}
 .spec-x{background:none;border:0;color:var(--faint);padding:6px;margin:-6px;cursor:pointer;
   display:flex;min-width:34px;min-height:34px;align-items:center;justify-content:center}
@@ -6132,6 +6163,10 @@ body.spec-open{overflow:hidden}
 <!-- The priority block's own full page. Same shape as the importer's: a real page, not a
      sheet, because setting one up is six decisions with numbers to read at each. -->
 <div class="ai-full spec-full" id="specFull" hidden><div class="ai-full-in" id="specFullIn"></div></div>
+<!-- The plan builder. Seven questions, one a screen, and a preview you can refuse. Same
+     full-page shape as the importer and the priority block, for the same reason: these
+     are decisions with numbers to read, not a sheet to tap through. -->
+<div class="ai-full spec-full" id="buildFull" hidden><div class="ai-full-in" id="buildFullIn"></div></div>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 <div id="toasts" aria-live="polite" aria-atomic="false"></div>
 <script>
@@ -6139,7 +6174,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "39.7";
+const APP_VERSION = "40.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -6238,6 +6273,19 @@ const DAY_COLORS = ["var(--d-pusha)","var(--d-pulla)","var(--d-legsa)",
    choice can be made on something other than day count. `layout` is the full cycle;
    count the "rest" entries and you have the recovery budget. */
 const SPLITS = {
+  /* TWO DAYS IS A REAL ANSWER, and the app had none. Somebody who can train twice a week
+     was being offered a three-day split and told to miss a third of it, which is how a
+     plan stops being followed. Two full-body days, alternating emphasis, every muscle
+     twice. */
+  full2: {
+    name: "Full Body",
+    tag: "2 days a week",
+    blurb: "Two sessions, each covering everything. The least you can train and still make progress on every muscle.",
+    best: "Best if two days is what your week honestly has in it.",
+    days: [{id:"full2A", name:"Full Body A", short:"A"},
+           {id:"full2B", name:"Full Body B", short:"B"}],
+    layout: ["full2A","rest","rest","full2B","rest","rest","rest"]
+  },
   full3: {
     name: "Full Body",
     tag: "3 days a week",
@@ -6282,6 +6330,21 @@ const SPLITS = {
            {id:"legsB", name:"Legs B", short:"L2"}],
     layout: ["pushA","pullA","legsA","rest","pushB","pullB","legsB","rest"]
   },
+  /* FIVE DAYS, and not as five body parts. Upper and lower twice over is the four-day
+     plan that works; the fifth day is where push, pull and legs each get a session of
+     their own on top. Every muscle twice a week, no day carrying a whole region alone. */
+  ulppl5: {
+    name: "Upper / Lower / Push / Pull / Legs",
+    tag: "5 days a week",
+    blurb: "An upper and a lower day, then push, pull and legs. Everything twice a week, with room in each session.",
+    best: "Best if you train five days and want the volume spread rather than stacked.",
+    days: [{id:"u5upper", name:"Upper",  short:"UP"},
+           {id:"u5lower", name:"Lower",  short:"LO"},
+           {id:"u5push",  name:"Push",   short:"PU"},
+           {id:"u5pull",  name:"Pull",   short:"PL"},
+           {id:"u5legs",  name:"Legs",   short:"LG"}],
+    layout: ["u5upper","u5lower","rest","u5push","u5pull","u5legs","rest"]
+  },
   bro5: {
     name: "One Body Part a Day",
     tag: "5 days a week",
@@ -6295,7 +6358,13 @@ const SPLITS = {
     layout: ["chestD","backD","rest","shouldersD","armsD","legsD","rest"]
   }
 };
-const SPLIT_ORDER = ["full3","ul4","ppl3","ppl6","bro5"];
+const SPLIT_ORDER = ["full2","full3","ul4","ulppl5","ppl3","ppl6","bro5"];
+/* H10 \u2014 WHAT THE BUILDER WILL WRITE, by days a week. ppl3 and bro5 are kept so every
+   existing plan on them still renders, and are not offered: three days of push/pull/legs
+   trains each muscle once a week, and a body-part split trains it once a week with
+   everything else waiting six days. Both are choices somebody can make; neither is one
+   the app should make for them. */
+const BUILDER_SPLIT_BY_DAYS = {2:"full2", 3:"full3", 4:"ul4", 5:"ulppl5", 6:"ppl6"};
 const DEFAULT_SPLIT = "ul4";
 
 /* A split you built yourself lives on the profile as a whole object rather than a key,
@@ -8631,10 +8700,71 @@ Object.keys(EX_LIBRARY_EXTRA).forEach(k=>{
    Changing a pick is still possible \u2014 by editing EX_LIBRARY, which is the curated table
    and where such a decision belongs. The test pins every (slot \u00d7 gear) pick, so a change
    has to be made on purpose. */
+/* THE TABLE ITSELF, WRITTEN DOWN RATHER THAN DERIVED.
+
+   The first version of this took a snapshot of the curated list order, which froze the
+   right thing and froze the wrong contents: the order a slot's list happens to be written
+   in is not a considered ranking, and on four slots it disagreed with the science the rest
+   of the app is built on.
+
+   The reference's own table is the ranking, and the reason for each one is the same
+   principle \u2014 LOAD THE MUSCLE WHERE IT IS LONG [M]:
+
+     overhead press \u2014 a seated dumbbell press before a barbell: the bells can travel past
+       the ears and the shoulder is in a safer position at the bottom.
+     lateral raise  \u2014 a cable behind the body before a dumbbell: the side delt is loaded
+       at the bottom of the arc, where a dumbbell gives almost nothing [Maeo-style
+       lengthened-position evidence, M].
+     triceps        \u2014 overhead before a pushdown: the long head crosses the shoulder and is
+       only stretched overhead [M \u2014 Maeo 2023].
+     rear delt      \u2014 a reverse pec deck before a cable fly: stable, and it is the position
+       people can actually push close to failure in.
+     squat (bodyweight) \u2014 a split squat before a two-legged air squat, which stops being a
+       hard set for anybody after a fortnight.
+
+   Anything not named here keeps the curated order, which is what the swap lists have
+   always used. Names are checked against the library by the self-test, so a rename cannot
+   quietly empty a row. */
+const EX_PREFERENCE_TABLE = {
+  press_horizontal: ["Barbell Bench Press","Dumbbell Bench Press","Chest Press Machine","Push-Up","Incline Push-Up"],
+  press_incline:    ["Incline Dumbbell Bench Press","Incline Barbell Bench Press","Incline Chest Press Machine","Decline Push-Up"],
+  fly:              ["Mid Cable Fly (on bench)","Pec Deck","Dumbbell Fly","Deficit Push-Up"],
+  pull_vertical:    ["Lat Pulldown","Pull-Up","Assisted Pull-Up","Chin-Up"],
+  pull_horizontal:  ["Chest Supported Row Machine","Chest Supported Dumbbell Row","Seated Cable Row",
+                     "Single-Arm Dumbbell Row","Barbell Row","Inverted Row"],
+  lat_iso:          ["Straight-Arm Cable Pulldown","Cable Lat Prayer","Machine Pullover","Dumbbell Pullover",
+                     "Band Straight-Arm Pulldown"],
+  press_overhead:   ["Seated Dumbbell Shoulder Press","Machine Shoulder Press","Barbell Overhead Press",
+                     "Dumbbell Shoulder Press","Pike Push-Up"],
+  lateral:          ["Cable Lateral Raise","Machine Lateral Raise","Leaning Dumbbell Lateral Raise",
+                     "Dumbbell Lateral Raise","Band Lateral Raise"],
+  rear_delt:        ["Reverse Pec Deck","Cable Reverse Rear Delt Fly","Dumbbell Reverse Fly",
+                     "Band Pull-Apart","Band Face Pull"],
+  curl:             ["Incline Dumbbell Curl","Preacher Curl","Cable Hammer Curl","Barbell Curl",
+                     "Dumbbell Hammer Curl","Band Curl"],
+  triceps:          ["Overhead Cable Extension","Dumbbell Overhead Extension","Rope Pushdown",
+                     "Tricep Pushdown","Close-Grip Push-Up"],
+  squat:            ["Barbell Back Squat","Hack Squat","Leg Press","Front Squat","Goblet Squat",
+                     "Split Squat","Bodyweight Squat"],
+  lunge:            ["Dumbbell Bulgarian Split Squat","Walking Lunge","Reverse Lunge","Bulgarian Split Squat","Split Squat"],
+  quad_iso:         ["Leg Extension","Sissy Squat","Reverse Nordic Curl"],
+  hinge:            ["Romanian Deadlift","Dumbbell Romanian Deadlift","45-Degree Back Extension",
+                     "Single-Leg RDL","Dumbbell RDL"],
+  ham_iso:          ["Seated Leg Curl","Lying Leg Curl","Nordic Curl","Stability Ball Leg Curl"],
+  hip_thrust:       ["Hip Thrust","Barbell Hip Thrust","Dumbbell Hip Thrust","Single-Leg Hip Thrust","Glute Bridge"],
+  calf:             ["Standing Calf Raise","Seated Calf Raise","Dumbbell Calf Raise","Bodyweight Calf Raise"],
+  abs:              ["Cable Ab Crunch","Hanging Knee Raise","Weighted Crunch","Leg Raises","Plank"]
+};
 const EX_PREFERENCE = (function(){
   const o = {};
   Object.keys(EX_LIBRARY).forEach(slot=>{
-    o[slot] = Object.freeze((EX_LIBRARY[slot] || []).map(x=> x.name));
+    const curated = (EX_LIBRARY[slot] || []).map(x=> x.name);
+    const said = EX_PREFERENCE_TABLE[slot];
+    if(!said){ o[slot] = Object.freeze(curated); return; }
+    /* The written ranking first, then anything curated it does not mention, so a slot
+       never loses an option it had \u2014 the table says what to prefer, not what to allow. */
+    const rest = curated.filter(n=> !said.some(x=> swapSquash(x) === swapSquash(n)));
+    o[slot] = Object.freeze(said.concat(rest));
   });
   return Object.freeze(o);
 })();
@@ -9156,7 +9286,32 @@ const SLOT_MAIN = {
   glute_iso:        ["glutes"],
   lower_back:       ["lower_back","hams","glutes"]
 };
+/* 2.6 \u2014 REP RANGES, BY SLOT AND BY WHAT YOU ARE TRAINING FOR.
+
+   Growth is similar anywhere from about 5 to 30 reps when the set is taken close enough
+   to failure [S], so the range is chosen for other reasons: joints, how reliably effort
+   can be judged, and what the goal actually asks for. Strength work is low enough to
+   practise the lift; a cut keeps the loads heavy because that is what preserves muscle in
+   a deficit [M]; general health sits in the middle of everything.
+
+   SLOT_REPS stays as the default (the muscle goal) so everything that already reads it
+   behaves exactly as before. */
 const SLOT_REPS  = {heavy:"6-10", second:"8-12", iso:"12-15", abs:"10-15"};
+const SLOT_REPS_BY_GOAL = {
+  muscle:   {heavy:"6-10", second:"8-12", iso:"12-15", abs:"10-20"},
+  strength: {heavy:"4-6",  second:"6-8",  iso:"8-12",  abs:"10-15"},
+  lean:     {heavy:"6-10", second:"8-12", iso:"12-20", abs:"10-20"},
+  health:   {heavy:"8-12", second:"8-15", iso:"10-15", abs:"10-20"}
+};
+/* And the slots whose joints prefer higher reps whatever the goal: the side and rear
+   delts and the calves are trained near end-range under load, and 12-20 is kinder there
+   without costing anything [P]. */
+const HIGH_REP_SLOTS = {lateral:"12-20", rear_delt:"12-20", calf:"12-20", front_delt:"12-20"};
+function slotRepsFor(slotKey, kind, goal){
+  if(HIGH_REP_SLOTS[slotKey] && goal !== "strength") return HIGH_REP_SLOTS[slotKey];
+  const table = SLOT_REPS_BY_GOAL[goal] || SLOT_REPS_BY_GOAL.muscle;
+  return table[kind] || table.second;
+}
 /* M1 \u2014 RPE 10 ONLY ON THE LAST SET, AND NEVER ON A COMPOUND. The ab ramp used to read
    [9,10,10,10], which asks for three more sets after a set taken to failure. */
 const SLOT_RPES  = {heavy:[7,8,8,9], second:[7,8,9], iso:[8,9,9,9,9], abs:[9,9,9,10]};
@@ -9165,13 +9320,32 @@ const PLAN_SLOTS = {
   full3: {
     fullA: [["squat","heavy"],["press_horizontal","second"],["pull_horizontal","second"],["lateral","iso",5],["calf","iso",5],["abs","abs",4]],
     fullB: [["hinge","heavy"],["press_overhead","second"],["pull_vertical","second"],["quad_iso","iso"],["rear_delt","iso",5],["curl","iso"]],
-    fullC: [["lunge","heavy"],["press_incline","second"],["pull_horizontal","second"],["ham_iso","iso"],["lateral","iso",5],["triceps","iso"],["calf","iso",5],["abs","abs",4]]
+    fullC: [["lunge","heavy"],["press_incline","second"],["pull_horizontal","second"],["ham_iso","iso"],["fly","iso",3],["lateral","iso",5],["triceps","iso"],["calf","iso",5],["abs","abs",4]]
   },
   ul4: {
     upperA: [["press_horizontal","heavy"],["pull_horizontal","second",4],["press_overhead","second"],["fly","iso"],["lat_iso","iso"],["lateral","iso",5],["rear_delt","iso",4],["triceps","iso"]],
     lowerA: [["squat","heavy"],["hinge","second"],["quad_iso","iso"],["calf","iso",5],["abs","abs",4]],
     upperB: [["pull_vertical","heavy"],["press_incline","second"],["pull_horizontal","second",4],["rear_delt","iso",5],["lateral","iso",5],["curl","iso"],["triceps","iso"]],
     lowerB: [["hinge","heavy"],["lunge","second"],["ham_iso","iso"],["hip_thrust","iso"],["calf","iso",5],["abs","abs",4]]
+  },
+  /* On two days a week every muscle has to appear on both of them, so the two lists
+     differ in emphasis rather than in coverage: the side delts and the calves tolerate \u2014
+     and need \u2014 the frequency, and there is nowhere else for them to go. */
+  full2: {
+    full2A: [["squat","heavy"],["press_horizontal","heavy"],["pull_horizontal","heavy"],
+             ["press_overhead","second"],["ham_iso","iso"],["lateral","iso",4],["curl","iso"],
+             ["calf","iso",3],["abs","abs",3]],
+    full2B: [["hinge","heavy"],["pull_vertical","heavy"],["press_incline","heavy"],
+             ["lunge","second"],["quad_iso","iso"],["fly","iso",3],["rear_delt","iso",4],
+             ["lateral","iso",3],["triceps","iso"],["calf","iso",4]]
+  },
+  ulppl5: {
+    u5upper: [["press_horizontal","heavy"],["pull_horizontal","second",4],["press_overhead","second"],
+              ["lat_iso","iso"],["lateral","iso",4],["curl","iso"],["triceps","iso"]],
+    u5lower: [["squat","heavy"],["hinge","second"],["quad_iso","iso"],["ham_iso","iso"],["calf","iso",4],["abs","abs",3]],
+    u5push:  [["press_incline","heavy"],["fly","iso"],["lateral","iso",4],["rear_delt","iso",4],["triceps","iso"]],
+    u5pull:  [["pull_vertical","heavy"],["pull_horizontal","second"],["rear_delt","iso",4],["shrug","iso"],["curl","iso"]],
+    u5legs:  [["lunge","heavy"],["hip_thrust","second"],["ham_iso","iso"],["quad_iso","iso"],["calf","iso",4],["abs","abs",3]]
   },
   ppl3: {
     push: [["press_horizontal","heavy",5],["press_overhead","second"],["press_incline","second",4],["fly","iso"],["lateral","iso",7],["rear_delt","iso",5],["triceps","iso",4]],
@@ -9194,6 +9368,1649 @@ const PLAN_SLOTS = {
     legsD:      [["squat","heavy",5],["hinge","second",4],["quad_iso","iso",4],["ham_iso","iso",4],["calf","iso",7],["abs","abs",4]]
   }
 };
+/* =====================================================================
+   M11 \u2014 HOW TO DO IT
+
+   Every movement the builder can put in a plan, written out: how to set up, how the rep
+   runs, how far it travels, what goes wrong, and where the stretch is. Five fields,
+   because those are the five things somebody standing in front of an unfamiliar machine
+   actually needs, and because "keep your core tight" is not one of them.
+
+   SHOWN ONCE, ON THE FIRST EXPOSURE. A movement you have done fifty times does not need
+   instructions, and a card that explains the bench press every Monday is a card people
+   learn to scroll past. It appears the first time the movement reaches a session and
+   stops of its own accord.
+
+   `demo` IS NULL AND STAYS NULL. A link to a video the app has not checked is a link the
+   app is vouching for, and there is no supply of them here. The field exists so that one
+   can be filled in per movement when there is; it is not populated with search URLs or
+   with anybody's channel. */
+const EX_TECHNIQUE = {
+  "seated dumbbell shoulder press":
+    {setup:"Upright bench, back supported, bells at shoulder height with the palms forward.",
+     execution:"Press up and slightly in, stopping just short of clashing them, then lower to the shoulders.",
+     rom:"Elbows to about ninety degrees or a touch lower, up to nearly straight.",
+     errors:"Arching the lower back off the pad, and bouncing out of the bottom.",
+     stretch:"The bottom, elbows level with or just below the shoulders — further than a barbell allows, which is the reason this one is first.", demo:null},
+  "cable lateral raise":
+    {setup:"Cable set low and run behind the body, handle in the far hand, a slight lean away from the stack.",
+     execution:"Lead with the elbow out to shoulder height, then lower slowly against the cable.",
+     rom:"Arm across the body at the bottom, shoulder height at the top.",
+     errors:"Shrugging at the top, and standing square so the cable goes slack at the bottom.",
+     stretch:"The bottom, with the arm across the body and the cable still pulling — a dumbbell gives almost nothing there.", demo:null},
+  "reverse pec deck":
+    {setup:"Chest on the pad, handles set so the arms start in front of the chest at shoulder height.",
+     execution:"Open the arms wide and back, leading with the hands, until the arms are in line with the body.",
+     rom:"Full stretch across the chest at the front, arms level at the back.",
+     errors:"Shrugging, and bending the elbows so it becomes a row.",
+     stretch:"The front, with the arms across the chest.", demo:null},
+  "overhead cable extension":
+    {setup:"Rope on a low pulley, face away from the stack, rope behind the head, elbows narrow and high.",
+     execution:"Extend to full lockout in front of you, then let the elbows bend until the triceps are stretched.",
+     rom:"Deep behind the head to straight arms.",
+     errors:"Letting the elbows flare wide or drop, which hands the work to the shoulder.",
+     stretch:"Behind the head: the long head of the triceps crosses the shoulder and is only stretched overhead.", demo:null},
+  "chest supported dumbbell row":
+    {setup:"Chest on an incline bench set to about forty-five degrees, bells hanging straight down.",
+     execution:"Pull to the hips, elbows back past the ribs, then let the arms hang out fully.",
+     rom:"Full hang at the bottom, bells to the hips at the top.",
+     errors:"Lifting the chest off the pad to move more weight.",
+     stretch:"The bottom, letting the shoulder blades travel forward around the ribs.", demo:null},
+  "leaning dumbbell lateral raise":
+    {setup:"Hold an upright with one hand and lean away from it, bell in the free hand.",
+     execution:"Lead with the elbow out to shoulder height, lower under control.",
+     rom:"Arm hanging across the body at the bottom, shoulder height at the top.",
+     errors:"Letting the body swing back upright to help the weight up.",
+     stretch:"The bottom, where the lean puts the side delt under load before the rep starts.", demo:null},
+  "hanging knee raise":
+    {setup:"Dead hang from a bar, shoulders set down, legs together.",
+     execution:"Curl the pelvis up as the knees come toward the chest, then lower slowly without swinging.",
+     rom:"Legs hanging straight at the bottom, knees past the hips at the top.",
+     errors:"Swinging, and lifting with the hip flexors while the abs do nothing.",
+     stretch:"The bottom, hanging, with the abs long — do not let the lower back arch.", demo:null},
+  "dumbbell romanian deadlift":
+    {setup:"Bells in front of the thighs, feet hip width, knees soft and staying soft.",
+     execution:"Push the hips back, bells tracking the legs, until the hamstrings stop lengthening, then stand.",
+     rom:"Mid-shin or wherever the back starts to round, whichever comes first.",
+     errors:"Turning it into a squat by bending the knees, and rounding the back to reach further.",
+     stretch:"The bottom, hips back and hamstrings long.", demo:null},
+  "45-degree back extension":
+    {setup:"Pads at the crease of the hip, feet locked, body in one line.",
+     execution:"Hinge forward until the hamstrings stop lengthening, then extend back to in line — no further.",
+     rom:"Hips flexed at the bottom, body straight at the top.",
+     errors:"Hyperextending the lower back at the top, which is where this movement gets its bad name.",
+     stretch:"The bottom, hinged forward with the hamstrings long.", demo:null},
+  "band pull-apart":
+    {setup:"Band held at shoulder height, arms straight, hands about shoulder width.",
+     execution:"Pull the band apart until the arms are in line with the body, squeeze, return slowly.",
+     rom:"Hands together at the front, arms wide at the back.",
+     errors:"Bending the elbows, and letting the band snap back.",
+     stretch:"The front, with the band stretching the upper back across the chest.", demo:null},
+  "straight-arm cable pulldown":
+    {setup:"High pulley, a pace back from it, arms straight overhead, slight hinge at the hip.",
+     execution:"Sweep the straight arms down to the thighs, then let them travel back overhead.",
+     rom:"Overhead to hips, elbows locked soft the whole way.",
+     errors:"Bending the elbows, which turns it into a pushdown.",
+     stretch:"The top, arms overhead and the lats long under load.", demo:null},
+  "single-leg hip thrust":
+    {setup:"Shoulder blades on a bench, one foot flat and close to the hips, the other knee pulled up.",
+     execution:"Drive through the planted heel to full hip extension, ribs down, then lower under control.",
+     rom:"Hips low at the bottom, level with the knee at the top.",
+     errors:"Arching the lower back instead of extending the hip, and letting the hips rotate.",
+     stretch:"The bottom, with the working glute long.", demo:null},
+  "dumbbell front raise":
+    {setup:"Stand tall, bells in front of the thighs, palms down, a soft elbow bend.",
+     execution:"Raise to shoulder height in front of you, lower under control.",
+     rom:"Thighs to shoulder height. No higher — past that the traps take it.",
+     errors:"Swinging with the hips, and going so heavy the lower back arches.",
+     stretch:"The bottom, with the arm hanging by the thigh.", demo:null},
+  "farmer's carry":
+    {setup:"A bell in each hand, shoulders down and back, ribs stacked over the hips.",
+     execution:"Walk at a steady pace without leaning, breathing in a rhythm. Log the distance or the seconds as reps.",
+     rom:"The set is the walk, not a rep count.",
+     errors:"Shrugging the shoulders up to the ears, and leaning away from the load.",
+     stretch:"Not a stretch movement — the work is holding a position while moving.", demo:null},
+  "wrist curl":
+    {setup:"Forearms on a bench or your thighs, palms up, wrists just past the edge.",
+     execution:"Let the bar roll to the fingers, curl it back and flex the wrist fully.",
+     rom:"Fingers open at the bottom, wrist fully flexed at the top.",
+     errors:"Moving the elbow, and using a weight that stops the wrist travelling.",
+     stretch:"The bottom, with the bar rolled into the fingers.", demo:null},
+  "dumbbell wrist curl":
+    {setup:"Forearm on a bench, palm up, wrist over the edge, one bell.",
+     execution:"Lower the hand until the wrist is fully extended, curl back up.",
+     rom:"Full extension to full flexion.",
+     errors:"Lifting the forearm off the bench to help.",
+     stretch:"The bottom, with the wrist bent back under load.", demo:null},
+  "plate pinch hold":
+    {setup:"Pinch a plate (or two, smooth sides out) between thumb and fingers, arm by the side.",
+     execution:"Stand and hold until the grip gives. Log the seconds in the reps box.",
+     rom:"A hold, not a rep. Stand tall throughout.",
+     errors:"Resting the plate on the thigh, which takes the grip out of it.",
+     stretch:"Not a stretch movement — it is a hold to failure.", demo:null},
+  "neck curl":
+    {setup:"Lie back on a bench with the head off the end, a plate held on the forehead with a towel.",
+     execution:"Lower the head back under control, then curl the chin toward the chest.",
+     rom:"As far back as is comfortable, chin to chest at the top.",
+     errors:"Starting heavy. The neck takes weeks to tolerate direct work.",
+     stretch:"The bottom, with the head back — take it slowly and build up.", demo:null},
+  "cable hip adduction":
+    {setup:"Cuff on the inside ankle, standing side-on to the stack, hand on something solid.",
+     execution:"Pull the leg across the body against the cable, return under control.",
+     rom:"As far across as the hip allows, as far out as the cable will let it travel.",
+     errors:"Twisting the torso to drag the leg across.",
+     stretch:"The far end, with the leg out to the side and the adductors long.", demo:null},
+  "copenhagen plank":
+    {setup:"Side-lying, top leg on a bench at the knee or ankle, bottom elbow under the shoulder.",
+     execution:"Lift the hips and the bottom leg, hold. Log the seconds in the reps box.",
+     rom:"A straight line from ankle to head. Knee on the bench is the easier version.",
+     errors:"Letting the hips drop, and rotating the chest toward the floor.",
+     stretch:"Not a stretch movement — it is a long hold for the adductor.", demo:null},
+  "cable glute kickback":
+    {setup:"Cuff on the ankle, facing the stack, a slight forward lean and a hand on the frame.",
+     execution:"Drive the leg back and up, squeezing the glute, return under control.",
+     rom:"Knee past the standing leg at the front, hip fully extended at the back.",
+     errors:"Arching the lower back to get more range, and swinging the leg.",
+     stretch:"The front, with the working hip flexed and the glute long.", demo:null},
+  "banded lateral walk":
+    {setup:"Band around the ankles or just above the knees, a quarter squat, feet hip width.",
+     execution:"Step sideways against the band, keeping tension, without letting the feet come together.",
+     rom:"Steps of a consistent length. Log the steps or the seconds as reps.",
+     errors:"Standing up tall between steps, which releases the band.",
+     stretch:"Not a stretch movement — the tension is constant and that is the point.", demo:null},
+  "frog pump":
+    {setup:"Lie on your back, soles of the feet together, knees out wide, heels close to the hips.",
+     execution:"Drive through the outside of the feet and lift the hips, squeeze, lower under control.",
+     rom:"Hips to the floor, full extension at the top.",
+     errors:"Pushing through the toes, and arching the lower back instead of extending the hip.",
+     stretch:"The bottom, flat on the floor with the knees wide.", demo:null},
+  "45 degree hyperextension":
+    {setup:"Pads at the crease of the hip, feet locked, body in one line.",
+     execution:"Hinge forward until the hamstrings stop lengthening, then extend back to in line — no further.",
+     rom:"Hips flexed at the bottom, body straight at the top.",
+     errors:"Hyperextending the lower back at the top, which is where this movement gets its bad name.",
+     stretch:"The bottom, hinged forward with the hamstrings long.", demo:null},
+  "barbell bench press":
+    {setup:"Shoulder blades pulled back and down into the bench, feet flat, a small arch in the lower back.",
+     execution:"Lower the bar to the base of the sternum under control, touch, press back over the shoulder joint.",
+     rom:"Chest to lockout. A bar that stops short of the chest trains a shorter muscle.",
+     errors:"Flaring the elbows to ninety degrees, bouncing off the ribs, and lifting the hips off the bench.",
+     stretch:"The stretch is at the bottom: let the bar touch and feel the chest lengthen before you press.", demo:null},
+  "dumbbell bench press":
+    {setup:"Sit on the end of the bench with the bells on your thighs, kick them up one at a time as you lie back.",
+     execution:"Lower until the hands are level with the chest, press up and slightly together without clashing them.",
+     rom:"Deeper than a barbell allows, which is the reason to use them.",
+     errors:"Pressing the bells together hard at the top, which takes the chest out of it, and dropping them below control at the bottom.",
+     stretch:"The bottom, with the elbows a little below the torso — that is where the pec is longest.", demo:null},
+  "incline dumbbell bench press":
+    {setup:"Bench at about thirty degrees. Steeper and the front delt takes it over.",
+     execution:"Lower to the upper chest, elbows about forty-five degrees from the body, press back up over the collarbones.",
+     rom:"Full depth at the bottom; stop just short of locking out.",
+     errors:"Setting the bench too steep, and pressing the bells back over the face.",
+     stretch:"The bottom of each rep, letting the upper chest lengthen under load.", demo:null},
+  "dumbbell fly":
+    {setup:"Lie flat, bells over the chest, a soft bend in the elbows that does not change.",
+     execution:"Open the arms wide and slow until the chest is stretched, then bring them back along the same arc.",
+     rom:"As wide as the shoulder will take without pain. The top half is almost free — the bottom is the work.",
+     errors:"Turning it into a press by bending the elbows, and going heavier than the shoulder can control.",
+     stretch:"The whole point of the movement: the bottom, arms wide, chest long.", demo:null},
+  "mid cable fly (on bench)":
+    {setup:"Bench between the stacks, handles set to chest height, a soft constant elbow bend.",
+     execution:"Bring the handles together over the chest, then let them travel back out until the chest is stretched.",
+     rom:"Hands can travel past the body line, which a dumbbell cannot give you.",
+     errors:"Letting the elbows bend and straighten, and standing up out of position mid-set.",
+     stretch:"The far end of the arc, with the cable pulling the arm back.", demo:null},
+  "push-up":
+    {setup:"Hands under the shoulders, body in one line from head to heel, ribs down.",
+     execution:"Lower until the chest is just off the floor, press back up without letting the hips sag.",
+     rom:"Chest to the floor. Half a push-up trains half a chest.",
+     errors:"Letting the hips drop, flaring the elbows wide, and shortening the range as fatigue arrives.",
+     stretch:"The bottom. Hands on parallettes or a pair of dumbbells to get deeper.", demo:null},
+  "close-grip push-up":
+    {setup:"Hands about shoulder width, under the chest rather than out wide.",
+     execution:"Lower with the elbows tracking close to the ribs, press back up.",
+     rom:"Chest to the hands, elbows fully closed at the bottom.",
+     errors:"Letting the elbows drift out, which turns it back into an ordinary push-up.",
+     stretch:"The bottom, with the elbow fully bent and the triceps long.", demo:null},
+  "decline push-up":
+    {setup:"Feet on a bench or a step, hands on the floor, body in one line.",
+     execution:"Lower the chest to the floor, press back up. Feet higher is harder.",
+     rom:"Chest to the floor.",
+     errors:"Hips sagging, and head poking forward to fake depth.",
+     stretch:"The bottom, as with any push-up.", demo:null},
+  "pike push-up":
+    {setup:"Hips high, body in an inverted V, hands shoulder width, head between the arms.",
+     execution:"Lower the crown of the head toward the floor, press back up.",
+     rom:"Head to the floor. Feet on a step makes it harder.",
+     errors:"Turning it into an ordinary push-up by letting the hips drop.",
+     stretch:"The bottom, with the shoulder at its deepest.", demo:null},
+  "barbell overhead press":
+    {setup:"Bar on the front delts, grip just outside the shoulders, glutes and abs tight.",
+     execution:"Press straight up, moving the head back out of the way, finish with the bar over the mid-foot.",
+     rom:"Collarbone to lockout, biceps by the ears at the top.",
+     errors:"Arching the lower back to press, and finishing with the bar in front of the face.",
+     stretch:"The bottom, at the shoulders, before the press begins.", demo:null},
+  "dumbbell shoulder press":
+    {setup:"Seated with the back supported or standing tall, bells at shoulder height, palms forward.",
+     execution:"Press up and slightly in, stopping just short of clashing them.",
+     rom:"Elbows down to about ninety degrees or a touch lower, then up to nearly straight.",
+     errors:"Bouncing out of the bottom, and letting the ribs flare.",
+     stretch:"The bottom, elbows level with or just below the shoulders.", demo:null},
+  "dumbbell lateral raise":
+    {setup:"Stand tall, a slight forward lean, bells by the sides with a soft elbow bend.",
+     execution:"Lead with the elbow and raise to shoulder height, then lower slowly.",
+     rom:"Up to shoulder height, down until the bells are by the thighs.",
+     errors:"Swinging the weight up with the hips, and shrugging the traps at the top.",
+     stretch:"The bottom, with the arm hanging — lean away from a cable or an upright to load it there.", demo:null},
+  "band lateral raise":
+    {setup:"Stand on the band, handles at the sides, slight forward lean.",
+     execution:"Lead with the elbow out to shoulder height, lower under control.",
+     rom:"Shoulder height at the top, arms by the sides at the bottom.",
+     errors:"Letting the band snap you back down.",
+     stretch:"Hardest at the top with a band, so slow the lowering to find the stretch.", demo:null},
+  "cable reverse rear delt fly":
+    {setup:"Cables crossed in front at shoulder height, one handle in each hand.",
+     execution:"Open the arms wide and back, leading with the hands, stop when the arms are in line with the body.",
+     rom:"Full crossover in front, arms wide and back behind the torso.",
+     errors:"Shrugging, and letting the elbows bend so it becomes a row.",
+     stretch:"The front of the arc, with the arm across the chest.", demo:null},
+  "dumbbell reverse fly":
+    {setup:"Chest on an incline bench or hinged at the hip, arms hanging, thumbs down.",
+     execution:"Raise the bells out to the sides until the arms are level with the torso.",
+     rom:"Arms hanging to level. No higher — past that the traps take over.",
+     errors:"Using the lower back to swing, and turning it into a row.",
+     stretch:"The bottom, with the arms hanging under the chest.", demo:null},
+  "band face pull":
+    {setup:"Band anchored at about head height, one end in each hand, arms straight.",
+     execution:"Pull toward the eyes, knuckles rotating back, elbows high and wide.",
+     rom:"Arms straight at the front, hands beside the ears at the back.",
+     errors:"Pulling to the chin with low elbows, which makes it a row.",
+     stretch:"The front, arms straight and shoulders allowed to travel forward.", demo:null},
+  "barbell row":
+    {setup:"Hinge to about forty-five degrees, bar hanging at arms length, back flat.",
+     execution:"Pull to the belly button, elbows past the ribs, lower under control.",
+     rom:"Arms straight at the bottom, bar to the torso at the top.",
+     errors:"Standing up as you pull, and rounding the lower back at the bottom.",
+     stretch:"The bottom, letting the shoulder blades travel forward around the ribs.", demo:null},
+  "single-arm dumbbell row":
+    {setup:"One hand and one knee on a bench, the other foot planted, back flat.",
+     execution:"Pull the bell to the hip, elbow past the ribs, no twisting through the torso.",
+     rom:"Arm fully extended at the bottom, bell to the hip at the top.",
+     errors:"Rotating the torso to get another inch, and shrugging at the top.",
+     stretch:"The bottom, letting the shoulder blade come forward.", demo:null},
+  "chest supported row machine":
+    {setup:"Chest on the pad, feet planted, a full-length grip on the handles.",
+     execution:"Pull the handles to the torso, elbows back, then let the shoulder blades travel forward at the bottom.",
+     rom:"Full reach forward, handles to the torso.",
+     errors:"Leaning back off the pad to move more weight.",
+     stretch:"The bottom, reaching forward with the shoulder blades.", demo:null},
+  "inverted row":
+    {setup:"Under a bar or a sturdy table, heels on the floor, body in one line.",
+     execution:"Pull the chest to the bar, elbows back, lower under control.",
+     rom:"Arms straight at the bottom, chest to the bar at the top.",
+     errors:"Letting the hips sag, and shortening the range when it gets hard.",
+     stretch:"The bottom, arms straight and shoulder blades forward.", demo:null},
+  "lat pulldown":
+    {setup:"Thighs under the pad, grip just outside the shoulders, chest up and a slight lean back.",
+     execution:"Pull the elbows down and back until the bar reaches the collarbone, then let it travel all the way up.",
+     rom:"Arms fully extended and shoulders up at the top, bar to the chest at the bottom.",
+     errors:"Leaning back hard to turn it into a row, and stopping the bar at the forehead.",
+     stretch:"The top, arms straight and the lats long under load.", demo:null},
+  "pull-up":
+    {setup:"Dead hang, grip just outside the shoulders, shoulders set down and back before the first rep.",
+     execution:"Pull until the chin clears the bar, lower all the way to straight arms.",
+     rom:"Dead hang to chin over bar. A band under the feet keeps the range honest while you get stronger.",
+     errors:"Kipping, and stopping short of a straight-arm hang between reps.",
+     stretch:"The hang, which is the one part people skip.", demo:null},
+  "dumbbell pullover":
+    {setup:"Lie across a bench or along it, one bell held over the chest, arms nearly straight.",
+     execution:"Reach back over the head until the lats are stretched, pull back over the chest.",
+     rom:"As far back as the shoulder allows without the ribs flaring.",
+     errors:"Bending the elbows into a triceps extension, and flaring the ribs to get more range.",
+     stretch:"The back of the movement, arms overhead.", demo:null},
+  "cable lat prayer":
+    {setup:"Stand a pace back from a high pulley, hinge at the hip, arms straight overhead on the rope.",
+     execution:"Sweep the arms down to the thighs keeping them straight, return overhead.",
+     rom:"Full overhead reach to arms by the hips.",
+     errors:"Bending the elbows, which turns it into a pushdown.",
+     stretch:"The overhead position, hinged forward with the lats long.", demo:null},
+  "band straight-arm pulldown":
+    {setup:"Band anchored high, arms straight overhead, a pace back from the anchor.",
+     execution:"Sweep the straight arms down to the thighs, return under control.",
+     rom:"Overhead to hips, elbows locked soft throughout.",
+     errors:"Letting the elbows bend as it gets hard.",
+     stretch:"The top, arms overhead and lats stretched.", demo:null},
+  "barbell shrug":
+    {setup:"Bar at arms length, shoulders relaxed down, chest up.",
+     execution:"Shrug straight up, pause a second at the top, lower all the way down.",
+     rom:"Shoulders fully down at the bottom, as high as they go at the top.",
+     errors:"Rolling the shoulders, and bouncing the bar off the thighs.",
+     stretch:"The bottom, letting the shoulders hang.", demo:null},
+  "dumbbell shrug":
+    {setup:"Bells at the sides, shoulders relaxed, chin tucked.",
+     execution:"Shrug straight up, hold a second, lower under control.",
+     rom:"Full drop at the bottom, full lift at the top.",
+     errors:"Rolling the shoulders backwards, which does nothing extra.",
+     stretch:"The bottom, with the shoulders hanging.", demo:null},
+  "incline dumbbell curl":
+    {setup:"Bench at about forty-five degrees, arms hanging behind the torso, palms forward.",
+     execution:"Curl without letting the elbow travel forward, lower all the way to straight.",
+     rom:"Fully straight at the bottom, forearm to bicep at the top.",
+     errors:"Letting the elbows drift forward, which gives the stretch away.",
+     stretch:"The bottom, arms hanging behind the body — the whole reason for the incline.", demo:null},
+  "band curl":
+    {setup:"Stand on the band, elbows pinned to the ribs, palms forward.",
+     execution:"Curl to the shoulders, squeeze, lower slowly against the band.",
+     rom:"Straight arms at the bottom, full bend at the top.",
+     errors:"Letting the elbows drift forward and the band snap the arm down.",
+     stretch:"The bottom, where the band is easiest — go slow there.", demo:null},
+  "tricep pushdown":
+    {setup:"Elbows at the sides, a slight forward lean, grip the bar or rope at chest height.",
+     execution:"Push down to full lockout, let the forearms come back to about ninety degrees.",
+     rom:"Full lockout at the bottom; do not let the elbows travel up past the ribs.",
+     errors:"Leaning over the bar to push it down with bodyweight.",
+     stretch:"Overhead work gives the triceps their stretch; this one is about the lockout.", demo:null},
+  "dumbbell overhead extension":
+    {setup:"One bell in both hands, elbows narrow and pointing forward, overhead.",
+     execution:"Lower behind the head until the triceps are stretched, press back to lockout.",
+     rom:"Deep behind the head to full lockout.",
+     errors:"Letting the elbows flare wide, and arching the lower back.",
+     stretch:"Behind the head, which is where the long head is longest.", demo:null},
+  "barbell back squat":
+    {setup:"Bar on the upper back, feet about shoulder width, toes slightly out, brace before you move.",
+     execution:"Sit between the hips, knees tracking over the toes, down until the hip is below the knee if you can.",
+     rom:"As deep as you can hold a flat back. Depth before load.",
+     errors:"Knees caving in, heels lifting, and the chest dropping out of the bottom.",
+     stretch:"The bottom, with the quads and glutes long under load.", demo:null},
+  "goblet squat":
+    {setup:"One bell held at the chest, elbows inside the knees, feet about shoulder width.",
+     execution:"Sit straight down between the hips, elbows brushing the inside of the knees, stand up.",
+     rom:"Full depth — the counterweight at the chest is what lets you get there.",
+     errors:"Letting the bell drift away from the chest, which pulls you forward.",
+     stretch:"The bottom, held for a beat.", demo:null},
+  "bodyweight squat":
+    {setup:"Feet about shoulder width, toes slightly out, arms forward for balance.",
+     execution:"Sit down between the hips, chest up, stand back up.",
+     rom:"Full depth, slow on the way down.",
+     errors:"Rushing the bottom and bouncing out of it.",
+     stretch:"The bottom, paused.", demo:null},
+  "split squat":
+    {setup:"One foot forward, one back, torso upright, feet about hip width apart side to side.",
+     execution:"Lower straight down until the back knee is just off the floor, drive through the front heel.",
+     rom:"Back knee to within an inch of the floor.",
+     errors:"Stepping too short, which turns it into a knee-forward lunge, and leaning over the front thigh.",
+     stretch:"The bottom, with the front glute and the back hip flexor long.", demo:null},
+  "dumbbell bulgarian split squat":
+    {setup:"Back foot on a bench, front foot far enough forward that the shin stays near vertical.",
+     execution:"Lower straight down, keep the torso tall, drive through the front heel.",
+     rom:"As deep as the back hip allows. Depth is the point.",
+     errors:"Standing too close to the bench, and turning it into a step-up by leaning forward.",
+     stretch:"The bottom, where the front leg is longest.", demo:null},
+  "sissy squat":
+    {setup:"Hold an upright for balance, feet together, rise onto the balls of the feet.",
+     execution:"Let the knees travel forward as you lean back, keeping hips and shoulders in one line.",
+     rom:"As far back as you can control and return from.",
+     errors:"Breaking at the hip, which turns it into a squat.",
+     stretch:"The bottom, with the quads fully lengthened over the knee.", demo:null},
+  "leg extension":
+    {setup:"Back against the pad, knees in line with the machine's pivot, shin pad on the ankle.",
+     execution:"Extend to straight, pause a beat at the top, lower under control.",
+     rom:"Full extension at the top, deep knee bend at the bottom.",
+     errors:"Slamming into lockout and letting the weight drop back.",
+     stretch:"The bottom, with the knee fully bent.", demo:null},
+  "romanian deadlift":
+    {setup:"Bar at the hips, feet hip width, knees soft and staying soft.",
+     execution:"Push the hips back, bar sliding down the thighs, until the hamstrings stop lengthening, then stand.",
+     rom:"Down to mid-shin or wherever the back starts to round — whichever comes first.",
+     errors:"Turning it into a squat by bending the knees, and rounding the lower back to reach further.",
+     stretch:"The bottom, hips back and hamstrings long.", demo:null},
+  "single-leg rdl":
+    {setup:"One foot planted, the other leg free, a soft knee on the standing leg.",
+     execution:"Hinge at the hip, reaching the free leg back, until the hamstring stops lengthening.",
+     rom:"As far as balance and the hamstring allow with a flat back.",
+     errors:"Twisting the hips open to reach further.",
+     stretch:"The bottom, with the standing hamstring long.", demo:null},
+  "seated leg curl":
+    {setup:"Seated with the back supported, pad above the ankles, thigh clamped down.",
+     execution:"Curl the heels under the seat, pause, return slowly to straight.",
+     rom:"Full extension at the top, heels under you at the bottom.",
+     errors:"Lifting the hips off the seat to finish the rep.",
+     stretch:"The top, with the hip flexed and the hamstring at its longest — which is why seated beats lying.", demo:null},
+  "nordic curl":
+    {setup:"Kneel with the heels anchored, hips extended, body in one line from knee to head.",
+     execution:"Lower forward as slowly as you can control, catch with the hands, push back up.",
+     rom:"As far as you can control. The lowering is the training.",
+     errors:"Breaking at the hips, which shortens the lever and the work.",
+     stretch:"The bottom of the controlled descent.", demo:null},
+  "hip thrust":
+    {setup:"Shoulder blades on a bench, bar over the hips, feet flat and shins vertical at the top.",
+     execution:"Drive through the heels, finish with the hips level with the knees, ribs down.",
+     rom:"Hips to the floor at the bottom, full extension at the top.",
+     errors:"Arching the lower back to fake lockout, and letting the knees cave.",
+     stretch:"The bottom, with the glutes long under the bar.", demo:null},
+  "dumbbell hip thrust":
+    {setup:"Shoulder blades on a bench, one bell across the hips held with both hands.",
+     execution:"Drive through the heels to full hip extension, lower under control.",
+     rom:"Hips low at the bottom, level at the top.",
+     errors:"Arching the back instead of extending the hip.",
+     stretch:"The bottom, with the glutes long under the bell.", demo:null},
+  "glute bridge":
+    {setup:"Lie on your back, feet flat and close to the hips, ribs down.",
+     execution:"Drive through the heels, lift the hips until the body is in one line from knee to shoulder.",
+     rom:"Hips to the floor, hips to lockout.",
+     errors:"Pushing through the toes, and arching the lower back at the top.",
+     stretch:"The bottom, flat on the floor.", demo:null},
+  "standing calf raise":
+    {setup:"Balls of the feet on the step, knees straight but not locked.",
+     execution:"Rise as high as you can, pause, let the heels drop below the step under control.",
+     rom:"Full drop below the step, full rise onto the toes.",
+     errors:"Bouncing out of the bottom on the tendon rather than the muscle.",
+     stretch:"The bottom, with the heel below the step — hold it two seconds.", demo:null},
+  "dumbbell calf raise":
+    {setup:"One bell in one hand, balls of the feet on a plate or step, the other hand on something solid.",
+     execution:"Rise onto the toes, pause, lower the heel below the step.",
+     rom:"Full drop to full rise.",
+     errors:"Short, fast reps with no stretch at either end.",
+     stretch:"The bottom, heel dropped and held.", demo:null},
+  "bodyweight calf raise":
+    {setup:"Balls of the feet on a step, one leg at a time once both legs get easy.",
+     execution:"Rise, pause at the top, lower the heel below the step slowly.",
+     rom:"Full range at both ends.",
+     errors:"Rushing, which is how most calf work fails.",
+     stretch:"The bottom, heel below the step.", demo:null},
+  "cable ab crunch":
+    {setup:"Kneel facing the stack, rope beside the head, hips still.",
+     execution:"Round the spine down toward the floor, pulling the ribs to the hips, then return.",
+     rom:"Full flexion at the bottom, a long spine at the top.",
+     errors:"Hinging at the hip, which makes it a hip-flexor movement.",
+     stretch:"The top, with the abs lengthened over the hips.", demo:null},
+  "leg raises":
+    {setup:"Hang from a bar or lie flat, legs straight, lower back under control.",
+     execution:"Curl the pelvis up rather than only lifting the legs, lower slowly.",
+     rom:"Legs down to the start, hips curled at the top.",
+     errors:"Swinging, and lifting with the hip flexors while the abs do nothing.",
+     stretch:"The bottom, with the abs long — do not let the lower back arch.", demo:null},
+  "side plank":
+    {setup:"On one forearm, elbow under the shoulder, feet stacked, body in one line.",
+     execution:"Lift the hips and hold, breathing normally. Log the seconds in the reps box.",
+     rom:"A straight line from ankle to head throughout.",
+     errors:"Letting the hips sink, and rotating the chest toward the floor.",
+     stretch:"Not a stretch movement — the work is the hold.", demo:null},
+  "dumbbell side bend":
+    {setup:"Stand tall, one bell in one hand, the other hand behind the head.",
+     execution:"Bend sideways toward the loaded side, then pull back up with the opposite side.",
+     rom:"Full side bend down, fully upright at the top.",
+     errors:"Leaning forward or back instead of sideways.",
+     stretch:"The bottom, with the side of the trunk lengthened.", demo:null}
+};
+/* The entry for a movement, through the app's own canonical form so a rename, an alias
+   or an imported spelling still finds it. */
+function techniqueFor(name){
+  const t = EX_TECHNIQUE[nrm(name)];
+  if(t) return t;
+  const c = canonEx(name);
+  const hit = Object.keys(EX_TECHNIQUE).find(k=> canonEx(k) === c);
+  return hit ? EX_TECHNIQUE[hit] : null;
+}
+/* Have you ever logged a working set of this? Shared with H7's first-exposure rule, and
+   the same answer for the same reason: the live session does not count, because the card
+   has to say the same thing from the first set to the last. */
+function techniqueCardHTML(en){
+  if(!en || !en.name) return "";
+  const t = techniqueFor(en.name);
+  if(!t) return "";
+  if(!firstExposureTo(en.name)) return "";
+  return `<div class="tq-card">
+    <div class="tq-h">${esc(en.name)}, first time</div>
+    <div class="tq-row"><b>Set up</b><span>${esc(t.setup)}</span></div>
+    <div class="tq-row"><b>The rep</b><span>${esc(t.execution)}</span></div>
+    <div class="tq-row"><b>How far</b><span>${esc(t.rom)}</span></div>
+    <div class="tq-row"><b>Watch for</b><span>${esc(t.errors)}</span></div>
+    <div class="tq-row"><b>The stretch</b><span>${esc(t.stretch)}</span></div>
+  </div>`;
+}
+/* =====================================================================
+   THE PLAN BUILDER
+
+   The app has always said it does not write programmes, it runs the one you already
+   have. That is the right posture for somebody arriving with a coach's PDF and no help
+   at all for somebody arriving with nothing, which is most people. So: a plan, built from
+   the answers to seven questions, out of the same library, the same landmarks and the
+   same preference table everything else here uses.
+
+   buildPlan() is PURE. It reads the answers and the app's tables and returns a
+   programme, a split, a meso and a report; it writes nothing. Everything that decides is
+   in here and everything that saves is in adoptBuiltPlan(), which is what makes the
+   preview screen honest \u2014 what you are shown is what you get, because it is the same
+   object.
+
+   THE SHAPE OF IT:
+
+     1. the split follows the days you can train, and nothing else. Five days is not a
+        reason to train each muscle once.
+     2. every slot is filled from the frozen preference table, by the gear you have.
+     3. sets start from the day plan's own counts, scaled by training age.
+     4. then volume is TUNED: every muscle is brought to at least its floor and under its
+        ceiling, by adding or trimming sets where they will land, muscle by muscle.
+     5. priority muscles get more, protected ones get less and lose the movements that
+        provoke them.
+     6. the session caps and the time budget are enforced, supersets before cuts.
+     7. the quality check runs, and anything it fails is fed back in \u2014 up to a few
+        rounds, because a fix for one muscle is a change to another.
+
+   WHAT IT WILL NOT DO. It will not write a plan it cannot pass its own check, and it
+   will not pretend: `report` says what it did, what it could not do, and why. */
+const BUILD_ROUNDS = 6;
+/* PART 3 \u2014 THE BUILDER'S OWN CAPS, named with their grade.
+   MAX_SETS_PER_EXERCISE_GEN: past five sets of one movement a second movement for the
+     muscle is the better buy [P]. The app never stops you writing more yourself.
+   MAX_WORKING_SETS_PER_SESSION: a day the app proposes stops here [P]; set quality falls
+     off late in a long session and adherence falls with it (2.19).
+   (FREQ_MIN_DAY_SETS, what counts as having trained a muscle on a day, is already
+   declared with the window statistics that use it.) */
+const MAX_SETS_PER_EXERCISE_GEN = 5;
+const MAX_WORKING_SETS_PER_SESSION = 24;
+/* THE MUSCLES A PLAN IS JUDGED ON FOR FREQUENCY AND COVERAGE. The reference's starting
+   target table gives direct weekly work to these and marks the rest \u2014 traps, forearms,
+   lower back, adductors, neck \u2014 as fed indirectly unless somebody prioritises them. A
+   twice-a-week rule applied to the forearms would have the builder adding wrist curls to
+   a two-day full-body plan, which is the opposite of what the table says. */
+const MAJOR_MUSCLES = ["chest","lats","upper_back","delts_side","delts_rear","biceps",
+                       "triceps","quads","hams","glutes","calves","abs"];
+const BUILD_DEFAULTS = {
+  goal: "muscle", days: 4, minutes: 60, gear: "full", level: null,
+  trainingWeeks: null, priority: [], protect: [], sex: null, bodyweight: null
+};
+/* The questions, in order, each with what happens if it is skipped. The builder screen
+   reads this; so does the test. */
+const BUILD_QUESTIONS = ["goal","age","days","minutes","gear","focus","you"];
+function buildAnswers(raw){
+  const a = Object.assign({}, BUILD_DEFAULTS, raw || {});
+  a.days = Math.max(2, Math.min(6, parseInt(a.days, 10) || 4));
+  a.minutes = Math.max(20, Math.min(120, parseInt(a.minutes, 10) || 60));
+  if(!GEAR_TIERS[a.gear]) a.gear = "full";
+  if(!GOALS[a.goal]) a.goal = "muscle";
+  a.priority = (a.priority || []).filter(g=> GROUPS[g]).slice(0, 2);
+  a.protect  = (a.protect  || []).filter(x=> !!x).slice(0, 4);
+  /* A SKIPPED QUESTION IS NOT AN ANSWER OF ZERO. Number(null) is a perfectly finite 0,
+     and zero weeks of training is "beginner" \u2014 so skipping the training-age question
+     wrote a beginner's plan for somebody who had simply declined to say. */
+  const w = (a.trainingWeeks == null || a.trainingWeeks === "") ? NaN : Number(a.trainingWeeks);
+  a.trainingWeeks = isFinite(w) && w >= 0 ? Math.round(w) : null;
+  const bw = Number(a.bodyweight);
+  a.bodyweight = isFinite(bw) && bw > 0 ? bw : null;
+  if(a.sex !== "m" && a.sex !== "f") a.sex = null;
+  /* H9: a training age in weeks IS the level, through the same thresholds inferExperience
+     uses, so the builder and the app can never disagree about who they are writing for. */
+  if(!a.level){
+    a.level = a.trainingWeeks == null ? "intermediate"
+      : a.trainingWeeks < EXP_YEARS.beginner ? "beginner"
+      : a.trainingWeeks < EXP_YEARS.intermediate ? "intermediate" : "advanced";
+  }
+  return a;
+}
+/* The landmarks this plan is being written against. The app's own, so the plan and the
+   Body tab are measuring the same thing \u2014 with the builder's answers standing in for
+   the log where there is no log yet. */
+function buildTargets(a){
+  const out = {};
+  const A = (()=>{ try{ return bodyAnalysis(); }catch(e){ return null; } })();
+  GKEYS.forEach(g=>{
+    const G = GROUPS[g];
+    let L;
+    try{ L = (A && A.lm && A.lm[g]) || adjustedLandmarks(A, g) || G; }catch(e){ L = G; }
+    const scale = EXP_SCALE[a.level] || EXP_SCALE.intermediate;
+    const base = {mev: G.mev * scale.mev, mav: G.mav * scale.mav, mrv: G.mrv * scale.mrv};
+    const use = (A && A.lm && A.lm[g]) ? L : base;
+    const pri = a.priority.indexOf(g) > -1;
+    out[g] = {
+      mev: use.mev,
+      /* The target is the middle of the productive band, not its top: a plan that opens
+         at MAV has nowhere to go for eight weeks. A priority muscle opens higher. */
+      want: pri ? Math.min(use.mrv * 0.9, use.mav * 1.15) : (use.mev + use.mav) / 2,
+      top: Math.min(use.mav, use.mrv * 0.9),
+      mrv: use.mrv, optional: !!G.optional, priority: pri
+    };
+  });
+  return out;
+}
+/* THE FLOOR UNDER A MOVEMENT'S SET COUNT. Two for most things, three for the lift a day
+   opens with: a plan whose main lift is two sets and whose lateral raise is four has had
+   its priorities inverted by arithmetic, and that is what every trimming pass below would
+   otherwise do \u2014 a compound is the least direct contributor to most of the muscles it
+   feeds, so it is always the cheapest set to take. */
+function buildMinSets(e){ return (e && e.slotKind === "heavy") ? 3 : 2; }
+/* Which movements in a day can absorb another set of this muscle, best first: the ones
+   that train it most directly, and never a slot that is already at the session cap. */
+function buildCandidates(list, g){
+  return list.map((e, i)=> ({e, i, f: muscleFrac(e.name, g)}))
+    .filter(x=> x.f >= 0.5)
+    .sort((a, b)=> b.f - a.f);
+}
+function buildDaySets(list, g){
+  return (list || []).reduce((t, e)=> t + muscleFrac(e.name, g) * (parseInt(e.sets,10) || 0), 0);
+}
+/* THE TUNING PASS. Volume is moved one set at a time, which is slow and is the only way
+   to keep every other constraint true while it happens: a set added to a press is also a
+   set of triceps and front delts, and a builder that adds four at once finds out
+   afterwards. */
+function buildTune(program, dayIds, targets, a){
+  const notes = [];
+  const weeklyOf = ()=> programWeeklySets(program, dayIds);
+  /* 1. BRING EVERYTHING UP TO ITS FLOOR. Ordered by how far under it is, so the muscle
+        in the most trouble is served first and the indirect credit it brings with it is
+        already on the board when the next one is counted. */
+  /* TWO PHASES, AND THE ORDER IS THE POINT. Everything reaches its FLOOR first, then
+     everything climbs toward the middle of its band. Run as one phase it was possible for
+     the loop to spend its whole budget lifting well-served muscles from their floor
+     toward mid-band while a muscle nothing trains directly sat a tenth of a set under
+     its own \u2014 which is how the obliques and the lower back failed the check on a plan
+     that looked, from every other angle, finished. */
+  for(let phase = 0; phase < 2; phase++){
+  for(let pass = 0; pass < 120; pass++){
+    const weekly = weeklyOf();
+    /* L5 AS A CEILING ON THE CLIMB, not only as a trim afterwards. Phase 1 lifts every
+       muscle toward the middle of its band, and on a tier where the chest has only
+       push-ups that produced thirteen sets of abs against seven of chest \u2014 inside both
+       bands, and a plan nobody chose. The cap tracks what the chest is actually GETTING,
+       which rises as the same loop serves it, rather than what it was aiming for. */
+    const chestNow = Math.max(weekly.chest || 0, targets.chest ? targets.chest.mev : 0);
+    const aim = g=> phase === 0 ? targets[g].mev
+      : (g === "chest" || targets[g].priority) ? targets[g].want
+      : Math.max(targets[g].mev, Math.min(targets[g].want, chestNow * QUALITY_BALANCE_X));
+    const short = GKEYS.filter(g=> !targets[g].optional && weekly[g] + 0.05 < aim(g))
+      .sort((x, y)=> (aim(x) - weekly[x]) - (aim(y) - weekly[y]))
+      .reverse();
+    if(!short.length) break;
+    let moved = false;
+    for(const g of short){
+      /* the day with the most room, so volume spreads rather than stacking */
+      const days = dayIds.slice().sort((x, y)=> buildDaySets(program[x], g) - buildDaySets(program[y], g));
+      for(const wid of days){
+        if(buildDaySets(program[wid], g) + 1 > SESSION_SETS_INFO + 0.5) continue;
+        const cands = buildCandidates(program[wid] || [], g);
+        const hit = cands.find(x=> (parseInt(x.e.sets,10) || 0) < MAX_SETS_PER_EXERCISE_GEN);
+        if(!hit) continue;
+        hit.e.sets = (parseInt(hit.e.sets,10) || 0) + 1;
+        if(Array.isArray(hit.e.rpes)) hit.e.rpes.push(hit.e.rpes[hit.e.rpes.length - 1]);
+        moved = true;
+        break;
+      }
+      if(moved) break;
+    }
+    if(!moved && phase === 1){
+      /* A PRIORITY MUSCLE THAT HAS RUN OUT OF ROOM GETS ANOTHER MOVEMENT. Choosing a
+         muscle to push is not worth much if the answer is "the two slots that already
+         train it are full" \u2014 which is what a 1.15 \u00d7 MAV target runs into on any split
+         with one lateral raise in it. */
+      const pri = GKEYS.filter(g=> targets[g].priority && weeklyOf()[g] + 0.05 < targets[g].want);
+      let gave = false;
+      for(const g of pri){
+        const ex = buildMovementFor(g, a.gear, a.protect);
+        if(!ex) continue;
+        const wid = dayIds.slice().sort((x, y)=>
+          buildDaySets(program[x], g) - buildDaySets(program[y], g))[0];
+        if(buildDaySets(program[wid], g) + 1 > SESSION_SETS_INFO + 0.5) continue;
+        program[wid].push(ex);
+        notes.push(ex.name + " added for the " + GROUPS[g].name.toLowerCase()
+          + ", which you asked to push.");
+        gave = true;
+        break;
+      }
+      if(gave) continue;
+    }
+    if(!moved){
+      /* NOBODY IN THE PLAN TRAINS IT. A muscle under its floor with no movement that
+         gives it half a set is not a volume problem, it is a missing exercise \u2014 the
+         obliques and the lower back are the usual pair, because every plan picks them up
+         indirectly and no plan trains them. So one is added, from the same library and
+         the same preference order as everything else. M5's rule, from the other side:
+         never leave a muscle under its floor with no direct work. */
+      const weekly2 = weeklyOf();
+      const stuck = GKEYS.filter(g=> !targets[g].optional && weekly2[g] + 0.05 < targets[g].mev);
+      let added = false;
+      for(const g of stuck){
+        const ex = buildMovementFor(g, a.gear, a.protect);
+        if(!ex) continue;
+        /* onto the day with the least in it, so the fit pass has somewhere to work */
+        const wid = dayIds.slice().sort((x, y)=>
+          (program[x] || []).length - (program[y] || []).length)[0];
+        program[wid].push(ex);
+        notes.push(ex.name + " added for the " + GROUPS[g].name.toLowerCase()
+          + ", which nothing else in the plan trains directly.");
+        added = true;
+        break;
+      }
+      if(added) continue;
+      stuck.forEach(g=> notes.push((GROUPS[g].name) + " could not be brought to its floor with "
+        + a.days + " days and " + a.minutes + " minutes."));
+      break;
+    }
+  }
+  }
+  /* 2. TRIM ANYTHING OVER ITS CEILING, taking from the movement that contributes least
+        directly \u2014 the sets that were costing the muscle without being for it. */
+  for(let pass = 0; pass < 40; pass++){
+    const weekly = weeklyOf();
+    const over = GKEYS.filter(g=> !targets[g].priority && weekly[g] > targets[g].top + 0.05)
+      .sort((x, y)=> (weekly[y] - targets[y].top) - (weekly[x] - targets[x].top));
+    if(!over.length) break;
+    let moved = false;
+    for(const g of over){
+      const days = dayIds.slice().sort((x, y)=> buildDaySets(program[y], g) - buildDaySets(program[x], g));
+      for(const wid of days){
+        /* AND IT MAY NOT PUT ANYTHING ELSE UNDER ITS FLOOR. Trimming a muscle over its
+           ceiling takes a set off some movement, and that movement feeds other muscles
+           too \u2014 one of which was sitting exactly on its floor. The lower back lost its
+           only direct work this way, on a plan that had just been brought up to it. */
+        const safeToCut = e=> GKEYS.every(g2=>{
+          const f2 = muscleFrac(e.name, g2);
+          if(f2 <= 0 || targets[g2].optional) return true;
+          return (weekly[g2] - targets[g2].mev) >= f2 - 0.001;
+        });
+        const cands = (program[wid] || []).map((e, i)=> ({e, i, f: muscleFrac(e.name, g)}))
+          .filter(x=> x.f > 0 && (parseInt(x.e.sets,10) || 0) > buildMinSets(x.e) && safeToCut(x.e))
+          .sort((p, q)=> p.f - q.f);
+        if(!cands.length) continue;
+        const hit = cands[0];
+        hit.e.sets = (parseInt(hit.e.sets,10) || 0) - 1;
+        if(Array.isArray(hit.e.rpes) && hit.e.rpes.length > 1) hit.e.rpes.pop();
+        moved = true;
+        break;
+      }
+      if(moved) break;
+    }
+    if(!moved) break;
+  }
+  /* 3. L5 \u2014 THE BALANCE RULE, as a thing the builder DOES rather than a thing the check
+        catches. On a bodyweight tier the chest has push-ups and the back has pull-ups and
+        rows, so a plan that serves every muscle to the middle of its band comes out with
+        fourteen sets of mid-back against eight of chest. Both are inside their own bands;
+        together they are a back programme nobody asked for. */
+  for(let pass = 0; pass < 60; pass++){
+    const weekly = weeklyOf();
+    const chest = weekly.chest || 0;
+    if(!(chest > 0)) break;
+    const lim = chest * QUALITY_BALANCE_X;
+    const over = GKEYS.filter(g=> g !== "chest" && !targets[g].optional && !targets[g].priority
+                                  && weekly[g] > lim + 0.05)
+      .sort((x, y)=> (weekly[y] - lim) - (weekly[x] - lim));
+    if(!over.length) break;
+    let moved = false;
+    for(const g of over){
+      const days = dayIds.slice().sort((x, y)=> buildDaySets(program[y], g) - buildDaySets(program[x], g));
+      for(const wid of days){
+        const safeToCut = e=> GKEYS.every(g2=>{
+          const f2 = muscleFrac(e.name, g2);
+          if(f2 <= 0 || targets[g2].optional) return true;
+          return (weekly[g2] - targets[g2].mev) >= f2 - 0.001;
+        });
+        const cands = (program[wid] || []).map(e=> ({e, f: muscleFrac(e.name, g)}))
+          .filter(x=> x.f > 0 && (parseInt(x.e.sets,10) || 0) > buildMinSets(x.e) && safeToCut(x.e))
+          .sort((p, q)=> q.f - p.f);          // the one that feeds it most, this time
+        if(!cands.length){
+          /* THE BLOCKER IS A MUSCLE RIDING ON THIS ONE'S COAT-TAILS. On a bodyweight plan
+             the hanging knee raise is the only thing training the obliques, so the
+             obliques sit exactly on their floor and every attempt to trim thirteen sets of
+             abs is refused to protect them. Give the obliques a movement of their own and
+             the trim becomes safe \u2014 which is the better plan anyway: a muscle whose
+             entire volume is a by-product of another muscle's work is not being trained,
+             it is being splashed. */
+          const blocker = GKEYS.find(g2=>{
+            if(targets[g2].optional || g2 === g) return false;
+            const feeds = (program[wid] || []).some(e=> muscleFrac(e.name, g) > 0
+              && muscleFrac(e.name, g2) > 0 && (parseInt(e.sets,10) || 0) > buildMinSets(e));
+            return feeds && (weekly[g2] - targets[g2].mev) < 1;
+          });
+          if(blocker){
+            const ex = buildMovementFor(blocker, a.gear, a.protect);
+            const spare = dayIds.slice().sort((x, y)=>
+              buildDaySets(program[x], blocker) - buildDaySets(program[y], blocker))[0];
+            if(ex && !(program[spare] || []).some(e2=> canonEx(e2.name) === canonEx(ex.name))){
+              program[spare].push(ex);
+              notes.push(ex.name + " added so the " + GROUPS[blocker].name.toLowerCase()
+                + " is trained on purpose rather than as a by-product.");
+              moved = true;
+              break;
+            }
+          }
+          continue;
+        }
+        cands[0].e.sets = (parseInt(cands[0].e.sets,10) || 0) - 1;
+        if(Array.isArray(cands[0].e.rpes) && cands[0].e.rpes.length > 1) cands[0].e.rpes.pop();
+        moved = true;
+        break;
+      }
+      if(moved) break;
+    }
+    if(!moved) break;
+  }
+  return notes;
+}
+/* A movement that trains this muscle directly, chosen the same way every other slot is:
+   the slot whose job it is, then the preference order inside it, then the gear. */
+function buildMovementFor(g, gear, protect){
+  const slot = Object.keys(SLOT_MAIN).find(k=> (SLOT_MAIN[k] || [])[0] === g);
+  if(slot){
+    const ex = pickExercise(slot, gear);
+    if(ex && !buildProvokes(ex.name, protect))
+      return slotToExercise([slot, "iso", 3], gear, "intermediate");
+  }
+  /* No slot owns it, so ask the library for the movement that trains it hardest. */
+  const allowed = GEAR_TIERS[gear] || GEAR_TIERS.full;
+  let best = null;
+  Object.keys(EX_LIBRARY).forEach(k=> (EX_LIBRARY[k] || []).forEach(x=>{
+    if(allowed.indexOf(x.gear) < 0) return;
+    if(buildProvokes(x.name, protect)) return;
+    const f = muscleFrac(x.name, g);
+    if(f >= 0.7 && (!best || f > best.f)) best = {name: x.name, f, slot: k};
+  }));
+  if(!best) return null;
+  /* The movement this found, not whatever its slot would have picked \u2014 the slot's own
+     first choice is usually the one that was just rejected for provoking something. */
+  const e = slotToExercise([best.slot, "iso", 3], gear, "intermediate");
+  if(e && !buildProvokes(e.name, protect)) return e;
+  return Object.assign(e || {sets: 3, reps: "10-15", rpes: [8,9,9], rpe: "8-9", weight: null, note: ""},
+                       {name: best.name, weight: null, slotKind: "iso"});
+}
+/* M5's order, applied to a day that will not fit: pair what can be paired, then take
+   sets off whatever is furthest above its floor, and only drop a movement when there is
+   nothing left to take. Never leaves a muscle under its floor with no direct work. */
+function buildFit(program, dayIds, targets, a){
+  const notes = [];
+  const tight = [];
+  dayIds.forEach(wid=>{
+    let guard = 0;
+    while(dayMinutes(program[wid]) > a.minutes && guard++ < 60){
+      const list = program[wid];
+      /* a) SUPERSET TWO ISOLATIONS THAT SHARE NOTHING. Paired work costs no rest of its
+            own, which is where the minutes are. */
+      /* Isolation first, because pairing two of those costs nothing but the walk between
+         them. A compound is allowed into a pair only on the second lap, when there is
+         nothing else left and the alternative is dropping a movement outright. */
+      const free = list.map((e, i)=> ({e, i})).filter(x=> !x.e.superset);
+      const isoOnly = free.filter(x=> !isCompound(x.e.name));
+      /* Two isolations first \u2014 pairing those costs nothing but the walk between them.
+         Then an isolation beside a compound, which is the classic way a long day is made
+         short and is fine as long as they share no muscle. Never two compounds: that is
+         not a time saving, it is two hard lifts with no rest between them. */
+      const pairable = isoOnly.length >= 2 ? isoOnly : free;
+      let paired = false;
+      for(let i = 0; i < pairable.length - 1 && !paired; i++){
+        for(let j = i + 1; j < pairable.length; j++){
+          if(isCompound(pairable[i].e.name) && isCompound(pairable[j].e.name)) continue;
+          const A2 = musclesFor(pairable[i].e.name) || {}, B2 = musclesFor(pairable[j].e.name) || {};
+          const shares = GKEYS.some(g=> (A2[g] || 0) >= 0.5 && (B2[g] || 0) >= 0.5);
+          if(shares) continue;
+          pairable[i].e.superset = true;
+          pairable[j].e.superset = true;
+          pairable[j].e.supersetEnd = true;
+          paired = true;
+          notes.push(pairable[i].e.name + " and " + pairable[j].e.name + " are paired to save time.");
+          break;
+        }
+      }
+      if(paired) continue;
+      /* b) TAKE A SET off whatever is furthest above its floor. */
+      const weekly = programWeeklySets(program, dayIds);
+      const room = e=>{
+        let worst = Infinity;
+        GKEYS.forEach(g=>{
+          const f = muscleFrac(e.name, g);
+          if(f <= 0 || targets[g].optional) return;
+          worst = Math.min(worst, (weekly[g] - targets[g].mev) / Math.max(f, 0.01));
+        });
+        return worst;
+      };
+      /* DOWN TO THE FLOOR AND NOT PAST IT, and the unit matters: room() is in sets OF THE
+         MUSCLE, and taking one set off a movement costs the muscle its share of that set.
+         So a cut needs a whole set of headroom, not any headroom at all \u2014 at 0.3 above
+         the floor, cutting a movement that pays half a set put the muscle under it, which
+         is how the lower back failed the check on a plan the tune pass had just finished
+         bringing up to its floor. */
+      const cut = list.map(e=> ({e, r: room(e)}))
+        .filter(x=> (parseInt(x.e.sets,10) || 0) > buildMinSets(x.e) && x.r >= 1)
+        .sort((p, q)=> q.r - p.r)[0];
+      if(cut){ cut.e.sets = (parseInt(cut.e.sets,10) || 0) - 1;
+               if(Array.isArray(cut.e.rpes) && cut.e.rpes.length > 1) cut.e.rpes.pop();
+               continue; }
+      /* c) DROP A MOVEMENT, last, and only one whose muscles survive without it. */
+      const drop = list.map((e, i)=> ({e, i, r: room(e)}))
+        .filter(x=> x.r > (parseInt(x.e.sets,10) || 0))
+        .sort((p, q)=> q.r - p.r)[0];
+      /* NOTHING LEFT TO GIVE. Everything that can be paired is paired, every set above a
+         floor has gone, and dropping a movement would put a muscle under its minimum. The
+         day is as short as this many training days can honestly be made \u2014 which is a
+         fact about the week, not a fault in the plan, and it is reported as one. */
+      if(!drop){ tight.push(wid); break; }
+      notes.push(drop.e.name + " came off " + dayNameOf({days:[]}, wid) + " to fit the time.");
+      list.splice(drop.i, 1);
+    }
+  });
+  notes.tight = tight;
+  return notes;
+}
+function buildPlan(answers){
+  const a = buildAnswers(answers);
+  const splitId = BUILDER_SPLIT_BY_DAYS[a.days] || "ul4";
+  const split = JSON.parse(JSON.stringify(SPLITS[splitId]));
+  split.builtId = splitId;
+  const dayIds = split.days.map(d=> d.id);
+  const targets = buildTargets(a);
+  const report = {splitId, days: a.days, minutes: a.minutes, level: a.level,
+                  notes: [], dropped: [], priority: a.priority.slice()};
+
+  /* 2. FILL THE SLOTS. slotToExercise() is what the app's own default plan is built
+        with, so a built plan and a default plan are the same kind of object. */
+  const program = {finisher: []};
+  const noGear = [];
+  dayIds.forEach(wid=>{
+    program[wid] = (PLAN_SLOTS[splitId][wid] || []).map(sl=>{
+      /* Nothing in this tier does this job. The slot is dropped rather than filled with
+         equipment you do not have, and the report says which \u2014 the volume it was
+         carrying is made up by the tuning pass on everything that is left. */
+      if(!pickExerciseIn(sl[0], a.gear)){ noGear.push(sl[0]); return null; }
+      return slotToExercise(sl, a.gear, a.level, a.goal);
+    }).filter(Boolean);
+  });
+  if(noGear.length) report.notes.push("Nothing in your equipment covers "
+    + [...new Set(noGear)].join(", ") + ", so those slots are left out and the work is "
+    + "spread over the movements you can do.");
+
+  /* 3. PROTECTED AREAS. A movement that loads somewhere somebody has told the app to
+        leave alone is swapped for another in its slot where there is one, and dropped
+        where there is not \u2014 before any tuning, so the volume is made up elsewhere. */
+  if(a.protect.length){
+    dayIds.forEach(wid=>{
+      program[wid] = program[wid].filter(e=>{
+        if(!buildProvokes(e.name, a.protect)) return true;
+        const alt = buildSafeAlternative(e.name, a.gear, a.protect);
+        if(alt){
+          report.notes.push(e.name + " \u2192 " + alt + ", to keep off " + a.protect.join(" and ") + ".");
+          e.name = alt;
+          delete e.weight;
+          return true;
+        }
+        report.dropped.push(e.name);
+        return false;
+      });
+    });
+  }
+
+  /* 4-6. TUNE, FIT, AND CHECK, in rounds: a cut made for the clock changes the volume,
+          and a set added for a muscle changes the clock. */
+  let q = null, tight = [];
+  for(let round = 0; round < BUILD_ROUNDS; round++){
+    report.notes = report.notes.concat(buildTune(program, dayIds, targets, a));
+    const fit = buildFit(program, dayIds, targets, a);
+    tight = fit.tight || [];
+    report.notes = report.notes.concat(fit);
+    q = planQuality(program, split, {budget: a.minutes, priority: a.priority, gear: a.gear,
+                                     tight: tight});
+    if(q.ok) break;
+    /* The one thing a round can act on by itself: a session over the cap, which is always
+       fixable by moving a set to another day. Everything else is handled by the tune and
+       fit passes above on the next time round. */
+    /* A MUSCLE DOWN TO ONE DAY A WEEK gets a second exposure, on the day that has none of
+       it. This happens when the fit pass drops the only movement that fed it on one of
+       the days \u2014 the volume survives, spread onto the other day, and the frequency rule
+       does not. */
+    q.fail.filter(f=> f.k === "freq" && f.muscle).forEach(f=>{
+      const bare = dayIds.filter(wid=> buildDaySets(program[wid], f.muscle) < FREQ_MIN_DAY_SETS)
+        .sort((x, y)=> (program[x] || []).length - (program[y] || []).length)[0];
+      if(!bare) return;
+      const ex = buildMovementFor(f.muscle, a.gear, a.protect);
+      if(ex && !(program[bare] || []).some(e=> canonEx(e.name) === canonEx(ex.name))){
+        program[bare].push(ex);
+        report.notes.push(ex.name + " added to " + dayNameOf(split, bare) + " so the "
+          + GROUPS[f.muscle].name.toLowerCase() + " is trained twice a week.");
+      }
+    });
+    q.fail.filter(f=> f.k === "session" && f.wid).forEach(f=>{
+      const list = program[f.wid] || [];
+      const cands = buildCandidates(list, f.muscle);
+      const hit = cands.find(x=> (parseInt(x.e.sets,10) || 0) > buildMinSets(x.e));
+      if(hit) hit.e.sets = (parseInt(hit.e.sets,10) || 0) - 1;
+    });
+  }
+
+  /* AND ONE LAST LOOK AT FREQUENCY, after the rounds rather than inside them. The repair
+     above runs between rounds, and the fit pass that follows it can drop the very movement
+     it just added \u2014 so the last word has to come after the last fit. */
+  if(q && q.fail.some(f=> f.k === "freq")){
+    q.fail.filter(f=> f.k === "freq" && f.muscle).forEach(f=>{
+      const bare = dayIds.filter(wid=> buildDaySets(program[wid], f.muscle) < FREQ_MIN_DAY_SETS)
+        .sort((x, y)=> (program[x] || []).length - (program[y] || []).length)[0];
+      if(!bare) return;
+      const ex = buildMovementFor(f.muscle, a.gear, a.protect);
+      if(ex && !(program[bare] || []).some(e=> canonEx(e.name) === canonEx(ex.name))){
+        program[bare].push(ex);
+        report.notes.push(ex.name + " added to " + dayNameOf(split, bare) + " so the "
+          + GROUPS[f.muscle].name.toLowerCase() + " is trained twice a week, which is worth "
+          + "a few minutes over the budget.");
+      }
+    });
+    q = planQuality(program, split, {budget: a.minutes, priority: a.priority, gear: a.gear,
+                                     tight: tight.concat(dayIds)});
+  }
+
+  /* 7. STARTING LOADS AND FEELER SETS. A load where the table has an honest one, and the
+        first session is held to RPE 7 and asks for a feeler set either way (see H7). */
+  if(a.bodyweight > 0){
+    fillStartingLoads(program, {bodyweight: a.bodyweight, sex: a.sex, level: a.level});
+  }
+
+  /* 8. THE BLOCK. Written here so the plan arrives with a start date and a deload clock
+        rather than acquiring one the first time something looks at it. */
+  const meso = {start: Date.now(), weeks: DELOAD_EVERY_WEEKS, builtBy: "builder",
+                level: a.level, goal: a.goal, days: a.days, minutes: a.minutes};
+
+  report.quality = q;
+  report.weekly = (q && q.weekly) || programWeeklySets(program, dayIds);
+  report.targets = targets;
+  report.answers = a;
+  return {program, split, meso, report};
+}
+/* Does this movement load somewhere that has been asked to be left alone? The areas are
+   the app's own injury areas, so "shoulder" means what it means everywhere else. */
+const BUILD_PROTECT = {
+  shoulder: /bench|press|dip|fly|flye|pull[- ]?up|chin[- ]?up|overhead|lateral|upright row|pullover/i,
+  elbow:    /curl|extension|pushdown|skull|dip|close[- ]?grip/i,
+  wrist:    /curl|press|push[- ]?up|front squat|clean/i,
+  lowback:  /deadlift|good morning|bent[- ]?over row|squat|back extension|hyperextension|row$/i,
+  knee:     /squat|lunge|leg press|leg extension|step[- ]?up|split squat/i,
+  hip:      /squat|lunge|hip thrust|deadlift|abduction|adduction|good morning/i,
+  neck:     /shrug|neck|overhead/i
+};
+function buildProvokes(name, protect){
+  return (protect || []).some(k=>{
+    const re = BUILD_PROTECT[k];
+    return re ? re.test(nrm(name)) : false;
+  });
+}
+/* Another movement in the same slot that does not provoke it. The slot is the job, so a
+   swap inside it keeps the plan's shape. */
+function buildSafeAlternative(name, gear, protect){
+  const hit = exSlotFor(name);
+  if(!hit) return null;
+  const allowed = GEAR_TIERS[gear] || GEAR_TIERS.full;
+  const pref = EX_PREFERENCE[hit.key] || [];
+  const list = (EX_LIBRARY[hit.key] || []).slice()
+    .sort((x, y)=> pref.indexOf(x.name) - pref.indexOf(y.name));
+  const alt = list.find(x=> allowed.indexOf(x.gear) > -1
+    && swapSquash(x.name) !== swapSquash(name) && !buildProvokes(x.name, protect));
+  return alt ? alt.name : null;
+}
+/* =====================================================================
+   THE BUILDER, ON SCREEN
+
+   Seven questions, one a screen, every one of them skippable \u2014 a question somebody does
+   not know the answer to must not be a wall, and every default here is a defensible plan.
+   Then a preview: the days, the minutes, the volume table and the quality summary, with
+   Use this plan or Change answers. Nothing is written until Use this plan.
+
+   The same full-page shape as the importer and the priority block. BUILD_UI holds the
+   answers while the flow is open and nothing else reads it. */
+let BUILD_UI = null;
+function buildHost(){ return document.getElementById("buildFullIn"); }
+function openBuildPage(seed){
+  BUILD_UI = Object.assign({step: 0, answers: Object.assign({}, BUILD_DEFAULTS), built: null},
+                           seed || {});
+  /* What the app already knows about you is a better starting point than a blank form,
+     and every one of these is still a question you get asked. */
+  try{
+    const st = S.setup || {};
+    if(st.goal) BUILD_UI.answers.goal = st.goal;
+    if(st.gear) BUILD_UI.answers.gear = st.gear;
+    const wks = Math.round(trainingAgeWeeks());
+    if(wks > 0) BUILD_UI.answers.trainingWeeks = wks;
+    const bw = bodyWeightNow();
+    if(bw > 0) BUILD_UI.answers.bodyweight = bw;
+    if(S.sex === "m" || S.sex === "f") BUILD_UI.answers.sex = S.sex;
+  }catch(e){}
+  const w = document.getElementById("buildFull");
+  if(w){ w.hidden = false; w.scrollTop = 0; }
+  document.body.classList.add("build-open");
+  closeDropdown();
+  renderBuildPage();
+}
+function closeBuildPage(){
+  BUILD_UI = null;
+  const w = document.getElementById("buildFull");
+  if(w) w.hidden = true;
+  document.body.classList.remove("build-open");
+  render();
+}
+function renderBuildPage(){
+  const host = buildHost();
+  if(!host || !BUILD_UI) return;
+  host.innerHTML = BUILD_UI.step >= BUILD_QUESTIONS.length
+    ? buildPreviewHTML() : buildStepHTML(BUILD_QUESTIONS[BUILD_UI.step]);
+  bindBuildPage();
+  const h = host.querySelector("h2");
+  if(h){ h.setAttribute("tabindex", "-1"); try{ h.focus({preventScroll:true}); }catch(e){} }
+  const w = document.getElementById("buildFull");
+  if(w) w.scrollTop = 0;
+}
+function buildHeadHTML(title, sub){
+  const n = BUILD_QUESTIONS.length;
+  const at = Math.min(BUILD_UI.step, n);
+  return `<div class="spec-top">
+    <button class="spec-x" data-buildclose aria-label="Close">${ICON.close}</button>
+    ${BUILD_UI.step < n ? `<div class="spec-steps" role="progressbar" aria-valuenow="${at+1}"
+      aria-valuemin="1" aria-valuemax="${n}">Question ${at+1} of ${n}</div>` : ""}
+  </div>
+  <h2 class="spec-h">${esc(title)}</h2>
+  ${sub ? `<p class="spec-sub">${sub}</p>` : ""}`;
+}
+function buildFootHTML(nextLabel, skipLabel){
+  return `<div class="spec-foot">
+    ${BUILD_UI.step > 0 ? `<button class="btn ghost" data-buildback>Back</button>`
+      : `<span></span>`}
+    <button class="btn" data-buildnext>${esc(nextLabel || "Next")}</button>
+  </div>
+  ${skipLabel ? `<div style="text-align:center;margin-top:10px">
+    <button class="linklike" data-buildskip>${esc(skipLabel)}</button></div>` : ""}`;
+}
+/* One option row, the same control the setup screens use. */
+function buildOptHTML(key, value, title, sub, on){
+  return `<button class="ob-opt${on ? " on" : ""}" data-buildset="${esc(key)}"
+    data-buildval="${esc(String(value))}">
+    <span class="ob-opt-t">${esc(title)}</span>
+    ${sub ? `<span class="ob-opt-s">${esc(sub)}</span>` : ""}
+    <span class="ob-tick">${ICON.check}</span>
+  </button>`;
+}
+function buildStepHTML(q){
+  const a = BUILD_UI.answers;
+  const opts = rows=> `<div class="spec-opts">${rows.join("")}</div>`;
+  if(q === "goal") return buildHeadHTML("What are you training for?",
+      "This sets the volume targets your plan is written against. It does not change how "
+      + "hard you work or what the movements are.")
+    + opts(Object.keys(GOALS).map(k=> buildOptHTML("goal", k, GOALS[k].name, GOALS[k].sub, a.goal === k)))
+    + buildFootHTML("Next", "Skip \u2014 build it for muscle");
+
+  if(q === "age"){
+    const rowsA = [[0, "I'm new to this", "Under six months of training behind you."],
+                   [40, "Under two years", "You know the lifts and you are still adding weight quickly."],
+                   [110, "Two to five years", "Progress has slowed down and you train through it."],
+                   [300, "Five years or more", "Long enough that a week off changes nothing."]];
+    return buildHeadHTML("How long have you been training?",
+      "Not how long you have used this app \u2014 how long you have trained. It decides how "
+      + "much work the plan starts with, which is the one number a beginner and an "
+      + "advanced lifter should not share.")
+    + opts(rowsA.map(([w, t, s2])=> buildOptHTML("trainingWeeks", w, t, s2, a.trainingWeeks === w)))
+    + buildFootHTML("Next", "Skip \u2014 assume a couple of years");
+  }
+
+  if(q === "days") return buildHeadHTML("How many days a week can you train?",
+      "Honestly, rather than at your best. A plan built for four days and run on two is "
+      + "worse than a plan built for two.")
+    + opts([2,3,4,5,6].map(n=> buildOptHTML("days", n, n + " days",
+        (SPLITS[BUILDER_SPLIT_BY_DAYS[n]] || {}).name + " \u00b7 "
+        + (SPLITS[BUILDER_SPLIT_BY_DAYS[n]] || {}).blurb, a.days === n)))
+    + buildFootHTML("Next", "Skip \u2014 four days");
+
+  if(q === "minutes") return buildHeadHTML("How long is a session?",
+      "Door to door, minus the walk. The plan is fitted to this: movements get paired "
+      + "before anything is cut, and nothing is cut below the minimum a muscle needs.")
+    + opts([30,45,60,75,90].map(n=> buildOptHTML("minutes", n, n + " minutes",
+        n <= 30 ? "Tight. Expect paired movements and few long rests."
+        : n <= 45 ? "Workable for anything up to five days a week."
+        : n <= 60 ? "The usual answer, and the one most plans assume."
+        : n <= 75 ? "Room for full rests on the heavy work."
+        : "Long sessions. Fewer days a week suits this better.", a.minutes === n)))
+    + buildFootHTML("Next", "Skip \u2014 an hour");
+
+  if(q === "gear") return buildHeadHTML("What can you train with?",
+      "Every movement in the plan comes from what you pick here. Nothing is prescribed "
+      + "that you cannot do.")
+    + opts(Object.keys(GEAR_LABEL).map(k=> buildOptHTML("gear", k, GEAR_LABEL[k].name,
+        GEAR_LABEL[k].sub, a.gear === k)))
+    + buildFootHTML("Next", "Skip \u2014 a full gym");
+
+  if(q === "focus"){
+    const pri = a.priority || [];
+    const choices = GKEYS.filter(g=> !(GROUPS[g] || {}).optional && (GROUPS[g] || {}).pl !== 0 || g === "chest" || g === "lats" || g === "quads" || g === "glutes");
+    const uniq = [...new Set(["chest","lats","upper_back","delts_side","biceps","triceps","quads","hams","glutes","calves","abs"])];
+    return buildHeadHTML("Anything you want to push, or protect?",
+      "Up to two muscles get more work than the rest. Anything you tell the app to protect "
+      + "loses the movements that tend to provoke it, and the volume is made up elsewhere.")
+    + `<div class="spec-opts">${uniq.map(g=> buildOptHTML("priority", g, GROUPS[g].name,
+        pri.indexOf(g) > -1 ? "Chosen" : "", pri.indexOf(g) > -1)).join("")}</div>`
+    + `<div class="sub" style="margin:14px 2px 6px">Anywhere that needs keeping clear?</div>`
+    + `<div class="spec-opts">${Object.keys(BUILD_PROTECT).map(k=> buildOptHTML("protect", k,
+        {shoulder:"Shoulder", elbow:"Elbow", wrist:"Wrist", lowback:"Lower back",
+         knee:"Knee", hip:"Hip", neck:"Neck"}[k] || k, "",
+        (a.protect || []).indexOf(k) > -1)).join("")}</div>`
+    + buildFootHTML("Next", "Skip \u2014 train everything evenly");
+  }
+
+  if(q === "you") return buildHeadHTML("Starting loads, if you want them",
+      "Only used to put a first weight on each movement, which the app corrects within "
+      + "two or three sessions anyway. Skip it and every movement starts with a feeler set "
+      + "instead.")
+    + `<div class="field"><label>Bodyweight (${esc(unitWord())})</label>
+        <input id="bldBw" inputmode="decimal" value="${a.bodyweight == null ? "" : esc(String(a.bodyweight))}"
+          placeholder="optional"></div>`
+    + `<div class="sub" style="margin:14px 2px 6px">Upper-body strength differs enough
+        between men and women that one table would be wrong for half of everybody. Skipping
+        takes the lower figure.</div>`
+    + opts([["m","Man",""],["f","Woman",""]].map(([v,t,s2])=> buildOptHTML("sex", v, t, s2, a.sex === v)))
+    + buildFootHTML("Build it", "Skip \u2014 use feeler sets");
+
+  return buildHeadHTML("Ready", "") + buildFootHTML("Build it");
+}
+/* THE PREVIEW. Everything the plan is, before anything is written: the days and what is
+   in them, the minutes, the volume against the landmarks, and what the check said. */
+function buildPreviewHTML(){
+  const r = BUILD_UI.built;
+  if(!r) return buildHeadHTML("Building\u2026", "");
+  const q = r.report.quality || {fail:[], warn:[]};
+  const sp = r.split;
+  const days = sp.days.map(d=>{
+    const list = r.program[d.id] || [];
+    const m = (q.minutes || []).find(x=> x.wid === d.id) || {};
+    return `<div class="bld-day">
+      <div class="bld-day-h"><b>${esc(d.name)}</b><span class="num">${
+        esc(String(m.sets || list.reduce((t,e)=> t + (parseInt(e.sets,10)||0), 0)))} sets \u00b7 ${
+        esc(String(m.mins || dayMinutes(list)))} min</span></div>
+      ${list.map(e=> `<div class="bld-ex"><span>${esc(e.name)}${
+        e.superset ? ` <i class="bld-ss">paired</i>` : ""}</span><span class="num">${
+        esc(String(e.sets))} \u00d7 ${esc(String(e.reps))}</span></div>`).join("")}
+    </div>`;
+  }).join("");
+  const rows = GKEYS.filter(g=> !(GROUPS[g] || {}).optional)
+    .map(g=>{
+      const v = (r.report.weekly || {})[g] || 0;
+      const t = (r.report.targets || {})[g] || GROUPS[g];
+      const pri = (r.report.priority || []).indexOf(g) > -1;
+      const under = v + 0.05 < t.mev, over = v > (t.top || t.mav) + 0.05;
+      return `<div class="bld-vol${under ? " bld-under" : over ? " bld-over" : ""}">
+        <span>${esc(GROUPS[g].name)}${pri ? ` <i class="bld-ss">priority</i>` : ""}</span>
+        <span class="num">${esc(String(r1(v)))} <i>of ${esc(String(r1(t.mev)))}\u2013${
+          esc(String(r1(t.top || t.mav)))}</i></span></div>`;
+    }).join("");
+  const notes = (r.report.notes || []).slice(0, 6);
+  return buildHeadHTML(sp.name + ", " + sp.tag,
+      "Built from your answers, against the same volume targets the Body tab measures you "
+      + "by. Nothing is saved until you say so.")
+    + `<div class="bld-sum">${q.fail.length
+        ? `<b class="st-bad">${q.fail.length} problem${q.fail.length===1?"":"s"}</b>`
+        : `<b class="st-good">No problems found</b>`}
+       ${q.warn.length ? `<span>${q.warn.length} note${q.warn.length===1?"":"s"}</span>` : ""}</div>`
+    + (q.fail.length ? `<div class="bld-fails">${q.fail.map(f=>
+        `<div class="st-row st-bad"><b>${esc(f.k)}</b>${esc(f.msg)}</div>`).join("")}</div>` : "")
+    + `<div class="bld-days">${days}</div>`
+    + `<div class="bld-vol-h">Sets a week, against your targets</div>
+       <div class="bld-vols">${rows}</div>`
+    + (notes.length ? `<div class="bld-vol-h">What it did</div>
+       <div class="bld-notes">${notes.map(n=> `<div class="sub">${esc(n)}</div>`).join("")}</div>` : "")
+    + `<div class="spec-foot">
+        <button class="btn ghost" data-buildback>Change answers</button>
+        <button class="btn" data-buildadopt>Use this plan</button>
+      </div>`;
+}
+function bindBuildPage(){
+  const host = buildHost();
+  if(!host) return;
+  host.querySelectorAll("[data-buildclose]").forEach(b=> b.onclick = ()=> closeBuildPage());
+  host.querySelectorAll("[data-buildset]").forEach(b=> b.onclick = ()=>{
+    const k = b.dataset.buildset, v = b.dataset.buildval;
+    const a = BUILD_UI.answers;
+    if(k === "priority"){
+      const i = a.priority.indexOf(v);
+      if(i > -1) a.priority.splice(i, 1);
+      else if(a.priority.length < 2) a.priority.push(v);
+      else { toast("Two is the limit \u2014 a plan that pushes everything pushes nothing"); return; }
+    } else if(k === "protect"){
+      const i = a.protect.indexOf(v);
+      if(i > -1) a.protect.splice(i, 1); else a.protect.push(v);
+    } else if(k === "days" || k === "minutes" || k === "trainingWeeks"){
+      a[k] = parseInt(v, 10);
+    } else {
+      a[k] = v;
+    }
+    renderBuildPage();
+  });
+  const step = ()=>{
+    const bw = host.querySelector("#bldBw");
+    if(bw){
+      const v = parseFloat(bw.value);
+      BUILD_UI.answers.bodyweight = isFinite(v) && v > 0 ? v : null;
+    }
+  };
+  host.querySelectorAll("[data-buildnext]").forEach(b=> b.onclick = ()=>{
+    step();
+    BUILD_UI.step++;
+    if(BUILD_UI.step >= BUILD_QUESTIONS.length) BUILD_UI.built = buildPlan(BUILD_UI.answers);
+    renderBuildPage();
+  });
+  host.querySelectorAll("[data-buildskip]").forEach(b=> b.onclick = ()=>{
+    BUILD_UI.step++;
+    if(BUILD_UI.step >= BUILD_QUESTIONS.length) BUILD_UI.built = buildPlan(BUILD_UI.answers);
+    renderBuildPage();
+  });
+  host.querySelectorAll("[data-buildback]").forEach(b=> b.onclick = ()=>{
+    step();
+    BUILD_UI.step = Math.max(0, BUILD_UI.step - 1);
+    renderBuildPage();
+  });
+  host.querySelectorAll("[data-buildadopt]").forEach(b=> b.onclick = ()=>{
+    if(!BUILD_UI.built) return;
+    if(!adoptBuiltPlan(BUILD_UI.built)) return;
+    closeBuildPage();
+    goTab("program");
+    toast("Your plan is ready", "good");
+  });
+}
+/* WRITING IT DOWN. The only function in the builder that touches state, and it is the
+   same shape as adopting an imported plan: the split, the programme, the block, and a
+   record of what it was built from so the Program tab can say. */
+function adoptBuiltPlan(r){
+  if(!r || !r.program || !r.split) return false;
+  if(S.active && !confirm("You have a workout in progress. Replacing your plan now will "
+      + "leave it running against the old one. Carry on?")) return false;
+  const before = JSON.parse(JSON.stringify({program: S.program, customSplit: S.customSplit,
+                                            splitId: S.splitId}));
+  S.customSplit = r.split;
+  S.splitId = null;
+  delete S.splitLayout;
+  S.program = r.program;
+  S.meso = r.meso;
+  S.planStart = Date.now();
+  S.blockStart = Date.now();
+  S.cycleStart = Date.now();
+  S.cycleDone = [];
+  S.restDays = [];
+  S.pointer = 0;
+  S.override = null;
+  /* H9 \u2014 the answers are kept, because they are the only record of what this plan was
+     written for and the only thing a rebuild could start from. */
+  S.builtPlan = {at: Date.now(), answers: r.report.answers, report: {
+    splitId: r.report.splitId, notes: (r.report.notes || []).slice(0, 12),
+    dropped: r.report.dropped || [], priority: r.report.priority || []}};
+  if(r.report.answers){
+    S.setup = Object.assign({name:"Me", at: Date.now()}, S.setup || {},
+      {goal: r.report.answers.goal, gear: r.report.answers.gear, level: r.report.answers.level});
+    if(r.report.answers.trainingWeeks != null) S.priorTrainingWeeks = r.report.answers.trainingWeeks;
+    if(r.report.answers.sex) S.sex = r.report.answers.sex;
+  }
+  applySplit();
+  invalidateTableOrigin();
+  logPlanChange("built", null, r.split.name,
+    [r.split.days.length + " days, " + (r.report.answers || {}).minutes + " minutes a session"],
+    {note: "Built by Element 26 from your answers.", undo: null, before: null});
+  save(); queueSync();
+  return true;
+}
+/* =====================================================================
+   THE QUALITY CHECK
+
+   Every plan this app writes, and every plan it is handed, gets read against the same
+   list. It exists because a programme can be wrong in ways that are obvious once stated
+   and invisible while you are writing it: a muscle under its floor, a day with eleven
+   sets of chest in it, ninety minutes of work in a sixty-minute slot, four pushing
+   movements and one pull.
+
+   WHAT IT IS ALLOWED TO DO DEPENDS ON WHOSE PLAN IT IS. On a plan the builder wrote, a
+   failure is a bug and the builder retries until there are none. On an imported plan it
+   informs and never blocks: that document is somebody's programme, often a coach's, and
+   an app that refuses to run it because the push-to-pull ratio is 1.4 has misunderstood
+   its job. The checks are the same; only the consequence differs.
+
+   Each finding carries a `fix` key where there is something the app could actually do
+   about it, so the import review can offer the button and the builder knows what to
+   change on the retry. */
+const QUALITY_PUSH_PULL = [0.7, 1.4];      // pushing sets against pulling sets
+const QUALITY_QUAD_HAM  = [0.6, 2.0];      // quad sets against hamstring sets
+const QUALITY_BALANCE_X = 1.6;             // L5: no muscle above this many times chest
+/* Which slots count as pushing and which as pulling, for the ratio. Read off the
+   movement's muscles rather than its name, so a machine nobody has heard of still lands
+   on the right side. */
+function pushPullOf(name){
+  const mm = musclesFor(name) || {};
+  const push = (mm.chest || 0) + (mm.delts_front || 0) + (mm.triceps || 0);
+  const pull = (mm.lats || 0) + (mm.upper_back || 0) + (mm.biceps || 0) + (mm.delts_rear || 0) + (mm.traps || 0);
+  if(push >= 0.8 && push > pull) return "push";
+  if(pull >= 0.8 && pull > push) return "pull";
+  return null;
+}
+/* Minutes a day's prescription asks for, by the same arithmetic projectedDuration() uses
+   when there is no history to read: working time plus the rest the plan itself asks for. */
+function dayMinutes(list){
+  let sec = 0;
+  (list || []).forEach(e=>{
+    const sets = parseInt(e.sets, 10) || 0;
+    const rest = Array.isArray(e.rest) ? e.rest[0]
+      : (restTargetFor(e, {reps: String(repRange(e.reps) ? repRange(e.reps)[1] : 10)}) || {ideal:[120]}).ideal[0];
+    sec += sets * (40 + (e.superset ? 0 : rest));
+  });
+  return Math.round(sec / 60);
+}
+/* Weekly sets per muscle for a whole programme, fractional credit included. */
+function programWeeklySets(program, dayIds){
+  const out = {};
+  GKEYS.forEach(g=> out[g] = 0);
+  (dayIds || Object.keys(program || {})).forEach(wid=>{
+    (program[wid] || []).forEach(e=>{
+      const n = parseInt(e.sets, 10) || 0;
+      if(!n) return;
+      GKEYS.forEach(g=>{ out[g] += muscleFrac(e.name, g) * n; });
+    });
+  });
+  return out;
+}
+/* The one function. `opts.budget` is minutes a session, `opts.priority` the muscles
+   somebody chose to push, `opts.gear` the tier they train with. */
+function planQuality(program, split, opts){
+  const o = opts || {};
+  const dayIds = (split && split.days ? split.days.map(d=> d.id) : Object.keys(program || {}))
+    .filter(k=> k !== "finisher");
+  const fail = [], warn = [];
+  const add = (list, k, msg, extra)=> list.push(Object.assign({k, msg}, extra || {}));
+  const weekly = programWeeklySets(program, dayIds);
+  const priority = (o.priority || []).slice();
+  const A = (()=>{ try{ return bodyAnalysis(); }catch(e){ return null; } })();
+  const lm = g=>{
+    try{ return (A && A.lm && A.lm[g]) || adjustedLandmarks(A, g); }
+    catch(e){ return GROUPS[g]; }
+  };
+
+  /* 1. VOLUME, against the same landmarks the Body tab measures you by. Under the floor
+        is a failure; over the ceiling is a failure; between MAV and MRV is a note. */
+  GKEYS.forEach(g=>{
+    const G = GROUPS[g];
+    if(!G || G.optional) return;
+    const L = lm(g) || G;
+    const v = weekly[g] || 0;
+    const top = Math.min(L.mav, L.mrv * 0.9);
+    if(v + 0.05 < L.mev){
+      add(fail, "under", G.name + " gets " + r1(v) + " sets a week, under its floor of "
+        + r1(L.mev) + ".", {muscle: g, fix: "add", want: L.mev});
+    } else if(v > L.mrv + 0.05){
+      add(fail, "over", G.name + " gets " + r1(v) + " sets a week, past its ceiling of "
+        + r1(L.mrv) + ".", {muscle: g, fix: "cut", want: top});
+    } else if(v > top + 0.05 && priority.indexOf(g) < 0){
+      add(warn, "high", G.name + " is at " + r1(v) + " sets a week, above " + r1(top)
+        + " where the returns flatten.", {muscle: g});
+    }
+  });
+
+  /* 2. FREQUENCY. A muscle trained once a week with its whole week's volume in one
+        sitting is the shape the per-session cap exists to prevent. */
+  GKEYS.forEach(g=>{
+    const G = GROUPS[g];
+    if(!G || G.optional || !(weekly[g] > 0)) return;
+    const days = dayIds.filter(wid=> (program[wid] || [])
+      .some(e=> muscleFrac(e.name, g) * (parseInt(e.sets,10)||0) >= FREQ_MIN_DAY_SETS)).length;
+    /* 2.4 \u2014 EVERY MAJOR MUSCLE TWICE A WEEK WHEREVER THE WEEK HAS TWO DAYS IN IT. Not
+       because frequency grows more muscle at equal volume \u2014 it does not, to any
+       consistent degree [M\u2013S] \u2014 but because it keeps per-session volume in the range
+       the evidence covers, keeps sessions shorter, and makes a missed day cost less. */
+    if(days < 2 && weekly[g] >= GROUPS[g].mev){
+      if(dayIds.length >= 2 && MAJOR_MUSCLES.indexOf(g) > -1)
+        add(fail, "freq", G.name + " is trained on one day a week out of " + dayIds.length
+          + ".", {muscle: g, fix: "spread"});
+      else
+        add(warn, "freq", G.name + " is trained on one day a week.", {muscle: g});
+    }
+  });
+
+  /* 3. PER-SESSION SETS, the C1 cap. */
+  dayIds.forEach(wid=>{
+    GKEYS.forEach(g=>{
+      const n = (program[wid] || []).reduce((t,e)=>
+        t + muscleFrac(e.name, g) * (parseInt(e.sets,10) || 0), 0);
+      if(n > SESSION_SETS_MAX + 0.05)
+        add(fail, "session", (GROUPS[g] || {}).name + " gets " + r1(n) + " sets in one session on "
+          + dayNameOf(split, wid) + ", past " + SESSION_SETS_MAX + ".", {muscle: g, wid, fix: "cut"});
+    });
+  });
+
+  /* 4. SETS AND MINUTES A DAY. */
+  dayIds.forEach(wid=>{
+    const list = program[wid] || [];
+    const sets = list.reduce((t,e)=> t + (parseInt(e.sets,10) || 0), 0);
+    const mins = dayMinutes(list);
+    if(sets > MAX_WORKING_SETS_PER_SESSION)
+      add(warn, "long", dayNameOf(split, wid) + " has " + sets + " working sets in it, past the "
+        + MAX_WORKING_SETS_PER_SESSION + " a session this app will propose.", {wid, fix: "shorten"});
+    if(o.budget > 0 && mins > o.budget + 5){
+      /* A day that could be shorter and is not is a fault. A day that cannot be shorter
+         without putting a muscle under its floor is a statement about how many days a
+         week you train, and the plan says so rather than failing over it. */
+      if((o.tight || []).indexOf(wid) > -1)
+        add(warn, "budget", dayNameOf(split, wid) + " comes to about " + mins + " minutes rather than "
+          + o.budget + ". With this many training days there is no way to make it shorter without "
+          + "putting a muscle under its minimum.", {wid, mins});
+      else
+        add(fail, "budget", dayNameOf(split, wid) + " needs about " + mins + " minutes against your "
+          + o.budget + ".", {wid, mins, fix: "shorten"});
+    }
+  });
+
+  /* 5. PUSH AGAINST PULL, AND QUADS AGAINST HAMSTRINGS. Both are about what a programme
+        does to a body over months rather than about any one session. */
+  let push = 0, pull = 0;
+  dayIds.forEach(wid=> (program[wid] || []).forEach(e=>{
+    const side = pushPullOf(e.name);
+    const n = parseInt(e.sets, 10) || 0;
+    if(side === "push") push += n; else if(side === "pull") pull += n;
+  }));
+  if(push > 0 && pull > 0){
+    const r = push / pull;
+    if(r < QUALITY_PUSH_PULL[0] || r > QUALITY_PUSH_PULL[1])
+      add(warn, "pushpull", "Pushing to pulling is " + r1(r) + " to 1 (" + r1(push) + " against "
+        + r1(pull) + " sets).");
+  }
+  const quad = weekly.quads || 0, ham = weekly.hams || 0;
+  if(quad > 0 && ham > 0){
+    const r = quad / ham;
+    if(r < QUALITY_QUAD_HAM[0] || r > QUALITY_QUAD_HAM[1])
+      add(warn, "quadham", "Quads to hamstrings is " + r1(r) + " to 1.");
+  }
+
+  /* 6. L5 \u2014 THE BALANCE RULE. A programme where the side delts get three times what the
+        chest gets is not a chest programme with extra shoulders, it is a shoulder
+        programme nobody chose. Priority muscles are exempt: choosing one is exactly the
+        statement this rule otherwise makes on your behalf. */
+  const chest = weekly.chest || 0;
+  if(chest > 0){
+    GKEYS.forEach(g=>{
+      if(g === "chest" || (GROUPS[g] || {}).optional) return;
+      if(priority.indexOf(g) > -1) return;
+      const v = weekly[g] || 0;
+      if(v > chest * QUALITY_BALANCE_X + 0.05)
+        add(fail, "balance", (GROUPS[g] || {}).name + " gets " + r1(v) + " sets to the chest's "
+          + r1(chest) + ".", {muscle: g, fix: "cut", want: chest * QUALITY_BALANCE_X});
+    });
+  }
+
+  /* 6b. 2.8.3 \u2014 WEEKLY COVERAGE. A plan can hit every volume target and still be missing
+         a pattern: all the chest volume in flat presses and none on an incline, hamstrings
+         hinged but never curled, a vertical pull and no row. These are the movements a
+         week has to contain, and each one has a reason in 2.8.1 \u2014 regional coverage,
+         long-length loading, or both. Reported as notes on an imported plan and fixed by
+         the builder, which can always add the movement. */
+  try{
+    /* ASKED OF THE SLOT, NOT OF THE NAME, wherever a slot exists for the job. A decline
+       push-up IS the bodyweight incline press and says nothing of the kind in its name;
+       a chest-supported row is a row whatever it is called. Only the three jobs the
+       library has no slot for \u2014 overhead triceps, a lengthened curl, and a fly done
+       without equipment \u2014 are matched by name. */
+    const slotOf = e=>{ const h = exSlotFor(e.name); return h ? h.key : ""; };
+    const daysWithSlot = keys=> dayIds.filter(wid=>
+      (program[wid] || []).some(e=> keys.indexOf(slotOf(e)) > -1)).length;
+    const daysWithName = re=> dayIds.filter(wid=>
+      (program[wid] || []).some(e=> re.test(nrm(e.name)))).length;
+    const want = [
+      [["press_incline"], null, "an incline press", 1],
+      [["fly"], null, "a chest fly with a stretch", 1],
+      [["pull_vertical"], null, "a vertical pull", 1],
+      [["pull_horizontal"], null, "a horizontal row", 1],
+      [null, /overhead.*(extension|press)|skull|french press/, "an overhead triceps extension", 1],
+      [null, /incline.*curl|preacher|bayesian|spider/, "a lengthened-position curl", 1],
+      [["ham_iso"], null, "a knee-flexion hamstring curl", 1],
+      [["hinge"], null, "a hip hinge", 1],
+      [["squat","lunge"], null, "a knee-dominant squat pattern", 1],
+      [["lateral"], null, "lateral raises", 2],
+      [["rear_delt"], null, "direct rear-delt work", 1],
+      [["calf"], null, "calves", 2]
+    ];
+    want.forEach(([keys, re, say, n])=>{
+      const got = keys ? daysWithSlot(keys) : daysWithName(re);
+      if(got < n)
+        add(warn, "missing", "No " + say + (n > 1 ? " on " + n + " days" : "") + " this week.",
+          {fix: "add", want: say});
+    });
+  }catch(e){}
+
+  /* 7. LENGTHENED-POSITION COVERAGE. A muscle trained only where it is short gets less
+        out of the same sets, and it is the cheapest thing in programming to fix. */
+  GKEYS.forEach(g=>{
+    const G = GROUPS[g];
+    if(!G || G.optional || !(weekly[g] >= G.mev)) return;
+    let lp = 0;
+    dayIds.forEach(wid=> (program[wid] || []).forEach(e=>{
+      if(muscleFrac(e.name, g) <= 0) return;
+      if(lengthenedEnd(e.name) === "bottom") lp += muscleFrac(e.name, g) * (parseInt(e.sets,10)||0);
+    }));
+    if(!(lp > 0)) add(warn, "lengthened", G.name + " has no movement that loads it in a stretch.", {muscle: g});
+  });
+
+  /* 8. MOVEMENTS THE APP CANNOT PLACE, AND EFFORT IT SHOULD NOT ASK FOR. */
+  dayIds.forEach(wid=> (program[wid] || []).forEach(e=>{
+    if(!musclesFor(e.name))
+      add(warn, "unmapped", e.name + " is not a movement Element 26 knows, so its sets count toward nothing.",
+        {wid, name: e.name});
+    const capped = capRpeRamp(e.name, Array.isArray(e.rpes) ? e.rpes : []);
+    if(capped.changed)
+      add(warn, "rpe", e.name + " is written to RPE 10 where it should stop short.",
+        {wid, name: e.name, fix: "rpe"});
+    if(o.gear && !gearAllows(e.name, o.gear))
+      add(warn, "gear", e.name + " needs equipment your "
+        + String(((GEAR_LABEL[o.gear] || {}).name) || o.gear).toLowerCase()
+        + " does not have.", {wid, name: e.name, fix: "swap"});
+  }));
+
+  return {fail, warn, weekly, ok: fail.length === 0,
+          minutes: dayIds.map(wid=> ({wid, name: dayNameOf(split, wid), mins: dayMinutes(program[wid] || []),
+                                      sets: (program[wid]||[]).reduce((t,e)=> t + (parseInt(e.sets,10)||0), 0)}))};
+}
+/* A day's name from a split that may not be the one currently loaded. */
+function dayNameOf(split, wid){
+  const d = (split && split.days || []).find(x=> x.id === wid);
+  return (d && d.name) || dayName(wid);
+}
+/* Can this movement be done with that equipment tier? Asked of the library, which is the
+   only thing that knows what a movement needs. */
+function gearAllows(name, gear){
+  const allowed = GEAR_TIERS[gear] || GEAR_TIERS.full;
+  const g = libraryGearFor(name);
+  if(!g) return true;                 // nothing known about it: not the check's business
+  return allowed.indexOf(g) > -1;
+}
 /* Sets per slot, by training age. The gap between a beginner and an advanced lifter is
    not effort, it is how much work they can turn into growth instead of fatigue. */
 function setsForLevel(kind, level){
@@ -9215,6 +11032,21 @@ function setsForLevel(kind, level){
    dumbbell flyes over cable flyes and dumbbell overhead extensions over pushdowns: not
    wrong, exactly, but not what anyone standing in that gym would choose. The tier list
    now only answers "can I do this?", and the library answers "what is best?". */
+/* THE STRICT PICK, FOR THE BUILDER. pickExercise() ends with "and if nothing in your gear
+   fits, here is the head of the list anyway", which is the right answer for a swap menu
+   somebody is reading and the wrong one for a plan: it prescribes equipment the person
+   has just told the app they do not have. The reference is explicit \u2014 never fall back
+   outside the tier; fill the slot from the tier, or drop it and say so. */
+function pickExerciseIn(key, gear){
+  const list = EX_LIBRARY[key] || [];
+  const allowed = GEAR_TIERS[gear] || GEAR_TIERS.full;
+  const pref = EX_PREFERENCE[key] || [];
+  for(const name of pref){
+    const rec = list.find(x=> swapSquash(x.name) === swapSquash(name));
+    if(rec && allowed.indexOf(rec.gear) > -1) return rec;
+  }
+  return list.find(x=> allowed.indexOf(x.gear) > -1) || null;
+}
 function pickExercise(key, gear){
   const list = EX_LIBRARY[key] || [];
   const allowed = GEAR_TIERS[gear] || GEAR_TIERS.full;
@@ -9529,9 +11361,14 @@ function buildProgram(splitId, gear, level, customDays){
   out.finisher = [];
   return out;
 }
-function slotToExercise(sl, gear, level){
+function slotToExercise(sl, gear, level, goal){
   const [key, kind, setsOverride] = sl;
-  const ex = pickExercise(key, gear);
+  /* The goal only reaches here from the builder; everything else gets the muscle ranges,
+     which is what the default programme has always been written in. */
+  goal = goal || "muscle";
+  /* Inside the tier if anything fits; the lenient pick only as the last word, for the
+     default programme, which is built before anybody has said what gear they own. */
+  const ex = pickExerciseIn(key, gear) || pickExercise(key, gear);
   if(!ex) return null;
   /* An override still scales with training age, it just starts from a higher base — a
      beginner does not inherit an advanced lifter's calf volume merely because calves
@@ -9558,7 +11395,7 @@ function slotToExercise(sl, gear, level){
      set flow the first time you do it, which sets a load from what YOU lifted rather
      than from a number picked for somebody else. */
   if(ex.calibrate) extra.calibrate = ex.calibrate;
-  return exr(ex.name, rpes, SLOT_REPS[kind] || "8-12", null, ex.cue || "", extra);
+  return exr(ex.name, rpes, slotRepsFor(key, kind, goal), null, ex.cue || "", extra);
 }
 /* The plan a brand-new profile starts on, before onboarding has run. Deliberately the
    middle-of-the-road option: if someone dismisses setup and starts lifting, what they
@@ -13676,7 +15513,13 @@ const MUSCLE_KEYWORDS = [
      "push-up" sent it to chest, and the app's own library files it under the overhead
      press slot, so the two disagreed about the same movement. */
   [/pike push[- ]?up|handstand push[- ]?up|wall walk/,                       {delts_front:1, delts_side:.4, triceps:.6, abs:.3}],
-  [/bench|pec |pec$|\bfly\b|flye|chest press|\bdip|push[- ]?up|guillotine/, {chest:1, delts_front:.4, triceps:.4}],
+  /* PART 5 \u2014 A FLY IS ITS OWN RULE, WITH NO TRICEPS CREDIT. The elbow does not extend
+     in a fly: the triceps are not meaningfully trained and the share table says a muscle
+     that is not meaningfully trained scores zero. Sitting inside the pressing rule it
+     collected 0.4 of the triceps from every fly in every plan, which is volume the arms
+     were being credited with and never did. [M \u2014 share bounds, 2.2] */
+  [/\bfly\b|flye|pec deck|cable crossover|pec fly|chest fly/,                {chest:1, delts_front:.3}],
+  [/bench|pec |pec$|chest press|\bdip|push[- ]?up|guillotine/, {chest:1, delts_front:.4, triceps:.4}],
   [/pulldown|pull[- ]?up|chin[- ]?up|pullover|lat prayer|straight[- ]?arm/,  {lats:1, biceps:.4, upper_back:.4, traps:.3}],
   // Rows are a mid-back movement first and a trap movement second; shrugs are the
   // reverse, so they get their own rule ahead of this one.
@@ -15489,6 +17332,15 @@ function inferExperience(){
      log nor the import answer can. */
   if(EXP_LEVELS.indexOf(S.expManual) > -1) return S.expManual;
   const age = trainingAgeWeeks();
+  /* H9 \u2014 AND WITH NOTHING TO GO ON, WHAT YOU TOLD US. A profile with no sessions and no
+     training age reads as zero weeks, which is "beginner" \u2014 so somebody who answered
+     "five years or more" in the importer or the builder was written a beginner's plan on
+     their first day, and told why in a sentence quoting a log that did not exist. The
+     answer is not a guess and it is the only evidence there is until there is a log. */
+  if(!(age > 0) && !(S.sessions || []).length){
+    const said = (S.setup || {}).level;
+    if(EXP_LEVELS.indexOf(said) > -1) return said;
+  }
   let idx = age < EXP_YEARS.beginner ? 0 : age < EXP_YEARS.intermediate ? 1 : 2;
   /* TRAINING NOW, not having trained once. Somebody with ten years behind them who is
      currently lifting once a fortnight is not carrying an advanced lifter\u2019s work
@@ -23090,62 +24942,59 @@ function aiQNum(v, fallback){
    and then some. Movements done with no load at all are absent on purpose: their answer
    is no number, which loadNeededFor() already understands. */
 const START_RATIOS = [
-  /* H7 \u2014 THE SPECIFIC ROWS, ABOVE THE GENERIC ONES, because the generic ones answer for
-     a barbell and several of these movements are only ever done with something else.
-
-     The conversion below ("a pair of dumbbells is 40% of the barbell figure in each
-     hand") fires on the word "dumbbell" in the name, and the three worst cases in the
-     table did not have it:
-
-       GOBLET SQUAT is one dumbbell at the chest. Read off the squat row it prescribed a
-       back-squat load \u2014 180 lb for a 180 lb lifter \u2014 as a single bell you hold in your
-       hands. It is a total, not a per-hand figure, and the number is small.
-
-       WALKING LUNGE is normally a pair of dumbbells, and the lunge row is a barbell
-       figure, so it asked for the whole barbell load in EACH hand.
-
-       DUMBBELL FLY was reading the pec-deck row, which is already marked per-hand \u2014 so
-       no conversion applied and a 63 lb dumbbell fly came out of a cable number.
-
-     Each row is: pattern, male ratio, female ratio, and `true` where the ratio already
-     describes ONE HAND. */
+  /* PART 4 \u2014 THE REFERENCE'S OWN TABLE, specific names before generic patterns, and the
+     fourth column marking a ratio that ALREADY describes one hand. Every figure is a
+     typical working load for about eight reps at RPE 7 for an INTERMEDIATE lifter, as a
+     fraction of bodyweight; the level multiplier below scales it. They are deliberately
+     conservative, and the first session is capped at RPE 7 on top of that \u2014 a first set
+     that is too light costs one session and one that is too heavy can cost a great deal
+     more. Where no row matches there is no number: the movement asks for a feeler set. */
   [/\b(goblet squat)\b/i,                                     0.30, 0.22],
-  [/\b(kettlebell swing)\b/i,                                 0.25, 0.18],
-  [/\b(walking lunge|reverse lunge|forward lunge|curtsy lunge)\b/i, 0.19, 0.14, true],
-  [/\b(bulgarian split squat)\b/i,                            0.17, 0.12, true],
-  [/\b(dumbbell|db)\b.*\b(fly|flye)\b/i,                       0.13, 0.09, true],
-  [/\b(svend press)\b/i,                                      0.10, 0.07],
-  [/\b(dumbbell|db)\b.*\b(pullover)\b/i,                      0.15, 0.10],
-  [/\b(hip thrust|glute bridge)\b/i,                          1.20, 1.00],
-  [/\b(leg press)\b/i,                                        2.00, 1.50],
-  [/\b(hack squat)\b/i,                                       1.20, 0.90],
-  [/\b(front squat)\b/i,                                      0.80, 0.60],
-  [/\b(squat|lunge|split squat|step[- ]?up)\b/i,              1.00, 0.75],
-  [/\b(romanian deadlift|rdl|stiff[- ]?leg|good morning)\b/i,  0.90, 0.70],
-  [/\b(deadlift)\b/i,                                         1.25, 1.00],
-  [/\b(leg extension)\b/i,                                    0.55, 0.40],
-  [/\b(leg curl|hamstring curl)\b/i,                           0.45, 0.35],
-  [/\b(calf raise|calf press)\b/i,                            1.00, 0.75],
-  [/\b(abduction|adduction)\b/i,                              0.50, 0.45],
-  [/\b(incline (?:bench|press))\b/i,                           0.70, 0.42],
-  [/\b(bench press|chest press)\b/i,                           0.85, 0.50],
-  /* A PEC DECK IS ONE STACK. The row below is per-hand, which is right for a cable
-     crossover (two stacks, one in each hand) and wrong for a machine where the number on
-     the pin is the whole load. */
-  [/\b(pec deck|machine (?:chest )?fly|machine flye)\b/i,       0.50, 0.32],
-  [/\b(chest fly|cable fly|cable crossover|fly|flye)\b/i,       0.35, 0.22, true],
-  [/\b(overhead press|shoulder press|military press)\b/i,       0.55, 0.35],
-  [/\b(lat pulldown|pulldown)\b/i,                             0.70, 0.50],
-  [/\b(pullover)\b/i,                                          0.30, 0.20],
-  [/\b(shrug)\b/i,                                             0.90, 0.60],
-  [/\b(row)\b/i,                                               0.70, 0.50],
-  [/\b(face pull)\b/i,                                         0.30, 0.22, true],
-  [/\b(lateral raise|rear delt|reverse fly)\b/i,               0.09, 0.06, true],
-  [/\b(preacher|barbell curl|ez curl)\b/i,                     0.35, 0.22],
-  [/\b(curl)\b/i,                                              0.16, 0.10, true],
-  [/\b(skull ?crusher|overhead extension)\b/i,                 0.30, 0.18, true],
-  [/\b(tricep|pushdown)\b/i,                                   0.35, 0.22],
-  [/\b(crunch|ab )\b/i,                                         0.40, 0.30]
+  [/\b(hack squat)\b/i,                                       1.00, 0.75],
+  [/\b(leg press)\b/i,                                        1.80, 1.35],
+  [/\b(front squat)\b/i,                                      0.70, 0.50],
+  [/\b(bulgarian split squat)\b/i,                            0.16, 0.12, true],
+  [/\b(dumbbell|db)\b.*\b(lunge|split squat|step[- ]?up)\b/i,  0.18, 0.13, true],
+  [/\b(walking lunge|reverse lunge|forward lunge|curtsy lunge|step[- ]?up)\b/i, 0.18, 0.13, true],
+  [/\b(squat)\b/i,                                            0.90, 0.65],
+  [/\b(dumbbell|db)\b.*\b(romanian|rdl)\b/i,                   0.28, 0.20, true],
+  [/\b(romanian deadlift|rdl|stiff[- ]?leg|good morning)\b/i,   0.85, 0.65],
+  [/\b(hip thrust|glute bridge)\b/i,                          1.10, 0.95],
+  [/\b(deadlift)\b/i,                                         1.10, 0.85],
+  [/\b(leg extension)\b/i,                                     0.45, 0.33],
+  [/\b(leg curl|hamstring curl)\b/i,                            0.40, 0.30],
+  [/\b(calf raise|calf press)\b/i,                             0.90, 0.70],
+  [/\b(abduction|adduction)\b/i,                               0.45, 0.40],
+  [/\b(dumbbell|db)\b.*\b(incline)\b.*\b(press)\b/i,           0.24, 0.15, true],
+  [/\b(incline)\b.*\b(dumbbell|db)\b.*\b(press)\b/i,           0.24, 0.15, true],
+  [/\b(incline (?:bench|press|barbell))\b/i,                    0.60, 0.37],
+  [/\b(dumbbell|db)\b.*\b(bench|chest)\b.*\b(press)\b/i,       0.28, 0.17, true],
+  [/\b(bench press|chest press)\b/i,                           0.75, 0.45],
+  [/\b(pec deck|machine (?:chest )?fly|machine flye)\b/i,       0.45, 0.30],
+  [/\b(cable fly|cable crossover|crossover)\b/i,                0.10, 0.07, true],
+  [/\b(dumbbell|db)\b.*\b(fly|flye)\b/i,                       0.12, 0.08, true],
+  [/\b(fly|flye|chest fly)\b/i,                                 0.12, 0.08, true],
+  [/\b(dumbbell|db)\b.*\b(shoulder|overhead)\b.*\b(press)\b/i, 0.18, 0.11, true],
+  [/\b(overhead press|shoulder press|military press)\b/i,        0.45, 0.28],
+  [/\b(lat pulldown|pulldown)\b/i,                              0.60, 0.45],
+  [/\b(pullover)\b/i,                                           0.25, 0.17],
+  [/\b(shrug)\b/i,                                              0.90, 0.60],
+  [/\b(dumbbell|db)\b.*\b(row)\b/i,                            0.25, 0.17, true],
+  [/\b(row)\b/i,                                                0.60, 0.45],
+  [/\b(face pull)\b/i,                                          0.25, 0.18, true],
+  [/\b(lateral raise|side raise)\b/i,                           0.07, 0.05, true],
+  [/\b(front raise)\b/i,                                        0.07, 0.05, true],
+  [/\b(rear delt|reverse fly|reverse pec)\b/i,                   0.07, 0.05, true],
+  [/\b(overhead (?:cable |dumbbell |db )?extension)\b/i,         0.18, 0.12],
+  [/\b(preacher|barbell curl|ez curl|ez[- ]?bar curl)\b/i,       0.30, 0.20],
+  [/\b(curl)\b/i,                                               0.12, 0.08, true],
+  [/\b(skull ?crusher)\b/i,                                     0.25, 0.16],
+  [/\b(pushdown)\b/i,                                           0.30, 0.20],
+  [/\b(tricep)\b/i,                                             0.25, 0.16],
+  [/\b(crunch|ab )\b/i,                                          0.35, 0.28],
+  [/\b(upright row|high pull)\b/i,                               0.35, 0.25],
+  [/\b(wrist curl)\b/i,                                         0.10, 0.07, true],
+  [/\b(kettlebell swing)\b/i,                                   0.25, 0.18]
 ];
 const START_LEVEL_MULT = {beginner: 0.70, intermediate: 1.00, advanced: 1.30};
 /* A first working load for one movement, or null when there is no honest number to give:
@@ -23734,10 +25583,18 @@ function aiHeroHTML(){
   const a = AI_IMP;
   let h = `<div class="ai-hero">` + aiHeroArtHTML() + `
     <h3 class="ai-hero-h">Bring in your plan</h3>
-    <p class="ai-hero-p">Element 26 doesn't write training programmes, it runs the one you already
-      have — a coach's PDF, a spreadsheet, a photo of the sheet in your gym bag. Hand it over
-      and we'll take care of the setup.</p>
+    <p class="ai-hero-p">Element 26 runs the plan you already have — a coach's PDF, a
+      spreadsheet, a photo of the sheet in your gym bag. Hand it over and we'll take care
+      of the setup. If you haven't got one, it'll write you one.</p>
   </div>`;
+  /* THE BUTTON FOR EVERYBODY WHO ARRIVES WITH NOTHING, and it goes ABOVE Upload because
+     it is the answer for more people. The old hero line said the app does not write
+     programmes, which was true, was a boast about a limitation, and left somebody with no
+     plan on a screen asking them to upload one. */
+  h += `<div class="btn-row" style="margin-top:2px">
+      <button class="btn ghost" id="aiBuildBtn" style="flex:1">Build me a plan</button>
+    </div>
+    <div class="ai-sub-cta">Seven questions. No document needed.</div>`;
   if(a.files.length){
     h += `<div class="ai-files">` + a.files.map((f, i)=>
       `<span class="ai-file"><span>${esc(f.name)}</span><button data-airm="${i}" aria-label="Remove">✕</button></span>`
@@ -24009,6 +25866,30 @@ function aiReviewHTML(){
       planRules.map(([k,v])=>`<div class="ai-kv"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("") + `</div>`;
   }
 
+  /* THE QUALITY CHECK, ON SOMEBODY ELSE'S PLAN, WHICH INFORMS AND NEVER BLOCKS.
+
+     This document is a programme somebody wrote, often a coach, and an app that refuses
+     to run it because the push-to-pull ratio is 1.4 has misunderstood what it is for. So
+     every finding here is a note, the import proceeds either way, and the wording says
+     whose plan it is. The one thing it adds is a button where the app could actually do
+     something about it \u2014 see aiQualityFix(). */
+  try{
+    const q = planQuality(r.program, r.customSplit || currentSplit(),
+      {gear: (r.prefs && r.prefs.gear) || (S.setup || {}).gear});
+    const found = q.fail.concat(q.warn);
+    if(found.length){
+      h += `<div class="ai-card"><div class="ai-card-h">What we noticed<span class="ai-tag">Element 26</span></div>
+        <div class="ai-kv-sub" style="margin:2px 0 8px">Your plan is imported exactly as written \u2014
+          none of this changes it. These are the things Element 26 would have done differently.</div>` +
+        found.slice(0, 8).map(f=>{
+          const fix = f.fix === "rpe" ? "aiqfix-rpe" : "";
+          return `<div class="ai-kv"><b>${esc(f.k)}</b><span>${esc(f.msg)}${
+            fix ? ` <button class="linklike" data-${fix}="${esc(f.name || "")}">Fix it for me</button>` : ""
+          }</span></div>`;
+        }).join("") + `</div>`;
+    }
+  }catch(e){}
+
   /* CARD 3, the answers. Each row jumps back to the page that set it. */
   const mine = [];
   const push = (qid, k, v)=> mine.push({qid, k, v});
@@ -24069,6 +25950,25 @@ function bindAIImport(){
   on("aiAgain", ()=>{
     AI_IMP = {ob: a.ob, stage:"hero", text:"", files:[], parts:null, busy:false, step:0,
               err:"", check:null, doc:null, questions:[], answers:{}, qi:0, result:null, expand:{}};
+    renderAIImport();
+  });
+  /* THE ONE FIX THE APP CAN MAKE TO SOMEBODY ELSE'S PLAN WITHOUT ARGUING WITH IT: an RPE
+     target that asks a compound to go past failure, or an isolation to do it on every set
+     but the last. It is pressed per movement, and it changes the import rather than the
+     document. */
+  all("[data-aiqfix-rpe]", b=> b.onclick = ()=>{
+    const name = b.dataset["aiqfixRpe"];
+    let n = 0;
+    Object.keys(a.result.program || {}).forEach(wid=>
+      (a.result.program[wid] || []).forEach(e=>{
+        if(name && e.name !== name) return;
+        const c2 = capRpeRamp(e.name, Array.isArray(e.rpes) ? e.rpes : []);
+        if(!c2.changed) return;
+        e.rpes = c2.list;
+        e.rpe = rpeSummary(c2.list);
+        n++;
+      }));
+    toast(n ? "Effort capped on " + n + " movement" + (n === 1 ? "" : "s") : "Nothing to change");
     renderAIImport();
   });
   on("aiUse",   aiUsePlan);
@@ -24894,6 +26794,38 @@ function planWeekCardHTML(){
     </div>
     <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:12.5px">What your plan says about this week, in its own words.</div>
     ${body}</div>`;
+}
+/* THE CHECK, ON THE PLAN YOU ARE ACTUALLY RUNNING. The same function the builder is
+   gated on and the import review reports, pointed at whatever is in S.program now \u2014
+   because a plan drifts: you add a movement, cut a day short, swap something out, and
+   nothing was watching the shape of the whole thing. It never blocks anything here. */
+function planQualityCardHTML(){
+  if(!DAYS.length) return "";
+  let q;
+  try{
+    q = planQuality(S.program, currentSplit(),
+      {budget: (S.builtPlan && S.builtPlan.answers && S.builtPlan.answers.minutes) || 0,
+       priority: (S.builtPlan && S.builtPlan.answers && S.builtPlan.answers.priority) || [],
+       gear: (S.setup || {}).gear});
+  }catch(e){ return ""; }
+  const n = q.fail.length, w = q.warn.length;
+  if(!n && !w) return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px"><span class="dot" style="background:var(--good,#6a9)"></span>
+      <h3>Your plan checks out</h3></div>
+    <div class="sub" style="margin:4px 0 0">Every muscle inside its range, every session
+      inside the caps, nothing unbalanced. Checked against the same targets the Body tab uses.</div>
+  </div>`;
+  const row = (x, cls)=> `<div class="st-row ${cls}"><b>${esc(x.k)}</b>${esc(x.msg)}</div>`;
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--acc)"></span><h3>A look at your plan</h3>
+    </div>
+    <div class="sub" style="margin:4px 0 10px">${n ? n + " thing" + (n===1?"":"s") + " worth fixing"
+      : "Nothing wrong"}${w ? (n ? ", and " : "") + w + " note" + (w===1?"":"s") : ""}. This is
+      the same check the builder runs; it is never in your way.</div>
+    <div class="st-wrap" style="margin:0">${q.fail.map(x=> row(x, "st-bad")).join("")}${
+      q.warn.slice(0, 6).map(x=> row(x, "st-warn")).join("")}</div>
+  </div>`;
 }
 /* =====================================================================
    WHERE YOUR REST DAYS GO, AND YOURS IS THE LAST WORD
@@ -27947,6 +29879,7 @@ function viewActiveSession(){
     h += exNoteLineHTML(en);
     h += restNoteLineHTML(en);
     h += effortCeilingLineHTML(en);
+    h += techniqueCardHTML(en);
     h += supersetNoteHTML(supersetInfo(a.entries, ei));
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(ll) h += ll;
@@ -35624,7 +37557,7 @@ function viewProgram(){
   } Targets show <span class="rpe-help">RPE</span>, tap to see what it means.</div>
   <div class="btn-row" style="margin-bottom:10px">
     <button class="btn ghost small" id="planBtn" style="flex:1">${ICON.doc} Full plan</button>
-    <button class="btn ghost small" id="setupSplit" style="flex:1">Change the schedule</button>
+    <button class="btn ghost small" id="buildPlanBtn" style="flex:1">Build a new plan</button>
   </div>
   <div class="btn-row" style="margin-bottom:16px">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
@@ -35635,6 +37568,7 @@ function viewProgram(){
   <div class="sub" style="margin:-8px 2px 16px;font-size:12.5px;color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
+  h += planQualityCardHTML();
   h += restLayoutCardHTML();
   h += testWeeksCardHTML();
   h += planKindCardHTML();
@@ -38685,6 +40619,8 @@ function bind(){
   };
   const plan = $("#planBtn");
   if(plan) plan.onclick = openPlan;
+  const abb = $("#aiBuildBtn");
+  if(abb) abb.onclick = ()=>{ closeAIImport(); openBuildPage(); };
   const aiB = $("#aiImportBtn");
   if(aiB) aiB.onclick = ()=> openAIImport(false);
   const phB = $("#planHistBtn");
@@ -38973,8 +40909,13 @@ function bind(){
   document.querySelectorAll("[data-edit]").forEach(b=> b.onclick=()=> openExEditor(...b.dataset.edit.split(":")));
   document.querySelectorAll("[data-addex]").forEach(b=> b.onclick=()=> openExEditor(b.dataset.addex, -1));
   /* ---- the day editor ---- */
-  const sus = $("#setupSplit");
-  if(sus) sus.onclick = openSplitEditor;
+  /* "Change the schedule" lived here. It opened a picker of five named splits, which
+     answers a question nobody arrives with: somebody wanting a different plan wants a
+     plan, not a taxonomy. The builder asks what their week is actually like and writes
+     one. openSplitEditor() and switchSplit() are left in the file, unbound \u2014 they still
+     work and nothing calls them. */
+  const bpb = $("#buildPlanBtn");
+  if(bpb) bpb.onclick = ()=> openBuildPage();
   document.querySelectorAll("[data-dayedit]").forEach(b=>{
     b.onclick = ()=> dayEditOpen(b.dataset.dayedit);
     // the day card is a div, so it needs the keyboard behaviour a button gets for free
@@ -43728,10 +45669,15 @@ function bwNextRung(name){
 /* H3 \u2014 the biggest single jump in load that counts as progression rather than a
    different exercise, as a fraction of what is on the bar now. */
 const JUMP_CAP_ISO = 0.10, JUMP_CAP_COMPOUND = 0.075;
-/* And how the reps take the progress instead when the jump is over the cap: five more at
-   the top of the range, never past twenty, because past twenty the set is about something
-   else. */
-const REP_EXT_STEP = 5, REP_EXT_MAX = 20;
+/* And how the reps take the progress instead when the jump is over the cap. A compound
+   extends by three and stops at twenty; an isolation extends by five and stops at thirty.
+   The difference is where the rep count stops being about the muscle: on a squat that is
+   twenty, where the lungs and the lower back give out first; on a lateral raise it is a
+   good deal further, and 5-30 is the range the growth evidence covers [S]. */
+const REP_EXT_STEP_COMPOUND = 3, REP_EXT_STEP_ISO = 5;
+const REP_EXT_MAX_COMPOUND = 20, REP_EXT_MAX_ISO = 30;
+function repExtStepFor(name){ return isCompound(name) ? REP_EXT_STEP_COMPOUND : REP_EXT_STEP_ISO; }
+function repExtMaxFor(name){ return isCompound(name) ? REP_EXT_MAX_COMPOUND : REP_EXT_MAX_ISO; }
 /* Increment size, by movement class. The small-increment rule is not cosmetic: a 5 lb
    per-hand jump on a 30 lb curl is a 17% load increase, and that exact jump is
    documented as the cause of four stalled arm lifts in this log. Anything carrying an
@@ -44199,8 +46145,8 @@ function progressionFor(sess, entry){
            + "weight to add to this one. " + next + " is the next version of the same "
            + "pattern. Rebuild from " + range[0] + " reps on it."
       };
-      if(range[1] < REP_EXT_MAX && !(target && target.repExt)){
-        const top = Math.min(REP_EXT_MAX, range[1] + REP_EXT_STEP);
+      if(range[1] < repExtMaxFor(entry.name) && !(target && target.repExt)){
+        const top = Math.min(repExtMaxFor(entry.name), range[1] + repExtStepFor(entry.name));
         return {
           name: entry.name, kind: "stretch", from: null, reps: entry.reps,
           newReps: range[0] + "-" + top, step,
@@ -44251,8 +46197,8 @@ function progressionFor(sess, entry){
     const pctJump = jumpFrom > 0 ? step.amount / jumpFrom : 0;
     const over = jumpFrom > 0 && to != null && step.gearForced && pctJump > cap + 1e-9;
     const already = target && target.repExt;
-    if(over && !already && range[1] < REP_EXT_MAX){
-      const top = Math.min(REP_EXT_MAX, range[1] + REP_EXT_STEP);
+    if(over && !already && range[1] < repExtMaxFor(entry.name)){
+      const top = Math.min(repExtMaxFor(entry.name), range[1] + repExtStepFor(entry.name));
       const newReps = range[0] + "-" + top;
       return {
         name: entry.name, kind: "stretch", from: jumpFrom, reps: entry.reps, newReps, step,
@@ -44269,7 +46215,7 @@ function progressionFor(sess, entry){
     }
     if(!(isFinite(planW) && to != null && parseFloat(to) <= planW)) return {
       name: entry.name, kind: "up", from, to, step,
-      overCap: over && range[1] >= REP_EXT_MAX ? Math.round(pctJump * 1000) / 10 : null,
+      overCap: over && range[1] >= repExtMaxFor(entry.name) ? Math.round(pctJump * 1000) / 10 : null,
       endsStretch: !!already,
       msg: step.bodyweight && from == null
         ? "Add " + fmtLoad(step.amount) + " next time"
@@ -50497,7 +52443,53 @@ function selfTestRun(){
       });
     });
   }catch(e){ note(fail, "preference", String((e && e.message) || e)); }
+  /* 8. M11 \u2014 EVERY MOVEMENT THE BUILDER CAN WRITE HAS INSTRUCTIONS.
+
+        The builder picks from the frozen preference table, so the set of movements it can
+        put in front of somebody is knowable in advance \u2014 which means "we will write the
+        technique notes later" is checkable rather than a promise. A movement the plan can
+        prescribe and the app cannot explain is a gap somebody meets in a gym. */
+  try{
+    /* The set is computable exactly: every slot the builder's own day plans name, through
+       pickExercise, for each equipment tier \u2014 plus the movements it adds itself when a
+       muscle has nothing training it directly. Not the whole preference table: that is
+       every curated alternative in the app, which is what the swap menu offers and a
+       different promise. */
+    const can = new Set();
+    const slots = new Set();
+    Object.keys(BUILDER_SPLIT_BY_DAYS).forEach(d=>{
+      const plan = PLAN_SLOTS[BUILDER_SPLIT_BY_DAYS[d]] || {};
+      Object.keys(plan).forEach(wid=> (plan[wid] || []).forEach(sl=> slots.add(sl[0])));
+    });
+    Object.keys(SLOT_MAIN).forEach(k=> slots.add(k));        // buildMovementFor's reach
+    slots.forEach(slot=> Object.keys(GEAR_TIERS).forEach(gear=>{
+      const ex = pickExercise(slot, gear);
+      if(ex && ex.name) can.add(ex.name);
+    }));
+    can.forEach(n=>{
+      if(!techniqueFor(n)) note(fail, "no technique", n);
+      else {
+        const t = techniqueFor(n);
+        ["setup","execution","rom","errors","stretch"].forEach(k=>{
+          if(!t[k] || String(t[k]).length < 12) note(fail, "thin technique", n + " \u00b7 " + k);
+        });
+        if(t.demo) note(warn, "demo link", n);
+      }
+    });
+  }catch(e){ note(fail, "technique", String((e && e.message) || e)); }
   return {fail, warn, lib: seen.size, ok: fail.length === 0};
+}
+/* The reference calls this runSelfTests(); the file has always called it selfTestRun().
+   Both names reach the same function so neither document is wrong about it. */
+function runSelfTests(){
+  const r = selfTestRun();
+  try{
+    console.log("Element 26 self-test \u2014 " + r.lib + " movements, "
+      + (r.ok ? "no failures" : r.fail.length + " FAILURES") + ", " + r.warn.length + " notes");
+    r.fail.forEach(f=> console.log("  FAIL  " + f.k + " | " + f.detail));
+    r.warn.forEach(f=> console.log("  note  " + f.k + " | " + f.detail));
+  }catch(e){}
+  return r;
 }
 function selfTestHTML(r){
   const row = (x, cls)=> `<div class="st-row ${cls}"><b>${esc(x.k)}</b>${esc(x.detail)}</div>`;

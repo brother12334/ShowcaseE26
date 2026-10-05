@@ -263,10 +263,169 @@ plan is the app rewriting somebody's programme behind their back.
 initialising, and `isCompound()` reads a map declared further down, which throws in its
 temporal dead zone. The app's own tables are written compliant instead.
 
+## Phase 5 — the Plan Builder
+
+### What it is
+
+`buildPlan(answers)` is pure: it reads the answers and the app's own tables and returns
+`{program, split, meso, report}`, writing nothing. `adoptBuiltPlan()` is the only function
+that touches state, which is what makes the preview honest — what you are shown is the
+object you get.
+
+The order it works in:
+
+1. the split follows the days and nothing else — 2 Full Body A/B, 3 Full Body A/B/C,
+   4 Upper/Lower ×2, 5 Upper/Lower/Push/Pull/Legs, 6 PPL ×2. Two new splits were added
+   (`full2`, `ulppl5`); `ppl3` and `bro5` are kept so every existing plan still renders and
+   are not offered — both train each muscle once a week.
+2. every slot is filled through `pickExercise`, so the builder uses the same frozen
+   preference table as everything else (C2).
+3. sets start from the day plan's own counts, scaled by training age.
+4. **tuning**, one set at a time: everything to its floor first, then everything toward the
+   middle of its band. One at a time because a set added to a press is also a set of
+   triceps and front delts.
+5. priority muscles get more; protected areas lose the movements that provoke them, swapped
+   inside their slot where there is an alternative.
+6. **fitting**, in M5's order: pair, then trim above floors, then drop a movement last.
+7. the quality check runs and anything it fails is fed back in, up to six rounds.
+
+### Three rules the measurements forced
+
+- **A trim may not put another muscle under its floor.** Trimming a muscle over its
+  ceiling takes a set off a movement that feeds others too — and the lower back lost its
+  only direct work this way, on a plan that had just been brought up to its floor.
+- **`room()` is in sets of the muscle, so a cut needs a whole set of headroom.** At 0.3
+  above the floor, cutting a movement that pays half a set puts the muscle under it.
+- **A compound keeps three sets.** Every trimming pass picks the least direct contributor,
+  and a compound is the least direct contributor to most of the muscles it feeds — so the
+  arithmetic kept producing plans whose main lift was two sets and whose lateral raise was
+  four.
+
+### A muscle nothing trains gets a movement
+
+The obliques and the lower back are the usual pair: every plan picks them up indirectly
+and no plan trains them. When a muscle is under its floor and no movement in the plan
+gives it half a set, the builder adds one — from the same library, through the same
+preference order. That is M5's rule from the other side: never leave a muscle under its
+floor with no direct work.
+
+### H10 — the measurement
+
+Days 2–6 × four gear tiers × three levels × goal {muscle, lean} × budget {45, 60, 75}:
+
+| | |
+|---|---|
+| Combinations built | **360** |
+| Quality-check failures | **0** |
+| Notes (warnings) | 1,170 |
+
+Every major muscle lands inside [MEV, min(MAV, 0.9·MRV)], priority muscles excepted.
+
+**One honest departure.** On two training days at a 45-minute budget, a full-body session
+that meets every floor comes to about 54 minutes. Everything that can be paired is paired,
+every set above a floor has gone, and dropping a movement would put a muscle under its
+minimum. That is a fact about training twice a week, not a fault in the plan, so the
+builder marks the day `tight` and the check reports it as a note that says exactly that
+rather than as a failure. A day that *could* be shorter and is not is still a failure.
+
+### The screens
+
+Seven questions, one per screen, every one skippable with a defensible default: goal,
+training age, days, session length, equipment, priority and protected areas, and an
+optional bodyweight and sex for starting loads. Then a preview — the days and what is in
+them, sets and minutes per day, the per-muscle volume table against the targets, the
+quality summary and what the builder did — with **Use this plan** and **Change answers**.
+Nothing is written until Use this plan.
+
+### Where the check appears
+
+| Where | Behaviour |
+|---|---|
+| Builder preview | failures are not allowed; the builder retries until there are none |
+| Import review | informs only, never blocks — the document is somebody's programme, often a coach's. "Fix it for me" where the app can actually act (the RPE caps) |
+| Program tab | a standing card on whatever plan you are running now, because a plan drifts |
+
+### H9 and M11
+
+**H9**: training age is asked in weeks and mapped through the same thresholds
+`inferExperience` uses, so the builder and the app cannot disagree about who they are
+writing for. `inferExperience` now falls back to `S.setup.level` when there is no log and
+no training age — a profile on day one read as zero weeks, which is "beginner", so
+somebody who answered "five years or more" was written a beginner's plan and told why in a
+sentence quoting a log that did not exist. A skipped question is also no longer an answer
+of zero: `Number(null)` is a perfectly finite 0.
+
+**M11**: 64 movements — every one the builder can produce across all slots and tiers —
+have setup, execution, range of motion, errors and a stretch cue, shown once on the first
+exposure to that movement. `demo` is null everywhere and a self-test invariant fails if
+any field is thinner than twelve characters or if a demo link ever appears: a link the app
+has not checked is a link it is vouching for.
+
+## Audit IDs — what changed and what covers it
+
+| ID | Change | Covered by |
+|---|---|---|
+| C2 | `EX_PREFERENCE_TABLE`: the ranking is written down (reference 2.8.2), not derived from list order, and frozen before the catalogue merges. `pickExerciseIn` never falls back outside the gear tier | `phase2.mjs` §5, `matrix.txt` |
+| H1 | Progression read off the sets at the top working load | `phase3.mjs` §1 |
+| H2 | Bodyweight only when the movement needs no load and none logged in 60 days | `phase3.mjs` §2 |
+| H3 | Jump caps 10% / 7.5%, rep extension +3/+5 to 20/30 | `phase3.mjs` §3 |
+| H4 | The cut worked back from an e1RM, mirrored in `toohardTarget` | `phase3.mjs` §4 |
+| H5 | Keyword order: specific before general; flies with no triceps credit; a slot-vs-map invariant | `phase2.mjs` §4, `#selftest` 6 |
+| H6 | `perfIndex` uncapped for self-comparison; trend window 3–30 | `phase3.mjs` §5 |
+| H7 | The reference's starting-load table, per-hand flags, RPE 7 on a first session, feeler sets everywhere | `phase4.mjs` §1, §2, §5 |
+| H8 | Auto-apply by default with undo; one load for the boxes and the warm-up | `phase3.mjs` §8, §9 |
+| H9 | Training age asked and mapped to a level; `inferExperience` falls back to `S.setup.level` | `phase5.mjs` §9 |
+| H10 | Per-session caps, the time budget, ppl3/bro5 retired from the builder | `phase5.mjs` §1, §2, §3 |
+| M1 | Compounds stop at RPE 9; 10 only on the last isolation set; the import says what it capped | `phase4.mjs` §3 |
+| M2 | Beginner compounds held to RPE 8 for six training weeks, with a reason | `phase4.mjs` §4 |
+| M5 | Fit order: pair → trim above floors → drop last; a muscle under its floor always gets direct work | `phase5.mjs` §3, and the "muscle nothing trains" rule |
+| M7 | A compound never rests under two minutes in the fallback | `phase3.mjs` §7 |
+| M8 | Front raises, carries and sumo/wide-stance re-slotted | `phase2.mjs` §3 |
+| M11 | 76 movements with setup, execution, range, errors and a stretch cue; `demo` null | `phase5.mjs` §10, `#selftest` 8 |
+| L1 | One RPE-adjusted e1RM definition | `phase2.mjs` §1, §2 |
+| L3 | Messages name the sets at the load | `phase3.mjs` §1 |
+| L4 | Bodyweight ladders; added load only for pull-ups, chin-ups and dips | `phase3.mjs` §6 |
+| L5 | No muscle above 1.6× chest unless chosen — enforced while tuning, not only checked | `phase5.mjs` §7 |
+
+M3, M4, M6, M9, M10, L2 belong to phases 6 and 7 and are not done yet.
+
 ## Open questions
 
-Things in the code that conflict with the brief, or that the brief does not settle.
-Recorded rather than guessed at.
+Things where this codebase and the science reference disagree, or where the reference asks
+for something the library cannot currently supply. Recorded rather than guessed at, as the
+reference requires.
+
+**Three movements the reference's preference table names do not exist for a
+bodyweight-only user, and one slot cannot hold them.** The reference gives the bodyweight
+column a deficit push-up for the fly slot, a "bench-to-floor triceps extension" for
+overhead triceps, and nothing for a lengthened curl. The first is already catalogued under
+`press_horizontal`, and a movement may only be in one slot — that invariant is what keeps
+swap lists and volume counting honest, and I would rather report the gap than weaken it.
+So a bodyweight plan carries three coverage notes: no chest fly, no overhead triceps
+extension, no lengthened-position curl. **Proposed resolution:** add three bodyweight
+movements to the library in their own slots — a deficit/ring fly-style push-up variant for
+`fly`, a bench-to-floor extension for `triceps`, and a band or ring curl for `curl` —
+rather than moving existing ones. Not done here because adding movements to the library is
+outside phase 5's scope.
+
+**The reference's bodyweight squat entry is a split squat; the app's `squat` slot is
+not.** 2.8.2 gives the bodyweight column "Split Squat → Bulgarian Split Squat → Pistol",
+but Split Squat lives in the `lunge` slot, which the same plans also use. The builder's
+bodyweight plans therefore get a split squat from the lunge slot and a bodyweight squat
+from the squat slot, which covers the pattern twice rather than missing it. Left as is.
+
+**`MAX_WORKING_SETS_PER_SESSION` is checked, not enforced.** The reference lists 24 as a
+builder cap. It is a quality-check note rather than a constraint the tuning loop respects,
+because the volume targets and the per-session per-muscle cap already keep every built day
+under it in all 360 combinations. **Proposed resolution:** leave it as a check until a
+combination actually exceeds it.
+
+**The app has `GOAL_SCALE` and the reference has a narrative.** 2.2 says strength lowers
+volume and raises intensity, lean holds the floor and lowers the ceiling, health lowers
+overall. The app's existing `GOAL_SCALE` already does this and the builder reads the
+landmarks through it, so the numbers come from one place. The reference's rep-range table
+(2.6) is now implemented separately in `SLOT_REPS_BY_GOAL`, which is the part the app did
+not have.
 
 **The `fly` slot has no bodyweight option.** Its curated bodyweight entry was a Deficit
 Push-Up, which the catalogue correctly files as a horizontal press, and the library has no
@@ -304,7 +463,7 @@ they are recomputed whenever a session is swept.
 | 2 | C2 / H5 / M8 / L1 | done — `phase2.mjs`, invariants 6 and 7 |
 | 3 | Progression — H1–H4, H6, H8, L3, L4, M7 | done — `phase3.mjs` |
 | 4 | Safety — H7, M1, M2 | done — `phase4.mjs` |
-| 5 | Builder, quality check, H9/H10/L5/M11, remove "Change the schedule" | not started |
+| 5 | Builder, quality check, H9/H10/L5/M11, remove "Change the schedule" | done — `phase5.mjs` |
 | 6 | Periodization (M9) + M3 | not started |
 | 7 | M4, M5, M6, M10, L2 | not started |
 | 8 | Streaks + coach view | not started |
