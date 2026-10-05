@@ -6118,7 +6118,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "39.3";
+const APP_VERSION = "39.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8058,6 +8058,47 @@ function rpeSummary(list){
   const lo = Math.min.apply(null, list), hi = Math.max.apply(null, list);
   return lo === hi ? String(lo) : lo + "-" + hi;
 }
+/* M1 \u2014 WHAT AN RPE TARGET IS ALLOWED TO ASK FOR.
+
+   Two rules, and they are about where failure is affordable rather than about effort
+   being bad:
+
+     A COMPOUND STOPS AT 9. A squat or a bench taken to the point where the rep does not
+     finish is a technical failure under load with a bar on your back or across your
+     throat, and the evidence that the last rep bought anything the ninth did not is thin.
+     One in reserve on a multi-joint lift, always.
+
+     RPE 10 IS FOR THE LAST SET OF AN ISOLATION. A curl or a leg extension taken to
+     failure is cheap: the joint positions are safe, the fatigue is local, and it is the
+     set most of the research on training to failure was done on. On the LAST set, because
+     a set taken to failure degrades everything after it \u2014 the app's own default ab ramp
+     was [9,10,10,10], which asks for three sets after failure.
+
+   Applied at the point a plan is WRITTEN, including every imported one, so what the
+   session screen asks for and what the grade measures are the same number. */
+function capRpeRamp(name, list, opts){
+  const out = (list || []).map(v=> parseFloat(v)).map(v=> isFinite(v) ? v : null);
+  if(!out.length) return {list: out, changed: false, why: null};
+  const comp = isCompound(name);
+  const last = out.length - 1;
+  let changed = false, why = null;
+  for(let i = 0; i < out.length; i++){
+    if(out[i] == null) continue;
+    const ceiling = comp ? 9 : (i === last ? 10 : 9);
+    if(out[i] > ceiling){
+      out[i] = ceiling;
+      changed = true;
+      why = comp ? "compound" : "notLast";
+    }
+  }
+  return {list: out, changed, why};
+}
+/* NOT CAPPED HERE. exr() runs while this file is still initialising \u2014 the default
+   programme is built on the way in \u2014 and capRpeRamp() asks isCompound(), which reads a
+   map declared further down the file and throws in its temporal dead zone. So the app's
+   own tables are written compliant (see SLOT_RPES), the importer caps what it reads at
+   the boundary, and rpeTargetFor() caps at read time, which is what actually governs the
+   set in front of you whatever a stored plan says. */
 function exr(name, rpes, reps, weight, note, extra){
   const list = rpes.slice();
   const e = {
@@ -8944,7 +8985,9 @@ const SLOT_MAIN = {
   lower_back:       ["lower_back","hams","glutes"]
 };
 const SLOT_REPS  = {heavy:"6-10", second:"8-12", iso:"12-15", abs:"10-15"};
-const SLOT_RPES  = {heavy:[7,8,8,9], second:[7,8,9], iso:[8,9,9,9,9], abs:[9,10,10,10]};
+/* M1 \u2014 RPE 10 ONLY ON THE LAST SET, AND NEVER ON A COMPOUND. The ab ramp used to read
+   [9,10,10,10], which asks for three more sets after a set taken to failure. */
+const SLOT_RPES  = {heavy:[7,8,8,9], second:[7,8,9], iso:[8,9,9,9,9], abs:[9,9,9,10]};
 
 const PLAN_SLOTS = {
   full3: {
@@ -22473,6 +22516,18 @@ function aiExercise(x, ctx){
   }
   while(rpes.length < sets) rpes.push(rpes[rpes.length-1] || 8);
   rpes = rpes.slice(0, sets);
+  /* M1 \u2014 CAPPED AT THE BOUNDARY, AND SAID OUT LOUD. A document that writes "3x5 to
+     failure" against a squat is transcribed faithfully in every other respect; what it
+     asks for is a multi-joint lift taken past the point the rep finishes, three times.
+     The ramp is capped and the review screen lists it, because a change made to an
+     imported plan that the import does not mention is the app rewriting your programme
+     behind your back. */
+  const capped = capRpeRamp(name, rpes);
+  if(capped.changed){
+    ctx.rpeCapped = ctx.rpeCapped || [];
+    ctx.rpeCapped.push({name: name, was: rpes.slice(), now: capped.list.slice(), why: capped.why});
+    rpes = capped.list;
+  }
 
   /* REPS, as written. A document with no rep target at all is rare and worth saying out
      loud rather than papering over with a range nobody asked for. */
@@ -22644,6 +22699,7 @@ function aiPlanToProgram(doc, answers){
      that does not name its own. */
   const planRestSeconds = Math.round(Number(doc.defaultRestSeconds));
   const shared = {answers: ans, attention, matches, unit, increments, barbell, effortFromPlan: false,
+                  rpeCapped: null,
                   planRestSeconds: isFinite(planRestSeconds) ? planRestSeconds : null,
                   planRestNote: aiTrim(doc.defaultRestNote, 40) || ""};
   days.forEach((d, i)=>{
@@ -22766,7 +22822,7 @@ function aiPlanToProgram(doc, answers){
      well as what was made of it. See S.importSrc. */
   return {program, customSplit: split, splitId: null, warnings, attention, matches, meta,
           prefs, stated, barbellLifts: barbell, effortFromPlan, doc, answers: ans,
-          estimated, startBw};
+          estimated, startBw, rpeCapped: shared.rpeCapped};
 }
 
 /* ---------- stage 3: the questions this document actually leaves open ----------
@@ -22812,6 +22868,32 @@ function aiQNum(v, fallback){
    and then some. Movements done with no load at all are absent on purpose: their answer
    is no number, which loadNeededFor() already understands. */
 const START_RATIOS = [
+  /* H7 \u2014 THE SPECIFIC ROWS, ABOVE THE GENERIC ONES, because the generic ones answer for
+     a barbell and several of these movements are only ever done with something else.
+
+     The conversion below ("a pair of dumbbells is 40% of the barbell figure in each
+     hand") fires on the word "dumbbell" in the name, and the three worst cases in the
+     table did not have it:
+
+       GOBLET SQUAT is one dumbbell at the chest. Read off the squat row it prescribed a
+       back-squat load \u2014 180 lb for a 180 lb lifter \u2014 as a single bell you hold in your
+       hands. It is a total, not a per-hand figure, and the number is small.
+
+       WALKING LUNGE is normally a pair of dumbbells, and the lunge row is a barbell
+       figure, so it asked for the whole barbell load in EACH hand.
+
+       DUMBBELL FLY was reading the pec-deck row, which is already marked per-hand \u2014 so
+       no conversion applied and a 63 lb dumbbell fly came out of a cable number.
+
+     Each row is: pattern, male ratio, female ratio, and `true` where the ratio already
+     describes ONE HAND. */
+  [/\b(goblet squat)\b/i,                                     0.30, 0.22],
+  [/\b(kettlebell swing)\b/i,                                 0.25, 0.18],
+  [/\b(walking lunge|reverse lunge|forward lunge|curtsy lunge)\b/i, 0.19, 0.14, true],
+  [/\b(bulgarian split squat)\b/i,                            0.17, 0.12, true],
+  [/\b(dumbbell|db)\b.*\b(fly|flye)\b/i,                       0.13, 0.09, true],
+  [/\b(svend press)\b/i,                                      0.10, 0.07],
+  [/\b(dumbbell|db)\b.*\b(pullover)\b/i,                      0.15, 0.10],
   [/\b(hip thrust|glute bridge)\b/i,                          1.20, 1.00],
   [/\b(leg press)\b/i,                                        2.00, 1.50],
   [/\b(hack squat)\b/i,                                       1.20, 0.90],
@@ -22825,7 +22907,11 @@ const START_RATIOS = [
   [/\b(abduction|adduction)\b/i,                              0.50, 0.45],
   [/\b(incline (?:bench|press))\b/i,                           0.70, 0.42],
   [/\b(bench press|chest press)\b/i,                           0.85, 0.50],
-  [/\b(pec deck|chest fly|cable fly|fly)\b/i,                  0.35, 0.22, true],
+  /* A PEC DECK IS ONE STACK. The row below is per-hand, which is right for a cable
+     crossover (two stacks, one in each hand) and wrong for a machine where the number on
+     the pin is the whole load. */
+  [/\b(pec deck|machine (?:chest )?fly|machine flye)\b/i,       0.50, 0.32],
+  [/\b(chest fly|cable fly|cable crossover|fly|flye)\b/i,       0.35, 0.22, true],
   [/\b(overhead press|shoulder press|military press)\b/i,       0.55, 0.35],
   [/\b(lat pulldown|pulldown)\b/i,                             0.70, 0.50],
   [/\b(pullover)\b/i,                                          0.30, 0.20],
@@ -22842,6 +22928,16 @@ const START_RATIOS = [
 const START_LEVEL_MULT = {beginner: 0.70, intermediate: 1.00, advanced: 1.30};
 /* A first working load for one movement, or null when there is no honest number to give:
    no bodyweight to scale from, or a movement carrying no external load at all. */
+/* H7 \u2014 IS THE NUMBER PER HAND OR IS IT THE WHOLE LOAD. The table knows; nothing could
+   ask it. Everything that prints a starting load, and the feeler-set note, needs to say
+   which \u2014 "35 lb" and "35 lb a hand" are different instructions. */
+function startingLoadPerHand(name){
+  const n = String(name || "");
+  const row = START_RATIOS.find(r=> r[0].test(n));
+  if(!row) return false;
+  if(row[3]) return true;
+  return /\b(dumbbell|db|d\.b\.)\b/i.test(n);
+}
 function startingLoadFor(name, opts){
   const o = opts || {};
   const bw = parseFloat(o.bodyweight);
@@ -23673,6 +23769,18 @@ function aiReviewHTML(){
   if(supersets) planRules.push(["Supersets", supersets + " pair" + (supersets===1?"":"s") + ", kept in the order your plan runs them"]);
   if(warmed) planRules.push(["Warm-ups", warmed + " movement" + (warmed===1?"":"s") + " carry the warm-up sets your plan prescribes"]);
   if(r.effortFromPlan) planRules.push(["Effort", r.effortFromPlan + ", imported per set"]);
+  /* M1 \u2014 the one change the import makes to what a document asks for, named. */
+  if((r.rpeCapped || []).length){
+    const cap = r.rpeCapped;
+    const comp = cap.filter(x=> x.why === "compound");
+    const iso  = cap.filter(x=> x.why !== "compound");
+    const bits = [];
+    if(comp.length) bits.push(comp.length + " multi-joint lift" + (comp.length===1?"":"s")
+      + " held to RPE 9 \u2014 " + comp.slice(0,3).map(x=> x.name).join(", "));
+    if(iso.length) bits.push("failure moved to the last set on " + iso.length
+      + " isolation movement" + (iso.length===1?"":"s"));
+    planRules.push(["Effort capped", bits.join("; ") + ". Everything else is as written."]);
+  }
   if((m.special||[]).length) planRules.push(["Special instructions", m.special.join(" · ")]);
   if(planRules.length){
     h += `<div class="ai-card"><div class="ai-card-h">Plan rules<span class="ai-tag plan">From your plan</span></div>` +
@@ -27363,6 +27471,7 @@ function viewActiveSession(){
     h += planBehindLineHTML(en);
     h += exNoteLineHTML(en);
     h += restNoteLineHTML(en);
+    h += effortCeilingLineHTML(en);
     h += supersetNoteHTML(supersetInfo(a.entries, ei));
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(ll) h += ll;
@@ -27529,10 +27638,82 @@ function rpeTargetFor(entry, si){
   const list = entry && entry.rpes;
   if(Array.isArray(list) && list.length){
     // more sets logged than prescribed (you added one) -> the last target carries on
-    return list[Math.min(si, list.length - 1)];
+    const raw = list[Math.min(si, list.length - 1)];
+    const cap = effortCeiling(entry, si);
+    if(cap && cap.rpe != null && raw != null && parseFloat(raw) > cap.rpe) return cap.rpe;
+    return raw;
   }
   return null;
 }
+/* The prescription as the PLAN wrote it, with no safety ceiling applied. Only two
+   callers want this: a catch-up, which records a load rather than proposing one, and
+   anything explaining the difference between what the plan asks and what is being asked
+   of you today. */
+function rpeTargetRaw(entry, si){
+  const list = entry && entry.rpes;
+  if(Array.isArray(list) && list.length) return list[Math.min(si, list.length - 1)];
+  return null;
+}
+/* THE CEILING ON WHAT ANY SET MAY BE ASKED FOR, and why each one exists.
+
+   These are read-time rules, not stored numbers, and that is deliberate: two of the
+   three expire, and a prescription that has been baked into a plan cannot expire. A plan
+   is not rewritten; what the set row asks for, what the grade measures against, and what
+   progression reads as "at target" all come through here, so one answer governs all
+   three and none of them can disagree.
+
+   In order of how low they go:
+
+     H7, A MOVEMENT YOU HAVE NEVER DONE: RPE 7. The first time under a new lift you do
+     not know what the bottom of it feels like, the starting load is an estimate off a
+     table, and the honest instruction is "leave three in the tank and tell us what
+     happened". The app's own progression corrects the load within two sessions, which is
+     what that machinery is for. Expires the moment there is one finished session with
+     the movement in it.
+
+     M2, A BEGINNER ON A COMPOUND, FOR SIX WEEKS: RPE 8. Not because a beginner cannot
+     work hard \u2014 because a squat at RPE 9 is a squat where the technique is the thing
+     that fails first, and six weeks is roughly how long it takes for the pattern to stop
+     being the limiting factor. Counted in training weeks, so somebody who told the app
+     about three years before it existed is not a beginner on day one.
+
+     M1, A COMPOUND, ALWAYS: RPE 9. And on an isolation, 10 only on the last set. This is
+     also written into the app's own tables; here it catches an imported plan, a legacy
+     one, and anything typed by hand. */
+const BEGINNER_COMPOUND_WEEKS = 6;
+function effortCeiling(entry, si){
+  if(!entry || !entry.name) return null;
+  /* A technique that ends past failure has already overridden the target \u2014 see
+     effortUncapped(). Capping a drop set at 9 would be asking for the opposite of it. */
+  if(effortUncapped(entry, si)) return null;
+  const comp = isCompound(entry.name);
+  if(firstExposureTo(entry.name)) return {rpe: 7, why: "first"};
+  if(comp && isBeginnerNow() && trainingAgeWeeks() < BEGINNER_COMPOUND_WEEKS)
+    return {rpe: 8, why: "learning"};
+  if(comp) return {rpe: 9, why: "compound"};
+  const total = (entry.sets || []).length || 1;
+  const last = Math.min(si, total - 1) === total - 1;
+  return last ? null : {rpe: 9, why: "notLast"};
+}
+/* Never performed, as far as the log knows. The LIVE session does not count: the whole
+   point is that the first session under a movement is the careful one, and a cap that
+   lifted after set one would lift exactly when it is being relied on. */
+function firstExposureTo(name){
+  const k = nrm(name);
+  if(!k) return false;
+  return !(S.sessions || []).some(s=> s && (s.entries || []).some(e=>
+    e && nrm(e.name) === k && (e.sets || []).some(isWorkingSet)));
+}
+function isBeginnerNow(){
+  try{ return inferExperience() === "beginner"; }catch(e){ return false; }
+}
+/* What each ceiling says for itself, on the set row and on the grade card. */
+const EFFORT_CEILING_WHY = {
+  first:    "first time on this movement, so it is held to three reps in reserve",
+  learning: "a compound while the movement is still being learned, held to two in reserve",
+  compound: "a multi-joint lift, so it stops one rep short of failure",
+  notLast:  "failure belongs on the last set of an isolation, not the ones before it"
+};
 // How far a logged RPE may sit from its target before it counts as off-target. Half a
 // point is inside the noise of self-reported RPE; a full point is a real difference.
 const RPE_TOL = 0.5;
@@ -43567,7 +43748,12 @@ function progressionFor(sess, entry){
     ws.forEach(st=>{
       const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
       if(!(w > planW + 0.01) || !(r >= range[0])) return;
-      const t = rpeTargetFor(entry, entry.sets.indexOf(st));
+      /* THE PLAN'S OWN TARGET, not the safety ceiling. A catch-up is a correction: it
+         writes down the load you have already performed, and it adds nothing. The
+         first-exposure ceiling exists to stop the app PROPOSING a weight off one
+         session; refusing to record the weight you actually used would just leave the
+         plan permanently wrong about it. */
+      const t = rpeTargetRaw(entry, entry.sets.indexOf(st));
       const e = parseFloat(st.rpe) || 0;
       if(t != null && e && e > t + RPE_TOL) return;     // no RPE logged counts as meeting it
       if(!best || w > best.w) best = {w, r, rpe: e, t};
@@ -45220,14 +45406,45 @@ function fmtTimeOfDay(ms){
    than admitting there isn't one, so the exercise carries `calibrate` with a ballpark
    and asks for a feeler set the first time you perform it.
    ===================================================================== */
+/* H7 \u2014 EVERY LOADED MOVEMENT GETS A FEELER SET THE FIRST TIME, not just the two that
+   happened to carry a `calibrate` ballpark.
+
+   The starting load is an estimate from a table of bodyweight ratios. It is a good
+   estimate and it is still a guess about a movement you have never performed, and the
+   difference between a good guess and a known number is one set. So the first exposure
+   to anything that takes a load says so, shows the number it worked out, and asks for
+   one set at a conservative effort \u2014 which is the same session the RPE ceiling holds to
+   7 (see effortCeiling). What you log becomes the load.
+
+   It is a note, not a gate: nothing is blocked, nothing extra has to be tapped, and
+   somebody who knows exactly what they lift can simply type it. */
 function needsCalibration(e){
-  return !!(e && e.calibrate != null && e.weight == null);
+  if(!e || !e.name) return false;
+  if(e.calibrate != null && e.weight == null) return true;
+  return !!(loadNeededFor(e) && firstExposureTo(e.name));
+}
+function feelerLoadFor(e){
+  if(!e) return null;
+  const w = parseFloat(e.weight != null ? e.weight : e.planWeight);
+  if(w > 0) return w;
+  if(e.calibrate != null) return parseFloat(e.calibrate) || null;
+  const bw = bodyWeightNow();
+  const est = startingLoadFor(e.name, {bodyweight: bw, sex: S.sex || null, level: inferExperience()});
+  return est || null;
 }
 function calibrateHTML(e){
+  const w = feelerLoadFor(e);
+  const hand = startingLoadPerHand(e && e.name) ? " a hand" : "";
+  if(w == null) return `<div class="cal-note">
+    <b>First time on this one</b> There is no baseline yet, and no bodyweight on file to
+    estimate one from. Pick something you are confident you can control, keep three reps
+    in reserve, and log what actually worked \u2014 that becomes the starting load.
+  </div>`;
   return `<div class="cal-note">
-    <b>Calibrate this one</b> No baseline yet. Do one feeler set of about
-    ${esc(String(e.calibrate))} ${unitWord()}, take it to roughly the top of the rep range, then log
-    what actually worked. That becomes the starting load.
+    <b>First time on this one</b> ${e.weight == null && e.calibrate != null
+      ? "No baseline yet." : "This load is an estimate."}
+    Do one feeler set of about ${esc(fmtLoad(w))}${hand}, keep about three reps in reserve,
+    then log what actually worked. That becomes the starting load.
   </div>`;
 }
 function setCalibratedLoad(name, w){
@@ -47292,6 +47509,35 @@ function planChangeLineHTML(en){
    question the first time a load moves — you did sixteen last week and the app is asking
    for ten. So the sentence still exists; it just exists once, at the bottom, where it is
    available without being the first thing you read three times on the way down the card. */
+/* M2 / H7 \u2014 THE REASON THE EFFORT TARGET IS LOWER THAN THE PLAN'S.
+
+   Without it, the chip on the row shows 8 where the plan says 9 and nothing anywhere
+   explains why \u2014 which reads as a bug and teaches somebody to ignore the number. Said
+   once under the exercise, not once per set, and only when a ceiling is actually biting.
+
+   The two ceilings that expire get a sentence about what they are FOR, because "held to
+   RPE 8" on its own sounds like the app doubting you; "the pattern is the thing that
+   fails first on a compound you have been doing for three weeks" is the actual reason,
+   and it is a coaching point rather than a limit. */
+function effortCeilingLineHTML(en){
+  if(!en || !en.name) return "";
+  const list = en.rpes;
+  if(!Array.isArray(list) || !list.length) return "";
+  const cap = effortCeiling(en, (en.sets || []).length - 1);
+  if(!cap || cap.rpe == null) return "";
+  if(cap.why === "compound" || cap.why === "notLast") return "";   // the standing rules, not news
+  const asks = Math.max.apply(null, list.map(v=> parseFloat(v) || 0));
+  if(!(asks > cap.rpe)) return "";
+  const msg = cap.why === "first"
+    ? "First time on this movement, so every set is held to RPE " + cap.rpe
+      + " \u2014 about three reps left. Find out what the load feels like; the weight catches "
+      + "up on its own from next session."
+    : "Still learning this one, so it is held to RPE " + cap.rpe + " \u2014 two reps left. On a "
+      + "multi-joint lift the technique is what gives out first, and a set that ends with "
+      + "the pattern falling apart teaches the pattern falling apart.";
+  return `<div class="ex-insight"><span class="ins-tag">${cap.why === "first" ? "new lift" : "learning"
+    }</span><span>${esc(msg)}</span></div>`;
+}
 function rebuildLineHTML(en){
   const rb = rebuildFor(en);
   if(!rb || rb.top == null) return "";

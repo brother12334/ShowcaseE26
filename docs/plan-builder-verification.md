@@ -201,6 +201,68 @@ Auto writes load increases and rep stretches, both with an undo snapshot in the 
 history. It does **not** move up a bodyweight ladder: that changes which exercise you do,
 and nothing about "add the weight I earned" implies consent to that.
 
+## Phase 4 — safety
+
+### Effort ceilings, read at the moment a set is asked for
+
+Three ceilings, all applied in `effortCeiling()` and read through `rpeTargetFor()`, so the
+set row, the grade and the progression rule cannot disagree about what a set was asked
+for. None of them rewrites a plan — two of them expire, and a prescription baked into a
+plan cannot expire.
+
+| Ceiling | Applies to | Expires |
+|---|---|---|
+| RPE 7 | the first session on any movement (H7) | as soon as one finished session contains it |
+| RPE 8 | a compound while a beginner's training age is under 6 weeks (M2) | at 6 training weeks, or as soon as the level is no longer beginner |
+| RPE 9 | any compound; and any isolation set that is not the last one (M1) | never — it is the standing rule |
+
+A technique that ends past failure (a drop set, myo-reps, rest-pause, an AMRAP, a set
+marked to failure) is exempt: capping one of those at 9 would be asking for the opposite
+of the technique.
+
+The two that expire print a sentence under the exercise saying what the ceiling is for,
+because a chip showing 8 where the plan says 9 with nothing to explain it reads as a bug.
+
+**A catch-up reads the plan's own target, not the ceiling.** Recording a load you have
+already performed is a correction, not a proposal; refusing it on a first exposure would
+leave the plan permanently wrong about a weight you are visibly using. `rpeTargetRaw()`
+exists for that one caller.
+
+### Starting loads
+
+`START_RATIOS` gained specific rows above the generic ones, because the generic ones
+answer for a barbell and the per-hand conversion fires on the word "dumbbell" in the name:
+
+| Movement | Was reading | Now |
+|---|---|---|
+| Goblet Squat | the back-squat row — 180 lb for a 180 lb lifter, as one bell | 0.30 of bodyweight, total: 55 lb |
+| Walking Lunge | the lunge row, a barbell figure, in **each** hand | 0.19 per hand: 35 lb |
+| Dumbbell Fly | the pec-deck row, already per-hand, so no conversion | 0.13 per hand: 25 lb |
+| Pec Deck | marked per-hand, though the pin is the whole load | its own row, total: 90 lb |
+
+`startingLoadPerHand()` answers the question nothing could ask before: "35 lb" and "35 lb
+a hand" are different instructions, and the feeler-set note now says which.
+
+### Feeler sets
+
+`needsCalibration()` used to mean "this exercise carries a `calibrate` ballpark and no
+weight" — true of two movements in the whole library. It now also covers the first
+exposure to anything that takes a load: the note names the estimate, says to keep about
+three reps in reserve (the same session the ceiling holds to RPE 7), and what gets logged
+becomes the starting load. It is a note, not a gate.
+
+### What the importer changes, and says it changes
+
+A document that writes "3×5 to failure" against a squat is transcribed faithfully in
+every other respect; the ramp is capped to [9,9,9] at the boundary and the review screen
+lists it under "Effort capped", naming the movements. An unannounced change to an imported
+plan is the app rewriting somebody's programme behind their back.
+
+`SLOT_RPES.abs` was `[9,10,10,10]` — three sets after a set taken to failure. It is now
+`[9,9,9,10]`. The cap is not applied inside `exr()`: that runs while the file is still
+initialising, and `isCompound()` reads a map declared further down, which throws in its
+temporal dead zone. The app's own tables are written compliant instead.
+
 ## Open questions
 
 Things in the code that conflict with the brief, or that the brief does not settle.
@@ -241,7 +303,7 @@ they are recomputed whenever a session is swept.
 | 1 | Harness | done — `#selftest`, `selftest.mjs`, this file |
 | 2 | C2 / H5 / M8 / L1 | done — `phase2.mjs`, invariants 6 and 7 |
 | 3 | Progression — H1–H4, H6, H8, L3, L4, M7 | done — `phase3.mjs` |
-| 4 | Safety — H7, M1, M2 | not started |
+| 4 | Safety — H7, M1, M2 | done — `phase4.mjs` |
 | 5 | Builder, quality check, H9/H10/L5/M11, remove "Change the schedule" | not started |
 | 6 | Periodization (M9) + M3 | not started |
 | 7 | M4, M5, M6, M10, L2 | not started |
