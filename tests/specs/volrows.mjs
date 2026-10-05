@@ -94,9 +94,9 @@ console.log("4 - TAPPING A SHORT MUSCLE OFFERS THE FIX");
     await new Promise(r=> setTimeout(r, 60));
     const m = document.getElementById("modal");
     return {open: !!m, text: m ? m.textContent.replace(/\s+/g," ").trim() : "",
-            addSet: !!(m && m.querySelector("#vfSet")),
-            addEx: !!(m && m.querySelector("#vfEx")),
-            setLabel: m && m.querySelector("#vfSet") ? m.querySelector("#vfSet").textContent.trim() : ""};
+            addSet: !!(m && m.querySelector('[data-volpick="add"]')),
+            addEx: !!(m && m.querySelector('[data-volpick="ex"]')),
+            setLabel: m && m.querySelector('[data-volpick="add"]') ? m.querySelector('[data-volpick="add"] b').textContent.trim() : ""};
   });
   ck("the sheet opens", r.open === true, "");
   ck("it says what the muscle gets", /sets a week/.test(r.text), r.text.slice(0,160));
@@ -111,18 +111,21 @@ console.log("4 - TAPPING A SHORT MUSCLE OFFERS THE FIX");
       .reduce((u,e)=> u + (parseInt(e.sets,10)||0), 0), 0);
     const was = total();
     const logWas = (S.planLog||[]).length;
-    document.getElementById("vfSet").click();
+    const opt = document.querySelector(String.raw`[data-volpick="add"]`);
+    const offered = parseInt(opt.querySelector("b").textContent.replace(/[^0-9]/g, ""), 10);
+    opt.click();
     await new Promise(r=> setTimeout(r, 120));
     /* The one that grew is the one the sheet named; find it by its set count. */
     let grown = null;
     DAYS.forEach(wid=> (S.program[wid]||[]).forEach(e=>{
       if(e.name === "Lat Pulldown" && (parseInt(e.sets,10)||0) === 4) grown = e; }));
-    return {was, now: total(), rpes: grown ? (grown.rpes||[]).length : 0,
+    return {was, offered, now: total(), rpes: grown ? (grown.rpes||[]).length : 0,
             sets: grown ? parseInt(grown.sets,10) : 0,
             logged: (S.planLog||[]).length - logWas,
             shut: !document.getElementById("modalBg").classList.contains("show")};
   });
-  ck("pressing it adds exactly one set", r.now === r.was + 1, JSON.stringify(r));
+  ck("pressing it adds exactly the sets it offered", r.now === r.was + r.offered,
+     JSON.stringify(r));
   ck("the effort ramp grows with it", r.rpes === r.sets, JSON.stringify(r));
   ck("the change goes in the plan history", r.logged === 1, JSON.stringify(r));
   ck("and the sheet closes", r.shut === true, JSON.stringify(r));
@@ -135,9 +138,9 @@ console.log("5 - A MUSCLE NOTHING TRAINS OFFERS THE ONE THING THAT WOULD HELP");
     openVolFix("calves");          // nothing in this plan touches calves
     await new Promise(r=> setTimeout(r, 60));
     const m = document.getElementById("modal");
-    return {addSet: !!(m && m.querySelector("#vfSet")),
-            addEx: !!(m && m.querySelector("#vfEx")),
-            label: m && m.querySelector("#vfEx") ? m.querySelector("#vfEx").textContent.trim() : ""};
+    return {addSet: !!(m && m.querySelector('[data-volpick="add"]')),
+            addEx: !!(m && m.querySelector('[data-volpick="ex"]')),
+            label: m && m.querySelector('[data-volpick="ex"]') ? m.querySelector('[data-volpick="ex"] b').textContent.trim() : ""};
   });
   ck("no set is offered, because there is nothing to add one to", r.addSet === false, "");
   ck("adding a movement is offered", r.addEx === true, "");
@@ -157,7 +160,7 @@ console.log("6 - A MUSCLE IN RANGE IS NOT NAGGED");
     openVolFix("chest");
     await new Promise(r=> setTimeout(r, 60));
     const m = document.getElementById("modal");
-    return {state: ch && ch.state, addSet: !!(m && m.querySelector("#vfSet")),
+    return {state: ch && ch.state, addSet: !!(m && m.querySelector('[data-volpick="add"]')),
             text: m ? m.textContent.replace(/\s+/g," ") : ""};
   });
   ck("the chest is in range now", r.state === "ok", JSON.stringify(r.state));
@@ -186,8 +189,8 @@ console.log("7 - BEING OVER THE CEILING IS AS ACTIONABLE AS BEING UNDER IT");
     const m = document.getElementById("modal");
     return {state: ch && ch.state, v: ch && ch.v, mrv: ch && ch.mrv,
             text: m ? m.textContent.replace(/\s+/g," ").trim() : "",
-            cut: !!(m && m.querySelector("#vfCut")),
-            label: m && m.querySelector("#vfCut") ? m.querySelector("#vfCut").textContent.trim() : "",
+            cut: !!(m && m.querySelector('[data-volpick="cut"]')),
+            label: m && m.querySelector('[data-volpick="cut"]') ? m.querySelector('[data-volpick="cut"] b').textContent.trim() : "",
             over: !!(m && m.querySelector(".pf-over")),
             aim: !!(m && m.querySelector(".vf-sci"))};
   });
@@ -203,14 +206,15 @@ console.log("7 - BEING OVER THE CEILING IS AS ACTIONABLE AS BEING UNDER IT");
 {
   const r = await ev(async ()=>{
     const m = document.getElementById("modal");
-    const btn = m.querySelector("#vfCut");
+    const btn = m.querySelector('[data-volpick="cut"] b');
     const want = parseInt(btn.textContent.replace(/[^0-9]/g, ""), 10);
     const name = btn.textContent.replace(/^Take \d+ sets? off /, "").trim();
+    const row = m.querySelector('[data-volpick="cut"]');
     const total = ()=> DAYS.reduce((t,wid)=> t + (S.program[wid]||[])
       .filter(e=> e.name === name).reduce((u,e)=> u + (parseInt(e.sets,10)||0), 0), 0);
     const was = total(), logWas = (S.planLog||[]).length;
-    btn.click();
-    await new Promise(r=> setTimeout(r, 120));
+    row.click();
+    await new Promise(r=> setTimeout(r, 150));
     const q = planQuality(S.program, currentSplit(), {gear:(S.setup||{}).gear});
     const ch = (q.volume || []).find(v=> v.g === "chest");
     return {want, name, was, now: total(), logged: (S.planLog||[]).length - logWas,
@@ -240,7 +244,7 @@ console.log("7 - BEING OVER THE CEILING IS AS ACTIONABLE AS BEING UNDER IT");
     openVolFix("chest");
     await new Promise(r=> setTimeout(r, 60));
     const m = document.getElementById("modal");
-    const btn = m && m.querySelector("#vfCut");
+    const btn = m && m.querySelector('[data-volpick="cut"] b');
     const offered = btn ? parseInt(btn.textContent.replace(/[^0-9]/g,""), 10) : 0;
     if(btn){
       const name = btn.textContent.replace(/^Take \d+ sets? off /, "").trim();
@@ -258,7 +262,7 @@ console.log("7 - BEING OVER THE CEILING IS AS ACTIONABLE AS BEING UNDER IT");
        JSON.stringify(r));
   } else {
     ck("with nothing left to trim it says so instead of offering a button",
-       /already at its own minimum/.test(r.text), r.text.slice(0,200));
+       /already at (its own|its) minimum/.test(r.text), r.text.slice(0,200));
   }
 }
 
@@ -291,7 +295,194 @@ console.log("8 - THE SHEET SAYS WHAT TO AIM FOR, NOT ONLY WHAT IS WRONG");
      JSON.stringify(r.terms));
 }
 
-console.log("9 - NOTHING THREW");
+/* THE APP KNOWS WHICH MOVEMENT CARRIES THE MOST SETS. It does not know that Thursday is
+   the day you are rushed, that the cable station is always busy, or that you are pushing
+   your chest on purpose this block. So the one-tap answer is the default and not the
+   only option. */
+console.log("9 - THE SHEET OFFERS A CHOICE, NOT A PRESCRIPTION");
+{
+  const r = await ev(async ()=>{
+    hideModal();
+    DAYS.forEach(w=>{ S.program[w] = []; });
+    S.program[DAYS[0]] = [{name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+                          {name:"Incline Dumbbell Bench Press", sets:4, reps:"8-12", rpes:[7,8,8,9]},
+                          {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}];
+    S.program[DAYS[1]] = [{name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+                          {name:"Incline Dumbbell Bench Press", sets:4, reps:"8-12", rpes:[7,8,8,9]},
+                          {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}];
+    saveQuiet();
+    openVolFix("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    const m = document.getElementById("modal");
+    const opts = Array.from(m.querySelectorAll("[data-volpick]"));
+    return {keys: opts.map(b=> b.dataset.volpick),
+            titles: opts.map(b=> b.querySelector("b").textContent.trim()),
+            subs: opts.map(b=> (b.querySelector("span span") || {}).textContent || ""),
+            primary: opts.filter(b=> b.classList.contains("on")).map(b=> b.dataset.volpick),
+            heading: (m.querySelector(".vf-pick-k") || {}).textContent || ""};
+  });
+  ck("it asks rather than tells", /what would you like to do/i.test(r.heading), r.heading);
+  ck("there is more than one way to go", r.keys.length >= 4, JSON.stringify(r.keys));
+  ck("the one-tap cut is offered", r.keys.indexOf("cut") > -1, JSON.stringify(r.keys));
+  ck("and is the default", r.primary.length === 1 && r.primary[0] === "cut",
+     JSON.stringify(r.primary));
+  ck("spreading it is offered", r.keys.indexOf("spread") > -1, JSON.stringify(r.keys));
+  ck("so is choosing by hand", r.keys.indexOf("pick") > -1, JSON.stringify(r.keys));
+  ck("and so is doing nothing", r.keys.indexOf("leave") > -1, JSON.stringify(r.keys));
+  ck("every option says what it will do", r.subs.every(x=> x.length > 15),
+     JSON.stringify(r.subs));
+  ck("and leaving it is not framed as a mistake",
+     /on purpose/.test(r.subs[r.keys.indexOf("leave")] || ""), r.subs[r.keys.indexOf("leave")]);
+}
+{
+  /* A muscle nothing trains cannot be spread over, trimmed, or hand-set, so those are
+     not offered. An option list that offers impossible options is worse than a button. */
+  const r = await ev(async ()=>{
+    hideModal();
+    DAYS.forEach(w=>{ S.program[w] = [{name:"Lat Pulldown", sets:3, reps:"8-12", rpes:[7,8,9]}]; });
+    saveQuiet();
+    openVolFix("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    return Array.from(document.querySelectorAll("[data-volpick]")).map(b=> b.dataset.volpick);
+  });
+  ck("with nothing training it, only adding a movement is offered",
+     r.indexOf("ex") > -1 && r.indexOf("cut") < 0 && r.indexOf("spread") < 0
+       && r.indexOf("pick") < 0, JSON.stringify(r));
+  ck("and leaving it alone", r.indexOf("leave") > -1, JSON.stringify(r));
+}
+
+console.log("10 - SPREADING, LEAVING, AND SETTING IT YOURSELF");
+{
+  const over = ()=> ev(()=>{
+    DAYS.forEach(w=>{ S.program[w] = []; });
+    S.program[DAYS[0]] = [{name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+                          {name:"Incline Dumbbell Bench Press", sets:4, reps:"8-12", rpes:[7,8,8,9]},
+                          {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}];
+    S.program[DAYS[1]] = [{name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+                          {name:"Incline Dumbbell Bench Press", sets:4, reps:"8-12", rpes:[7,8,8,9]},
+                          {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}];
+    saveQuiet();
+  });
+  const chest = ()=> ev(()=>{
+    const q = planQuality(S.program, currentSplit(), {gear:(S.setup||{}).gear});
+    const c = (q.volume || []).find(z=> z.g === "chest");
+    return {v: c.v, state: c.state, mrv: c.mrv};
+  });
+  await over();
+  const b4 = await chest();
+  const r = await ev(async ()=>{
+    hideModal(); openVolFix("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    const logWas = (S.planLog || []).length;
+    document.querySelector('[data-volpick="spread"]').click();
+    await new Promise(r=> setTimeout(r, 200));
+    const sets = DAYS.reduce((t, w)=> t.concat((S.program[w]||[])
+      .filter(e=> muscleFrac(e.name,"chest") >= DIRECT_SHARE)
+      .map(e=> parseInt(e.sets,10)||0)), []);
+    return {logged: (S.planLog||[]).length - logWas, sets};
+  });
+  const after = await chest();
+  ck("spreading brings it back inside the range", after.state === "ok",
+     b4.v + " -> " + after.v + " (" + after.state + ")");
+  ck("and it came off more than one movement",
+     new Set(r.sets).size > 1 || r.sets.length > 1, JSON.stringify(r.sets));
+  ck("recorded as one entry in the plan history", r.logged === 1, String(r.logged));
+}
+{
+  await ev(()=>{
+    DAYS.forEach(w=>{ S.program[w] = []; });
+    [DAYS[0], DAYS[1]].forEach(w=>{ S.program[w] = [
+      {name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+      {name:"Incline Dumbbell Bench Press", sets:4, reps:"8-12", rpes:[7,8,8,9]},
+      {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}]; });
+    saveQuiet();
+  });
+  const r = await ev(async ()=>{
+    hideModal(); openVolFix("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    const before = JSON.stringify(S.program);
+    const logWas = (S.planLog || []).length;
+    document.querySelector('[data-volpick="leave"]').click();
+    await new Promise(r=> setTimeout(r, 120));
+    return {same: JSON.stringify(S.program) === before,
+            logged: (S.planLog||[]).length - logWas,
+            shut: !document.getElementById("modalBg").classList.contains("show")};
+  });
+  ck("LEAVING IT CHANGES NOTHING AT ALL", r.same === true, JSON.stringify(r));
+  ck("and is not written into the plan history either", r.logged === 0, String(r.logged));
+  ck("the sheet just closes", r.shut === true, String(r.shut));
+}
+{
+  /* The hand-set screen: a live total, nothing written until Apply, and a movement taken
+     to zero removed — which is the one thing the one-tap buttons cannot do. */
+  const r = await ev(async ()=>{
+    hideModal();
+    DAYS.forEach(w=>{ S.program[w] = []; });
+    S.program[DAYS[0]] = [{name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+                          {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}];
+    S.program[DAYS[1]] = [{name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+                          {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}];
+    saveQuiet();
+    const before = JSON.stringify(S.program);
+    openVolAdjust("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    const rows = document.querySelectorAll(".va-row").length;
+    const t0 = document.querySelector(".va-tot-v").textContent.trim();
+    document.querySelector('[data-vdir="-1"]').click();
+    await new Promise(r=> setTimeout(r, 60));
+    const t1 = document.querySelector(".va-tot-v").textContent.trim();
+    return {rows, t0, t1, untouched: JSON.stringify(S.program) === before,
+            moved: !!document.querySelector(".va-v.is-moved")};
+  });
+  ck("every movement training it gets a row", r.rows === 4, String(r.rows));
+  ck("the weekly total is live", r.t0 !== r.t1, r.t0 + " -> " + r.t1);
+  ck("the changed row is marked", r.moved === true, String(r.moved));
+  ck("AND NOTHING IS WRITTEN UNTIL APPLY", r.untouched === true, String(r.untouched));
+}
+{
+  const r = await ev(async ()=>{
+    const back = document.querySelector("#vaBack");
+    const before = JSON.stringify(S.program);
+    back.click();
+    await new Promise(r=> setTimeout(r, 80));
+    return {same: JSON.stringify(S.program) === before,
+            backOnChoices: !!document.querySelector("[data-volpick]"),
+            cleared: VOL_ADJ === null};
+  });
+  ck("Back discards the sketch", r.same === true, String(r.same));
+  ck("and returns to the choices", r.backOnChoices === true, String(r.backOnChoices));
+  ck("with nothing left half-edited", r.cleared === true, String(r.cleared));
+}
+{
+  const r = await ev(async ()=>{
+    hideModal();
+    openVolAdjust("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    Object.keys(VOL_ADJ.want).forEach(k=>{
+      const [wid, ei] = k.split("|");
+      const e = (S.program[wid] || [])[parseInt(ei, 10)];
+      if(e && e.name === "Cable Fly") VOL_ADJ.want[k] = 0;
+    });
+    renderVolAdjust();
+    await new Promise(r=> setTimeout(r, 60));
+    const warned = /removed from the day/.test(document.getElementById("modal").textContent);
+    const nBefore = DAYS.reduce((t, w)=> t + (S.program[w]||[]).length, 0);
+    const logWas = (S.planLog||[]).length;
+    document.querySelector("#vaApply").click();
+    await new Promise(r=> setTimeout(r, 200));
+    return {warned, nBefore, nAfter: DAYS.reduce((t, w)=> t + (S.program[w]||[]).length, 0),
+            flies: DAYS.reduce((t, w)=> t + (S.program[w]||[]).filter(e=> e.name === "Cable Fly").length, 0),
+            logged: (S.planLog||[]).length - logWas,
+            cleared: VOL_ADJ === null};
+  });
+  ck("it says a movement at zero will be removed", r.warned === true, String(r.warned));
+  ck("and applying removes it", r.flies === 0 && r.nAfter === r.nBefore - 2,
+     JSON.stringify(r));
+  ck("recorded once in the plan history", r.logged === 1, String(r.logged));
+  ck("and the editor is closed down", r.cleared === true, String(r.cleared));
+}
+
+console.log("11 - NOTHING THREW");
 await ev(()=> hideModal());
 ck("no page errors", errs.length === 0, errs.join(" | "));
 console.log(bad ? "BROKEN: " + bad : "all good");

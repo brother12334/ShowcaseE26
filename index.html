@@ -5074,6 +5074,31 @@ body.news-open{overflow:hidden}
 .spec-opt-t b{display:block;font-size:15px}
 .spec-opt-t span{display:block;font-size:12.5px;line-height:1.45;color:var(--faint);margin-top:3px}
 .spec-opt-k{color:var(--acc);font-size:15px}
+.spec-opt-go{color:var(--faint);font-size:17px;flex-shrink:0}
+.spec-opt.on .spec-opt-go{color:var(--acc)}
+/* The plan check's "what would you like to do" list, and the screen behind "choose". */
+.vf-pick-k{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);margin:16px 0 0}
+.va-tot{display:flex;align-items:baseline;gap:11px;margin:4px 0 13px;
+  padding-bottom:12px;border-bottom:1px solid var(--line)}
+.va-tot-v{font:26px/1 var(--disp);font-weight:600;flex-shrink:0}
+.va-tot-k{font-size:12.5px;line-height:1.5;color:var(--dim)}
+.va-tot-k i{font-style:normal;color:var(--faint);font-size:11.5px}
+.va-list{display:flex;flex-direction:column;gap:6px}
+.va-row{display:flex;align-items:center;gap:11px;background:var(--card2);
+  border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 10px}
+.va-row.is-off{opacity:.55}
+.va-n{flex:1;min-width:0}
+.va-n b{display:block;font-size:13.5px;font-weight:600;color:var(--text)}
+.va-n i{display:block;font-style:normal;font:10.5px var(--mono);color:var(--faint);margin-top:2px}
+.va-step{display:flex;align-items:center;gap:2px;flex-shrink:0}
+.va-b{width:34px;height:34px;border-radius:var(--r-sm);background:var(--card);
+  border:1px solid var(--line);color:var(--dim);font:16px var(--mono);cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
+.va-b:active{background:var(--acc-soft);color:var(--acc)}
+.va-v{width:30px;text-align:center;font:15px var(--disp);font-weight:600;color:var(--text)}
+.va-v.is-moved{color:var(--acc)}
+.va-note{font-size:11.5px;line-height:1.5;color:var(--faint);margin-top:10px}
 .spec-cards{display:flex;flex-direction:column;gap:9px;margin-bottom:6px}
 .spec-card{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);
   border-radius:15px;padding:15px;color:var(--txt);font:inherit;cursor:pointer;
@@ -6399,7 +6424,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "49.1";
+const APP_VERSION = "49.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -28744,6 +28769,205 @@ function volEntriesFor(g){
   out.sort((a, b)=> (b.f - a.f) || (a.sets - b.sets));
   return out;
 }
+/* WHAT TO DO ABOUT IT IS THE USER'S DECISION, NOT THE APP'S.
+
+   The sheet used to prescribe: one button, one movement, one number. That is the right
+   DEFAULT and the wrong only-option — the app knows which movement carries the most sets
+   of a muscle, and it does not know that Thursday is the day you are rushed, that the
+   cable station is always busy, or that you are pushing your chest on purpose this block.
+
+   So the one-tap answer stays at the top, where it is the fastest thing to press, and
+   under it the other ways somebody might actually want to go: spread the change over
+   every movement instead of taking it all off one, open the movements and set them
+   yourself, or decide this is deliberate and leave it alone. Nothing here is a
+   recommendation the app withdraws if you disagree with it. */
+function volChoiceHTML(id, title, sub, primary){
+  return `<button type="button" class="spec-opt${primary ? " on" : ""}" data-volpick="${esc(id)}">
+    <span class="spec-opt-t"><b>${title}</b>${sub ? `<span>${sub}</span>` : ""}</span>
+    <span class="spec-opt-go">\u203a</span>
+  </button>`;
+}
+function volChoicesHTML(x, g, best, fat, canCut, canAdd, toFloor, addBy){
+  const spread = volEntriesFor(g).filter(c=> c.sets > 0).length;
+  const rows = [];
+  if(x.state === "over"){
+    if(fat && canCut > 0)
+      rows.push(volChoiceHTML("cut",
+        `Take ${canCut} set${canCut === 1 ? "" : "s"} off ${esc(fat.e.name)}`,
+        `On ${esc(widName(fat.wid))}, which is carrying the most of it.`
+          + (canCut < x.v - x.mrv ? " It cannot give up the whole cut on its own." : ""), true));
+    if(fat && canCut === 0)
+      /* Every movement doing this muscle is already at its own minimum, so there is no
+         set to take without removing a movement. Said plainly rather than left as the
+         absence of a button. */
+      rows.push(volChoiceHTML("pick", "Every movement is already at its minimum",
+        `Nothing can be trimmed further \u2014 open them and take one out instead.`, true));
+    if(spread > 1 && canCut > 0)
+      rows.push(volChoiceHTML("spread", "Spread the cut across every movement",
+        `A set at a time, off whatever has most to spare, until it is back inside the range.`));
+    if(canCut > 0)
+      rows.push(volChoiceHTML("pick", "Choose where it comes off",
+        `Every movement that trains this muscle, with the weekly total as you change it.`));
+    rows.push(volChoiceHTML("leave", "Leave it as it is",
+      `You may be pushing this on purpose. Nothing is changed.`));
+  } else if(x.state === "under"){
+    if(best && canAdd > 0)
+      rows.push(volChoiceHTML("add",
+        `Add ${canAdd} set${canAdd === 1 ? "" : "s"} to ${esc(best.e.name)}`,
+        `On ${esc(widName(best.wid))}, where it already does the most for this muscle.`
+          + (canAdd < toFloor
+              ? ` That is as far as one movement goes \u2014 ${MAX_SETS_PER_EXERCISE_GEN} sets is its cap.`
+              : ""), true));
+    rows.push(volChoiceHTML("ex",
+      best && canAdd > 0 ? "Add a different exercise" : "Add an exercise for this",
+      best && canAdd === 0
+        ? `Everything training it is already at ${MAX_SETS_PER_EXERCISE_GEN} sets \u2014 another movement is the only way up.`
+        : `Nothing in the plan trains it enough; a new movement is the honest fix.`,
+      !(best && canAdd > 0)));
+    if(spread > 1)
+      rows.push(volChoiceHTML("spread", "Spread the sets across every movement",
+        `A set at a time, onto whatever is furthest from its own cap.`));
+    if(spread)
+      rows.push(volChoiceHTML("pick", "Choose where they go",
+        `Every movement that trains this muscle, with the weekly total as you change it.`));
+    rows.push(volChoiceHTML("leave", "Leave it as it is",
+      `A muscle can be held at maintenance on purpose. Nothing is changed.`));
+  } else {
+    if(spread)
+      rows.push(volChoiceHTML("pick", "Change it anyway",
+        `Every movement that trains this muscle, with the weekly total as you change it.`));
+  }
+  if(!rows.length) return "";
+  return `<div class="vf-pick-k">What would you like to do?</div>
+    <div class="spec-opts" style="margin-top:8px">${rows.join("")}</div>`;
+}
+
+/* THE SCREEN WHERE SOMEBODY SETS IT THEMSELVES.
+
+   Every movement that trains this muscle, each with its own stepper, and the weekly total
+   for the muscle recomputed as you go — against its own floor and ceiling, so the effect
+   of a change is visible before it is committed rather than after. Nothing is written
+   until Apply: this is a sketch pad, and Cancel costs nothing.
+
+   A movement taken to zero is removed on apply, which is the one thing the one-tap
+   buttons cannot do and the case they explicitly hand over ("every movement is already
+   at its minimum, so the sets have to come off by dropping one"). */
+let VOL_ADJ = null;
+function openVolAdjust(g){
+  const list = volEntriesFor(g);
+  if(!list.length) return;
+  VOL_ADJ = {g, want: {}};
+  list.forEach(c=>{ VOL_ADJ.want[c.wid + "|" + c.ei] = c.sets; });
+  renderVolAdjust();
+}
+function volAdjTotals(){
+  const a = VOL_ADJ;
+  let q;
+  try{ q = planQuality(S.program, currentSplit(), {gear: (S.setup || {}).gear}); }catch(e){ return null; }
+  const x = (q.volume || []).find(v=> v.g === a.g);
+  if(!x) return null;
+  /* The muscle's week as it WOULD be: every other movement untouched, these at the
+     numbers on screen. */
+  let v = 0;
+  DAYS.forEach(wid=> (S.program[wid] || []).forEach((e, ei)=>{
+    const f = muscleFrac(e.name, a.g);
+    if(f <= 0) return;
+    const k = wid + "|" + ei;
+    const n = a.want[k] == null ? (parseInt(e.sets, 10) || 0) : a.want[k];
+    v += f * n;
+  }));
+  const state = v + 0.05 < x.mev ? "under" : v > x.mrv + 0.05 ? "over" : "ok";
+  return {x, v, state, was: x.v};
+}
+function renderVolAdjust(){
+  const a = VOL_ADJ;
+  if(!a) return;
+  const t = volAdjTotals();
+  if(!t) return;
+  const list = volEntriesFor(a.g);
+  const col = t.state === "under" ? "var(--bad)" : t.state === "over" ? "var(--warn)" : "var(--acc)";
+  const word = t.state === "under" ? "under the minimum"
+             : t.state === "over" ? "past the ceiling" : "in range";
+  const rows = list.map(c=>{
+    const k = c.wid + "|" + c.ei;
+    const n = a.want[k] == null ? c.sets : a.want[k];
+    const moved = n !== c.sets;
+    return `<div class="va-row${n === 0 ? " is-off" : ""}">
+      <span class="va-n"><b>${esc(c.e.name)}</b>
+        <i>${esc(widName(c.wid))} \u00b7 ${Math.round(c.f * 100)}% of each set${
+          n === 0 ? " \u00b7 will be removed" : ""}</i></span>
+      <span class="va-step">
+        <button type="button" class="va-b" data-vadj="${esc(k)}" data-vdir="-1"
+          aria-label="One fewer set">\u2212</button>
+        <span class="va-v num${moved ? " is-moved" : ""}">${n}</span>
+        <button type="button" class="va-b" data-vadj="${esc(k)}" data-vdir="1"
+          aria-label="One more set">+</button>
+      </span>
+    </div>`;
+  }).join("");
+  showModal(`<h3>${esc(t.x.name)}</h3>
+    <div class="va-tot">
+      <span class="va-tot-v num" style="color:${col}">${r1(t.v)}</span>
+      <span class="va-tot-k">sets a week \u2014 ${esc(word)}<br>
+        <i>${r1(t.x.mev)} minimum, ${r1(t.x.mrv)} ceiling${
+          Math.abs(t.v - t.was) > 0.05 ? ", was " + r1(t.was) : ""}</i></span>
+    </div>
+    <div class="va-list">${rows}</div>
+    <div class="va-note">Nothing is saved until you apply it. A movement taken to zero is
+      removed from the day.</div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn" id="vaApply" style="flex:1">Apply</button></div>
+    <div class="btn-row"><button class="btn ghost small" id="vaBack" style="flex:1">Back</button></div>`);
+  const m = $("#modal");
+  if(!m) return;
+  m.querySelectorAll("[data-vadj]").forEach(b=> b.onclick = ()=>{
+    const k = b.dataset.vadj, dir = parseInt(b.dataset.vdir, 10) || 0;
+    const cur = a.want[k] == null ? 0 : a.want[k];
+    a.want[k] = Math.max(0, Math.min(MAX_SETS_PER_EXERCISE_GEN, cur + dir));
+    renderVolAdjust();
+  });
+  const back = m.querySelector("#vaBack");
+  if(back) back.onclick = ()=>{ const gg = a.g; VOL_ADJ = null; openVolFix(gg); };
+  const ap = m.querySelector("#vaApply");
+  if(ap) ap.onclick = ()=>{
+    const changes = [];
+    /* Highest index first, so splicing one out cannot shift the index of another. */
+    const edits = Object.keys(a.want).map(k=>{
+      const [wid, ei] = k.split("|");
+      return {wid, ei: parseInt(ei, 10), n: a.want[k]};
+    }).sort((p2, q2)=> q2.ei - p2.ei);
+    edits.forEach(ed=>{
+      const e = (S.program[ed.wid] || [])[ed.ei];
+      if(!e) return;
+      const was = parseInt(e.sets, 10) || 0;
+      if(ed.n === was) return;
+      if(ed.n === 0){
+        /* A pair that loses a member stops being a pair. */
+        const list2 = S.program[ed.wid] || [];
+        const bfr = list2[ed.ei - 1], aft = list2[ed.ei + 1];
+        if(e.supersetEnd && bfr && bfr.superset && !bfr.supersetEnd) delete bfr.superset;
+        else if(e.superset && !e.supersetEnd && aft && aft.supersetEnd){
+          delete aft.superset; delete aft.supersetEnd;
+        }
+        list2.splice(ed.ei, 1);
+        changes.push(e.name + " removed from " + widName(ed.wid));
+        return;
+      }
+      e.sets = ed.n;
+      if(Array.isArray(e.rpes)){
+        if(e.rpes.length > ed.n) e.rpes = e.rpes.slice(0, ed.n);
+        while(e.rpes.length < ed.n) e.rpes.push(e.rpes[e.rpes.length - 1]);
+      }
+      changes.push(e.name + " " + was + " \u2192 " + ed.n + " sets on " + widName(ed.wid));
+    });
+    if(!changes.length){ VOL_ADJ = null; hideModal(); return; }
+    logPlanChange("sets", null, GROUPS[a.g].name, changes,
+      {note: "Set by you from the plan check."});
+    VOL_ADJ = null;
+    save(); hideModal(); render();
+    toast(changes.length + " change" + (changes.length === 1 ? "" : "s") + " applied");
+  };
+}
 function openVolFix(g){
   let q;
   try{ q = planQuality(S.program, currentSplit(), {gear: (S.setup || {}).gear}); }catch(e){ return; }
@@ -28784,6 +29008,10 @@ function openVolFix(g){
   const fatNow = fat ? fat.sets : 0;
   const fatFloor = fat ? Math.max(1, buildMinSets(fat.e)) : 0;
   const canCut = fat ? Math.max(0, Math.min(cutBy, fatNow - fatFloor)) : 0;
+  /* The same honesty on the way up. One movement cannot go past the five-set cap, so a
+     muscle six sets short of its floor does not get a button offering six. */
+  const bestNow = best ? best.sets : 0;
+  const canAdd = best ? Math.max(0, Math.min(toFloor, MAX_SETS_PER_EXERCISE_GEN - bestNow)) : 0;
 
   const say = x.state === "under"
     ? `<b>Add ${toFloor} set${toFloor === 1 ? "" : "s"} a week</b> to clear the minimum of `
@@ -28827,37 +29055,75 @@ function openVolFix(g){
       overPart > 0 ? `<span style="color:var(--warn)">${r1(x.v)} NOW</span>` : ""}</div>
     <div class="sub" style="margin:12px 0 0;text-transform:none;letter-spacing:0">
       Your plan gives ${esc(x.name.toLowerCase())} <b>${r1(x.v)} sets a week</b>. ${say}</div>
-    ${x.state === "over" && fat ? `
-      ${canCut > 0 ? `<div class="btn-row" style="margin-top:14px">
-        <button class="btn" id="vfCut" style="flex:1">Take ${canCut} set${
-          canCut === 1 ? "" : "s"} off ${esc(fat.e.name)}</button></div>
-      <div class="sub" style="margin:6px 0 0;font-size:12px;color:var(--faint);text-transform:none;letter-spacing:0">
-        On ${esc(widName(fat.wid))}, which is carrying the most of it.${
-          canCut < cutBy ? " That is as much as one movement can give up \u2014 take the rest off another."
-                         : ""}</div>`
-      : `<div class="sub" style="margin:12px 0 0;font-size:12px;color:var(--faint);text-transform:none;letter-spacing:0">
-          Every movement doing this muscle is already at its own minimum, so the sets have
-          to come off by dropping one of them rather than by trimming.</div>`}` : ""}
-    ${x.state === "under" && best ? `
-      <div class="btn-row" style="margin-top:14px">
-        <button class="btn" id="vfSet" style="flex:1">Add a set to ${esc(best.e.name)}</button></div>
-      <div class="sub" style="margin:6px 0 0;font-size:12px;color:var(--faint);text-transform:none;letter-spacing:0">
-        On ${esc(widName(best.wid))}, where it already does the most for this muscle.</div>` : ""}
-    ${x.state === "under" ? `<div class="btn-row" style="margin-top:${best ? 8 : 14}px">
-        <button class="btn${best ? " ghost" : ""}" id="vfEx" style="flex:1">${
-          best ? "Add an exercise instead" : "Add an exercise for this"}</button></div>` : ""}
+    ${volChoicesHTML(x, g, best, fat, canCut, canAdd, toFloor, addBy)}
     ${science}
     <div class="btn-row" style="margin-top:10px">
       <button class="btn ghost small" id="closeModal" style="flex:1">Done</button></div>`);
   const m = $("#modal");
   if(!m) return;
-  const bCut = m.querySelector("#vfCut");
-  if(bCut) bCut.onclick = ()=>{
+  /* ONE HANDLER FOR THE CHOICE LIST. Each option is a decision somebody made, so each
+     one does exactly what its own label said it would and nothing else. */
+  m.querySelectorAll("[data-volpick]").forEach(b=> b.onclick = ()=>{
+    const pick = b.dataset.volpick;
+    if(pick === "leave"){ hideModal(); return; }
+    if(pick === "pick"){ hideModal(); openVolAdjust(g); return; }
+    if(pick === "ex"){ hideModal(); volAddExercise(g); return; }
+    if(pick === "spread"){ volSpread(g, x.state); return; }
+    if(pick === "cut"){ volCutOne(); return; }
+    if(pick === "add"){ volAddOne(); return; }
+  });
+  /* A SET AT A TIME, OFF (OR ONTO) WHATEVER HAS MOST TO SPARE, until the muscle is back
+     inside its range — the same rule the builder's own fit pass uses, applied here
+     because somebody asked for it rather than because the clock forced it. */
+  const volSpread = (gg, state)=>{
+    let moved = 0, guard = 0;
+    const changes = [];
+    while(guard++ < 60){
+      let q2;
+      try{ q2 = planQuality(S.program, currentSplit(), {gear: (S.setup || {}).gear}); }catch(e){ break; }
+      const v2 = (q2.volume || []).find(z=> z.g === gg);
+      if(!v2) break;
+      if(state === "over" && v2.state !== "over") break;
+      if(state === "under" && v2.v + 0.05 >= v2.mev) break;
+      const cands = volEntriesFor(gg).map(c=> ({c, n: parseInt(c.e.sets, 10) || 0}));
+      let hit = null;
+      if(state === "over"){
+        hit = cands.filter(z=> z.n > Math.max(1, buildMinSets(z.c.e)))
+                   .sort((p2, q3)=> q3.n - p2.n)[0]
+           || cands.filter(z=> z.n > 1).sort((p2, q3)=> q3.n - p2.n)[0];
+        if(!hit) break;
+        hit.c.e.sets = hit.n - 1;
+        if(Array.isArray(hit.c.e.rpes)) hit.c.e.rpes = hit.c.e.rpes.slice(0, hit.n - 1);
+        changes.push(hit.c.e.name + " " + hit.n + " \u2192 " + (hit.n - 1));
+      } else {
+        hit = cands.filter(z=> z.n < MAX_SETS_PER_EXERCISE_GEN)
+                   .sort((p2, q3)=> p2.n - q3.n)[0];
+        if(!hit) break;
+        hit.c.e.sets = hit.n + 1;
+        if(Array.isArray(hit.c.e.rpes) && hit.c.e.rpes.length === hit.n)
+          hit.c.e.rpes.push(hit.c.e.rpes[hit.c.e.rpes.length - 1]);
+        changes.push(hit.c.e.name + " " + hit.n + " \u2192 " + (hit.n + 1));
+      }
+      moved++;
+    }
+    if(!moved){ toast("Nothing left to move \u2014 set them yourself instead", "warn"); return; }
+    logPlanChange("sets", null, GROUPS[gg].name, changes,
+      {note: "Spread across every movement from the plan check."});
+    save(); hideModal(); render();
+    toast(moved + " set" + (moved === 1 ? "" : "s") + " moved across "
+      + GROUPS[gg].name.toLowerCase());
+  };
+  const volAddExercise = gg=>{
+    const counts = DAYS.map(wid=> ({wid,
+      n: (S.program[wid] || []).reduce((t, e)=> t + muscleFrac(e.name, gg) * (parseInt(e.sets,10)||0), 0)}));
+    counts.sort((a2, b2)=> a2.n - b2.n);
+    const wid = (counts[0] && counts[0].wid) || DAYS[0];
+    if(wid) openAddExercise(wid);
+  };
+  const volCutOne = ()=>{
     const e = (S.program[fat.wid] || [])[fat.ei];
     if(!e) return;
     const was = parseInt(e.sets, 10) || 0;
-    /* Never below one set, and never below what this exercise is for: taking a movement
-       to nothing is removing it, which is a different decision and not this button's. */
     const floor = Math.max(1, buildMinSets(e));
     const now = Math.max(floor, was - canCut);
     if(now === was){
@@ -28871,29 +29137,24 @@ function openVolFix(g){
     save(); hideModal(); render();
     toast((was - now) + " set" + (was - now === 1 ? "" : "s") + " off " + e.name);
   };
-  const bSet = m.querySelector("#vfSet");
-  if(bSet) bSet.onclick = ()=>{
+  const volAddOne = ()=>{
     const e = (S.program[best.wid] || [])[best.ei];
     if(!e) return;
     const was = parseInt(e.sets, 10) || 0;
-    e.sets = was + 1;
-    if(Array.isArray(e.rpes) && e.rpes.length === was) e.rpes.push(e.rpes[e.rpes.length - 1]);
-    logPlanChange("sets", best.wid, e.name,
-      ["Sets " + was + " \u2192 " + (was + 1)],
+    const now = Math.min(MAX_SETS_PER_EXERCISE_GEN, was + canAdd);
+    if(now === was){
+      toast(e.name + " is already at " + MAX_SETS_PER_EXERCISE_GEN
+        + " sets \u2014 add a movement instead", "warn");
+      return;
+    }
+    e.sets = now;
+    if(Array.isArray(e.rpes)){
+      while(e.rpes.length < now) e.rpes.push(e.rpes[e.rpes.length - 1]);
+    }
+    logPlanChange("sets", best.wid, e.name, ["Sets " + was + " \u2192 " + now],
       {note: "Added from the plan check, for " + GROUPS[g].name.toLowerCase() + "."});
     save(); hideModal(); render();
-    toast("A set added to " + e.name);
-  };
-  const bEx = m.querySelector("#vfEx");
-  if(bEx) bEx.onclick = ()=>{
-    hideModal();
-    /* Offered on the day that trains this muscle least, because that is where another
-       movement for it does the most good and unbalances the week the least. */
-    const counts = DAYS.map(wid=> ({wid,
-      n: (S.program[wid] || []).reduce((t, e)=> t + muscleFrac(e.name, g) * (parseInt(e.sets,10)||0), 0)}));
-    counts.sort((a, b)=> a.n - b.n);
-    const wid = (counts[0] && counts[0].wid) || DAYS[0];
-    if(wid) openAddExercise(wid);
+    toast((now - was) + " set" + (now - was === 1 ? "" : "s") + " added to " + e.name);
   };
 }
 /* ONE ROW PER MUSCLE, in the order the body is laid out rather than worst-first: a list
