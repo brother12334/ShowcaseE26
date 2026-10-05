@@ -703,6 +703,14 @@ Things where this codebase and the science reference disagree, or where the refe
 for something the library cannot currently supply. Recorded rather than guessed at, as the
 reference requires.
 
+**`GAIN_RATE_PCT_WK` has nowhere to go.** Part 3 lists it (beginner 0.25–0.5% of
+bodyweight a week, intermediate 0.1–0.25, advanced ≤ 0.1) as guidance. The app tracks
+bodyweight and charts it, but has no screen that compares the trend against a target rate,
+and inventing one to hold a constant is the wrong order of work. *Proposed resolution:*
+implement it when there is a bodyweight-trend card to put it on, where it would read as
+"you are gaining about 0.4% a week, which is the top of the useful range for your training
+age" rather than as a number on its own.
+
 **The myo-rep step in the time-box never fires in any measured combination.** M5 puts
 myo-reps second, after supersets, and across all 360 builder combinations the superset pass
 resolves the budget before the myo step is reached — because anything left unpaired at
@@ -1448,6 +1456,97 @@ all three remain reachable. Where a **priority** muscle's target is beyond what 
 can reach, the screen says so in its own line: the time is the thing to change, not the
 priority.
 
+## The science reference — conformance pass
+
+The reference was shelved for the duration of the phases at the owner's instruction and
+un-shelved for this pass. What follows is the whole of it checked against the code, with
+`science.mjs` holding the checks.
+
+### Part 3's constants, by value rather than by name
+
+The reference asks for each to be a named constant with a comment. Every value matches; a
+number of them live under the name this codebase already used, which is left alone because
+renaming fifteen constants across a 55,000-line file is churn with no behavioural
+difference. The mapping, so the reference can be read against the code:
+
+| Reference | In the code | Value |
+|---|---|---|
+| `EFFORT_CREDIT` | `EFFORT_CREDIT` | RIR ≤3 → 1.0, 4 → 0.5, 5 → 0.25, ≥6 → 0 |
+| `WARMUP_LOAD_PCT` | same | 0.60 |
+| `SESSION_SETS_INFO` / `_MAX` | same | 6 / 10 |
+| `MAX_SETS_PER_EXERCISE_GEN` | same | 5 |
+| `MAX_WORKING_SETS_PER_SESSION` | same | 24 |
+| `WEEKLY_SETS_FLAT` | same | 31 |
+| `FREQ_MIN_DAY_SETS` | same | 1.0 |
+| `RPE_TOL` | same | 0.5 |
+| `COMPOUND_MAX_RPE` / `HINGE_SQUAT_MAX_RPE` | `effortCeiling()`, reason `compound` | 9 / 9 |
+| `BEGINNER_COMPOUND_MAX_RPE` / `_ISO_` / `_WEEKS` | `effortCeiling()` + `BEGINNER_COMPOUND_WEEKS` | 8 / 9 / 6 |
+| `JUMP_MAX_ISO` / `_COMPOUND` | `JUMP_CAP_ISO` / `JUMP_CAP_COMPOUND` | 0.10 / 0.075 |
+| `REP_EXT_STEP_*` / `REP_EXT_MAX_*` | same | 3 / 5 → 20 / 30 |
+| `RIR_CAP_FOR_E1RM` | the cap inside `repsToFailure()` | 4 |
+| `PERF_REPS_WINDOW` | `E1RM_REPS_MIN` / `E1RM_REPS_MAX` | 3–30 |
+| `STALL_EXPOSURES` | the `rec.n < 3` test in `stallVerdict()` | 3 |
+| `MESO_ACCUM_WEEKS` | `MESO_SHAPE` | 6 / 4 / 4 |
+| `MESO_RIR` | `MESO_RIR` | [3, 2, 1.5, 1, 1] |
+| `ADD_SETS_PER_WEEK` | `ADD_SETS_PER_WEEK` | 1 |
+| `DELOAD_SET_FRACTION` / `DELOAD_RPE_CAP` | same | 0.5 / 7 |
+| `DELOAD_EVERY_TRAINING_WEEKS` | `DELOAD_EVERY_WEEKS`, counted in training weeks | 6 |
+| `LAYOFF_DELOAD_DAYS` | same | 7 |
+| `TM_DEFAULT`, `TM_STEP_UPPER` / `_LOWER` | same | 0.90, 5 / 10 lb |
+| `TM_RESET` | `TM_FAIL_FACTOR` | 0.90 |
+| `PROTEIN_G_PER_KG` low / high | `SPEC_PROTEIN_G_PER_KG` / `_HI` | 1.6 / 2.2 |
+| `STREAK_SET_SHARE` | same | 0.75 |
+| `GRACE_WEEK_EVERY` / `GRACE_MAX` | `STREAK_GRACE_EVERY` / `STREAK_GRACE_MAX` | 8 / 2 |
+| `FIRST_SESSION_MAX_RPE` | `effortCeiling()`, reason `first` | 7 |
+
+`GAIN_RATE_PCT_WK` is guidance the app has nowhere to put yet — it would belong on a
+bodyweight-trend card, which does not exist. Recorded as an open question rather than
+implemented into a screen nobody asked for.
+
+### Two rules the pass found genuinely missing
+
+**2.12.5 / 2.13 — the mesocycle RIR ramp.** The reference makes `rirRamp` the default
+model for builder plans after the beginner weeks, and the app had the block and the deload
+at the end of it with nothing in between: every week of a four-week accumulation asked for
+the same effort, which is the same week four times rather than a mesocycle. Now projected
+through `prescriptionFor()` like everything else in that section — `MESO_RIR` gives the
+compound ramp, an isolation runs half a point closer to failure, the plan's own
+within-exercise ladder is shifted as a whole rather than flattened, and every target still
+passes through `effortCeiling()` so M1, M2 and H7 remain non-negotiable. Off for a
+beginner's block, off for an imported plan, off inside somebody's first six weeks.
+
+| Week of the block | RIR | Compound's last set | Isolation's last set |
+|---|---|---|---|
+| 1 | 3 | RPE 7 | 7.5 |
+| 2 | 2 | 8 | 8.5 |
+| 3 | 1.5 | 8.5 | 9 |
+| 4, 5 | 1 | 9 | 9.5 |
+| Deload | — | the deload's own cap, RPE 7 | 7 |
+
+**2.13 — the week-boundary volume step.** "+1 set per week to a muscle only if its latest
+verdict is `up`, or `hold` with `probe`." The app had the decision engine and applied it at
+*cycle* boundaries from the Body tab; the week boundary inside a block is the thing that
+makes an accumulation block accumulate. `mesoVolumeStep()` runs once per week from
+`recomputeCycle`, respects `min(MAV, 0.9·MRV)` for beginners and `0.9·MRV` otherwise, the
+per-session band and the per-movement cap, and is stamped so it cannot run twice.
+
+It is the one thing in the periodization section that **writes** rather than projects —
+volume added for week three has to still be there in week four — so it is gated on the
+same preference that governs the app writing loads into a plan, logged with an undo, and
+silent on "ask me" or "I'll manage", where the Body tab's own volume suggestions already
+carry the same decision to somebody who wants to apply it by hand.
+
+### Part 7 — the things the app must never do
+
+Each one checked rather than assumed (`science.mjs` §4): no set of a heavy compound is
+ever asked for RPE 10 and a plan that asks for it is capped at import; a drop set counts as
+one set; the performance index is uncapped and never labelled a 1RM; no load rises during
+a deload; and nothing in the streak shames anybody. The remainder — equipment and protected
+areas, warm-ups not counted as working sets, no rewrite without a stamp and an
+explanation, soreness not treated as a signal of growth, no medical or supplement claims —
+are covered by `phase2.mjs`, `phase4.mjs`, `soreask.mjs`, `limits.mjs` and the audit work
+that preceded the phases.
+
 ## Phase log
 
 | Phase | Contents | State |
@@ -1462,3 +1561,4 @@ priority.
 | 8 | Streaks + coach view | done — `streak.mjs`, `share.mjs`, `tests/share-worker.mjs` |
 | 9 | Re-measurement, then bump `APP_VERSION` and `sw.js` `VERSION` | done — "The re-measurement" above; 44.0 / 37.0 |
 | — | The owner's decision: the time budget wins | done — `budget.mjs`, 45.0 / 38.0 |
+| — | Science reference conformance pass | done — `science.mjs`, 46.0 / 39.0 |

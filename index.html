@@ -6279,7 +6279,7 @@ body.build-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "45.0";
+const APP_VERSION = "46.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -44065,6 +44065,9 @@ function recomputeCycle(announce){
   try{ advanceProgramWeek(); }  catch(e){}
   try{ syncPlannedDeload(); }   catch(e){}
   try{ syncWaveState(); }       catch(e){}
+  /* 2.13 — the block's own weekly set, for a plan the builder wrote. After the week has
+     advanced, so it is the new week that gets the step. */
+  try{ mesoVolumeStep(); }      catch(e){}
   // the cycle's checkmarks are always derived from actual logged sessions since cycleStart
   const done = [];
   S.sessions
@@ -49665,6 +49668,98 @@ function advanceProgramWeek(){
   return true;
 }
 
+/* ---------- 2b. VOLUME WITHIN THE BLOCK (ADD_SETS_PER_WEEK) ----------
+
+   Reference 2.13: week one starts at the target, and at each week boundary a muscle gets
+   +1 set a week — but ONLY if its latest verdict says it is still responding (`up`, or
+   `hold` while probing). Never past min(MAV, 0.9 × MRV) for a beginner or 0.9 × MRV for
+   anybody else. A muscle that is overreached is cut by the amount the app already uses.
+
+   The app had the decision engine (decideForMuscle, through cycleReview) and applied it at
+   CYCLE boundaries from the Body tab. What it did not have was the week boundary inside a
+   block, which is the thing that makes an accumulation block accumulate.
+
+   THIS ONE WRITES. Everything else in this section is a projection, and this cannot be:
+   volume added for week three is volume the plan carries into week four, and a block whose
+   sets reset every time you crossed a week boundary would accumulate nothing. So it is
+   gated on the same preference that governs the app writing loads into your plan — the
+   person has already answered the question "may Element 26 change my programme without
+   asking" — it is logged with an undo like every other plan change, and it happens once
+   per week at most, stamped so a re-render cannot double it.
+
+   On "ask" or "I'll manage" nothing is written here. The Body tab's own volume
+   suggestions already carry the same decision to somebody who wants to apply it by hand,
+   and a second place to press the same button is not an improvement. */
+const ADD_SETS_PER_WEEK = 1;
+function mesoVolumeCeiling(g){
+  try{
+    const A = bodyAnalysis();
+    const L = (A && A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g];
+    if(!L) return Infinity;
+    const beginner = isBeginnerNow();
+    return beginner ? Math.min(L.mav, L.mrv * 0.9) : L.mrv * 0.9;
+  }catch(e){ return Infinity; }
+}
+/* Which muscles the block says may take another set this week. */
+function mesoVolumeDue(){
+  if(!mesoRampOn()) return [];
+  let rev = null;
+  try{ rev = cycleReview(); }catch(e){ return []; }
+  if(!rev || !rev.list) return [];
+  /* A deload week adds nothing, and neither does a week in which the app has decided the
+     whole body needs an easier one. */
+  if(rev.deload || deloadActive()) return [];
+  const weekly = programWeeklySets(S.program, DAYS);
+  return rev.list.filter(x=> x.k === "up" || (x.k === "hold" && x.probe))
+    .filter(x=> (weekly[x.g] || 0) + ADD_SETS_PER_WEEK <= mesoVolumeCeiling(x.g) + 0.05)
+    .map(x=> ({g: x.g, name: x.name, k: x.k, why: x.why || ""}));
+}
+function mesoVolumeStep(){
+  const mz = mesoWeekNow();
+  if(!mz || mz.deload) return 0;
+  const stamp = "w" + programWeek();
+  if(S.meso && S.meso.steppedAt === stamp) return 0;      // once a week, whatever happens
+  if(trainPrefs().progression !== "auto"){
+    if(S.meso) S.meso.steppedAt = stamp;
+    return 0;
+  }
+  const due = mesoVolumeDue();
+  if(S.meso) S.meso.steppedAt = stamp;
+  if(!due.length) return 0;
+  let n = 0;
+  const undo = [];
+  const lines = [];
+  due.forEach(x=>{
+    /* The day with the least of that muscle, so a weekly step spreads rather than
+       stacking — and never past the per-session band or the per-movement cap. */
+    const days = DAYS.slice().sort((a2, b2)=>
+      buildDaySets(S.program[a2], x.g) - buildDaySets(S.program[b2], x.g));
+    for(const wid of days){
+      if(buildDaySets(S.program[wid], x.g) + 1 > SESSION_SETS_INFO + 0.5) continue;
+      const cands = buildCandidates(S.program[wid] || [], x.g);
+      const hit = cands.find(c=> (parseInt(c.e.sets, 10) || 0) < MAX_SETS_PER_EXERCISE_GEN);
+      if(!hit) continue;
+      undo.push(planSnapOne(wid, hit.e));
+      hit.e.sets = (parseInt(hit.e.sets, 10) || 0) + ADD_SETS_PER_WEEK;
+      if(Array.isArray(hit.e.rpes)) hit.e.rpes.push(hit.e.rpes[hit.e.rpes.length - 1]);
+      lines.push(hit.e.name + " +" + ADD_SETS_PER_WEEK + " set for the "
+        + x.name.toLowerCase() + ", on " + dayName(wid));
+      n++;
+      break;
+    }
+  });
+  if(n){
+    logPlanChange("programme", null, "Week " + mz.week + " of the block", lines,
+      {note: "Your block adds a set a week to whatever is still responding. "
+           + due.map(x=> x.name).join(", ") + " "
+           + (due.length === 1 ? "was" : "were") + " still going up, so "
+           + (n === 1 ? "one movement" : n + " movements") + " carry another set from here.",
+       undo});
+    save(); queueSync();
+  }
+  return n;
+}
+
 /* ---------- 3. TRAINING WEEKS, COUNTED RATHER THAN TIMED ----------
 
    M3. The app's own deload clock said "six weeks since the block started", measured on
@@ -49912,6 +50007,57 @@ function applyWeekRow(entry, row, wk){
   return out;
 }
 
+/* ---------- 7b. THE MESOCYCLE'S OWN RIR RAMP (model `rirRamp`) ----------
+
+   Reference 2.12.5 and 2.13: for a plan the builder wrote, after the beginner weeks, the
+   default progression model is a RIR ramp across the block — week one leaves three reps
+   in reserve, the last week leaves one, and the loads progress by the double-progression
+   rules inside that. The app had the block (MESO_SHAPE) and the deload at the end of it,
+   and nothing at all between them: every week of a four-week accumulation asked for the
+   same effort, which is not a mesocycle, it is the same week four times.
+
+   MESO_RIR is the published ramp for compounds. An isolation runs half a point closer to
+   failure at each step, because the reference's table gives isolations the harder column
+   and because an isolation is where failure belongs.
+
+   PROJECTED, NOT WRITTEN. The plan keeps the effort targets it was built with; this moves
+   them for the week being performed, so ending a block or dropping the periodization
+   restores the plan exactly. The shape of the plan's own within-exercise ramp is kept —
+   whatever ladder it wrote across its sets is shifted as a whole, so a [7,8,8,9] stays a
+   ramp and only its height changes. And every target still passes through
+   effortCeiling() at read time, so the safety caps (M1, M2, H7) are not negotiable by
+   anything here. */
+const MESO_RIR = [3, 2, 1.5, 1, 1];
+const MESO_RIR_ISO_DELTA = 0.5;      // an isolation runs this much closer to failure
+function mesoRirFor(weekInBlock){
+  const i = Math.max(1, Math.round(weekInBlock || 1)) - 1;
+  return MESO_RIR[Math.min(i, MESO_RIR.length - 1)];
+}
+/* The week's effort target for one movement, as an RPE. Null when no ramp applies. */
+function mesoRpeTarget(entry, mz){
+  if(!entry || !mz || mz.deload) return null;
+  const rir = mesoRirFor(mz.week);
+  const iso = !isCompound(entry.name);
+  const rpe = 10 - rir + (iso ? MESO_RIR_ISO_DELTA : 0);
+  return Math.max(5, Math.min(10, Math.round(rpe * 2) / 2));
+}
+function applyMesoRamp(entry, mz){
+  const target = mesoRpeTarget(entry, mz);
+  if(target == null) return entry;
+  const list = Array.isArray(entry.rpes) && entry.rpes.length ? entry.rpes.slice() : null;
+  if(!list) return entry;
+  const last = parseFloat(list[list.length - 1]);
+  if(!isFinite(last)) return entry;
+  const delta = target - last;
+  if(Math.abs(delta) < 0.25) return entry;          // already where the week wants it
+  const rpes = list.map(v=>{
+    const n = parseFloat(v);
+    return isFinite(n) ? Math.max(5, Math.min(10, Math.round((n + delta) * 2) / 2)) : v;
+  });
+  return Object.assign({}, entry, {rpes, rpe: rpeSummary(rpes),
+    projected: entry.projected || "meso", mesoWeek: mz.week, mesoRir: mesoRirFor(mz.week)});
+}
+
 /* ---------- 8. THE ONE ENTRY POINT ----------
 
    Everything that builds a session goes through resolvedProgram(), which goes through
@@ -49924,7 +50070,25 @@ function prescriptionFor(entry, week){
   const row = weekRowFor(entry, wk);
   if(row) return applyWeekRow(entry, row, wk);
   if(waveFor(entry)) return apply531(entry, wk);
+  /* And failing both, the block's own ramp — for a plan the builder wrote, with a
+     mesocycle, for somebody past the beginner weeks. A beginner's block has no scheduled
+     deload and no ramp either: the first months are about learning the movement at a
+     sensible effort, and a ladder of RIR targets on top of that is precision nobody can
+     yet feel the difference between (2.12.4). */
+  const mz = mesoWeekNow();
+  if(mz && !mz.deload && mesoRampOn()) return applyMesoRamp(entry, mz);
   return entry;
+}
+/* Does the block ramp apply at all? A built plan, a block with more than one accumulation
+   week in it, and a lifter past the beginner weeks. */
+function mesoRampOn(){
+  if(!S.meso || S.importMeta) return false;
+  const sh = mesoShape();
+  if(!(sh.accum > 1)) return false;
+  if(sh.level === "beginner") return false;
+  try{ if(isBeginnerNow() && trainingAgeWeeks() < BEGINNER_COMPOUND_WEEKS) return false; }
+  catch(e){}
+  return true;
 }
 function weekView(list, week){
   const wk = (week > 0) ? Math.round(week) : programWeek();
