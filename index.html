@@ -6270,7 +6270,7 @@ body.build-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "43.0";
+const APP_VERSION = "44.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10056,7 +10056,40 @@ function buildAnswers(raw){
    the log where there is no log yet. */
 function buildTargets(a){
   const out = {};
-  const A = (()=>{ try{ return bodyAnalysis(); }catch(e){ return null; } })();
+  /* THE BANDS COME FROM THE ANSWERS, NOT FROM WHOEVER THE PROFILE SAYS YOU ARE.
+
+     Found by the phase 9 re-measurement, which is exactly what a re-measurement is for:
+     every one of the 360 combinations came out with identical bands. adjustedLandmarks()
+     scales by experience() and trainingGoal(), both of which read S — so a builder
+     answer of "advanced, training to get leaner" was built against the bands of whatever
+     profile happened to be in the app at the time, usually a fresh beginner one. The
+     level answer reached the set counts, the ramp-in and the effort ceilings, and never
+     reached the one number it matters most to.
+
+     The profile's own CALIBRATION must still be honoured — that is what the app has
+     learned about this person from their own cycles, and it is better information than
+     any answer. So the answers are applied where the answers belong: the level and the
+     goal are put in place for the duration of this one call and taken back out in a
+     finally, so adjustedLandmarks() computes exactly what it would compute for a person
+     who IS that level and HAS that goal, calibration and all.
+
+     Restored in a finally rather than at the end of the happy path: buildPlan() is
+     documented as writing no state, and a throw anywhere in the landmark code must not
+     be able to leave somebody's profile saying they are advanced. */
+  const wasExp = S.expManual;
+  const wasGoal = S.setup && S.setup.goal;
+  let A = null;
+  try{
+    if(a.level && EXP_LEVELS.indexOf(a.level) > -1) S.expManual = a.level;
+    if(a.goal && GOAL_SCALE[a.goal]){
+      if(!S.setup || typeof S.setup !== "object") S.setup = {name:"Me"};
+      S.setup.goal = a.goal;
+    }
+    try{ A = bodyAnalysis(); }catch(e){ A = null; }
+  } finally {
+    if(wasExp === undefined) delete S.expManual; else S.expManual = wasExp;
+    if(S.setup){ if(wasGoal === undefined) delete S.setup.goal; else S.setup.goal = wasGoal; }
+  }
   GKEYS.forEach(g=>{
     const G = GROUPS[g];
     let L;
@@ -10091,6 +10124,28 @@ function buildCandidates(list, g){
 }
 function buildDaySets(list, g){
   return (list || []).reduce((t, e)=> t + muscleFrac(e.name, g) * (parseInt(e.sets,10) || 0), 0);
+}
+/* DOES THIS DAY TRAIN THIS MUSCLE, as the frequency rule means it?
+
+   Not "does the day total a set of it": 1.4 sets of abs arriving as five lots of 0.3 from
+   squats and rows is incidental credit, not an exposure, and a day like that is why the
+   frequency rule exists. One movement has to give the muscle a real set of its own.
+
+   Found by the phase 9 re-measurement: the CHECK asked this question and the REPAIR asked
+   the other one, so three combinations failed with the repair declining to act — the day
+   totalled 1.4 so it did not look bare, and no single movement on it reached one set so
+   the check said the muscle was trained once a week. Both were reading their own rule
+   correctly. Now there is one rule. */
+function buildTrainsDay(list, g){
+  return (list || []).some(e=> muscleFrac(e.name, g) * (parseInt(e.sets,10) || 0) >= FREQ_MIN_DAY_SETS);
+}
+/* And nothing is ever added to a day that already has it. The repairs each push a
+   movement onto a day, and nothing stopped two of them choosing the same one — the
+   re-measurement found days carrying two Hanging Knee Raises and two Incline Dumbbell
+   Curls, which is not more volume, it is the same exercise twice with the sets split. */
+function buildHasMove(list, name){
+  const k = canonEx(name);
+  return (list || []).some(e=> canonEx(e.name) === k);
 }
 /* THE TUNING PASS. Volume is moved one set at a time, which is slow and is the only way
    to keep every other constraint true while it happens: a set added to a press is also a
@@ -10131,7 +10186,33 @@ function buildTune(program, dayIds, targets, a){
       for(const wid of days){
         if(buildDaySets(program[wid], g) + 1 > SESSION_SETS_INFO + 0.5) continue;
         const cands = buildCandidates(program[wid] || [], g);
-        const hit = cands.find(x=> (parseInt(x.e.sets,10) || 0) < MAX_SETS_PER_EXERCISE_GEN);
+        /* A SET IS NEVER ONLY ITS OWN MUSCLE'S SET, and until the phase 9 re-measurement
+           nothing here acted on that. The guard above asks "has THIS muscle room in this
+           session" and then adds a set to a movement that feeds four others — so a
+           bodyweight squat added for the quads carried the abs past the per-session hard
+           stop, and sets added all week carried them past their weekly ceiling. Both
+           produced quality-check failures on plans the builder had just written, which is
+           the builder marking its own homework wrong.
+
+           So the candidate itself is checked, in both directions, before it is taken:
+           nothing may breach SESSION_SETS_MAX in a session, and nothing may be pushed
+           past its own weekly ceiling. A muscle left under its aim because every way of
+           feeding it would break one of those is a plan that says so in its notes —
+           which is a fact about the week, not a fault. */
+        const weeklyNow = weekly;
+        const roomFor = e=>{
+          const day = program[wid] || [];
+          return GKEYS.every(g2=>{
+            const f2 = muscleFrac(e.name, g2);
+            if(f2 <= 0) return true;
+            const inDay = buildDaySets(day, g2) + f2;
+            if(inDay > SESSION_SETS_MAX + 0.05) return false;
+            if(targets[g2].priority || targets[g2].optional) return true;
+            return (weeklyNow[g2] || 0) + f2 <= targets[g2].top + 0.05;
+          });
+        };
+        const hit = cands.find(x=> (parseInt(x.e.sets,10) || 0) < MAX_SETS_PER_EXERCISE_GEN
+                                && roomFor(x.e));
         if(!hit) continue;
         hit.e.sets = (parseInt(hit.e.sets,10) || 0) + 1;
         if(Array.isArray(hit.e.rpes)) hit.e.rpes.push(hit.e.rpes[hit.e.rpes.length - 1]);
@@ -10153,6 +10234,7 @@ function buildTune(program, dayIds, targets, a){
         const wid = dayIds.slice().sort((x, y)=>
           buildDaySets(program[x], g) - buildDaySets(program[y], g))[0];
         if(buildDaySets(program[wid], g) + 1 > SESSION_SETS_INFO + 0.5) continue;
+        if(buildHasMove(program[wid], ex.name)) continue;
         program[wid].push(ex);
         notes.push(ex.name + " added for the " + GROUPS[g].name.toLowerCase()
           + ", which you asked to push.");
@@ -10175,8 +10257,10 @@ function buildTune(program, dayIds, targets, a){
         const ex = buildMovementFor(g, a.gear, a.protect);
         if(!ex) continue;
         /* onto the day with the least in it, so the fit pass has somewhere to work */
-        const wid = dayIds.slice().sort((x, y)=>
-          (program[x] || []).length - (program[y] || []).length)[0];
+        const wid = dayIds.slice()
+          .filter(w2=> !buildHasMove(program[w2], ex.name))
+          .sort((x, y)=> (program[x] || []).length - (program[y] || []).length)[0];
+        if(!wid) continue;
         program[wid].push(ex);
         notes.push(ex.name + " added for the " + GROUPS[g].name.toLowerCase()
           + ", which nothing else in the plan trains directly.");
@@ -10223,6 +10307,72 @@ function buildTune(program, dayIds, targets, a){
       if(moved) break;
     }
     if(!moved) break;
+  }
+  /* 2b. AND WHEN THE CEILING STILL CANNOT BE REACHED, THE PLAN HAS ONE MOVEMENT TOO MANY.
+
+        Found by the phase 9 re-measurement: eighteen combinations — six days, advanced,
+        every tier but bodyweight — came out with the chest at 16 to 17.4 sets a week
+        against a ceiling of 15.8. Not a bug in the trim above: push/pull/legs twice over
+        puts six chest movements in a week, and once every one of them is at its floor
+        (three sets for the press that opens a day, two for a fly) there is no set left to
+        take. The volume is not the sum of a mistake; it is the sum of one movement more
+        than that ceiling can hold.
+
+        So the last resort is to remove one, and WHICH one matters:
+
+          never the last direct work for any muscle the plan is responsible for — the
+            same rule the time-box follows (M5);
+          never one whose removal drops a muscle under its own floor, checked first;
+          an isolation before a second compound, and a second compound before the lift a
+            day opens with, because a day that loses its main press is a different day;
+          and among equals, the one that lands the muscle closest to its ceiling.
+
+        Reported in the notes, because a movement the builder chose and then took away is
+        exactly the kind of thing somebody would otherwise notice and not understand. */
+  const SLOT_SACRIFICE = {iso: 0, abs: 1, second: 2, heavy: 3};
+  for(let pass = 0; pass < 8; pass++){
+    const weekly = weeklyOf();
+    const over = GKEYS.filter(g=> !targets[g].priority && !targets[g].optional
+        && weekly[g] > targets[g].top + 0.05)
+      .sort((x, y)=> (weekly[y] - targets[y].top) - (weekly[x] - targets[x].top));
+    if(!over.length) break;
+    /* How many movements still train each muscle directly, so the last one is spared. */
+    const direct = {};
+    GKEYS.forEach(g=>{ direct[g] = 0; });
+    dayIds.forEach(wid=> (program[wid] || []).forEach(e=>{
+      GKEYS.forEach(g=>{ if(muscleFrac(e.name, g) >= DIRECT_SHARE) direct[g]++; });
+    }));
+    let cut = null;
+    for(const g of over){
+      const want = weekly[g] - targets[g].top;      // how much has to come off
+      dayIds.forEach(wid=> (program[wid] || []).forEach((e, i)=>{
+        const f = muscleFrac(e.name, g);
+        if(f <= 0) return;
+        const n = plannedSetValue(e);
+        const gives = f * n;
+        if(gives <= 0) return;
+        const lastDirect = GKEYS.some(g2=> !targets[g2].optional
+          && muscleFrac(e.name, g2) >= DIRECT_SHARE && direct[g2] <= 1);
+        if(lastDirect) return;
+        const safe = GKEYS.every(g2=>{
+          const f2 = muscleFrac(e.name, g2);
+          if(f2 <= 0 || targets[g2].optional) return true;
+          return (weekly[g2] - f2 * n) >= targets[g2].mev - 0.05;
+        });
+        if(!safe) return;
+        const rank = SLOT_SACRIFICE[e.slotKind] == null ? 1 : SLOT_SACRIFICE[e.slotKind];
+        const miss = Math.abs(gives - want);
+        if(!cut || rank < cut.rank || (rank === cut.rank && miss < cut.miss))
+          cut = {wid, i, e, rank, miss, g, gives};
+      }));
+      if(cut) break;
+    }
+    if(!cut) break;
+    program[cut.wid].splice(cut.i, 1);
+    notes.push(cut.e.name + " came off " + dayNameOf({days:[]}, cut.wid) + ": the "
+      + GROUPS[cut.g].name.toLowerCase() + " was over its ceiling with every movement already "
+      + "at its smallest honest set count, so the week had one movement more than it can "
+      + "recover from.");
   }
   /* 3. L5 \u2014 THE BALANCE RULE, as a thing the builder DOES rather than a thing the check
         catches. On a bodyweight tier the chest has push-ups and the back has pull-ups and
@@ -10494,7 +10644,7 @@ function buildPlan(answers){
     tight = fit.tight || [];
     report.notes = report.notes.concat(fit);
     q = planQuality(program, split, {budget: a.minutes, priority: a.priority, gear: a.gear,
-                                     tight: tight});
+                                     targets: targets, tight: tight});
     if(q.ok) break;
     /* The one thing a round can act on by itself: a session over the cap, which is always
        fixable by moving a set to another day. Everything else is handled by the tune and
@@ -10504,11 +10654,11 @@ function buildPlan(answers){
        the days \u2014 the volume survives, spread onto the other day, and the frequency rule
        does not. */
     q.fail.filter(f=> f.k === "freq" && f.muscle).forEach(f=>{
-      const bare = dayIds.filter(wid=> buildDaySets(program[wid], f.muscle) < FREQ_MIN_DAY_SETS)
+      const bare = dayIds.filter(wid=> !buildTrainsDay(program[wid], f.muscle))
         .sort((x, y)=> (program[x] || []).length - (program[y] || []).length)[0];
       if(!bare) return;
       const ex = buildMovementFor(f.muscle, a.gear, a.protect);
-      if(ex && !(program[bare] || []).some(e=> canonEx(e.name) === canonEx(ex.name))){
+      if(ex && !buildHasMove(program[bare], ex.name)){
         program[bare].push(ex);
         report.notes.push(ex.name + " added to " + dayNameOf(split, bare) + " so the "
           + GROUPS[f.muscle].name.toLowerCase() + " is trained twice a week.");
@@ -10527,11 +10677,11 @@ function buildPlan(answers){
      it just added \u2014 so the last word has to come after the last fit. */
   if(q && q.fail.some(f=> f.k === "freq")){
     q.fail.filter(f=> f.k === "freq" && f.muscle).forEach(f=>{
-      const bare = dayIds.filter(wid=> buildDaySets(program[wid], f.muscle) < FREQ_MIN_DAY_SETS)
+      const bare = dayIds.filter(wid=> !buildTrainsDay(program[wid], f.muscle))
         .sort((x, y)=> (program[x] || []).length - (program[y] || []).length)[0];
       if(!bare) return;
       const ex = buildMovementFor(f.muscle, a.gear, a.protect);
-      if(ex && !(program[bare] || []).some(e=> canonEx(e.name) === canonEx(ex.name))){
+      if(ex && !buildHasMove(program[bare], ex.name)){
         program[bare].push(ex);
         report.notes.push(ex.name + " added to " + dayNameOf(split, bare) + " so the "
           + GROUPS[f.muscle].name.toLowerCase() + " is trained twice a week, which is worth "
@@ -10539,7 +10689,7 @@ function buildPlan(answers){
       }
     });
     q = planQuality(program, split, {budget: a.minutes, priority: a.priority, gear: a.gear,
-                                     tight: tight.concat(dayIds)});
+                                     targets: targets, tight: tight.concat(dayIds)});
   }
 
   /* 7. STARTING LOADS AND FEELER SETS. A load where the table has an honest one, and the
@@ -11004,7 +11154,21 @@ function planQuality(program, split, opts){
   const weekly = programWeeklySets(program, dayIds);
   const priority = (o.priority || []).slice();
   const A = (()=>{ try{ return bodyAnalysis(); }catch(e){ return null; } })();
+  /* THE CHECK AND THE BUILDER HAVE TO BE READING THE SAME BANDS.
+
+     Found by the phase 9 re-measurement, immediately after buildTargets() started
+     honouring the level and goal somebody ANSWERED: fifty-three combinations failed
+     because the builder was aiming at an advanced lifter's ceiling and the check was
+     judging against the profile's. Both were right about their own numbers and the pair
+     of them was useless — a plan cannot be checked against a different person from the
+     one it was written for.
+
+     So the caller may hand its own targets in, and the builder does. Everything else —
+     the Program tab card, the import review — passes nothing and gets the live profile's
+     landmarks, which is what those screens are asking about. */
+  const given = o.targets && typeof o.targets === "object" ? o.targets : null;
   const lm = g=>{
+    if(given && given[g] && given[g].mev != null) return given[g];
     try{ return (A && A.lm && A.lm[g]) || adjustedLandmarks(A, g); }
     catch(e){ return GROUPS[g]; }
   };
@@ -11034,8 +11198,7 @@ function planQuality(program, split, opts){
   GKEYS.forEach(g=>{
     const G = GROUPS[g];
     if(!G || G.optional || !(weekly[g] > 0)) return;
-    const days = dayIds.filter(wid=> (program[wid] || [])
-      .some(e=> muscleFrac(e.name, g) * (parseInt(e.sets,10)||0) >= FREQ_MIN_DAY_SETS)).length;
+    const days = dayIds.filter(wid=> buildTrainsDay(program[wid], g)).length;
     /* 2.4 \u2014 EVERY MAJOR MUSCLE TWICE A WEEK WHEREVER THE WEEK HAS TWO DAYS IN IT. Not
        because frequency grows more muscle at equal volume \u2014 it does not, to any
        consistent degree [M\u2013S] \u2014 but because it keeps per-session volume in the range
