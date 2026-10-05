@@ -130,7 +130,15 @@ console.log("5 - C2: THE PREFERENCE TABLE IS WRITTEN DOWN, AND FROZEN AGAINST TH
    science reference's own ranking (2.8.2) — which moved four slots: a seated dumbbell
    press before a barbell, a cable lateral raise before a dumbbell, overhead triceps work
    before a pushdown, and a reverse pec deck before a cable fly. Each one loads the muscle
-   where it is long, which is the principle the rest of the app is built on. */
+   where it is long, which is the principle the rest of the app is built on.
+
+   Regenerated once more when the bodyweight tier gained a real fly. The row it changed is
+   worth reading: it used to pin `fly|bodyweight|Mid Cable Fly (on bench)` — a cable
+   machine, offered to somebody who has told the app they train with no equipment. There
+   was no bodyweight fly in the library at all (the deficit push-up is re-slotted to
+   press_horizontal by a later catalogue row, correctly: it is a press), so the lenient
+   pick fell through the tier and handed back a cable. The pin was freezing that in place
+   rather than catching it. */
 {
   const want = readFileSync(new URL('./matrix.txt', import.meta.url), 'utf8').trim().split("\n");
   const got = await ev(()=>{

@@ -703,6 +703,16 @@ Things where this codebase and the science reference disagree, or where the refe
 for something the library cannot currently supply. Recorded rather than guessed at, as the
 reference requires.
 
+**`GAIN_RATE_PCT_WK` has nowhere to go.** — **RESOLVED in 49.0.** The bodyweight-trend
+card now exists on the Body tab, and the constant lives on it exactly as the proposed
+resolution described: the trend is read as a percent of bodyweight a week and compared
+against the band for the lifter's own training age. The eating phase (gain / maintain /
+lose) is what made it possible — without a stated intention a weight chart is a line, and
+a line cannot be right or wrong. Both ends of the comparison are a seven-day **median**
+rather than a mean: a single heavy weigh-in moved a mean-based trend from +0.20% a week to
+−0.40%, which is a confident wrong answer and worse than no card. The original note
+follows.
+
 **`GAIN_RATE_PCT_WK` has nowhere to go.** Part 3 lists it (beginner 0.25–0.5% of
 bodyweight a week, intermediate 0.1–0.25, advanced ≤ 0.1) as guidance. The app tracks
 bodyweight and charts it, but has no screen that compares the trend against a target rate,
@@ -1589,3 +1599,47 @@ Three rules it keeps, each pinned by `news.mjs`:
 It is shown from `openingPrompts()`, ahead of the daily prompts because it is a one-off
 and they are not, and suppressed mid-workout. It can be read again from
 **Settings → Help**.
+
+## The nine fixes after the independent verification of 47.3
+
+| # | Asked for | What was actually wrong |
+|---|---|---|
+| 1 | Commit the specs | They lived in a session scratchpad and each carried three absolute paths — the app, Playwright, a scratch directory. The suite could not be run from a clone of its own repository. 193 specs moved to `tests/specs/`, all paths resolved through `_e26.mjs`, and `tests/run.js` now **fails** on a missing listed spec instead of printing `SKIP` and passing. |
+| 2 | Training level → `priorTrainingWeeks` | The importer wrote `S.setup.level` and `S.experience` and never the weeks. `inferExperience()` reads weeks, so the answer held until the first logged session and then an advanced lifter was measured at "three days of training" and handed a beginner's targets. Beginner 26, intermediate 104, advanced 260; a skipped or declined question is 104, not 0. |
+| 3 | Warm-up and set-up in the budget | `dayMinutes()` priced work and rest only — a session nobody has ever had. A typical day was understated by about 16 minutes. 8 minutes of warm-up per session, 1 minute of set-up per movement (a pair is two). |
+| 4 | Caps as hard limits | Five sets per exercise was applied only where sets were *added*; 24 per session was a warning. Both are clamped now, after the rounds and before the loads. `effortCeiling()` read `(4).length` on a plan entry — `undefined` — so every set looked like the last and the isolation rule never reached a plan at all. |
+| 5 | Hamstrings twice a week | Two holes. The check's frequency rule was gated on `weekly[g] >= mev`, so a muscle both short on volume *and* trained once a week raised nothing — it excused itself in the worst case. And `buildTrainsDay()` counted a back squat's fractional credit as hamstring training, so a leg day with no hinge and no curl passed. |
+| 6 | Superset rules | Sharing no muscle was the only test. Two barbell movements is two stations held; two compounds is the hardest part of both lifts back to back with the second always performed tired. Compounds now pair only with isolations or machines. |
+| 7 | Tour copy | "Element 26 doesn't write programmes" — a boast about a limitation that no longer exists, shown to somebody who may have no plan. |
+| 8 | Nutrition basics | See the resolved open question above. |
+| 9 | Bodyweight library | The tier had no fly, no triceps extension and only a band curl. The deficit push-up is re-slotted to `press_horizontal` (correctly — it is a press), which left the fly slot empty, and `pickExercise` fell through the tier and offered a **cable** fly to somebody training with no equipment. `matrix.txt` had that pinned. |
+
+### The 540-combination re-measurement
+
+Run against the honest session length, every combination of 2–6 days × 3 equipment tiers
+× 3 training ages × 4 goals × 3 budgets:
+
+| | |
+|---|---|
+| Days over budget + tolerance | **0** |
+| Exercises past 5 sets | **0** |
+| Sessions past 24 working sets | **0** |
+| Isolations asked for failure before the last set | **0** |
+| Illegal supersets | **0** |
+| Weeks with hamstrings on fewer than 2 days | **0** |
+| Volume traded for time without the choice screen | **0** |
+| Combinations below a time-limited floor | **70** |
+
+The last row is the honest residual and it went up, from 2. Pricing the warm-up and the
+set-ups took about sixteen minutes a day out of the volume budget, and the owner's
+decision is that the clock wins — so what gives is sets. Every one of those 70 raises the
+choice screen before anything is saved, and `needMinutes` tells the person what the
+sessions would have to be: for an advanced lifter on three 60-minute days, 105. Two
+45-minute days is 90 minutes of gym a week, 16 of which are warm-up and set-up, and a
+full body's minimum has never fitted in what is left. The app says so now instead of
+quietly writing a plan that did not fit.
+
+Frequency is protected through the first three fit phases and surrendered only in the
+last-resort pass where the budget is the only rule standing — with one exception that
+outlives it, the hamstrings, because they are the muscle a time-boxed plan loses first
+and a leg curl is the cheapest thing on the day in sets.

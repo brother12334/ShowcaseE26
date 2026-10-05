@@ -96,10 +96,11 @@ console.log("MIGRATION - SKIPPING IS A REAL ANSWER");
   });
   ck("due before", r.due1===true, "");
   ck("declining counts as answered", r.asked && r.due2===false, JSON.stringify(r));
-  ck("and sets no training age", r.weeks==null, String(r.weeks));
+  ck("and stores the middle answer rather than leaving it a beginner",
+     r.weeks === 104, String(r.weeks));
 }
 
-console.log("MIGRATION - A BROKEN LOG STILL BOOTS");
+console.log("MIGRATION - A CORRUPT LOG STILL BOOTS");
 {
   const r = await p.evaluate(()=>{
     S.lmCalObs=null; delete S.lmCalSeeded;

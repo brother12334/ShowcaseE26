@@ -6,7 +6,41 @@ One command:
 node tests/run.js
 ```
 
-It exits non-zero if anything fails.
+It exits non-zero if anything fails. One spec, or a few, by name:
+
+```
+node tests/run.js budget caps eating
+```
+
+## Where the specs are
+
+`tests/specs/`, in the repository, which is a correction rather than a detail. They used
+to live in the scratchpad of the session that wrote them, and each one carried three
+absolute paths — the app at `/home/user/...`, Playwright at `/opt/node22/...`, and a
+scratch directory for screenshots. None of those exist in a clone, so the suite could not
+be run against a fresh checkout of its own repository: the one thing a test suite most
+needs to be able to do.
+
+Everything now resolves through `tests/specs/_e26.mjs`, which works out where the
+repository is from its own location. A spec imports `APP_URL` and whatever else it needs
+from there and nothing else knows a path:
+
+```js
+import { chromium, APP_URL, shot } from './_e26.mjs';
+```
+
+Playwright is looked for as an installed dependency first (`npm i -D playwright`), then at
+the path this suite was written against, then at `E26_PLAYWRIGHT` if you set it. Anything
+a spec writes — screenshots, dumps — goes to `tests/.out/`, which is gitignored.
+
+## A missing spec is a failure, not a skip
+
+`run.js` carries a `REQUIRED` list. If a spec named there is not on disk the run stops
+before anything executes and exits 2. The previous runner printed `SKIP <name> (not
+found)` and carried on, which meant a suite with every spec missing passed silently —
+the worst possible behaviour for a test runner, and exactly what it did when the specs
+were not committed. Specs on disk but absent from `REQUIRED` still run, so adding one is
+a single file; the list exists so that *deleting* one is a deliberate act with a diff.
 
 ## What it does
 
