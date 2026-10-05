@@ -6118,7 +6118,7 @@ body.spec-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "39.2";
+const APP_VERSION = "39.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -7562,7 +7562,13 @@ const PREF_DEFAULTS = {
   deloads: "auto",        // auto | planOnly
   rpe: true,              // log an RPE on every set, or keep the set row simple
   effort: "auto",         // auto | reserve | close | failure — only used where a plan gives no target
-  progression: "ask",     // auto | ask | hold — what happens when a load is ready to go up
+  /* H8 — AUTO IS THE DEFAULT, because "ask" means the plan is only ever right if you
+     press a button, and the one place the raise is visible is a card that closes. The
+     app worked the load out, it can write it down; the grade card says what it did, the
+     plan history keeps it, and every one of them has an Undo. An existing profile is NOT
+     switched over silently — see the migration, which pins "ask" for anybody who has
+     already trained, and the card that offers the change once. */
+  progression: "auto",    // auto | ask | hold — what happens when a load is ready to go up
   restDefault: null,      // seconds; null = judge each set on its own (restTargetFor)
   /* Which way the rest clock runs. "up" is a stopwatch from zero, which is what this has
      always been and stays the default. "down" counts the set's own rest target down to
@@ -9524,6 +9530,9 @@ let DISK_STAMP = 0;
    zone at that moment and reading it throws — which kills the whole script, exactly as
    documented three times over in this file. */
 let DISK_HAD_SIDES = false;
+/* H8 \u2014 the same trick, for the progression preference: what the DISK said, before the
+   fill from PREF_DEFAULTS makes every profile look like it had chosen. */
+let DISK_HAD_PROG = false;
 let S = load();
 applySplit();     // DAYS / ROTATION / CYCLE_LAYOUT / REST_CREDITS, from the chosen split
 migrate();
@@ -9535,11 +9544,13 @@ function load(){
       // remember what we read, so persist() can tell another tab's write from our own
       DISK_STAMP = Number(d && d.savedAt) || 0;
       DISK_HAD_SIDES = !!(d && d.prefs && typeof d.prefs === "object" && d.prefs.sides != null);
+      DISK_HAD_PROG  = !!(d && d.prefs && typeof d.prefs === "object" && d.prefs.progression != null);
       return d;
     }
   }catch(e){}
   DISK_STAMP = 0;
   DISK_HAD_SIDES = false;
+  DISK_HAD_PROG = false;
   return defaultState();
 }
 /* Split out of load() so a RESTORE can get at it. "Replace everything with this file"
@@ -9771,6 +9782,25 @@ function migrate(){
       S.prefs.sides = "matchWeaker";
     }
     S.sidesDefaultV2 = true;
+    saveQuiet();
+  }
+  /* H8 \u2014 NOBODY'S SETTING CHANGES BECAUSE THE DEFAULT DID.
+
+     What happens when a load is earned now defaults to "write it in". A profile that has
+     never chosen gets that, which is the point; a profile that has already been training
+     under "ask" must not find the app moving its weights because an update shipped.
+
+     ABOVE the fill from PREF_DEFAULTS, for the same reason the sides migration is \u2014 run
+     after it and the key is already there, the check sees a profile that looks like it
+     chose, and the migration is a no-op that looks like it worked. */
+  if(!S.autoProgV2){
+    const hadHistory = !!S.setup || (Array.isArray(S.sessions) && S.sessions.length > 0);
+    if(hadHistory && !DISK_HAD_PROG){
+      if(!S.prefs || typeof S.prefs !== "object") S.prefs = {};
+      S.prefs.progression = "ask";
+      S.autoProgOffer = "due";          // and the card on Today offers the change, once
+    }
+    S.autoProgV2 = true;
     saveQuiet();
   }
   /* Training preferences. An existing profile gets the historical defaults, so nothing
@@ -10924,12 +10954,27 @@ function restTargetFor(entry, st){
     return {band:"heavy", warn:120, ideal:[180,300], hard:420,
       why:"heavy, low-rep or near-max work, and the strength systems need 3-5 minutes to reload"};
   }
+  /* M7 \u2014 A COMPOUND NEVER RESTS LESS THAN TWO MINUTES IN THE FALLBACK.
+
+     The bands below are derived from the rep count alone, and a rep count does not know
+     how many joints were involved. A set of twelve on a squat and a set of twelve on a
+     cable curl landed in the same band and were told ninety seconds; a set of fifteen on
+     a leg press was told forty-five. The limiting factor on a compound is not the muscle
+     that was the target, it is everything the lift leaned on \u2014 which is why the
+     literature on multi-joint work does not go below two minutes whatever the reps. */
+  const compound = isCompound(entry && entry.name);
   if(reps <= 12){
-    return {band:"hypertrophy", warn:60, ideal:[90,180], hard:270,
-      why:"classic 8-12 rep hypertrophy work, which performs best on 1.5-3 minutes"};
+    return compound
+      ? {band:"compound", warn:90, ideal:[120,180], hard:270,
+         why:"a multi-joint lift in the 8-12 range, and a compound wants two minutes or more however light the reps feel"}
+      : {band:"hypertrophy", warn:60, ideal:[90,180], hard:270,
+         why:"classic 8-12 rep hypertrophy work, which performs best on 1.5-3 minutes"};
   }
-  return {band:"metabolic", warn:30, ideal:[45,120], hard:180,
-    why:"high-rep metabolic work, which recovers fast, 45 to 120 seconds is plenty"};
+  return compound
+    ? {band:"compound", warn:90, ideal:[120,180], hard:270,
+       why:"high-rep work on a multi-joint lift, which still needs two minutes: the reps recover fast and everything holding you up does not"}
+    : {band:"metabolic", warn:30, ideal:[45,120], hard:180,
+       why:"high-rep metabolic work, which recovers fast, 45 to 120 seconds is plenty"};
 }
 /* =====================================================================
    WHEN THE REST IS UP
@@ -15494,13 +15539,29 @@ function indexLifts(g){
 
 /* B2.2 EFFORT-ADJUSTED e1RM. Epley extended by the reps left in the tank, so a set of 8
    at RPE 8 and a set of 10 at RPE 10 are read as the same lift, which they roughly are.
-   Only 3-12 reps, because the formula degrades outside that, and only with RPE logged,
-   because without it the RIR term is an invention.
+   Only with RPE logged, because without it the RIR term is an invention.
 
    A bodyweight movement has no load to put in the formula, so reps at a comparable RIR
    stand in — comparable being the point: the same set taken to the same distance from
-   failure. */
-const E1RM_REPS_MIN = 3, E1RM_REPS_MAX = 12;
+   failure.
+
+   H6 — AND THIS ONE IS NOT CAPPED, BECAUSE IT IS NOT AN ESTIMATE OF ANYTHING.
+
+   est1RM() answers "what could you lift once", and clamps the reps because past fifteen
+   Epley stops being an estimate of a single rep. This answers a different question: did
+   this set beat that one. Comparing you to yourself needs a number that MOVES whenever
+   the work moves, and a clamp makes 20×12 and 20×15 identical — so three more reps on
+   the same weight read as a flat trend, on the one movement somebody had actually
+   improved at. The clamp is right for the estimate and wrong for the comparison, so the
+   comparison gets its own index: the same arithmetic, uncapped, and never shown as a
+   load. Three to thirty reps, which is the range a set of this kind is trained in. */
+const E1RM_REPS_MIN = 3, E1RM_REPS_MAX = 30;
+function perfIndex(w, repsToFail){
+  // No load, no index: the caller substitutes reps, which is the only thing that moves
+  // on a bodyweight movement.
+  if(!(w > 0) || !(repsToFail > 0)) return 0;
+  return w * (1 + repsToFail / 30);
+}
 function setE1RM(st, add, bodyweight){
   const reps = parseFloat(st && st.reps) || 0;
   const rpe  = parseFloat(st && st.rpe)  || 0;
@@ -15510,7 +15571,7 @@ function setE1RM(st, add, bodyweight){
   if(bodyweight) return {v: reps + rir, bw: true};
   const w = setLoad(st, add);
   if(!(w > 0)) return null;
-  return {v: est1RM(w, reps + rir), bw: false};
+  return {v: perfIndex(w, reps + rir), bw: false};
 }
 /* The best usable set of one entry, which is what an exposure is worth. */
 function entryE1RM(e, ctx){
@@ -18960,7 +19021,7 @@ function weakPoints(A){
         ? "Take a lighter week here: about half the sets, same loads."
         : "Change the stimulus rather than the amount of it.",
       "Volume is fine, but estimated strength is "+(dropped ? "down "+Math.abs(Math.round(g.strP*100))+"%" : "flat")+
-        " versus the previous 3 weeks"+(g.bestPrev ? " ("+Math.round(g.bestPrev)+" → "+Math.round(g.bestNow)+" "+unitWord()+" est. 1RM)" : "")+".",
+        " versus the previous 3 weeks"+(g.bestPrev ? " ("+Math.round(g.bestPrev)+" → "+Math.round(g.bestNow)+" on the work index)" : "")+".",
       "More sets is the wrong lever when the sets you already do aren't converting. "+
       (dropped && !shadow
         ? "A stall with falling strength is nearly always accumulated fatigue rather than too little work, so cut the sets by about half, keep the loads, and rebuild from there."
@@ -26854,6 +26915,7 @@ function viewToday(){
   h += weighDueHTML();
   h += soreDueHTML();
   h += planWeekStripHTML();
+  h += autoProgCardHTML();
 
   /* THE SESSION LIVES IN ITS OWN TAB NOW. What Today has to say while one is running is
      one thing — it is over there, carry on — and saying it in one card rather than
@@ -37773,6 +37835,23 @@ function bind(){
     S.active = null; hideRestUI(); save(); render();
     toast("Workout discarded");
   };
+  /* H8 \u2014 the one-time offer. Either answer is a decision, so either answer closes it. */
+  const apY = $("#autoProgYes");
+  if(apY) apY.onclick = ()=>{
+    S.prefs = S.prefs || {};
+    S.prefs.progression = "auto";
+    S.autoProgOffer = "took";
+    save(); queueSync(); render();
+    toast("Earned weight will be written into your plan from now on", "good");
+  };
+  const apN = $("#autoProgNo");
+  if(apN) apN.onclick = ()=>{
+    S.prefs = S.prefs || {};
+    S.prefs.progression = "ask";
+    S.autoProgOffer = "kept";
+    save(); queueSync(); render();
+    toast("Kept as it was \u2014 the grade card will go on asking");
+  };
   const disc = $("#discardBtn");
   if(disc) disc.onclick = discard;
   const disc2 = $("#liveDiscard");
@@ -39814,6 +39893,16 @@ function finishWorkout(){
     sessObj.progression.filter(p=> p.kind === "up" && p.to != null).forEach(p=>{
       if(applyProgression(p.name, p.to, null, progReason(p))) p.auto = true;
     });
+    /* H3/L4 \u2014 A REP STRETCH IS THE SAME DECISION AS A LOAD STEP, so "auto" writes it
+       too: it is double progression choosing its other variable, and refusing to apply it
+       would leave somebody on auto with a movement that can never progress because its
+       smallest jump is too big.
+
+       MOVING UP A LADDER IS NOT. That changes which exercise you do, and nothing about
+       "add the weight I earned" implies consent to that. It stays a button. */
+    sessObj.progression.filter(p=> p.kind === "stretch" && p.newReps).forEach(p=>{
+      if(applyRepStretch(p.name, p.newReps, progReason(p))){ p.auto = true; p.applied = true; }
+    });
   }
   /* AFTER the auto-progression pass, so a session that earned another increase keeps
      the fresh flag that pass just wrote rather than having it cleared by the reps that
@@ -41608,13 +41697,17 @@ function priorEntryFor(sess, exName, occ){
   }
   return null;
 }
-// Best estimated 1RM across a set list. Bodyweight movements fall back to rep count,
-// which is the only thing that can move on them. L1: reps to failure, as everywhere.
+/* The best set in a list, as a self-comparison index rather than as a load. Bodyweight
+   movements fall back to rep count, which is the only thing that can move on them.
+
+   H6: uncapped, because this is only ever compared against another reading of itself —
+   the grade's progressive-overload section and the per-lift trend. Capping it meant a
+   session that added three reps at the same weight graded as "held". */
 function topE1RM(sets, add){
   return (sets||[]).reduce((b,st)=>{
     if(!isWorkingSet(st)) return b;
     const rtf = repsToFailure(st);
-    const v = est1RM(setLoad(st, add), rtf) || rtf;
+    const v = perfIndex(setLoad(st, add), rtf) || rtf;
     return v > b ? v : b;
   }, 0);
 }
@@ -41904,7 +41997,10 @@ function scoreWorkout(sess){
       ". Lifts that came in under where you left them are scored as holding, not as going backwards.");
     if(prs.length) why.push("Personal record"+(prs.length>1?"s":"")+" today: "+
       [...new Set(prs.map(p=>p.name))].join(", ")+".");
-    const fmtRow = r=>r.name+" ("+Math.round(r.b)+"→"+Math.round(r.a)+" est. 1RM)";
+    /* "work index", not "est. 1RM": H6 uncapped this reading so that extra reps on the
+       same weight show up, which is right for comparing a lift against itself and means
+       the number is no longer an estimate of a single rep. */
+    const fmtRow = r=>r.name+" ("+Math.round(r.b)+"→"+Math.round(r.a)+" work index)";
     if(up.length) why.push("Up: "+up.slice(0,4).map(r=>r.b?fmtRow(r):r.name).join(", ")+
       (up.length>4?" +"+(up.length-4)+" more":"")+".");
     if(down.length) why.push("Down: "+down.slice(0,4).map(fmtRow).join(", ")+
@@ -42787,6 +42883,26 @@ function openScoreCard(sess, onDone){
         btn.disabled = false;
       }
     });
+    document.querySelectorAll("#modal [data-progstretch]").forEach(btn=> btn.onclick = ()=>{
+      const name = btn.dataset.progstretch;
+      const p = (sess.progression || []).find(x=> x && x.kind === "stretch" && x.name === name);
+      if(applyRepStretch(name, btn.dataset.progreps, p ? progReason(p) : null)){
+        if(p) p.applied = true;
+        save(); queueSync();
+        toast(esc(name) + " now runs to " + esc(btn.dataset.progreps) + " reps", "good");
+        redrawProgression();
+      } else { btn.classList.remove("done"); btn.disabled = false; }
+    });
+    document.querySelectorAll("#modal [data-proghard]").forEach(btn=> btn.onclick = ()=>{
+      const name = btn.dataset.proghard;
+      const p = (sess.progression || []).find(x=> x && x.kind === "harder" && x.name === name);
+      if(applyHarderVariation(name, btn.dataset.proghardto, p ? progReason(p) : null)){
+        if(p) p.applied = true;
+        save(); queueSync();
+        toast(esc(name) + " \u2192 " + esc(btn.dataset.proghardto) + " in your programme", "good");
+        redrawProgression();
+      } else { btn.classList.remove("done"); btn.disabled = false; }
+    });
     const all = $("#progApplyAll");
     if(all) all.onclick = ()=>{
       let n = 0;
@@ -42818,6 +42934,52 @@ function openScoreCard(sess, onDone){
    the load is right and you are not done with it.
    ===================================================================== */
 
+/* L4 \u2014 HOW A BODYWEIGHT MOVEMENT PROGRESSES, WHICH IS NOT BY HANGING WEIGHT OFF IT.
+
+   The old rule was one line for all of them: clear the top of the range and add five
+   pounds. That is right for exactly three movements \u2014 pull-ups, chin-ups and dips, where
+   a belt or a dumbbell between the feet is how everybody has always done it \u2014 and
+   nonsense for the rest. There is no way to add five pounds to a push-up, a plank or a
+   glute bridge, and the app said to anyway.
+
+   What those movements have instead is a LADDER: a harder version of the same pattern.
+   An incline push-up becomes a push-up becomes a deficit push-up; a glute bridge becomes
+   a single-leg hip thrust; a split squat becomes a Bulgarian split squat. Each rung is a
+   real movement in the library, so the swap is to something the app can already program,
+   cue and compare against.
+
+   When the ladder runs out, the reps take the progress, which is the same mechanism H3
+   uses when a load step is too big. Nothing is invented: a movement at the top of its
+   ladder and at the top of its extended range is simply as hard as it gets, and the
+   honest thing is to say so. */
+const BW_LOADABLE_RE = /pull[- ]?up|chin[- ]?up|\bdip/i;
+const BW_LADDERS = [
+  ["Incline Push-Up", "Push-Up", "Deficit Push-Up", "Ring Push-Up"],
+  ["Bodyweight Squat", "Split Squat", "Bulgarian Split Squat", "Sissy Squat"],
+  ["Glute Bridge", "Single-Leg Hip Thrust"],
+  ["Step-Up", "Reverse Lunge", "Walking Lunge"],
+  ["Plank", "Hollow Body Hold", "Hanging Knee Raise", "Leg Raises"],
+  ["Scapular Pull-Up", "Inverted Row"],
+  ["Single-Leg RDL", "Nordic Curl"]
+];
+/* The next rung up from where you are, or null at the top. Matched on the app's own
+   canonical form so a rename or an alias does not lose the ladder. */
+function bwNextRung(name){
+  const c = canonEx(name);
+  for(const rungs of BW_LADDERS){
+    const i = rungs.findIndex(r=> canonEx(r) === c);
+    if(i < 0) continue;
+    return rungs[i + 1] || null;
+  }
+  return null;
+}
+/* H3 \u2014 the biggest single jump in load that counts as progression rather than a
+   different exercise, as a fraction of what is on the bar now. */
+const JUMP_CAP_ISO = 0.10, JUMP_CAP_COMPOUND = 0.075;
+/* And how the reps take the progress instead when the jump is over the cap: five more at
+   the top of the range, never past twenty, because past twenty the set is about something
+   else. */
+const REP_EXT_STEP = 5, REP_EXT_MAX = 20;
 /* Increment size, by movement class. The small-increment rule is not cosmetic: a 5 lb
    per-hand jump on a 30 lb curl is a 17% load increase, and that exact jump is
    documented as the cause of four stalled arm lifts in this log. Anything carrying an
@@ -42832,12 +42994,49 @@ function progressionStep(e){
   if(st > 0 && out.amount > 0){
     const fitted = Math.max(st, Math.ceil((out.amount - 1e-9) / st) * st);
     if(fitted !== out.amount){
+      /* H3 \u2014 AND WHETHER THE GEAR IS WHAT MADE THE JUMP BIG. The class rules say what
+         size of step this movement wants; this says what you can actually load. When the
+         second is bigger than the first, the jump is the rack's decision rather than the
+         rule's \u2014 and that is the case where the reps should take the progress instead.
+         A step that IS the class step is as small as progression gets on that movement,
+         whatever percentage it works out to on a light dumbbell. */
+      out.gearForced = true;
+      out.classAmount = out.amount;
       out.amount = fitted;
       out.why = (out.why || "") + ", rounded to what you can load";
     }
   }
   if(st > 0 && out.alt > 0) out.alt = Math.max(st, Math.ceil((out.alt - 1e-9) / st) * st);
   return out;
+}
+/* H2 \u2014 HAS A LOAD ACTUALLY BEEN LOGGED FOR THIS MOVEMENT LATELY. The log, not the
+   plan: the plan is the thing that was wrong. */
+function loggedLoadRecently(name, days){
+  const key = nrm(name);
+  if(!key) return false;
+  const since = Date.now() - (days || 60) * DAY_MS;
+  return (S.sessions || []).some(s=>{
+    if(!s || (s.startedAt || 0) < since) return false;
+    return (s.entries || []).some(en=> nrm(en.name) === key &&
+      (en.sets || []).some(st=> (parseFloat(st && st.weight) || 0) > 0));
+  });
+}
+function lastLoggedLoad(name){
+  const key = nrm(name);
+  if(!key) return null;
+  for(let i = (S.sessions || []).length - 1; i >= 0; i--){
+    const s = S.sessions[i];
+    let found = null;
+    (s && s.entries || []).forEach(en=>{
+      if(nrm(en.name) !== key) return;
+      (en.sets || []).forEach(st=>{
+        const w = parseFloat(st && st.weight) || 0;
+        if(w > 0 && (found == null || w > found)) found = w;
+      });
+    });
+    if(found != null) return found;
+  }
+  return null;
 }
 function progressionStepRaw(e){
   const n = nrm(e && e.name);
@@ -42856,9 +43055,35 @@ function progressionStepRaw(e){
                 why: "Smith bar, lower body, " + stepInUnits(10) + " to " + stepInUnits(20) + " " + U})
       : st(10, {unit: U + " total", why: "Smith bar, upper body"});
   }
+  /* H2 \u2014 A BLANK LOAD IN THE PLAN IS NOT THE SAME AS A BODYWEIGHT MOVEMENT.
+
+     This asked one question \u2014 does the plan line carry a weight \u2014 and answered a
+     different one. A dumbbell reverse fly written into the plan with no starting load is
+     a dumbbell movement whose load nobody has filled in yet, and somebody logging it at
+     10 lb a hand was told to add FIVE: the bodyweight rule, which is about hanging a
+     belt off a pull-up, applied to a 10 lb raise as a 50% jump.
+
+     Two things have to be true for the bodyweight rule: the movement genuinely does not
+     need a load, and no load has in fact been logged for it recently. Sixty days,
+     because that is long enough to cover a layoff and short enough that a movement you
+     have moved on from stops being treated as loaded. */
   if(!e || e.weight == null){
-    return st(5, {unit: U, bodyweight: true,
-            why: "bodyweight movement: add external load once the top of the range clears on the first two sets"});
+    if(!loadNeededFor(e) && !loggedLoadRecently(e && e.name, 60)){
+      return st(5, {unit: U, bodyweight: true,
+              why: "bodyweight movement: add external load once the top of the range clears on the first two sets"});
+    }
+    const lw = lastLoggedLoad(e && e.name);
+    const gear = equipmentOf(e && e.name);
+    /* It is a loaded movement with the number missing, so it is stepped like one. The
+       class rules below all key off the name, and the name is all there is here. */
+    if(gear === "dumbbell" || /dumbbell|\bdb\b/.test(n)){
+      return isCompound(e && e.name)
+        ? st(5,   {unit: U + " a hand", why: "dumbbell compound (the plan has no load written in)"})
+        : st(2.5, {unit: U + " a hand", why: "dumbbell isolation, microplates (the plan has no load written in)"});
+    }
+    if(gear === "barbell") return st(5, {unit: U + " total", why: "barbell (the plan has no load written in)"});
+    if(lw != null && lw > 0 && lw <= 20) return st(2.5, {unit: U, why: "a light load, so a small step"});
+    return st(5, {unit: U, why: "the plan has no load written in; stepped like the load you logged"});
   }
   if(/dumbbell|\bdb\b/.test(n)){
     return isCompound(e.name)
@@ -42913,6 +43138,30 @@ function fmtLoad(v){
    The old version also had no expiry: one bad set survived every session that came after
    it, including the ones that got into the range. Later proof that the range IS
    reachable at that load now closes the flag. */
+/* H4 \u2014 THE LOAD AT WHICH THE PRESCRIBED RANGE IS ACTUALLY REACHABLE.
+
+   Worked back from the estimated 1RM of the set that proved it was not: one definition of
+   an e1RM (see est1RM), the top of the range, and the effort the set was supposed to be
+   taken at. Returned in the convention the plan is written in \u2014 the implement comes off
+   again \u2014 and rounded to something loadable. */
+function reachableLoadFor(target, cited, range){
+  if(!cited || !range) return null;
+  const e1 = est1RM(cited.load, repsToFailure({reps: cited.reps, rpe: cited.rpe}));
+  if(!(e1 > 0)) return null;
+  const tRpe = (function(){
+    const e = findProgramEntry(target && target.name) || target;
+    const list = e && e.rpes;
+    if(Array.isArray(list) && list.length) return parseFloat(list[list.length - 1]);
+    return 9;
+  })();
+  const rir = Math.max(0, Math.min(4, 10 - (isFinite(tRpe) ? tRpe : 9)));
+  const rtf = Math.min(E1RM_RTF_CAP, range[1] + rir);
+  const trueLoad = e1 / (1 + rtf / 30);
+  const add = cited.load - cited.raw;             // the bar or carriage, as logged that day
+  const raw = trueLoad - (isFinite(add) ? add : 0);
+  if(!(raw > 0)) return null;
+  return roundLoadable(raw, target && target.name);
+}
 function impossibleLoadCheck(target, entry, sess){
   const range = repRange(target && target.reps);
   if(!range || !target || target.weight == null) return null;
@@ -42993,9 +43242,23 @@ function impossibleLoadCheck(target, entry, sess){
      get wrong. Two steps down where the step allows it, one where it does not. */
   const step = progressionStep(target);
   const base = isFinite(rx) ? Math.min(cited.raw, rx) : cited.raw;
-  let suggest = roundLoadable(base - step.amount * 2, target.name);
-  if(!(suggest < base)) suggest = roundLoadable(base - step.amount, target.name);
-  if(!(suggest < base)) suggest = Math.max(0, Math.round((base * 0.9) * 2) / 2);
+  /* H4 \u2014 THE CUT IS ARITHMETIC, NOT A GUESS AT TWO STEPS DOWN.
+
+     "Two increments below the set that failed" has no relationship to how far below it
+     the answer is. 185 for three reps at RPE 10 against a prescription of 6-10 is not
+     185 minus ten pounds; it is about a hundred and fifty, and the log says so. The
+     cited set gives an estimated 1RM, and the load at which the TOP of the prescribed
+     range is reachable at the prescribed effort follows from it directly.
+
+     The top of the range rather than the bottom, because the instruction underneath is
+     "earn the range back": landing at the bottom of it means the first session is
+     already at the ceiling with nowhere to progress to. */
+  let suggest = reachableLoadFor(target, cited, range);
+  if(!(suggest > 0) || !(suggest < base)){
+    suggest = roundLoadable(base - step.amount * 2, target.name);
+    if(!(suggest < base)) suggest = roundLoadable(base - step.amount, target.name);
+    if(!(suggest < base)) suggest = Math.max(0, Math.round((base * 0.9) * 2) / 2);
+  }
   suggest = Math.max(0, suggest);
   /* AND NEVER UNDER A WEIGHT YOU HAVE ALREADY WORKED IN THE RANGE.
 
@@ -43030,7 +43293,11 @@ function impossibleLoadCheck(target, entry, sess){
   if(proven > suggest && proven < base) suggest = roundLoadable(proven, target.name);
   const when = cited.here ? "in this session" : "on " + fmtDate(cited.date);
   return {
-    at: {w: cited.raw, reps: cited.reps, rpe: cited.rpe, date: cited.date, set: cited.set},
+    // `load` as well as `w`: the true load is what H4's arithmetic needs, and toohardTarget
+    // redoes that arithmetic from this record alone.
+    at: {w: cited.raw, load: cited.load, reps: cited.reps, rpe: cited.rpe,
+         date: cited.date, set: cited.set},
+    reps: (target && target.reps) || null,
     to: suggest,                       // the load a flag built from this can actually apply
     from: target.weight,
     msg: fmtLoad(target.weight) + " for " + bottom + "-" + range[1] + " reps is not reachable: "
@@ -43039,8 +43306,40 @@ function impossibleLoadCheck(target, entry, sess){
     fix: "Drop to about " + fmtLoad(suggest) + " and earn the range back."
   };
 }
+/* H1 \u2014 THE SETS AT THE TOP WORKING LOAD, WHICH ARE THE ONES PROGRESSION IS ABOUT.
+
+   Judging the LAST set alone is right about which set is the honest one and wrong about
+   which set it is. Three shapes broke it:
+
+     A BACK-OFF IS NOT THE VERDICT. 75\u00d76, 75\u00d76, 75\u00d76, then 50\u00d710 easy to finish. The
+     last set cleared the top of the range at a comfortable RPE, so the card said "add
+     weight: 50 \u2192 55" after a session worked at 75.
+
+     A WARM-UP IS NOT A WORKING SET. isWorkingSet() answers "did this set happen", which
+     is the right question for tonnage and the wrong one here.
+
+     AND ONE SET AT THE TOP IS NOT THE WHOLE STORY. 6 @ 9, 6 @ 9.5, 6 @ 10, and then the
+     top of the range on the fourth \u2014 that is a load you are still fighting, not one you
+     have finished with. Earning the next weight means every set at that load is within a
+     rep of the top and the last of them is at the top, each at the prescribed effort.
+
+   So: the top load logged across the working sets is the load under discussion, the sets
+   taken at it are the evidence, and anything lighter is ignored. */
+function atTopLoadSets(entry){
+  const add = entryBarAdd(entry);
+  const warms = entryWarmups(entry);
+  const all = [];
+  (entry && entry.sets || []).forEach((st, i)=>{
+    if(!isWorkingSet(st) || warms[i]) return;
+    all.push({st, i, w: setLoad(st, add)});
+  });
+  if(!all.length) return null;
+  const top = all.reduce((m, x)=> Math.max(m, x.w), 0);
+  const at = all.filter(x=> x.w >= top - 0.01);
+  return {all, at, top, backoffs: all.length - at.length};
+}
 /* One exercise's verdict after a session.
-     up      last set cleared the top of the range at target RPE, add weight
+     up      every set at the top load is within a rep of the range, last one at it
      hold    still working up the range, says what is left to do
      stall   no improvement in reps or load across 3 sessions
      toohard the prescription itself is impossible at this load                      */
@@ -43057,17 +43356,33 @@ function progressionFor(sess, entry){
   if(bad) return {name: entry.name, kind: "toohard", detail: bad};
 
   if(!range) return null;
-  const last = ws[ws.length - 1];
+  /* H1. The sets at the top working load, and the last of those. */
+  const grp = atTopLoadSets(entry);
+  const atSets = (grp && grp.at.length) ? grp.at : [{st: ws[ws.length - 1], i: entry.sets.indexOf(ws[ws.length - 1]), w: 0}];
+  const lastAt = atSets[atSets.length - 1];
+  const last = lastAt.st;
   const reps = parseFloat(last.reps) || 0;
   const rpe = parseFloat(last.rpe) || 0;
-  const tRpe = rpeTargetFor(entry, entry.sets.indexOf(last));
+  const tRpe = rpeTargetFor(entry, lastAt.i);
   const load = parseFloat(last.weight);
   const step = progressionStep(target);
 
-  // "at its target RPE" means you got there without going past the prescribed effort.
-  // No RPE logged is treated as meeting it, rather than silently blocking progression.
-  const atTarget = (tRpe == null || !rpe) ? true : rpe <= tRpe + RPE_TOL;
-  const clearedTop = reps >= range[1];
+  // "at its target RPE" means EVERY set at this load got there without going past the
+  // prescribed effort. No RPE logged is treated as meeting it, rather than silently
+  // blocking progression.
+  const atTarget = atSets.every(x=>{
+    const t = rpeTargetFor(entry, x.i), e = parseFloat(x.st.rpe) || 0;
+    return (t == null || !e) ? true : e <= t + RPE_TOL;
+  });
+  /* The last set at the load is at the top of the range, and none of the ones before it
+     is more than a rep short of it. */
+  const clearedTop = reps >= range[1] && atSets.every(x=> (parseFloat(x.st.reps) || 0) >= range[1] - 1);
+  /* L3. What to call these sets in a sentence, so the message is about the sets the
+     verdict was actually read off. */
+  const atWord = atSets.length > 1
+    ? "every set at " + fmtLoad(isNaN(load) ? null : load)
+    : "the set at " + fmtLoad(isNaN(load) ? null : load);
+  const shortOf = atSets.filter(x=> (parseFloat(x.st.reps) || 0) < range[1] - 1).length;
 
   /* A NIGGLE HOLDS THE WEIGHT. You cleared the top of the range and you did it at the
      prescribed effort, and normally that is the whole case for adding load — but you have
@@ -43118,21 +43433,110 @@ function progressionFor(sess, entry){
            + "lowering, a pause, or a longer stretch at the bottom."
       };
     }
+    /* L4 \u2014 A BODYWEIGHT MOVEMENT GOES UP A RUNG, OR UP IN REPS. Only the three that
+       everybody loads \u2014 pull-ups, chin-ups, dips \u2014 take a belt. */
+    if(step.bodyweight && !BW_LOADABLE_RE.test(entry.name)){
+      const next = bwNextRung(entry.name);
+      if(next) return {
+        name: entry.name, kind: "harder", to: next, step,
+        msg: "Move up to " + next,
+        sub: "You cleared " + range[1] + " reps at the top of the range, and there is no "
+           + "weight to add to this one. " + next + " is the next version of the same "
+           + "pattern. Rebuild from " + range[0] + " reps on it."
+      };
+      if(range[1] < REP_EXT_MAX && !(target && target.repExt)){
+        const top = Math.min(REP_EXT_MAX, range[1] + REP_EXT_STEP);
+        return {
+          name: entry.name, kind: "stretch", from: null, reps: entry.reps,
+          newReps: range[0] + "-" + top, step,
+          msg: "Take the reps up instead: " + range[0] + "-" + range[1] + " \u2192 " + range[0] + "-" + top,
+          sub: "This is the hardest version of the pattern in the library and there is no "
+             + "load to add, so the reps carry it. Work up to " + top + " reps."
+        };
+      }
+      return {
+        name: entry.name, kind: "hold",
+        msg: "This one is as hard as it gets",
+        sub: "Top of the ladder and top of the range at " + range[1] + " reps. Make the "
+           + "set harder instead: slower on the way down, a pause at the bottom, or a "
+           + "longer stretch under load."
+      };
+    }
+    /* H3 \u2014 THE SMALLEST JUMP YOU OWN CAN STILL BE TOO BIG A JUMP.
+
+       Progression is a percentage, and the gear is an absolute. A 5 lb per-hand step is
+       a sensible increment on a 60 lb dumbbell press and a 50% increase on a 10 lb
+       lateral raise, and "the smallest jump available" is not an argument that the jump
+       is small. The second one is not progression, it is a different exercise \u2014 and the
+       app wrote it into the plan and then read the inevitable collapse in reps as a
+       stall.
+
+       Double progression already has the answer: the other half of it. When the load
+       step is over the cap, the REPS take the progress \u2014 the top of the range is
+       extended \u2014 and the load waits until the extended top is cleared, at which point
+       the increase is a smaller fraction of a bigger number and the range goes back to
+       what it was.
+
+       The caps are 10% for an isolation and 7.5% for a compound: a compound is more load
+       and more joints, so the same percentage is more absolute weight to absorb. Above
+       twenty reps the set stops being about the muscle and starts being about the lungs,
+       so the stretch stops there and the load goes up regardless, with the jump named. */
+    const jumpFrom = from;
+    const cap = isCompound(entry.name) ? JUMP_CAP_COMPOUND : JUMP_CAP_ISO;
+    /* Over the cap, AND over it because of the gear rather than because of the rule: a
+       2.5 lb microplate on a 10 lb raise is 25% and is also the smallest progression that
+       movement has, so extending the reps instead would mean it could never add load at
+       all. A 5 lb dumbbell step on the same raise is the rack forcing 50%, which is the
+       case this exists for. */
+    /* MEASURED ON THE STEP, NOT ON THE ROUNDED TARGET. roundLoadable() puts the next
+       load on the grid your plates make, and the load you are on now is not always on
+       that grid \u2014 185 lb with a 50 lb bar and 5s rounds up to 200, which reads as an 8%
+       jump when the step is 10 lb and 5.4%. The step is the decision; the rounding is
+       bookkeeping, and it must not be what trips the cap. */
+    const pctJump = jumpFrom > 0 ? step.amount / jumpFrom : 0;
+    const over = jumpFrom > 0 && to != null && step.gearForced && pctJump > cap + 1e-9;
+    const already = target && target.repExt;
+    if(over && !already && range[1] < REP_EXT_MAX){
+      const top = Math.min(REP_EXT_MAX, range[1] + REP_EXT_STEP);
+      const newReps = range[0] + "-" + top;
+      return {
+        name: entry.name, kind: "stretch", from: jumpFrom, reps: entry.reps, newReps, step,
+        pct: Math.round(pctJump * 1000) / 10,
+        msg: "Take the reps up instead: " + range[0] + "-" + range[1] + " \u2192 " + newReps,
+        sub: "You earned more, and the smallest step you can load is " + fmtLoad(step.amount)
+           + " \u2014 " + (Math.round(pctJump * 1000) / 10)
+           + "% on " + fmtLoad(jumpFrom) + ", past the " + Math.round(cap * 100)
+           + "% this " + (isCompound(entry.name) ? "compound" : "isolation") + " should jump by. "
+           + "Keep " + fmtLoad(jumpFrom) + " and work up to " + top
+           + " reps; the weight goes up when you get there, and the range goes back to "
+           + range[0] + "-" + range[1] + "."
+      };
+    }
     if(!(isFinite(planW) && to != null && parseFloat(to) <= planW)) return {
       name: entry.name, kind: "up", from, to, step,
+      overCap: over && range[1] >= REP_EXT_MAX ? Math.round(pctJump * 1000) / 10 : null,
+      endsStretch: !!already,
       msg: step.bodyweight && from == null
         ? "Add " + fmtLoad(step.amount) + " next time"
         : "Add weight next time: " + fmtLoad(from) + " → " + fmtLoad(to),
-      sub: "Last set hit " + reps + " reps, the top of " + range[0] + "-" + range[1] +
+      sub: (atSets.length > 1
+             ? "All " + atSets.length + " sets at " + fmtLoad(isNaN(load) ? null : load) +
+               " were within a rep of " + range[1] + ", and the last one hit " + reps
+             : "The set at " + fmtLoad(isNaN(load) ? null : load) + " hit " + reps +
+               " reps, the top of " + range[0] + "-" + range[1]) +
            (tRpe != null ? ", at RPE " + (rpe || tRpe) + " against a target of " + tRpe : "") +
-           ". Rebuild from " + range[0] + " reps at the new load."
+           ". Rebuild from " + range[0] + " reps at the new load." +
+           (grp && grp.backoffs ? " (The lighter set" + (grp.backoffs === 1 ? "" : "s") +
+             " after it " + (grp.backoffs === 1 ? "was" : "were") + " not counted.)" : "")
     };
   }
   if(clearedTop && !atTarget){
     return {
       name: entry.name, kind: "hold",
       msg: "Hold this load one more session",
-      sub: "You reached " + reps + " reps but at RPE " + rpe + ", past the target of " + tRpe +
+      sub: "You reached " + range[1] + " reps, but " + atWord + " was not at the prescribed "
+         + "effort \u2014 " + atSets.map(x=> "RPE " + (x.st.rpe || "?")).join(", ")
+         + " against a target of " + tRpe +
            ". Get the top of the range at the prescribed effort before adding weight."
     };
   }
@@ -43181,9 +43585,19 @@ function progressionFor(sess, entry){
   }
   return {
     name: entry.name, kind: "hold",
-    msg: "Need " + range[1] + " on the last set to move up",
-    sub: "Last set was " + reps + " rep" + (reps === 1 ? "" : "s") + " at " + fmtLoad(isNaN(load) ? null : load) +
-         ". " + (range[1] - reps) + " more and the load goes up " + fmtLoad(step.amount) + "."
+    msg: shortOf
+      ? "Need " + (range[1] - 1) + "-" + range[1] + " on every set at this load"
+      : "Need " + range[1] + " on the last set to move up",
+    sub: (atSets.length > 1
+           ? atSets.map(x=> (parseFloat(x.st.reps) || 0)).join(", ") + " at "
+             + fmtLoad(isNaN(load) ? null : load)
+           : "The set at " + fmtLoad(isNaN(load) ? null : load) + " was " + reps
+             + " rep" + (reps === 1 ? "" : "s")) +
+         ". " + (shortOf
+           ? "Every set at the load wants to be within a rep of " + range[1] +
+             ", and the last one at " + range[1] + ", before the weight goes up "
+             + fmtLoad(step.amount) + "."
+           : (range[1] - reps) + " more and the load goes up " + fmtLoad(step.amount) + ".")
   };
 }
 // The plan's own copy of an exercise, which is what a load change has to be written to.
@@ -43199,13 +43613,27 @@ function progressionFor(sess, entry){
    The alt partner is returned as itself, because that object carries the prescription
    the caller means to edit. */
 function findProgramEntry(name){
+  const hit = findProgramEntryWhere(name);
+  return hit ? hit.e : null;
+}
+/* H8 \u2014 THE SAME LOOKUP, PLUS WHICH DAY IT WAS FOUND ON.
+
+   An automatic change has to be undoable, and an undo snapshot is keyed by the day's
+   list it belongs to. findProgramEntry() returns the entry alone, which was enough while
+   every load change went through a button somebody pressed and could be typed back by
+   hand. It is not enough for a change the app makes on its own. */
+function findProgramEntryWhere(name){
   const k = nrm(name);
-  const lists = DAYS.map(d=> S.program[d] || []).concat([S.program.finisher || []]);
-  for(const list of lists){
-    for(const e of list){ if(nrm(e.name) === k) return e; }
+  const wids = DAYS.concat(["finisher"]);
+  for(const wid of wids){
+    const list = S.program[wid] || [];
+    for(const e of list){ if(nrm(e.name) === k) return {e, wid}; }
   }
-  for(const list of lists){
-    for(const e of list){ if(e && e.alt && nrm(e.alt.name) === k) return e.alt; }
+  for(const wid of wids){
+    const list = S.program[wid] || [];
+    /* The \u21c4 partner: its prescription lives on e.alt, and that object is what an edit
+       means to change \u2014 so the snapshot is of the partner, under the parent's day. */
+    for(const e of list){ if(e && e.alt && nrm(e.alt.name) === k) return {e: e.alt, wid, alt: true}; }
   }
   return null;
 }
@@ -43872,10 +44300,19 @@ function toohardTarget(p){
   if(d.to != null && isFinite(parseFloat(d.to))) return parseFloat(d.to);
   const cited = d.at && parseFloat(d.at.w);
   if(isFinite(cited) && cited > 0){
-    const step = progressionStep(findProgramEntry(p.name) || {name: p.name});
-    let suggest = roundLoadable(cited - step.amount * 2, p.name);
-    if(!(suggest < cited)) suggest = roundLoadable(cited - step.amount, p.name);
-    if(!(suggest < cited)) suggest = Math.max(0, Math.round((cited * 0.9) * 2) / 2);
+    /* H4 \u2014 the same arithmetic as the card, so the number on the button and the number
+       in the sentence cannot disagree. */
+    const prog = findProgramEntry(p.name);
+    const range = repRange((prog || {}).reps) || repRange(d.reps);
+    let suggest = range ? reachableLoadFor(prog || {name: p.name}, d.at && {
+      load: parseFloat(d.at.load != null ? d.at.load : d.at.w), raw: parseFloat(d.at.w),
+      reps: d.at.reps, rpe: d.at.rpe}, range) : null;
+    if(!(suggest > 0) || !(suggest < cited)){
+      const step = progressionStep(prog || {name: p.name});
+      suggest = roundLoadable(cited - step.amount * 2, p.name);
+      if(!(suggest < cited)) suggest = roundLoadable(cited - step.amount, p.name);
+      if(!(suggest < cited)) suggest = Math.max(0, Math.round((cited * 0.9) * 2) / 2);
+    }
     if(suggest > 0) return suggest;
   }
   const m = String(d.fix || "").match(/(\d+(?:\.\d+)?)/);
@@ -44025,6 +44462,68 @@ function progressionHTML(list){
        all rather than one that would be refused for every row under it. */
     if(upsOpen > 0)
       h += `<button class="more-btn" id="progApplyAll">Apply all ${upsOpen} to the programme</button>`;
+  }
+  /* H3 \u2014 THE RAISE THAT BECAME A REP TARGET. Its own heading, because it is neither a
+     raise nor a hold: you earned more work and the weight is not how you are getting it
+     this time. */
+  const manual = trainPrefs().progression === "hold";
+  const stretches = list.filter(p=> p.kind === "stretch" && !p.applied);
+  if(stretches.length && manual){
+    h += `<div class="rev-head">Reps could go up, ${stretches.length}</div>`;
+    stretches.forEach(p=>{
+      h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">${esc(p.msg)}</span></div>`;
+    });
+  } else if(stretches.length){
+    h += `<div class="rev-head">Reps go up instead, ${stretches.length}</div>`;
+    stretches.forEach(p=>{
+      h += `<div class="pg-row">
+        <div class="pg-main">
+          <b>${esc(p.name)}</b>
+          <div class="pg-msg">${esc(p.msg)}</div>
+          <div class="pg-sub">${esc(p.sub)}</div>
+        </div>
+        <button class="pg-apply" data-progstretch="${esc(p.name)}"
+          data-progreps="${esc(p.newReps)}">Apply</button>
+      </div>`;
+    });
+  }
+  /* L4 \u2014 THE RUNG UP. Its own heading too: it changes the movement, not a number, and
+     that is the one kind of plan edit somebody should never find they have agreed to by
+     accident. */
+  const harder = list.filter(p=> p.kind === "harder" && !p.applied);
+  if(harder.length && manual){
+    h += `<div class="rev-head">A harder version is available, ${harder.length}</div>`;
+    harder.forEach(p=>{
+      h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">${esc(p.msg)}</span></div>`;
+    });
+  } else if(harder.length){
+    h += `<div class="rev-head">Ready for a harder version, ${harder.length}</div>`;
+    harder.forEach(p=>{
+      h += `<div class="pg-row">
+        <div class="pg-main"><b>${esc(p.name)}</b>
+          <div class="pg-msg">${esc(p.msg)}</div>
+          <div class="pg-sub">${esc(p.sub)}</div>
+        </div>
+        <button class="pg-apply" data-proghard="${esc(p.name)}"
+          data-proghardto="${esc(p.to)}">Apply</button>
+      </div>`;
+    });
+  }
+  const harderDone = list.filter(p=> p.kind === "harder" && p.applied);
+  if(harderDone.length){
+    h += `<div class="rev-head">Moved up a version, ${harderDone.length}</div>`;
+    harderDone.forEach(p=>{
+      h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">now ${
+        esc(p.to)} \u2713</span></div>`;
+    });
+  }
+  const stretched = list.filter(p=> p.kind === "stretch" && p.applied);
+  if(stretched.length){
+    h += `<div class="rev-head">Range extended, ${stretched.length}</div>`;
+    stretched.forEach(p=>{
+      h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:12.5px">now ${
+        esc(p.newReps)} reps \u2713</span></div>`;
+    });
   }
   /* THE PLAN CATCHING UP, KEPT APART FROM THE RAISES.
 
@@ -44206,9 +44705,61 @@ function topLoggedLoad(name, days){
   });
   return top;
 }
-function applyProgression(name, to, why, reason, opts){
-  const e = findProgramEntry(name);
+/* H3 \u2014 WRITING A REP STRETCH INTO THE PLAN. The load does not move; the top of the
+   range does, and the entry remembers what the range was so the next raise can put it
+   back. */
+function applyRepStretch(name, newReps, reason){
+  const where = findProgramEntryWhere(name);
+  const e = where && where.e;
   if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
+  const rr = repRange(newReps);
+  if(!rr) return false;
+  const undo = where.alt ? null : [planSnapOne(where.wid, e, e.name)];
+  const from = e.reps;
+  if(!e.repExt) e.repExt = {base: from, at: Date.now()};
+  e.reps = newReps;
+  if(e.rebuild) delete e.rebuild;
+  e.byApp = {at: Date.now(), what: "reps extended to " + newReps, from: from, to: newReps,
+             why: reason ? String(reason) : null};
+  logPlanChange("reps", where.wid, e.name, [String(from) + " \u2192 " + newReps],
+    {undo: undo, note: "The smallest load step available was too big a jump for this weight, so the "
+         + "reps carry the progress until the top of the extended range is cleared."});
+  save(); queueSync();
+  return true;
+}
+/* L4 \u2014 MOVING UP A RUNG. The slot keeps its sets, reps, rest and its place in the day;
+   the movement changes and the loads, which belonged to the old one, go. Same shape as
+   the Body tab's swap, which is the other place in the app that does this. */
+function applyHarderVariation(name, toName, reason){
+  const where = findProgramEntryWhere(name);
+  const e = where && where.e;
+  if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
+  if(!toName) return false;
+  const old = e.name;
+  // keyed on the name it will HAVE, since that is what a revert has to find
+  const undo = where.alt ? null : [planSnapOne(where.wid, e, toName)];
+  e.name = toName;
+  delete e.weight; delete e.rebuild; delete e.setsCut; delete e.repExt;
+  e.byApp = {at: Date.now(), what: "moved up to " + toName, from: old, to: toName,
+             why: reason ? String(reason) : null};
+  logPlanChange("swapped", where.wid, e.name, [old + " \u2192 " + e.name],
+    {undo: undo, prevName: old, note: "The top of the rep range was cleared and there is no load to "
+       + "add to a " + old.toLowerCase() + ", so the next version of the pattern takes over."});
+  invalidateTableOrigin();
+  save(); queueSync();
+  return true;
+}
+function applyProgression(name, to, why, reason, opts){
+  const where = findProgramEntryWhere(name);
+  const e = where && where.e;
+  if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
+  /* H8 \u2014 A CHANGE THE APP MAKES ON ITS OWN HAS TO BE UNDOABLE, and the plan history's
+     "Put back" runs off a snapshot taken before the write. Without one the row appeared
+     in the history with no button, which is exactly the wrong shape for the one kind of
+     edit nobody asked for. Skipped for a \u21c4 partner, whose prescription lives on e.alt
+     and which the revert cannot find in a day's list by name \u2014 better no button than
+     one that quietly does nothing. */
+  const undo = where.alt ? null : [planSnapOne(where.wid, e, e.name)];
   const from = e.weight;
   const v = parseFloat(to);
   if(isNaN(v)) return false;
@@ -44239,6 +44790,19 @@ function applyProgression(name, to, why, reason, opts){
      explains why, and the grade reads it as a regression. Written onto the programme
      entry it drives the rep target, excuses the drop, and clears itself once the top of
      the range comes back. */
+  /* H3 \u2014 AND A RAISE ENDS A REP STRETCH. The range was extended because this load's
+     next step was too big a fraction of it; the step is now a smaller fraction of a
+     bigger number, so the range goes back to what the plan actually wants. */
+  if(e.repExt && from != null && v > from){
+    const base = e.repExt.base;
+    if(base){
+      logPlanChange("reps", null, e.name, [String(e.reps) + " \u2192 " + String(base)],
+        {note: "The extended range has done its job: the load has gone up, so the reps go "
+             + "back to the prescription."});
+      e.reps = base;
+    }
+    delete e.repExt;
+  }
   const rr = repRange(e.reps);
   // Only an increase has a range to rebuild UP through; a cut is already at the bottom.
   if(rr && (from == null || v > from)){
@@ -44255,9 +44819,9 @@ function applyProgression(name, to, why, reason, opts){
      you are about to log against. */
   e.byApp = {at: Date.now(), what: (down ? "load cut to " : "load raised to ") + fmtLoad(v),
              from: from, to: v, why: reason ? String(reason) : null};
-  logPlanChange("weight", null, e.name,
+  logPlanChange("weight", where.wid, e.name,
     [fmtLoad(from) + " → " + fmtLoad(v)],
-    {note: why ? why
+    {undo: undo, note: why ? why
       : down ? "Load reduced to a reachable one for the prescribed rep range."
       : "Double progression: last set cleared the top of the rep range at target RPE."
         + (rr ? " Rebuild from " + rr[0] + " reps at the new load." : "")});
@@ -45341,7 +45905,10 @@ function warmWorkingLoad(e, ctx){
   if(ctx && ctx.workoutId && e && e.name){
     const l = lastEntryFor(ctx.workoutId, e.name, !!ctx.anyDay, ctx.occ || 0);
     if(l){
-      const up = progressionUpFor(l.sess, e.name, ctx.occ || 0);
+      /* H8: one function answers "what did the last session earn", and the boxes below
+         the warm-up ask the same one. It already refuses a verdict that is below that
+         session's own top set, which is the rule the scar below describes. */
+      const up = earnedLoadPending(e.name, ctx.occ || 0);
       let top = 0;
       (l.sets || []).forEach(st=>{
         if(!st || st.reps === "" || st.reps == null) return;
@@ -45367,17 +45934,9 @@ function warmWorkingLoad(e, ctx){
   const bare = w - barWeightFor(e.name);
   return bare > 0 ? {w: bare, src: "plan"} : null;
 }
-/* The load a session's grade told you to move to for this movement, if it told you
-   anything. Occurrence-aware for the same reason every other lookup is: the finisher
-   runs crunch → leg raise → crunch, and the 2nd crunch's verdict is not the 1st's. */
-function progressionUpFor(sess, name, occ){
-  if(!sess || !Array.isArray(sess.progression)) return null;
-  const k = nrm(name);
-  const hits = sess.progression.filter(p=>p.kind === "up" && nrm(p.name) === k);
-  if(!hits.length) return null;
-  const to = parseFloat(hits[Math.min(occ || 0, hits.length - 1)].to);
-  return to > 0 ? to : null;
-}
+/* progressionUpFor() lived here. H8 replaced it with earnedLoadPending(), which answers
+   the same question with the guard built in and is asked by the set boxes too — the two
+   readings of "what did the last session earn" are now one function. */
 
 /* Is this movement genuinely unloaded, as opposed to loaded-but-not-yet-calibrated?
    Only used to word the warm-up, so a wrong answer costs a phrase, not a prescription. */
@@ -46222,12 +46781,81 @@ function appSetLoadPending(name){
       && (e.sets || []).some(isWorkingSet)));
   return trained ? null : to;
 }
+/* H8 \u2014 THE LOAD THE LAST SESSION EARNED, WHEREVER IT HAS NOT BEEN WRITTEN DOWN YET.
+
+   Under "ask before adding weight" the raise sits on the session that earned it until
+   somebody presses a button, and two parts of the logging screen read it differently:
+   the warm-up ramped to the earned load, and the boxes three inches below still showed
+   the old one. The same screen, at the same moment, disagreeing about what is going on
+   the bar \u2014 and the warm-up was the one that was right.
+
+   So both now ask this. "Earned" means the most recent session that actually contained
+   the movement produced a raise for it, and the raise is above that session's own top
+   working set \u2014 a stored verdict from when the movement was lighter is not news. */
+function earnedLoadPending(name, occ){
+  if(!name) return null;
+  if(deloadActive()) return null;
+  const k = nrm(name);
+  for(let i = (S.sessions || []).length - 1; i >= 0; i--){
+    const s = S.sessions[i];
+    if(!s) continue;
+    let top = 0, here = false;
+    (s.entries || []).forEach(e=>{
+      if(!e || nrm(e.name) !== k) return;
+      (e.sets || []).forEach(st=>{
+        if(!isWorkingSet(st)) return;
+        here = true;
+        const w = parseFloat(st.weight) || 0;
+        if(w > top) top = w;
+      });
+    });
+    if(!here) continue;                      // this session was not about this movement
+    const ups = (s.progression || []).filter(x=> x && x.kind === "up" && nrm(x.name) === k);
+    if(!ups.length) return null;             // the last time you did it, it earned nothing
+    const to = parseFloat(ups[Math.min(occ || 0, ups.length - 1)].to);
+    if(!(to > 0)) return null;
+    return to >= top ? to : null;
+  }
+  return null;
+}
+/* H8 \u2014 THE ONE-TIME CARD, FOR PROFILES THAT WERE ALREADY TRAINING.
+
+   Shown once, on Today, to somebody whose preference was pinned to "ask" by the
+   migration. It says what would change, and both buttons are answers rather than one
+   button and a way out: "keep asking me" is a setting too, and pressing it means the
+   card never comes back either. Nothing is changed by ignoring it \u2014 the pin is already
+   in place, so the app goes on behaving exactly as it did. */
+function autoProgCardHTML(){
+  if(S.autoProgOffer !== "due") return "";
+  return `<div class="card">
+    <div class="lc-k"><i></i>New</div>
+    <div class="lc-h">Weights can go up on their own</div>
+    <div class="sub" style="margin-top:8px">When a last set clears the top of its rep
+      range at the prescribed effort, Element 26 already works out the next load \u2014 and
+      then waits for you to press Apply on the grade card. It can write it into your plan
+      instead, the moment you earn it, and tell you what it did.</div>
+    <div class="sub" style="margin-top:8px">Every change is listed on the grade card and
+      in your plan history, with an undo. Nothing moves during a deload, and a movement
+      with a niggle logged against it is never given more weight.</div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn" id="autoProgYes" style="flex:1">Add it automatically</button>
+      <button class="btn ghost" id="autoProgNo" style="flex:1">Keep asking me</button>
+    </div>
+  </div>`;
+}
 function planLoadPh(en, last, si){
   const plan = planLoadFor(en);
   const did = lastWorkedPh(last, si);
   const forced = appSetLoadPending(en && en.name);
   if(forced != null){
     const net = forced - entryBarAdd(en);
+    if(net > 0) return String(r1(net));
+  }
+  /* H8. The raise the last session earned and nobody has applied yet \u2014 the same number
+     the warm-up above is ramping to. */
+  const earned = earnedLoadPending(en && en.name, (en && en.occ) || 0);
+  if(earned != null && !(isFinite(parseFloat(plan)) && parseFloat(plan) >= earned)){
+    const net = earned - entryBarAdd(en);
     if(net > 0) return String(r1(net));
   }
   if(plan !== ""){

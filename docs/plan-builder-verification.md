@@ -157,6 +157,50 @@ MEV/MAV/MRV, per-session maxima and minutes per day, with the requirement of zer
 quality-check failures and every major muscle inside [MEV, min(MAV, 0.9·MRV)]
 except chosen priority muscles.
 
+## Phase 3 — what changed in the progression engine
+
+| ID | Before | After |
+|---|---|---|
+| H1 | The verdict was read off the LAST working set | Read off the sets at the top working load: every one within a rep of the range top, the last one at it, each at or under its RPE target. Back-offs and warm-ups are ignored |
+| H2 | A plan line with no load meant "bodyweight: add 5 lb" | Bodyweight only when the movement needs no load *and* none has been logged in 60 days; otherwise it is stepped by its class, so a 10 lb dumbbell raise goes to 12.5 |
+| H3 | Any earned jump was written, however large a fraction it was | Over 10% (isolation) / 7.5% (compound), and only when the *gear* forces a step bigger than the class rule asks for, the top of the rep range extends by 5 instead (never past 20). Clearing the extended top then adds the load and restores the range |
+| H4 | The cut was "two increments below the set that failed" | Worked back from the cited set's estimated 1RM to the load at which the top of the range is reachable at the prescribed effort. 185×3 @ RPE 10 against 6–10 cuts to 150, and `toohardTarget` does the same arithmetic so the button agrees with the sentence |
+| H6 | One capped reading served both the absolute estimate and the self-comparison | Two: `est1RM` stays capped (it answers "what could you lift once"), and `perfIndex` is uncapped for the trend, the grade and calibration, with the trend window 3–30 reps. 20×12 → 20×15 now grades as up |
+| H8 | "Ask" by default; the warm-up ramped to the earned load while the set boxes showed the old one | Auto by default for new profiles, with the pin and the one-time card below for existing ones. `earnedLoadPending()` is the single source both the boxes and the warm-up read |
+| L3 | "Last set was 6 reps…" | The message names the sets at the load — "6, 6, 6 at 185 lb" — and says when a lighter set was not counted |
+| L4 | Every bodyweight movement was told to add 5 lb | Added load only for pull-ups, chin-ups and dips. Everything else moves up a ladder of harder variations, and the reps carry it once the ladder runs out |
+| M7 | The rest fallback was derived from the rep count alone | A multi-joint lift never rests under two minutes in the fallback, whatever the reps |
+
+### The jump cap, and how it is measured
+
+Two details decide this and both were found by the tests:
+
+- **It is measured on the step, not on the rounded target.** `roundLoadable` puts the
+  next load on the grid your plates make, and the load you are on now is not always on
+  that grid — 185 lb with a 50 lb bar and 5s rounds up to 200, which reads as an 8.1%
+  jump when the step is 10 lb and 5.4%. The rounding is bookkeeping and must not be what
+  trips a cap.
+- **It only fires when the gear is what made the jump big.** A 2.5 lb microplate on a
+  10 lb raise is 25% and is also the smallest progression that movement has; extending
+  the reps instead would mean it could never add load at all. A 5 lb dumbbell step on
+  the same raise is the rack forcing 50%, which is the case the rule exists for. This is
+  also what reconciles H2's acceptance (10 lb → 12.5) with H3's (`dbStep` 5 on a 10 lb
+  raise → 12–20).
+
+### Auto-apply, and who gets switched
+
+`PREF_DEFAULTS.progression` is now `"auto"`. Because `trainPrefs()` fills every missing
+preference from the defaults, shipping that alone would have switched every existing
+profile over silently — on the one setting where silence is the whole objection. So
+`DISK_HAD_PROG` records what the disk actually held, and a profile with a setup or a
+session but no stored choice is pinned to `"ask"` and offered the change once, on a card
+on Today with both answers as buttons. A profile that had already chosen is left alone
+and never asked.
+
+Auto writes load increases and rep stretches, both with an undo snapshot in the plan
+history. It does **not** move up a bodyweight ladder: that changes which exercise you do,
+and nothing about "add the weight I earned" implies consent to that.
+
 ## Open questions
 
 Things in the code that conflict with the brief, or that the brief does not settle.
@@ -196,7 +240,7 @@ they are recomputed whenever a session is swept.
 |---|---|---|
 | 1 | Harness | done — `#selftest`, `selftest.mjs`, this file |
 | 2 | C2 / H5 / M8 / L1 | done — `phase2.mjs`, invariants 6 and 7 |
-| 3 | Progression — H1–H4, H6, H8, L3, L4, M7 | not started |
+| 3 | Progression — H1–H4, H6, H8, L3, L4, M7 | done — `phase3.mjs` |
 | 4 | Safety — H7, M1, M2 | not started |
 | 5 | Builder, quality check, H9/H10/L5/M11, remove "Change the schedule" | not started |
 | 6 | Periodization (M9) + M3 | not started |
