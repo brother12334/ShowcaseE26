@@ -6313,7 +6313,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "47.0";
+const APP_VERSION = "47.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -50737,6 +50737,22 @@ function shareSnapshotSafe(opts){
   return {err: null, snap, text};
 }
 /* ---------- the calls ---------- */
+/* A 404 FROM THESE THREE ROUTES IS ABOUT THE SERVICE, NOT ABOUT A LINK.
+
+   The account Worker answers an unknown path with {error:"not found"}, and these calls
+   used to pass j.error straight to the toast — so somebody pressing "Make a link"
+   against a Worker deployed before sharing existed was told, simply, "not found". That
+   is the worker's own word for a route it does not have, and it reads as though the
+   user did something wrong.
+
+   The deployed Worker is updated by hand (wrangler deploy — see proxy/README.md); the
+   app updates itself. So the two halves can be different versions, and this is what it
+   looks like from the inside when they are. Say that instead.
+
+   /share/<token> GET is deliberately NOT in this group: there a 404 really does mean the
+   link is gone, which is what shareFetch already says. */
+const SHARE_NO_ROUTE = "This account service does not do sharing yet — it needs updating "
+  + "before links can be made. Nothing has left your device.";
 async function shareCreate(opts){
   if(!accountCloudOn() || !accountAuth()) return {err: "Sharing needs an Element 26 account that is signed in."};
   const built = shareSnapshotSafe(opts);
@@ -50746,6 +50762,7 @@ async function shareCreate(opts){
     const res = await apiFetch("/share", {method:"POST",
       headers:{"Content-Type":"application/json", "Authorization": accountAuth()},
       body: JSON.stringify({data: built.snap, days: o.days, label: o.label || ""})});
+    if(res.status === 404) return {err: SHARE_NO_ROUTE, stale: true};
     const j = await res.json().catch(()=> null);
     if(!res.ok || !j || !j.token) return {err: (j && j.error) || "That did not go through."};
     return {token: j.token, expiresAt: j.expiresAt, days: j.days, url: shareUrlFor(j.token)};
@@ -50755,6 +50772,7 @@ async function shareList(){
   if(!accountCloudOn() || !accountAuth()) return {shares: []};
   try{
     const res = await apiFetch("/shares", {headers:{"Authorization": accountAuth()}});
+    if(res.status === 404) return {shares: [], err: SHARE_NO_ROUTE, stale: true};
     const j = await res.json().catch(()=> null);
     return {shares: (j && j.shares) || []};
   }catch(e){ return {shares: [], err: "Could not reach the account service."}; }

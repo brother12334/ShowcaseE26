@@ -236,6 +236,32 @@ checks and the account-deletion sweep:
 node tests/share-worker.mjs
 ```
 
+### "Make a link" says the service needs updating
+
+The app updates itself — it is one file on Pages — and this Worker does not. Deploying
+a new `index.html` with sharing in it while the Worker is still the version from before
+sharing existed leaves the four routes above missing, and the Worker answers them with
+its catch-all 404. The app recognises that and says the account service does not do
+sharing yet.
+
+The fix is to deploy this Worker again, from the repo root:
+
+```bash
+wrangler deploy proxy/accountworker.js --name element26-accounts --config wrangler.accounts.toml
+```
+
+Then check the route is really there. Unauthenticated it must answer **401**, not 404 —
+404 means the deploy did not take:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://element26-accounts.<sub>.workers.dev/share \
+  -H 'Content-Type: application/json' -H 'Origin: https://your.site' -d '{}'
+```
+
+Nothing is lost by a late deploy: no snapshot leaves the device until a route accepts it,
+and existing accounts, data and reminders are untouched by the update.
+
 ## If both halves are lost
 
 The account is gone, and that is the honest trade for having no email and no password.
