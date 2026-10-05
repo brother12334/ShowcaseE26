@@ -5014,6 +5014,20 @@ body.news-open{overflow:hidden}
   margin:12px 0 7px;position:relative;overflow:hidden}
 .pf-scale{display:flex;justify-content:space-between;font:10px var(--mono);color:var(--faint);
   letter-spacing:.06em}
+/* The part of the bar past the ceiling. Drawn in the warning colour and hatched, so
+   "over" is legible as over rather than as a bar that happens to be full. */
+.pf-over{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(
+  -45deg, var(--warn) 0 3px, rgba(201,154,52,.35) 3px 6px);border-radius:0 5px 5px 0}
+/* The "what to aim for" block: the numbers somebody came here to find. */
+.vf-sci{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.vf-sci-k{font:10px var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:8px}
+.vf-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:5px 0;border-bottom:1px solid var(--line);font-size:13px;color:var(--dim)}
+.vf-row:last-of-type{border-bottom:0}
+.vf-row b{color:var(--text);font-weight:600;text-align:right;font-family:var(--mono);font-size:12px}
+.vf-sci-p{font-size:12.5px;line-height:1.55;color:var(--faint);margin-top:9px}
+
 /* The bodyweight-trend card on the Body tab. Built from the same tokens as everything
    else: the phase picker is the existing segmented control, and the verdict takes one of
    the three verdict colours rather than introducing a fourth. */
@@ -6385,7 +6399,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "49.0";
+const APP_VERSION = "49.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -28737,27 +28751,93 @@ function openVolFix(g){
   if(!x) return;
   const cands = volEntriesFor(g);
   const best = cands[0];
-  const ceiling = Math.max(x.mrv, x.v, 1);
-  const pct = Math.max(2, Math.min(100, (x.v / ceiling) * 100));
-  const mark = Math.max(0, Math.min(100, (x.mev / ceiling) * 100));
+  /* To CUT, the opposite exercise from the one you would add to: whatever is carrying the
+     most sets of this muscle, so the trim comes off the pile rather than off the movement
+     that is only just contributing. */
+  const fat = cands.slice().sort((a2, b2)=> (b2.sets * b2.f) - (a2.sets * a2.f))[0];
+
+  /* THE BAR, DRAWN HONESTLY WHEN YOU ARE PAST THE END OF IT.
+
+     It used to scale to max(ceiling, current) with a single tick at the floor, so 22 sets
+     against a ceiling of 19.8 drew a FULL bar with the MAX written under empty space —
+     the one reading where the picture should be shouting is the one where it flattened
+     out. The track is the useful range; anything past the ceiling is drawn as overflow in
+     its own colour, so being over looks like being over. */
+  const span = Math.max(x.mrv, x.v, 1);
+  const pctOf = n=> Math.max(0, Math.min(100, (n / span) * 100));
   const col = x.state === "under" ? "var(--bad)" : x.state === "over" ? "var(--warn)" : "var(--acc)";
+  const overPart = Math.max(0, x.v - x.mrv);
+
+  /* THE NUMBERS SOMEBODY CAN ACT ON. "Taking some off" is not an instruction; "cut four
+     sets, to eighteen" is. The target is the productive middle the app aims every built
+     plan at \u2014 above the floor, at or below the point where each further set stops
+     paying for itself. */
+  const aim = Math.max(x.mev, Math.min(x.top, x.mrv));
+  const cutBy = Math.max(1, Math.ceil(x.v - aim - 0.05));
+  const addBy = Math.max(1, Math.ceil(aim - x.v - 0.05));
+  const toFloor = Math.max(1, Math.ceil(x.mev - x.v - 0.05));
+
+  /* WHAT THIS ONE BUTTON CAN ACTUALLY DO. The cut is worked out from the muscle's weekly
+     total, but it comes off ONE movement, and a movement cannot go below one set or below
+     what its slot is for. Promising "take 5 sets off" and then quietly taking 3 is worse
+     than offering 3. */
+  const fatNow = fat ? fat.sets : 0;
+  const fatFloor = fat ? Math.max(1, buildMinSets(fat.e)) : 0;
+  const canCut = fat ? Math.max(0, Math.min(cutBy, fatNow - fatFloor)) : 0;
+
   const say = x.state === "under"
-    ? "That is under the least this muscle needs before it grows at all. "
-      + (x.short >= 1 ? r1(x.short) + " more set" + (x.short >= 1.95 ? "s" : "") + " a week would reach it."
-                      : "It is within a set of the floor.")
+    ? `<b>Add ${toFloor} set${toFloor === 1 ? "" : "s"} a week</b> to clear the minimum of `
+      + `${r1(x.mev)}.` + (aim > x.mev + 0.05
+          ? ` Work up to <b>${r1(aim)}</b> over the block and it is doing as much as it usefully can.`
+          : "")
     : x.state === "over"
-      ? "That is past what you can recover from, so the extra sets cost fatigue without "
-        + "buying growth. Taking some off will make the rest work better."
-      : "That is inside the range where sets pay off \u2014 above the minimum, below the "
-        + "ceiling. Nothing needs doing here.";
+      ? `<b>Cut ${cutBy} set${cutBy === 1 ? "" : "s"} a week</b>, down to about ${r1(x.v - cutBy)}. `
+        + `Past ${r1(x.mrv)} the extra sets are bought with recovery you then do not have for `
+        + `everything else \u2014 they are not making this muscle grow faster.`
+      : `This is the range to be in. Nothing needs doing.`;
+
+  /* WHAT THE RANGE IS, AND WHY IT IS THAT. Four lines, because this is the question
+     somebody actually has when they open this sheet: not "what is wrong" but "what should
+     it be". Every figure here is one the app already measures you against. */
+  const level = (()=>{ try{ return inferExperience(); }catch(e){ return "intermediate"; } })();
+  const science = `<div class="vf-sci">
+    <div class="vf-sci-k">What to aim for</div>
+    <div class="vf-row"><span>Sets a week</span><b>${Math.round(x.mev)}\u2013${
+      Math.round(x.top)}</b></div>
+    <div class="vf-row"><span>Spread over</span><b>2 or more days</b></div>
+    <div class="vf-row"><span>Reps</span><b>5\u201330, most in 6\u201312</b></div>
+    <div class="vf-row"><span>How close to failure</span><b>${MESO_RIR[0]} reps left, down to ${
+      MESO_RIR[MESO_RIR.length - 1]} by the end of the block</b></div>
+    <div class="vf-sci-p">More sets grow more muscle, but only up to a point: the gain per
+      set shrinks as you climb and stops at <span class="term" data-term="mrv" role="button" tabindex="0">MRV</span>
+      \u2014 about ${Math.round(x.mrv)} for ${esc(x.name.toLowerCase())} at your training age.
+      Start a block near ${Math.round(x.mev)} and let it climb a set a week; the useful work
+      is in the middle, not at the top.</div>
+  </div>`;
+
   showModal(`<h3>${esc(x.name)}</h3>
     <div class="pf-big">
-      <span class="pv-f" style="width:${pct}%;background:${col}"></span>
-      ${x.mev > 0 ? `<span class="pv-k" style="left:${mark}%"></span>` : ""}
+      <span class="pv-f" style="width:${pctOf(Math.min(x.v, x.mrv))}%;background:${col}"></span>
+      ${overPart > 0 ? `<span class="pf-over" style="left:${pctOf(x.mrv)}%;width:${
+        pctOf(x.v) - pctOf(x.mrv)}%"></span>` : ""}
+      ${x.mev > 0 ? `<span class="pv-k" style="left:${pctOf(x.mev)}%"></span>` : ""}
+      ${x.mrv > 0 && x.mrv < span ? `<span class="pv-k" style="left:${pctOf(x.mrv)}%"></span>` : ""}
     </div>
-    <div class="pf-scale"><span>0</span><span>${r1(x.mev)} MIN</span><span>${r1(x.mrv)} MAX</span></div>
+    <div class="pf-scale"><span>0</span><span>${r1(x.mev)} MIN</span><span>${r1(x.mrv)} MAX</span>${
+      overPart > 0 ? `<span style="color:var(--warn)">${r1(x.v)} NOW</span>` : ""}</div>
     <div class="sub" style="margin:12px 0 0;text-transform:none;letter-spacing:0">
-      Your plan gives ${esc(x.name.toLowerCase())} <b>${r1(x.v)} sets a week</b>. ${esc(say)}</div>
+      Your plan gives ${esc(x.name.toLowerCase())} <b>${r1(x.v)} sets a week</b>. ${say}</div>
+    ${x.state === "over" && fat ? `
+      ${canCut > 0 ? `<div class="btn-row" style="margin-top:14px">
+        <button class="btn" id="vfCut" style="flex:1">Take ${canCut} set${
+          canCut === 1 ? "" : "s"} off ${esc(fat.e.name)}</button></div>
+      <div class="sub" style="margin:6px 0 0;font-size:12px;color:var(--faint);text-transform:none;letter-spacing:0">
+        On ${esc(widName(fat.wid))}, which is carrying the most of it.${
+          canCut < cutBy ? " That is as much as one movement can give up \u2014 take the rest off another."
+                         : ""}</div>`
+      : `<div class="sub" style="margin:12px 0 0;font-size:12px;color:var(--faint);text-transform:none;letter-spacing:0">
+          Every movement doing this muscle is already at its own minimum, so the sets have
+          to come off by dropping one of them rather than by trimming.</div>`}` : ""}
     ${x.state === "under" && best ? `
       <div class="btn-row" style="margin-top:14px">
         <button class="btn" id="vfSet" style="flex:1">Add a set to ${esc(best.e.name)}</button></div>
@@ -28766,10 +28846,31 @@ function openVolFix(g){
     ${x.state === "under" ? `<div class="btn-row" style="margin-top:${best ? 8 : 14}px">
         <button class="btn${best ? " ghost" : ""}" id="vfEx" style="flex:1">${
           best ? "Add an exercise instead" : "Add an exercise for this"}</button></div>` : ""}
+    ${science}
     <div class="btn-row" style="margin-top:10px">
       <button class="btn ghost small" id="closeModal" style="flex:1">Done</button></div>`);
   const m = $("#modal");
   if(!m) return;
+  const bCut = m.querySelector("#vfCut");
+  if(bCut) bCut.onclick = ()=>{
+    const e = (S.program[fat.wid] || [])[fat.ei];
+    if(!e) return;
+    const was = parseInt(e.sets, 10) || 0;
+    /* Never below one set, and never below what this exercise is for: taking a movement
+       to nothing is removing it, which is a different decision and not this button's. */
+    const floor = Math.max(1, buildMinSets(e));
+    const now = Math.max(floor, was - canCut);
+    if(now === was){
+      toast(e.name + " is already at its minimum \u2014 take the sets off another movement", "warn");
+      return;
+    }
+    e.sets = now;
+    if(Array.isArray(e.rpes)) e.rpes = e.rpes.slice(0, now);
+    logPlanChange("sets", fat.wid, e.name, ["Sets " + was + " \u2192 " + now],
+      {note: "Cut from the plan check: " + GROUPS[g].name.toLowerCase() + " was over its ceiling."});
+    save(); hideModal(); render();
+    toast((was - now) + " set" + (was - now === 1 ? "" : "s") + " off " + e.name);
+  };
   const bSet = m.querySelector("#vfSet");
   if(bSet) bSet.onclick = ()=>{
     const e = (S.program[best.wid] || [])[best.ei];

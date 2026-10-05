@@ -165,7 +165,133 @@ console.log("6 - A MUSCLE IN RANGE IS NOT NAGGED");
   ck("and it says so plainly", /[Nn]othing needs doing/.test(r.text), r.text.slice(0,220));
 }
 
-console.log("7 - NOTHING THREW");
+/* A SHEET THAT ONLY DIAGNOSES IS A SHEET YOU LEARN TO CLOSE. The over case used to say
+   "taking some off will make the rest work better" and offer a single Done button: no
+   number, no target, and nothing to press. */
+console.log("7 - BEING OVER THE CEILING IS AS ACTIONABLE AS BEING UNDER IT");
+{
+  const r = await ev(async ()=>{
+    hideModal();
+    /* Pile the chest well past its ceiling across two days. */
+    S.program[DAYS[0]] = [{name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+                          {name:"Incline Dumbbell Bench Press", sets:4, reps:"8-12", rpes:[7,8,8,9]},
+                          {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}];
+    S.program[DAYS[1]] = [{name:"Barbell Bench Press", sets:5, reps:"6-10", rpes:[7,8,8,9,9]},
+                          {name:"Cable Fly", sets:3, reps:"10-15", rpes:[8,9,9]}];
+    saveQuiet();
+    const q = planQuality(S.program, currentSplit(), {gear:(S.setup||{}).gear});
+    const ch = (q.volume || []).find(v=> v.g === "chest");
+    openVolFix("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    const m = document.getElementById("modal");
+    return {state: ch && ch.state, v: ch && ch.v, mrv: ch && ch.mrv,
+            text: m ? m.textContent.replace(/\s+/g," ").trim() : "",
+            cut: !!(m && m.querySelector("#vfCut")),
+            label: m && m.querySelector("#vfCut") ? m.querySelector("#vfCut").textContent.trim() : "",
+            over: !!(m && m.querySelector(".pf-over")),
+            aim: !!(m && m.querySelector(".vf-sci"))};
+  });
+  ck("the chest really is over its ceiling", r.state === "over", JSON.stringify(r.state));
+  ck("the sheet names a number of sets to cut", /Cut \d+ set/.test(r.text), r.text.slice(0,180));
+  ck("and what that would leave", /down to about \d/.test(r.text), r.text.slice(0,200));
+  ck("there is a button that does it", r.cut === true, r.text.slice(0,240));
+  ck("and it names the movement and the count",
+     /^Take \d+ sets? off \S/.test(r.label), r.label);
+  ck("the bar shows the overshoot rather than just filling up", r.over === true, String(r.over));
+  ck("and the reading past the ceiling is on the scale", /NOW/.test(r.text), r.text.slice(0,120));
+}
+{
+  const r = await ev(async ()=>{
+    const m = document.getElementById("modal");
+    const btn = m.querySelector("#vfCut");
+    const want = parseInt(btn.textContent.replace(/[^0-9]/g, ""), 10);
+    const name = btn.textContent.replace(/^Take \d+ sets? off /, "").trim();
+    const total = ()=> DAYS.reduce((t,wid)=> t + (S.program[wid]||[])
+      .filter(e=> e.name === name).reduce((u,e)=> u + (parseInt(e.sets,10)||0), 0), 0);
+    const was = total(), logWas = (S.planLog||[]).length;
+    btn.click();
+    await new Promise(r=> setTimeout(r, 120));
+    const q = planQuality(S.program, currentSplit(), {gear:(S.setup||{}).gear});
+    const ch = (q.volume || []).find(v=> v.g === "chest");
+    return {want, name, was, now: total(), logged: (S.planLog||[]).length - logWas,
+            closer: ch && ch.v};
+  });
+  ck("pressing it takes exactly the sets it offered", r.now === r.was - r.want,
+     JSON.stringify(r));
+  ck("the button never promises more than one movement can give",
+     r.want > 0 && r.now >= 1, JSON.stringify(r));
+  ck("and it goes in the plan history", r.logged === 1, JSON.stringify(r));
+}
+{
+  /* The promise has to hold when the movement is already near its floor: the old label
+     was computed from the muscle's weekly total and would have offered five sets off a
+     five-set exercise. */
+  const r = await ev(async ()=>{
+    hideModal();
+    DAYS.forEach(w=>{ S.program[w] = []; });
+    const two = n=> ({name:n, sets:2, reps:"10-15", rpes:[8,9], slotKind:"iso"});
+    S.program[DAYS[0]] = [two("Cable Fly"), two("Pec Deck"), two("Dumbbell Fly"),
+                          two("Machine Chest Fly"), two("Incline Dumbbell Fly"),
+                          two("Flat Dumbbell Fly")];
+    S.program[DAYS[1]] = [two("Cable Crossover"), two("Low-to-High Cable Fly"),
+                          two("High-to-Low Cable Fly"), two("Mid Cable Fly (on bench)"),
+                          two("Svend Press"), two("Deficit Push-Up")];
+    saveQuiet();
+    openVolFix("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    const m = document.getElementById("modal");
+    const btn = m && m.querySelector("#vfCut");
+    const offered = btn ? parseInt(btn.textContent.replace(/[^0-9]/g,""), 10) : 0;
+    if(btn){
+      const name = btn.textContent.replace(/^Take \d+ sets? off /, "").trim();
+      const total = ()=> DAYS.reduce((t,wid)=> t + (S.program[wid]||[])
+        .filter(e=> e.name === name).reduce((u,e)=> u + (parseInt(e.sets,10)||0), 0), 0);
+      const was = total();
+      btn.click();
+      await new Promise(r=> setTimeout(r, 120));
+      return {btn:true, offered, was, now: total()};
+    }
+    return {btn:false, text: m ? m.textContent.replace(/\s+/g," ") : ""};
+  });
+  if(r.btn){
+    ck("near the floor it offers only what it can take", r.now === r.was - r.offered,
+       JSON.stringify(r));
+  } else {
+    ck("with nothing left to trim it says so instead of offering a button",
+       /already at its own minimum/.test(r.text), r.text.slice(0,200));
+  }
+}
+
+console.log("8 - THE SHEET SAYS WHAT TO AIM FOR, NOT ONLY WHAT IS WRONG");
+{
+  const r = await ev(async ()=>{
+    hideModal();
+    DAYS.forEach(w=>{ S.program[w] = []; });
+    S.program[DAYS[0]] = [{name:"Barbell Bench Press", sets:3, reps:"6-10", rpes:[7,8,9]}];
+    saveQuiet();
+    openVolFix("chest");
+    await new Promise(r=> setTimeout(r, 60));
+    const m = document.getElementById("modal");
+    const rows = Array.from(m.querySelectorAll(".vf-row")).map(x=>
+      x.textContent.replace(/\s+/g," ").trim());
+    return {rows, text: m.textContent.replace(/\s+/g," ").trim(),
+            terms: Array.from(m.querySelectorAll("[data-term]")).map(x=> x.dataset.term)};
+  });
+  ck("it gives a weekly set range", r.rows.some(x=> /Sets a week/.test(x)), JSON.stringify(r.rows));
+  ck("in whole sets, because that is what you count out",
+     !r.rows.some(x=> /Sets a week.*\d\.\d/.test(x)), JSON.stringify(r.rows));
+  ck("it says to spread them over two days or more",
+     r.rows.some(x=> /Spread over/.test(x) && /2/.test(x)), JSON.stringify(r.rows));
+  ck("it gives a rep range", r.rows.some(x=> /Reps/.test(x) && /6/.test(x)), JSON.stringify(r.rows));
+  ck("and how close to failure, matching the block's own ramp",
+     r.rows.some(x=> /failure/i.test(x) && /reps left/.test(x)), JSON.stringify(r.rows));
+  ck("it explains that more is not simply better",
+     /gain per set shrinks/.test(r.text), r.text.slice(-260));
+  ck("and links the term rather than assuming it", r.terms.indexOf("mrv") > -1,
+     JSON.stringify(r.terms));
+}
+
+console.log("9 - NOTHING THREW");
 await ev(()=> hideModal());
 ck("no page errors", errs.length === 0, errs.join(" | "));
 console.log(bad ? "BROKEN: " + bad : "all good");
