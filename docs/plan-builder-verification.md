@@ -1562,3 +1562,30 @@ that preceded the phases.
 | 9 | Re-measurement, then bump `APP_VERSION` and `sw.js` `VERSION` | done — "The re-measurement" above; 44.0 / 37.0 |
 | — | The owner's decision: the time budget wins | done — `budget.mjs`, 45.0 / 38.0 |
 | — | Science reference conformance pass | done — `science.mjs`, 46.0 / 39.0 |
+| — | "What changed" page for existing users | done — `news.mjs`, 47.0 / 40.0 |
+
+## The "what changed" page
+
+Six releases landed at once (41.0 to 46.0) and an existing user would have opened the
+app to find a builder, a periodised plan, a streak strip and a share link that were not
+there the week before. `#newsFull` is a full-page announcement, built on the same overlay
+pattern as the importer and the builder, that says what those releases did.
+
+Three rules it keeps, each pinned by `news.mjs`:
+
+1. **A new profile is never shown a changelog.** `newsAudience()` is true only for
+   somebody with a logged session, an edited plan (`planLog`), an imported or built plan,
+   or an account older than a day. For anybody else `whatsNewDue()` stamps
+   `S.seenNews = NEWS_FOR` and returns false, so the page does not lie in wait to ambush
+   a new user three weeks in.
+2. **Once.** `closeWhatsNew()` stamps the version, saves and queues a sync, and
+   `seenNews` is a `BACKUP_FIELDS` member so a restore does not re-announce it. It is
+   keyed to `NEWS_FOR`, not `APP_VERSION`, so a later bug-fix release does not reopen it.
+3. **It claims nothing about your data.** The first block on the page says nothing logged
+   has changed and no programme has been rewritten, before any feature is described.
+   §8 of the spec asserts that opening and closing it leaves `program`, `sessions` and
+   `pointer` byte-identical.
+
+It is shown from `openingPrompts()`, ahead of the daily prompts because it is a one-off
+and they are not, and suppressed mid-workout. It can be read again from
+**Settings → Help**.

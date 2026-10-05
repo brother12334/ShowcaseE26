@@ -4908,6 +4908,36 @@ body.cele-open{overflow:hidden}
 .spec-full{z-index:46}
 body.spec-open{overflow:hidden}
 body.build-open{overflow:hidden}
+body.news-open{overflow:hidden}
+/* WHAT CHANGED. A page of reading, so it is set as one: a numbered section per thing, a
+   generous measure, and the app's own accent doing the numbering rather than any new
+   colour. Nothing here is a new visual idea — it is the full-page surface the importer,
+   the priority block and the builder already use. */
+.news-safe{
+  margin:0 0 20px;padding:12px 13px;border-radius:11px;
+  border:1px solid var(--acc);background:var(--acc-soft);
+  font-size:13.5px;line-height:1.55;
+}
+.news-sec{
+  border-top:1px solid var(--line);padding:16px 0 2px;position:relative;
+  animation:viewIn .36s both;animation-delay:calc(var(--i) * 28ms);
+}
+.news-n{
+  font:11px var(--mono);letter-spacing:.1em;color:var(--acc);margin-bottom:4px;
+}
+.news-h{
+  font-family:var(--disp);font-size:18px;line-height:1.18;margin:0 0 8px;
+  letter-spacing:.01em;
+}
+.news-p{font-size:14px;line-height:1.62;color:var(--dim);margin:0 0 10px}
+.news-p b{color:var(--text)}
+.news-cta{
+  margin:22px 0 4px;padding:14px 13px;border-radius:12px;
+  border:1px solid var(--line);background:var(--card2);
+}
+.news-cta-t{font-family:var(--disp);font-size:16px;margin:0 0 6px}
+.news-again{font-size:12px;color:var(--faint);line-height:1.4;max-width:60%}
+@media (prefers-reduced-motion:reduce){ .news-sec{animation:none} }
 /* The builder's preview: the plan as a document, before it is one. */
 .bld-sum{display:flex;align-items:baseline;gap:10px;margin:0 0 14px;font-size:14px}
 .bld-sum span{color:var(--dim);font-size:13px}
@@ -6272,6 +6302,10 @@ body.build-open{overflow:hidden}
      full-page shape as the importer and the priority block, for the same reason: these
      are decisions with numbers to read, not a sheet to tap through. -->
 <div class="ai-full spec-full" id="buildFull" hidden><div class="ai-full-in" id="buildFullIn"></div></div>
+<!-- WHAT CHANGED, for somebody who was already using the app. A page rather than a sheet
+     because it is a lot, and because a sheet with eighteen things in it is a sheet nobody
+     scrolls to the bottom of. Shown once, stamped, and reachable again from Settings. -->
+<div class="ai-full spec-full" id="newsFull" hidden><div class="ai-full-in" id="newsFullIn"></div></div>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 <div id="toasts" aria-live="polite" aria-atomic="false"></div>
 <script>
@@ -6279,7 +6313,7 @@ body.build-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "46.0";
+const APP_VERSION = "47.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -29348,6 +29382,11 @@ function openingPrompts(){
   try{
     if(typeof S === "undefined" || !S || !S.setup) return;
     if(S.active) return;                                       // mid-workout, not now
+    /* WHAT CHANGED COMES FIRST, AND ONLY ONCE. Ahead of the daily prompts because it is a
+       one-off and they are not: the morning check-in will be asked tomorrow, and this
+       will not. Not gated on the sleep preference — that is a setting about sleep, not
+       about whether somebody may be told what the app now does. */
+    if(whatsNewDue()){ openWhatsNew(); return; }
     if(trainPrefs().sleepPrompt === false) return;              // sleep tracking is off
     const pend = S.sleepPend;
     if(pend && pend.startedAt){
@@ -39194,6 +39233,13 @@ function viewSync(){
 // The Help group's body, which is two buttons and the version rather than a set of controls.
 function settingsHelpHTML(){
   return `<div class="set-block">
+      <div class="set-name">What changed in v${esc(NEWS_FOR)}</div>
+      <div class="set-help">The plan builder, periodised plans that actually run week by
+        week, sessions that fit the time you have, weeks on target, a link for a coach and
+        a fairer grade — all of it, on one page.</div>
+      <div class="btn-row" style="margin-top:0"><button class="btn ghost small" id="newsOpen" style="flex:1">Read what changed</button></div>
+    </div>
+    <div class="set-block">
       <div class="set-name">The tour</div>
       <div class="set-help">Twelve steps on how the app works — cycles, rep ranges, RPE, logging a set,
         grades. About a minute, and it changes nothing.</div>
@@ -42433,6 +42479,8 @@ function bind(){
   };
   const repBtn = $("#repOpen");
   if(repBtn) repBtn.onclick = ()=> openReportSheet();
+  const nwBtn = $("#newsOpen");
+  if(nwBtn) nwBtn.onclick = ()=> openWhatsNew();
   const pon = $("#pushOnBtn");
   if(pon) pon.onclick = async ()=>{
     /* No await before requestPermission() inside pushEnable() — Safari drops the
@@ -50958,6 +51006,230 @@ function shareViewHTML(r){
   return h;
 }
 
+
+/* =====================================================================
+   WHAT CHANGED, SAID ONCE, TO THE PEOPLE IT CHANGED FOR
+
+   Six releases landed together: the plan builder, executed periodization, the weekly
+   streak, the coach link, a fairer grade, and the decision that the time budget wins.
+   Somebody who opens the app the morning after that deserves to be told, and they
+   deserve to be told in the one shape that fits it — a page.
+
+   THREE RULES THIS FOLLOWS, and they are the reason it is not a toast:
+
+     IT IS FOR PEOPLE WHO WERE ALREADY HERE. A changelog is a list of things you did not
+     have and now do, which means nothing to somebody signing up today. A profile with no
+     history has the version stamped silently and never sees this at all.
+
+     IT IS SHOWN ONCE, AND IT IS NOT LOST. Stamped on close, so it never appears twice;
+     and parked under Settings → Help, so closing it by accident does not cost you the
+     only copy. A one-shot announcement with no way back is how people end up never
+     finding out what the buttons do.
+
+     IT CLAIMS NOTHING ABOUT YOUR DATA. The first line says what did not happen: nothing
+     logged has changed, and no plan has been rewritten. That is the question somebody has
+     when an app they trust with two years of training suddenly looks different, and it
+     should be answered before anything else is said.
+
+   NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
+   only changing this does, which is deliberate — a bug fix release should not reopen a
+   page about the last big one. */
+const NEWS_FOR = "47.0";
+const NEWS = [
+  {k: "A plan, written for you",
+   s: ["Element 26 will build you a programme now. Seven questions — your goal, how long "
+     + "you have been training, days a week, minutes a session, what equipment you can "
+     + "reach, up to two muscles to push and anything to protect — and it writes the "
+     + "whole thing: exercises, sets, reps, effort targets, rest, and a starting load "
+     + "where it can work one out honestly.",
+       "It checks its own work before you see it, against the same volume targets the Body "
+     + "tab measures you by, and shows you the week's numbers per muscle. If it cannot "
+     + "make something work it says so rather than quietly handing it over.",
+       "<b>Program → Build a new plan</b>, or from the importer's first screen."]},
+
+  {k: "Sessions that fit the time you actually have",
+   s: ["The minutes you say you have are now a ceiling, not a suggestion. A day is never "
+     + "built longer than your budget plus five minutes — before, a plan that needed "
+     + "ninety minutes to hit every volume floor would simply hand you ninety minutes.",
+       "It pays for that in order: pairing movements that share no muscle first, because "
+     + "that costs nothing but the walk between them; then myo-reps on the last set of an "
+     + "isolation; then sets; and dropping an exercise last of all.",
+       "Where that still is not enough, a muscle drops to <b>maintenance volume</b> — "
+     + "enough to hold what you have and still add to it slowly — and the app tells you "
+     + "which muscles, and offers you the choice: keep the time, make the sessions longer, "
+     + "or add a day. It never picks for you."]},
+
+  {k: "Your plan runs week by week",
+   s: ["A periodised programme is a sequence, and the app used to run its first week over "
+     + "and over. Now it executes one.",
+       "<b>Imported plans:</b> a week-by-week table is followed week by week. A 5/3/1 "
+     + "document runs its real waves — 65/75/85, then 70/80/90, then 75/85/95, then the "
+     + "40/50/60 deload — off a training max it keeps for you, which goes up after each "
+     + "cycle and comes back down if a top set misses. Every load is worked out and shown "
+     + "with its arithmetic.",
+       "<b>Deload weeks your document names</b> now run themselves, and Element 26's own "
+     + "six-week clock stands aside while your plan has its own.",
+       "<b>Built plans</b> get a block: four building weeks and a deload for most people, "
+     + "six and none for a beginner, with the effort climbing across it — three reps in "
+     + "reserve in week one, one by the last — and a set a week added to whatever is "
+     + "still responding."]},
+
+  {k: "Weeks on target",
+   s: ["A week counts when you do the sessions your plan asks for and at least 75% of the "
+     + "sets with them. Deload weeks count. Weeks you were ill or away are paused, not "
+     + "lost, and you say which — the app will not guess.",
+       "One grace week is earned every eight, two banked at most, and it spends itself on "
+     + "a week that comes up short so one bad fortnight does not take the board with it.",
+       "There is no daily streak and there never will be: a streak that asks you to train "
+     + "on a rest day is a streak working against your programme. A chip on Today, a "
+     + "twelve-week strip on History, and nothing anywhere that tells you off."]},
+
+  {k: "A read-only link for a coach",
+   s: ["Settings → Share with a coach makes a link to a page — your plan, what each "
+     + "muscle has been getting against its landmarks, where your lifts are going, your "
+     + "records, your weeks on target and how your sessions have been graded.",
+       "Whoever has the link can read it and nothing else. It needs no app and no account "
+     + "at their end, it expires by itself in thirty days, and you can revoke it.",
+       "Your bodyweight, your sleep, your niggles and your notes are <b>not</b> in it "
+     + "unless you turn each one on. Your account id and recovery key can never be: the "
+     + "snapshot is checked for them before it leaves your phone."]},
+
+  {k: "The grade is fairer than it was",
+   s: ["Progressive overload used to compare each lift against the one session before it, "
+     + "which made your score a function of how good that day happened to be — beat a bad "
+     + "Tuesday and it called it progress; follow a personal best with a strong "
+     + "second-best and it called it regression. It now compares against the best of your "
+     + "last three sessions on that movement.",
+       "How far a lift has to move to count as moving now depends on how long you have "
+     + "been training. An advanced lifter holding their recent best is good training; a "
+     + "beginner matching theirs has stood still.",
+       "The session note and the daily check-in are no longer scored. Neither is a fact "
+     + "about the workout, and a perfectly logged session could not reach full marks "
+     + "without also writing prose about it. Both are still asked for, and both still feed "
+     + "what the app can tell you later.",
+       "Session efficiency is measured against the session length <i>you</i> gave the plan "
+     + "builder, and finishing inside it costs you nothing."]},
+
+  {k: "Every weight it suggests is one you can put on the bar",
+   s: ["A raise is never bigger than 7.5% of what you are lifting on a compound, or 10% on "
+     + "an isolation. Where the smallest jump your gym owns is bigger than that — a 5 lb "
+     + "dumbbell step on a 10 lb lateral raise — the reps take the progress instead: the "
+     + "top of the range stretches, and the weight goes up when you get there.",
+       "Bodyweight movements have ladders now rather than a dead end: push-up to deficit "
+     + "to ring, and added load only where you can actually hang it — a belt on dips and "
+     + "pull-ups, nothing on a push-up.",
+       "A dumbbell suggestion says what to pick up: <b>160 lb (80 per hand)</b>. On a "
+     + "weighted dip or a pull-up it separates you from the belt. And where your "
+     + "bodyweight is part of the load, only the part you can actually change is rounded.",
+       "First time on a movement, every set is held to RPE 7 with a feeler set first, "
+     + "because the starting load is an estimate and you do not yet know what the bottom "
+     + "of that lift feels like."]},
+
+  {k: "Your plan's own days, rests and tests",
+   s: ["A plan that names its rest days — “Monday push, Tuesday pull, Wednesday off” — "
+     + "keeps them. The app used to read the count, throw the names away and recommend "
+     + "rests of its own.",
+       "You can move the rest days yourself, in Program, and put the original schedule "
+     + "back whenever you like.",
+       "Testing weeks are yours to add, move and remove. Read from your document word for "
+     + "word until you touch them; yours from then on.",
+       "And if today is not the day your rotation offers, you can pick a different one of "
+     + "your plan's days for today without the cycle losing its place."]},
+
+  {k: "Quieter things, worth knowing",
+   s: ["A deload now halves each exercise's own set count instead of flattening everything "
+     + "to two — a six-set lift comes down to three, a two-set one to one. And a "
+     + "seven-day week is seven days long; it used to run eight and label the last one "
+     + "“day 8 of 7”.",
+       "The deload clock counts training weeks — weeks with at least two sessions in "
+     + "them — rather than calendar weeks, a week away ends the block on its own, and "
+     + "beginners are no longer put on the clock at all.",
+       "Element 26 asks your browser to keep your data permanently rather than in the bin "
+     + "it empties when storage runs short. Settings → Your data says whether it agreed.",
+       "And if a save ever fails at the end of a workout, the app stops everything and "
+     + "hands you the export rather than celebrating over a session it has just lost."]}
+];
+/* Has this person got anything to be told ABOUT? A log, a plan they have edited, or an
+   account that has been here longer than a day. Anything less is a new profile, and a new
+   profile is told nothing and has the version stamped. */
+function newsAudience(){
+  try{
+    if(S.sessions && S.sessions.length) return true;
+    if(Array.isArray(S.planLog) && S.planLog.length) return true;
+    if(S.importMeta || S.builtPlan) return true;
+    const made = ACCT && ACCT.createdAt;
+    return !!(made && Date.now() - made > DAY_MS);
+  }catch(e){ return false; }
+}
+function whatsNewDue(){
+  if(S.seenNews === NEWS_FOR) return false;
+  if(!newsAudience()){
+    /* Nothing to announce, so this version is marked as seen rather than waiting to
+       ambush somebody three weeks into using the app. */
+    S.seenNews = NEWS_FOR;
+    saveQuiet();
+    return false;
+  }
+  return true;
+}
+function newsHost(){ return document.getElementById("newsFullIn"); }
+function openWhatsNew(){
+  const w = document.getElementById("newsFull");
+  const host = newsHost();
+  if(!w || !host) return;
+  host.innerHTML = whatsNewHTML();
+  w.hidden = false;
+  w.scrollTop = 0;
+  document.body.classList.add("news-open");
+  closeDropdown();
+  host.querySelectorAll("[data-newsclose]").forEach(b=> b.onclick = ()=> closeWhatsNew());
+  const go = host.querySelector("[data-newsbuild]");
+  if(go) go.onclick = ()=>{ closeWhatsNew(); openBuildPage(); };
+  const h = host.querySelector("h2");
+  if(h){ h.setAttribute("tabindex", "-1"); try{ h.focus({preventScroll:true}); }catch(e){} }
+}
+function closeWhatsNew(){
+  const w = document.getElementById("newsFull");
+  if(w) w.hidden = true;
+  document.body.classList.remove("news-open");
+  S.seenNews = NEWS_FOR;
+  save(); queueSync();
+  render();
+}
+function whatsNewHTML(){
+  return `<div class="spec-top">
+      <button class="spec-x" data-newsclose aria-label="Close">${ICON.close}</button>
+      <div class="spec-steps">Version ${esc(NEWS_FOR)}</div>
+    </div>
+    <h2 class="spec-h">What changed</h2>
+    <p class="spec-sub">Six releases at once: Element 26 will write you a plan, it runs a
+      periodised one week by week, and it fits your sessions into the time you actually
+      have. Here is all of it.</p>
+    <div class="news-safe">
+      <b>Nothing you logged has changed.</b> Every workout, every weight and every note is
+      exactly where it was, and your programme has not been rewritten — the only thing
+      that changes a plan is you asking for one.
+    </div>
+    ${NEWS.map((x, i)=> `<section class="news-sec" style="--i:${i}">
+      <div class="news-n">${i + 1}</div>
+      <h3 class="news-h">${esc(x.k)}</h3>
+      ${x.s.map(line=> `<p class="news-p">${line}</p>`).join("")}
+    </section>`).join("")}
+    <div class="news-cta">
+      <div class="news-cta-t">Want to see the new builder?</div>
+      <p class="news-p">It asks seven questions and shows you the plan before anything is
+        saved. Your current programme stays exactly as it is unless you choose the new one.</p>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn" data-newsbuild style="flex:1">Build me a plan</button>
+        <button class="btn ghost" data-newsclose style="flex:1">Not now</button>
+      </div>
+    </div>
+    <div class="spec-foot">
+      <span class="news-again">You can read this again in Settings → Help.</span>
+      <button class="btn" data-newsclose>Got it</button>
+    </div>`;
+}
+
 /* =====================================================================
    D4 · THE SLEEP WINDOW
 
@@ -54313,7 +54585,7 @@ const BACKUP_FIELDS = [
      one-shot migration markers and SHOULD re-run against restored data; active, fresh and
      override are this-moment state; and sync carries the old gist token, which
      syncSafeState() strips on purpose and must never travel in a file. */
-  "pushOn","pushAsked","pushNever","ciAsked","sleepGuard"
+  "pushOn","pushAsked","pushNever","ciAsked","sleepGuard","seenNews"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
