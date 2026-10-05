@@ -1112,6 +1112,15 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   padding:6px 9px;margin:0 0 8px;line-height:1.4;
 }
 input.ph-plan::placeholder{color:var(--acc);opacity:.75}
+/* THE TIME-BUDGET CHOICE on the builder preview: three answers, one selected, with the
+   arithmetic for each. Uses the same .ch list the settings screens use, so it reads as a
+   setting rather than as an error. */
+.bld-choice{
+  margin:16px 0 4px;padding:13px 12px;border-radius:11px;
+  border:1px solid var(--acc);background:var(--acc-soft);
+}
+.bld-choice .bld-vol-h{margin-top:0}
+.bld-choice .ch-tx span{display:block;color:var(--dim);font-size:12px;line-height:1.45;margin-top:2px}
 /* D6b · THE SHARED VIEW. A page, not the app: no tab bar, no fixed header, generous
    measure, and the same cards so a coach reading it and the person who sent it are
    looking at the same thing. `share-view` on the body hides the app's own furniture. */
@@ -6270,7 +6279,7 @@ body.build-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "44.0";
+const APP_VERSION = "45.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -10011,6 +10020,67 @@ const MAX_SETS_PER_EXERCISE_GEN = 5;
    specialization's exercise picker use. Named here because the time-box now needs it
    too, and three literals in three passes is three chances to disagree. */
 const DIRECT_SHARE = 0.5;
+/* =====================================================================
+   THE TIME BUDGET WINS — the owner's decision, and the order it is applied in.
+
+   Before this, a session that could not meet every volume floor inside the stated budget
+   ran long and said so: the floors were absolute and the budget was advisory. That is the
+   wrong way round. Somebody who says they have forty-five minutes has forty-five minutes,
+   and a ninety-one-minute session handed to them is not a plan, it is a plan for somebody
+   else. A session that fits and is done beats a session that is right and is not.
+
+   So the budget is a hard ceiling — the stated figure plus five minutes of tolerance —
+   and volume gives way to it, in this order:
+
+     1  SUPERSET non-competing movements. Costs nothing: paired work has no rest of its
+        own. Two compounds may now be paired if they share no muscle, which the previous
+        rule forbade and which is how a squat and a pulldown are actually run.
+     2  MYO-REPS on the last set of an isolation. Worth 1.75 straight sets in this app's
+        own effective-set model at about half the time, so it buys back most of a set for
+        a quarter of one.
+     3  TRIM SETS, down to MEV first and only then into the time-limited floors below.
+     4  DROP A MOVEMENT, last.
+
+   THE TIME-LIMITED FLOORS. Volume does not fall to nothing: below MEV there is a floor
+   under the floor, and it is different for big and small muscles because they are not in
+   the same position when time runs out.
+
+     big muscles      0.7 × MEV. Chest, lats, mid back, quads, hamstrings, glutes: what a
+                      plan is mostly for, and what nothing else in a session trains for
+                      them by accident.
+     small muscles    0.5 × MEV. Side and rear delts, biceps, triceps, calves, abs: every
+                      one of them takes real indirect work from the compounds that remain,
+                      so the number on the page understates what they get.
+     priority         untouched. Choosing two muscles to push is a decision about where the
+                      time goes, and taking it back silently when the time runs short is
+                      the app overruling the person on their own stated priority.
+
+   Under MEV is MAINTENANCE, not failure: lower volume still holds muscle and still grows
+   it slowly, particularly for a beginner, and the check says so in those words. Under a
+   time-limited floor IS a failure — that is the point of having one.
+   ===================================================================== */
+const BUDGET_TOLERANCE_MIN = 5;
+const BIG_MUSCLES = ["chest", "lats", "upper_back", "quads", "hams", "glutes"];
+const TIME_FLOOR_BIG = 0.7;
+const TIME_FLOOR_SMALL = 0.5;
+/* The lowest a muscle may go, in the two modes the fit pass runs in. `mode` is "mev"
+   while there is still volume above the floors to take, and "time" once there is not. */
+function fitFloorFor(g, targets, mode){
+  const t = targets && targets[g];
+  if(!t || t.optional) return 0;
+  /* A muscle somebody chose to push keeps its whole target in every mode, including the
+     last one. Taking back a stated priority to save four minutes is the app overruling
+     the person on the one thing they asked for by name. */
+  if(t.priority) return t.want || t.mev || 0;
+  if(mode === "mev") return t.mev || 0;
+  if(mode === "none") return 0;
+  return (BIG_MUSCLES.indexOf(g) > -1 ? TIME_FLOOR_BIG : TIME_FLOOR_SMALL) * (t.mev || 0);
+}
+function isBigMuscle(g){ return BIG_MUSCLES.indexOf(g) > -1; }
+/* WHAT A SESSION CAN AFFORD TO LOSE, in order. An isolation before direct core work,
+   that before a second compound, and the lift a day opens with last of all: a day that
+   loses its main press is a different day. Read by both the tune pass and the time-box. */
+const SLOT_SACRIFICE = {iso: 0, abs: 1, second: 2, heavy: 3};
 const MAX_WORKING_SETS_PER_SESSION = 24;
 /* THE MUSCLES A PLAN IS JUDGED ON FOR FREQUENCY AND COVERAGE. The reference's starting
    target table gives direct weekly work to these and marks the rest \u2014 traps, forearms,
@@ -10329,7 +10399,6 @@ function buildTune(program, dayIds, targets, a){
 
         Reported in the notes, because a movement the builder chose and then took away is
         exactly the kind of thing somebody would otherwise notice and not understand. */
-  const SLOT_SACRIFICE = {iso: 0, abs: 1, second: 2, heavy: 3};
   for(let pass = 0; pass < 8; pass++){
     const weekly = weeklyOf();
     const over = GKEYS.filter(g=> !targets[g].priority && !targets[g].optional
@@ -10368,6 +10437,14 @@ function buildTune(program, dayIds, targets, a){
       if(cut) break;
     }
     if(!cut) break;
+    {
+      /* And a pair that loses a member stops being a pair - see buildFit's dropStep. */
+      const L2 = program[cut.wid], b2 = L2[cut.i - 1], a2 = L2[cut.i + 1];
+      if(cut.e.supersetEnd && b2 && b2.superset && !b2.supersetEnd) delete b2.superset;
+      else if(cut.e.superset && !cut.e.supersetEnd && a2 && a2.supersetEnd){
+        delete a2.superset; delete a2.supersetEnd;
+      }
+    }
     program[cut.wid].splice(cut.i, 1);
     notes.push(cut.e.name + " came off " + dayNameOf({days:[]}, cut.wid) + ": the "
       + GROUPS[cut.g].name.toLowerCase() + " was over its ceiling with every movement already "
@@ -10470,122 +10547,283 @@ function buildMovementFor(g, gear, protect){
    nothing left to take. Never leaves a muscle under its floor with no direct work. */
 function buildFit(program, dayIds, targets, a){
   const notes = [];
-  const tight = [];
-  dayIds.forEach(wid=>{
-    let guard = 0;
-    while(dayMinutes(program[wid]) > a.minutes && guard++ < 60){
-      const list = program[wid];
-      /* a) SUPERSET TWO ISOLATIONS THAT SHARE NOTHING. Paired work costs no rest of its
-            own, which is where the minutes are. */
-      /* Isolation first, because pairing two of those costs nothing but the walk between
-         them. A compound is allowed into a pair only on the second lap, when there is
-         nothing else left and the alternative is dropping a movement outright. */
-      const free = list.map((e, i)=> ({e, i})).filter(x=> !x.e.superset);
-      const isoOnly = free.filter(x=> !isCompound(x.e.name));
-      /* Two isolations first \u2014 pairing those costs nothing but the walk between them.
-         Then an isolation beside a compound, which is the classic way a long day is made
-         short and is fine as long as they share no muscle. Never two compounds: that is
-         not a time saving, it is two hard lifts with no rest between them. */
-      const pairable = isoOnly.length >= 2 ? isoOnly : free;
-      let paired = false;
-      for(let i = 0; i < pairable.length - 1 && !paired; i++){
-        for(let j = i + 1; j < pairable.length; j++){
-          if(isCompound(pairable[i].e.name) && isCompound(pairable[j].e.name)) continue;
-          const A2 = musclesFor(pairable[i].e.name) || {}, B2 = musclesFor(pairable[j].e.name) || {};
-          const shares = GKEYS.some(g=> (A2[g] || 0) >= 0.5 && (B2[g] || 0) >= 0.5);
-          if(shares) continue;
-          pairable[i].e.superset = true;
-          pairable[j].e.superset = true;
-          pairable[j].e.supersetEnd = true;
-          paired = true;
-          notes.push(pairable[i].e.name + " and " + pairable[j].e.name + " are paired to save time.");
-          break;
+  const over = [];          // days still past the ceiling after everything
+  const need = {};          // what each day would need to keep every MEV
+  const maint = {};         // muscles taken below MEV, and to what
+  const ceiling = a.minutes + BUDGET_TOLERANCE_MIN;
+  const weeklyOf = ()=> programWeeklySets(program, dayIds);
+
+  /* 1  PAIRING. Isolations first, because pairing two of those costs nothing but the walk
+        between them. Then an isolation beside a compound. Then — new, and the owner's
+        decision — two compounds that share no muscle, which is how a squat and a pulldown
+        are actually run and was previously forbidden outright. Never two movements that
+        share a muscle: that is not a time saving, it is one exercise done badly twice. */
+  const pairStep = wid=>{
+    const list = program[wid] || [];
+    const free = list.map((e, i)=> ({e, i})).filter(x=> !x.e.superset);
+    const iso = free.filter(x=> !isCompound(x.e.name));
+    const shares = (A2, B2)=> GKEYS.some(g=> (A2[g] || 0) >= DIRECT_SHARE && (B2[g] || 0) >= DIRECT_SHARE);
+    /* Three tiers, tried in order of how little the pairing costs. */
+    const tiers = [
+      iso.length >= 2 ? iso : [],                                        // iso + iso
+      free.filter(x=> true),                                             // iso + compound
+      free.filter(x=> isCompound(x.e.name))                              // compound + compound
+    ];
+    for(const pool of tiers){
+      for(let i = 0; i < pool.length - 1; i++){
+        for(let j = i + 1; j < pool.length; j++){
+          if(pool[i].e.superset || pool[j].e.superset) continue;
+          if(Math.abs(pool[i].i - pool[j].i) === 0) continue;
+          if(shares(musclesFor(pool[i].e.name) || {}, musclesFor(pool[j].e.name) || {})) continue;
+          const first = pool[i].i < pool[j].i ? pool[i] : pool[j];
+          const second = pool[i].i < pool[j].i ? pool[j] : pool[i];
+          /* A SUPERSET IS A POSITION, NOT A LABEL. The app's model is positional — the
+             opening member carries `superset` and the rest of the round FOLLOWS it — so
+             a pair has to be adjacent in the list. Marking movements three and seven as a
+             pair and leaving four, five and six between them produced a day whose flags
+             said one thing and whose order said another: the session screen would have
+             run them as separate exercises, and dayMinutes() could not price the round at
+             all. The partner is moved up behind its opener. */
+          const moved = list.splice(second.i, 1)[0];
+          list.splice(first.i + 1, 0, moved);
+          first.e.superset = true;
+          moved.superset = true;
+          moved.supersetEnd = true;
+          notes.push(first.e.name + " and " + moved.name + " are paired to save time"
+            + (isCompound(first.e.name) && isCompound(moved.name)
+                ? " \u2014 they share no muscle, so neither one is worse for it." : "."));
+          return true;
         }
       }
-      if(paired) continue;
-      /* b) MYO-REPS, before any volume comes off.
+    }
+    return false;
+  };
 
-            M5. A myo-rep set is worth 1.75 straight sets and costs about half of one, so
-            turning the last two sets of an isolation into one myo-rep set buys back most
-            of a set's time for a quarter of a set's volume. That is a better trade than
-            any cut below, which is why it is tried first — and it is a REAL technique
-            with the app's own value behind it (setTypeValue), not an accounting trick.
+  /* 2  MYO-REPS on the last set of an isolation.
 
-            Isolations only, and only where there are enough sets to give one up. A
-            myo-rep squat is not a time saving, it is a safety problem: the mini-sets are
-            taken within a breath of failure and the technique is the first thing to go. */
-      const myo = list.map((e, i)=> ({e, i}))
-        .filter(x=> !isCompound(x.e.name) && !x.e.superset && !plannedMyo(x.e)
-                 && (parseInt(x.e.sets, 10) || 0) >= buildMinSets(x.e) + 1)
-        .sort((p2, q2)=> (parseInt(q2.e.sets,10)||0) - (parseInt(p2.e.sets,10)||0))[0];
-      if(myo){
-        myo.e.sets = (parseInt(myo.e.sets, 10) || 0) - 1;
-        if(Array.isArray(myo.e.rpes) && myo.e.rpes.length > 1) myo.e.rpes.pop();
-        myo.e.tech = (Array.isArray(myo.e.tech) ? myo.e.tech.slice() : []).concat([
-          {k: "myoreps", detail: MYO_MINIS + " mini-sets of 3-5, " + MYO_PAUSE + " s between"}]);
-        notes.push(myo.e.name + " runs its last set as myo-reps to save time \u2014 "
-          + MYO_MINIS + " mini-sets after the hard one, which is worth about the set it replaces.");
-        continue;
-      }
-      /* c) TAKE A SET off whatever is furthest above its floor.
+        A note on DROP SETS, which the decision offers as an alternative and which this
+        does not use. Element 26 counts a drop set as ONE hard set — DROP_EXTRA_PER_DROP
+        is zero, following the literature it cites — so replacing two straight sets with
+        one drop set loses a full set of credit and saves only one rest period. It is a
+        fine technique and a bad time lever in this app's own accounting. Myo-reps are
+        worth 1.75, which is the whole reason they are here. */
+  const myoStep = wid=>{
+    const list = program[wid] || [];
+    const cand = list.map((e, i)=> ({e, i}))
+      .filter(x=> !isCompound(x.e.name) && !x.e.superset && !plannedMyo(x.e)
+               && (parseInt(x.e.sets, 10) || 0) >= buildMinSets(x.e) + 1)
+      .sort((p2, q2)=> (parseInt(q2.e.sets,10)||0) - (parseInt(p2.e.sets,10)||0))[0];
+    if(!cand) return false;
+    cand.e.sets = (parseInt(cand.e.sets, 10) || 0) - 1;
+    if(Array.isArray(cand.e.rpes) && cand.e.rpes.length > 1) cand.e.rpes.pop();
+    cand.e.tech = (Array.isArray(cand.e.tech) ? cand.e.tech.slice() : []).concat([
+      {k: "myoreps", detail: MYO_MINIS + " mini-sets of 3-5, " + MYO_PAUSE + " s between"}]);
+    notes.push(cand.e.name + " runs its last set as myo-reps to save time \u2014 "
+      + MYO_MINIS + " mini-sets after the hard one, which is worth about the set it replaces.");
+    return true;
+  };
 
-            M5 calls this the proportional pass, and the proportion is in the selection:
-            the set always comes off the movement with the most room above the floors of
-            every muscle it trains, measured in sets OF THOSE MUSCLES, and the loop
-            re-measures after each cut. So the cuts spread across the plan in proportion
-            to where the slack actually is instead of hollowing out one movement — and
-            nothing is ever cut to a point where a muscle lands under its MEV. */
-      const weekly = programWeeklySets(program, dayIds);
-      const room = e=>{
-        let worst = Infinity;
-        GKEYS.forEach(g=>{
-          const f = muscleFrac(e.name, g);
-          if(f <= 0 || targets[g].optional) return;
-          worst = Math.min(worst, (weekly[g] - targets[g].mev) / Math.max(f, 0.01));
-        });
-        return worst;
-      };
-      /* DOWN TO THE FLOOR AND NOT PAST IT, and the unit matters: room() is in sets OF THE
-         MUSCLE, and taking one set off a movement costs the muscle its share of that set.
-         So a cut needs a whole set of headroom, not any headroom at all \u2014 at 0.3 above
-         the floor, cutting a movement that pays half a set put the muscle under it, which
-         is how the lower back failed the check on a plan the tune pass had just finished
-         bringing up to its floor. */
-      const cut = list.map(e=> ({e, r: room(e)}))
-        .filter(x=> (parseInt(x.e.sets,10) || 0) > buildMinSets(x.e) && x.r >= 1)
-        .sort((p, q)=> q.r - p.r)[0];
-      if(cut){ cut.e.sets = (parseInt(cut.e.sets,10) || 0) - 1;
-               if(Array.isArray(cut.e.rpes) && cut.e.rpes.length > 1) cut.e.rpes.pop();
-               continue; }
-      /* d) DROP A MOVEMENT, last, and only one whose muscles survive without it.
+  /* 3  TRIM SETS. `mode` decides which floor applies: MEV while anything is above it,
+        the time-limited floors once nothing is. The set always comes off the movement
+        with the most room above the floor of every muscle it feeds, measured in sets of
+        those muscles, and the loop re-measures after each cut — so cuts spread across
+        the plan in proportion to where the slack is. */
+  const trimStep = (wid, mode, lastResort)=>{
+    const list = program[wid] || [];
+    const weekly = weeklyOf();
+    /* WHICH MUSCLE IS FURTHEST ABOVE ITS FLOOR, always measured against the TIME-limited
+       floors even in the mode that is allowed to go below them. The two questions are
+       different: "may this cut be made" is the mode's business, and "which cut hurts
+       least" is always the same question — take from whatever has the most room above the
+       floor that matters. Measured against zero, the last pass took its sets off the chest
+       simply because the chest had the most of them, which is the opposite of the rule. */
+    const floorMode = mode === "mev" ? "mev" : "time";
+    const room = e=>{
+      let worst = Infinity;
+      GKEYS.forEach(g=>{
+        const f = muscleFrac(e.name, g);
+        if(f <= 0 || (targets[g] && targets[g].optional)) return;
+        worst = Math.min(worst, (weekly[g] - fitFloorFor(g, targets, floorMode)) / Math.max(f, 0.01));
+      });
+      return worst;
+    };
+    /* HOW LOW A MOVEMENT MAY GO. Normally its own floor — three sets for the lift a day
+       opens with, two for everything else. In the last resort, where the only remaining
+       alternatives are breaching the budget or breaching a muscle's time-limited floor,
+       an accessory may come down to a single set: one hard set is a real stimulus, this
+       app's own effective-set model counts it in full, and it is plainly better than both
+       of the other two answers. The lift that opens the day never goes below three. */
+    const floorSets = e=> (lastResort && e.slotKind !== "heavy") ? 1 : buildMinSets(e);
+    /* A cut needs a whole set of headroom — room() is in sets OF THE MUSCLE, and taking
+       one set off a movement costs the muscle its share of that set. The one exception is
+       the pass that has no floors left to respect, where the cut has to happen and the
+       only question is which one does least harm. */
+    const needRoom = mode === "none" ? -Infinity : 1;
+    const cut = list.map(e=> ({e, r: room(e)}))
+      .filter(x=> (parseInt(x.e.sets,10) || 0) > floorSets(x.e) && x.r >= needRoom)
+      .sort((p2, q2)=> q2.r - p2.r)[0];
+    if(!cut) return false;
+    cut.e.sets = (parseInt(cut.e.sets,10) || 0) - 1;
+    if(Array.isArray(cut.e.rpes) && cut.e.rpes.length > 1) cut.e.rpes.pop();
+    return true;
+  };
 
-            M5 — AND NEVER THE LAST THING THAT TRAINS A MUSCLE DIRECTLY. The headroom
-            test below is necessary and not sufficient: a muscle can sit comfortably above
-            its floor on indirect credit alone — triceps off presses, biceps off rows —
-            and still be left with nothing in the week that actually trains it. That is a
-            plan with a hole in it the numbers do not show, so the last direct movement for
-            a muscle the plan is responsible for is not available to this pass whatever the
-            arithmetic says. */
-      const directLeft = {};
-      GKEYS.forEach(g=>{ directLeft[g] = 0; });
-      dayIds.forEach(w2=> (program[w2] || []).forEach(e2=>{
-        GKEYS.forEach(g=>{ if(muscleFrac(e2.name, g) >= DIRECT_SHARE) directLeft[g]++; });
-      }));
-      const lastDirect = e=> GKEYS.some(g=> !targets[g].optional
-        && muscleFrac(e.name, g) >= DIRECT_SHARE && directLeft[g] <= 1);
-      const drop = list.map((e, i)=> ({e, i, r: room(e)}))
-        .filter(x=> x.r > plannedSetValue(x.e) && !lastDirect(x.e))
-        .sort((p, q)=> q.r - p.r)[0];
-      /* NOTHING LEFT TO GIVE. Everything that can be paired is paired, every set above a
-         floor has gone, and dropping a movement would put a muscle under its minimum. The
-         day is as short as this many training days can honestly be made \u2014 which is a
-         fact about the week, not a fault in the plan, and it is reported as one. */
-      if(!drop){ tight.push(wid); break; }
-      notes.push(drop.e.name + " came off " + dayNameOf({days:[]}, wid) + " to fit the time.");
-      list.splice(drop.i, 1);
+  /* 4  DROP A MOVEMENT, last, and only one the floors in force can survive without.
+
+        In MEV mode this still refuses to take the last direct work for a muscle. In time
+        mode it may, because by then the alternative is a session nobody can do — but
+        only while the muscle stays above its time-limited floor, which is what that floor
+        is for. */
+  const dropStep = (wid, mode)=>{
+    const list = program[wid] || [];
+    const weekly = weeklyOf();
+    const direct = {};
+    GKEYS.forEach(g=>{ direct[g] = 0; });
+    dayIds.forEach(w2=> (program[w2] || []).forEach(e2=>{
+      GKEYS.forEach(g=>{ if(muscleFrac(e2.name, g) >= DIRECT_SHARE) direct[g]++; });
+    }));
+    const costOk = e=>{
+      const n = plannedSetValue(e);
+      return GKEYS.every(g=>{
+        const f = muscleFrac(e.name, g);
+        if(f <= 0 || (targets[g] && targets[g].optional)) return true;
+        return (weekly[g] - f * n) >= fitFloorFor(g, targets, mode) - 0.05;
+      });
+    };
+    const lastDirect = e=> GKEYS.some(g=> targets[g] && !targets[g].optional
+      && muscleFrac(e.name, g) >= DIRECT_SHARE && direct[g] <= 1);
+    /* HOW MUCH A REMOVAL HURTS: the worst deficit it would leave any muscle in, measured
+       against the time-limited floors even in the pass allowed to go below them. Zero
+       when nothing lands under its floor. */
+    const harm = e=>{
+      const n = plannedSetValue(e);
+      let worst = 0;
+      GKEYS.forEach(g=>{
+        const f = muscleFrac(e.name, g);
+        if(f <= 0 || (targets[g] && targets[g].optional)) return;
+        const after = (weekly[g] || 0) - f * n;
+        const floor = fitFloorFor(g, targets, mode === "mev" ? "mev" : "time");
+        if(after < floor) worst = Math.max(worst, floor - after);
+      });
+      return worst;
+    };
+    const rank = e=> SLOT_SACRIFICE[e.slotKind] == null ? 1 : SLOT_SACRIFICE[e.slotKind];
+    const cands = list.map((e, i)=> ({e, i}))
+      /* The last direct work for a muscle is protected while the floors are, and not
+         after: by the time there are no floors left to keep, a day that still does not
+         fit is choosing between losing an exercise and handing somebody a session they
+         cannot do. (This read `mode === "time"`, which made the most permissive pass the
+         most restrictive one — so the only sets left to take came off the chest, which
+         is exactly the muscle the rule is meant to protect.) */
+      .filter(x=> costOk(x.e) && (mode === "mev" ? !lastDirect(x.e) : true))
+      /* LEAST HARM FIRST, and only then the least of the session: an isolation before a
+         second compound, and a second compound before the lift the day opens with. The
+         harm term is what keeps the final pass from taking the chest apart simply because
+         a fly is an isolation — it is the owner's rule that cuts come from the muscles
+         furthest above their floor, applied to whole movements as well as to sets. */
+      .sort((p2, q2)=> (harm(p2.e) - harm(q2.e))
+                    || (rank(p2.e) - rank(q2.e)));
+    if(!cands.length) return false;
+    const hit = cands[0];
+    /* A PAIR THAT LOSES A MEMBER STOPS BEING A PAIR. Dropping one left the other carrying
+       a `supersetEnd` with no opener in front of it — an orphan the session screen would
+       run as an ordinary exercise and dayMinutes() could not price as a round. */
+    const bfr = list[hit.i - 1], aft = list[hit.i + 1];
+    if(hit.e.supersetEnd && bfr && bfr.superset && !bfr.supersetEnd){
+      delete bfr.superset;
+    } else if(hit.e.superset && !hit.e.supersetEnd && aft && aft.supersetEnd){
+      delete aft.superset; delete aft.supersetEnd;
+    }
+    list.splice(hit.i, 1);
+    notes.push(hit.e.name + " came off " + dayNameOf({days:[]}, wid) + " to fit "
+      + a.minutes + " minutes.");
+    return true;
+  };
+
+  dayIds.forEach(wid=>{
+    let guard = 0;
+    /* PHASE ONE: everything that does not cost a muscle its floor. */
+    while(dayMinutes(program[wid]) > ceiling && guard++ < 200){
+      if(pairStep(wid)) continue;
+      if(myoStep(wid)) continue;
+      if(trimStep(wid, "mev")) continue;
+      if(dropStep(wid, "mev")) continue;
+      break;
+    }
+    /* WHAT THIS DAY WOULD HAVE TO BE TO KEEP EVERY FLOOR. Recorded here, at the moment
+       the MEV-respecting passes run out, because it is the honest answer to "how long
+       would my sessions need to be" — and it is option (b) on the screen below. */
+    need[wid] = dayMinutes(program[wid]);
+    /* PHASE TWO: into the time-limited floors, because the budget wins. */
+    guard = 0;
+    while(dayMinutes(program[wid]) > ceiling && guard++ < 200){
+      if(trimStep(wid, "time")) continue;
+      if(dropStep(wid, "time")) continue;
+      break;
+    }
+    /* PHASE THREE: the last resort while the time-limited floors still hold — and here
+       DROPPING COMES FIRST. Trimming before dropping is the right order while there is
+       volume above a floor to take; once there is not, trimming first produces a day of
+       twelve exercises at one set each, which is not a session anybody would write.
+       Fewer movements carrying more sets is the better plan at the same cost. */
+    guard = 0;
+    while(dayMinutes(program[wid]) > ceiling && guard++ < 200){
+      if(dropStep(wid, "time")) continue;
+      if(trimStep(wid, "time", true)) continue;
+      break;
+    }
+    /* PHASE FOUR: THE BUDGET IS ABSOLUTE, SO THIS IS WHERE THE FLOORS GO.
+
+       Two training days of forty-five minutes is ninety minutes a week, and an advanced
+       lifter's floors do not fit in it — not at 0.7, not with everything pairable paired
+       and every accessory down to one set. At that point the decision's first line is the
+       one that governs: never generate a day longer than the budget. So volume goes below
+       the time-limited floors, and three things make that honest rather than silent:
+
+         the check still FAILS on it, as the decision says it must;
+         the muscles it happened to are named in the report, and the preview puts the
+           choice in front of the person before anything is saved — keep the budget, make
+           the sessions as long as they need to be, or add a day;
+         and a priority muscle is still never touched.
+
+       A plan nobody can perform is not a smaller problem than a plan that is too light. */
+    guard = 0;
+    while(dayMinutes(program[wid]) > ceiling && guard++ < 200){
+      if(dropStep(wid, "none")) continue;
+      if(trimStep(wid, "none", true)) continue;
+      break;
+    }
+    if(dayMinutes(program[wid]) > ceiling) over.push(wid);
+  });
+
+  /* WHICH MUSCLES ENDED UP ON MAINTENANCE, named so the screen can name them — and
+     which, if any, went under even the time-limited floor, which is a harder thing to
+     say and is said in its own field rather than mixed in with the first. */
+  const weekly = weeklyOf();
+  const below = {};
+  GKEYS.forEach(g=>{
+    const t = targets[g];
+    if(!t || t.optional || t.priority) return;
+    const tf = fitFloorFor(g, targets, "time");
+    if(weekly[g] + 0.05 < t.mev){
+      maint[g] = {now: Math.round(weekly[g] * 10) / 10, mev: Math.round(t.mev * 10) / 10,
+                  floor: Math.round(tf * 10) / 10, big: isBigMuscle(g)};
+      if(weekly[g] + 0.05 < tf) below[g] = maint[g];
     }
   });
-  notes.tight = tight;
+  notes.below = below;
+  const names = Object.keys(maint).map(g=> GROUPS[g].name.toLowerCase());
+  if(names.length) notes.push("To fit " + a.minutes + " minutes, "
+    + names.join(", ") + " " + (names.length === 1 ? "is" : "are")
+    + " on maintenance volume rather than growth volume \u2014 enough to hold what you have, "
+    + "and slower to add to it.");
+  notes.over = over;
+  notes.maint = maint;
+  notes.need = need;
+  /* The length a session would have to be for nothing to be on maintenance, rounded up to
+     five minutes because nobody plans a 67-minute workout. */
+  const needMax = Math.max.apply(null, dayIds.map(w=> need[w] || 0));
+  notes.needMinutes = Math.ceil(Math.max(needMax, a.minutes) / 5) * 5;
   return notes;
 }
 function buildPlan(answers){
@@ -10637,14 +10875,17 @@ function buildPlan(answers){
 
   /* 4-6. TUNE, FIT, AND CHECK, in rounds: a cut made for the clock changes the volume,
           and a set added for a muscle changes the clock. */
-  let q = null, tight = [];
+  let q = null, fit = null;
   for(let round = 0; round < BUILD_ROUNDS; round++){
     report.notes = report.notes.concat(buildTune(program, dayIds, targets, a));
-    const fit = buildFit(program, dayIds, targets, a);
-    tight = fit.tight || [];
+    fit = buildFit(program, dayIds, targets, a);
     report.notes = report.notes.concat(fit);
+    /* `maintenance` tells the check which world it is in: with the budget winning, a
+       muscle under MEV is a stated trade rather than a mistake, and the check labels it
+       as maintenance. A muscle under its TIME-LIMITED floor is still a failure, and the
+       check needs the same floors the fit pass used to say so. */
     q = planQuality(program, split, {budget: a.minutes, priority: a.priority, gear: a.gear,
-                                     targets: targets, tight: tight});
+                                     targets: targets, maintenance: true});
     if(q.ok) break;
     /* The one thing a round can act on by itself: a session over the cap, which is always
        fixable by moving a set to another day. Everything else is handled by the tune and
@@ -10684,12 +10925,16 @@ function buildPlan(answers){
       if(ex && !buildHasMove(program[bare], ex.name)){
         program[bare].push(ex);
         report.notes.push(ex.name + " added to " + dayNameOf(split, bare) + " so the "
-          + GROUPS[f.muscle].name.toLowerCase() + " is trained twice a week, which is worth "
-          + "a few minutes over the budget.");
+          + GROUPS[f.muscle].name.toLowerCase() + " is trained twice a week.");
       }
     });
+    /* AND BACK THROUGH THE TIME-BOX. This repair adds a movement to a day, and the budget
+       is a hard ceiling now — it used to be allowed to run "a few minutes over", which is
+       exactly the licence the owner's decision withdraws. */
+    fit = buildFit(program, dayIds, targets, a);
+    report.notes = report.notes.concat(fit);
     q = planQuality(program, split, {budget: a.minutes, priority: a.priority, gear: a.gear,
-                                     targets: targets, tight: tight.concat(dayIds)});
+                                     targets: targets, maintenance: true});
   }
 
   /* 7. STARTING LOADS AND FEELER SETS. A load where the table has an honest one, and the
@@ -10713,6 +10958,45 @@ function buildPlan(answers){
 
   report.quality = q;
   report.weekly = (q && q.weekly) || programWeeklySets(program, dayIds);
+  /* THE CHOICE THE PERSON HAS TO MAKE, WHERE THERE IS ONE.
+
+     The budget won, and something was paid for it: either a muscle is on maintenance
+     volume, or — at the extreme — the day could not be brought under the ceiling at all.
+     Both are decisions about the person's own week and neither is the app's to take
+     quietly, so the preview puts them in front of somebody before the plan is saved, with
+     the three honest answers and the arithmetic for each. Default (a): what they asked
+     for. Never chosen silently. */
+  report.fit = {maint: (fit && fit.maint) || {}, below: (fit && fit.below) || {},
+                over: (fit && fit.over) || [],
+                needMinutes: (fit && fit.needMinutes) || a.minutes,
+                minutes: dayIds.map(wid=> dayMinutes(program[wid]))};
+  /* A PRIORITY MUSCLE THAT COULD NOT GET ITS TARGET IS THE MOST IMPORTANT THING ON THIS
+     SCREEN. The floors protect it in every pass, but a floor cannot create time: twenty-four
+     sets of chest and a whole body besides do not fit into ninety minutes a week, and when
+     they do not, the budget wins there too. The person chose that muscle by name, so being
+     told is the minimum. */
+  report.fit.priority = [];
+  (a.priority || []).forEach(g=>{
+    const t = targets[g];
+    if(!t) return;
+    const got = (report.weekly || {})[g] || 0;
+    if(got + 0.05 < (t.want || 0)) report.fit.priority.push({g, name: GROUPS[g].name,
+      now: Math.round(got * 10) / 10, want: Math.round(t.want * 10) / 10});
+  });
+  const maintKeys = Object.keys(report.fit.maint);
+  if(maintKeys.length || report.fit.over.length || report.fit.priority.length){
+    report.choice = {
+      budget: a.minutes,
+      days: a.days,
+      need: report.fit.needMinutes,
+      over: report.fit.over.slice(),
+      muscles: maintKeys.map(g=> ({g, name: GROUPS[g].name,
+                                   now: report.fit.maint[g].now,
+                                   mev: report.fit.maint[g].mev,
+                                   big: report.fit.maint[g].big})),
+      priority: report.fit.priority.slice()
+    };
+  }
   report.targets = targets;
   report.answers = a;
   return {program, split, meso, report};
@@ -10760,7 +11044,8 @@ function buildSafeAlternative(name, gear, protect){
 let BUILD_UI = null;
 function buildHost(){ return document.getElementById("buildFullIn"); }
 function openBuildPage(seed){
-  BUILD_UI = Object.assign({step: 0, answers: Object.assign({}, BUILD_DEFAULTS), built: null},
+  BUILD_UI = Object.assign({step: 0, answers: Object.assign({}, BUILD_DEFAULTS), built: null,
+                            choice: "keep", choiceOf: null},
                            seed || {});
   /* What the app already knows about you is a better starting point than a blank form,
      and every one of these is still a question you get asked. */
@@ -10938,6 +11223,70 @@ function buildPreviewHTML(){
           esc(String(r1(t.top || t.mav)))}</i></span></div>`;
     }).join("");
   const notes = (r.report.notes || []).slice(0, 6);
+  /* THE CHOICE, WHERE THE TIME BUDGET COST SOMETHING.
+
+     The budget wins, and when it wins something is paid for it: a muscle on maintenance
+     volume rather than growth volume, or — at the extreme — a floor the time could not
+     keep. Both are decisions about somebody's own week and neither is the app's to take
+     quietly, so they are put in front of the person here, before anything is saved, with
+     the arithmetic for each answer.
+
+     (a) is the default and it is what they asked for. It is not pre-applied silently:
+     nothing is saved until "Use this plan" is pressed, and the three answers are on the
+     screen above that button with (a) already selected. */
+  /* ONCE OFFERED, THE CHOICE STAYS ON THE SCREEN. Picking (b) or (c) rebuilds the plan,
+     and the rebuilt plan usually needs no choice at all — so reading the question off the
+     CURRENT plan made the other two answers disappear the moment one was taken, with no
+     way back except starting over. The question belongs to the session, not to whichever
+     plan is in front of you, so it is remembered. */
+  if(r.report.choice && !BUILD_UI.choiceOf) BUILD_UI.choiceOf = r.report.choice;
+  const ch = BUILD_UI.choiceOf || r.report.choice;
+  const chosen = BUILD_UI.choice || "keep";
+  const choiceHTML = !ch ? "" : (()=>{
+    const names = ch.muscles.map(m=> m.name.toLowerCase());
+    const said = names.length
+      ? names.slice(0, 5).join(", ") + (names.length > 5 ? " and " + (names.length - 5) + " more" : "")
+      : "";
+    const opt = (v, t, d)=> `<button type="button" class="ch${chosen === v ? " on" : ""}"
+        data-buildchoice="${v}" aria-pressed="${chosen === v}">
+        <span class="ch-tick" aria-hidden="true">✓</span>
+        <span class="ch-tx"><b>${esc(t)}</b><span>${d}</span></span></button>`;
+    return `<div class="bld-choice">
+      <div class="bld-vol-h">This plan needs a decision from you</div>
+      ${(ch.priority || []).length ? `<div class="sub" style="margin:0 0 10px">
+        <b>${esc((ch.priority || []).map(x=> x.name).join(" and "))}</b>
+        ${ch.priority.length === 1 ? "is" : "are"} what you asked to push, and
+        ${ch.priority.length === 1 ? "it is" : "they are"} getting
+        ${esc(ch.priority.map(x=> String(x.now)).join(" and "))} sets a week against a target of
+        ${esc(ch.priority.map(x=> String(x.want)).join(" and "))}. There is not enough time in
+        ${ch.budget} minutes ${ch.days === 1 ? "" : "\u00d7 " + ch.days + " days "}for the
+        target \u2014 the time is the thing to change, not the priority.</div>` : ""}
+      <div class="sub" style="margin:0 0 10px">${ch.over.length
+        ? "Even at its shortest, " + (ch.over.length === 1 ? "one day" : ch.over.length + " days")
+          + " of this plan runs past the " + ch.budget + " minutes you have."
+        : "To fit " + ch.budget + " minutes a session, " + esc(said) + " "
+          + (names.length === 1 ? "is" : "are") + " on <b>maintenance volume</b> rather than "
+          + "growth volume."}
+        ${ch.need > ch.budget ? "Keeping every muscle at its growth floor would need about <b>"
+          + ch.need + " minutes</b> a session." : ""}</div>
+      <div class="ch-list">
+        ${opt("keep", "Keep " + ch.budget + " minutes",
+          names.length
+            ? "Growth is slower for " + esc(said) + ". Maintenance volume still holds the "
+              + "muscle you have and still adds to it, just slowly — and a session you "
+              + "finish beats one you skip."
+            : "The sessions stay the length you asked for.")}
+        ${ch.need > ch.budget ? opt("longer", "Make sessions " + ch.need + " minutes",
+          "Everything stays at its growth floor. " + (ch.need - ch.budget)
+          + " minutes more per session, "
+          + ((ch.need - ch.budget) * ch.days) + " more a week.") : ""}
+        ${ch.days < 6 ? opt("day", "Add a training day",
+          "Rebuild on " + (ch.days + 1) + " days a week at " + ch.budget
+          + " minutes. The same week's work, spread thinner, which is usually the best of "
+          + "the three if the day exists.") : ""}
+      </div>
+    </div>`;
+  })();
   return buildHeadHTML(sp.name + ", " + sp.tag,
       "Built from your answers, against the same volume targets the Body tab measures you "
       + "by. Nothing is saved until you say so.")
@@ -10950,11 +11299,12 @@ function buildPreviewHTML(){
     + `<div class="bld-days">${days}</div>`
     + `<div class="bld-vol-h">Sets a week, against your targets</div>
        <div class="bld-vols">${rows}</div>`
+    + choiceHTML
     + (notes.length ? `<div class="bld-vol-h">What it did</div>
        <div class="bld-notes">${notes.map(n=> `<div class="sub">${esc(n)}</div>`).join("")}</div>` : "")
     + `<div class="spec-foot">
         <button class="btn ghost" data-buildback>Change answers</button>
-        <button class="btn" data-buildadopt>Use this plan</button>
+        <button class="btn" data-buildadopt>${ch ? "Use this plan" : "Use this plan"}</button>
       </div>`;
 }
 function bindBuildPage(){
@@ -10989,17 +11339,47 @@ function bindBuildPage(){
   host.querySelectorAll("[data-buildnext]").forEach(b=> b.onclick = ()=>{
     step();
     BUILD_UI.step++;
-    if(BUILD_UI.step >= BUILD_QUESTIONS.length) BUILD_UI.built = buildPlan(BUILD_UI.answers);
+    if(BUILD_UI.step >= BUILD_QUESTIONS.length){
+      // a new plan from changed answers, so the question and its answer both start again
+      BUILD_UI.choice = "keep";
+      BUILD_UI.choiceOf = null;
+      BUILD_UI.built = buildPlan(BUILD_UI.answers);
+    }
     renderBuildPage();
   });
   host.querySelectorAll("[data-buildskip]").forEach(b=> b.onclick = ()=>{
     BUILD_UI.step++;
-    if(BUILD_UI.step >= BUILD_QUESTIONS.length) BUILD_UI.built = buildPlan(BUILD_UI.answers);
+    if(BUILD_UI.step >= BUILD_QUESTIONS.length){
+      // a new plan from changed answers, so the question and its answer both start again
+      BUILD_UI.choice = "keep";
+      BUILD_UI.choiceOf = null;
+      BUILD_UI.built = buildPlan(BUILD_UI.answers);
+    }
     renderBuildPage();
   });
   host.querySelectorAll("[data-buildback]").forEach(b=> b.onclick = ()=>{
     step();
     BUILD_UI.step = Math.max(0, BUILD_UI.step - 1);
+    renderBuildPage();
+  });
+  /* THE CHOICE. Selecting one of the three rebuilds the plan on the spot — so the
+     preview below the buttons is always the plan the selected answer actually produces,
+     rather than a promise about one. (a) keeps what was built. */
+  host.querySelectorAll("[data-buildchoice]").forEach(b=> b.onclick = ()=>{
+    const v = b.dataset.buildchoice;
+    BUILD_UI.choice = v;
+    const a = BUILD_UI.answers;
+    const ch = BUILD_UI.choiceOf
+            || (BUILD_UI.built && BUILD_UI.built.report && BUILD_UI.built.report.choice);
+    if(!ch){ renderBuildPage(); return; }
+    /* The answers themselves are not rewritten: a choice made on this screen is about
+       this plan, and going back to change answers must still show what was typed. The
+       rebuild is done on a copy. */
+    const ask = Object.assign({}, a);
+    if(v === "longer") ask.minutes = ch.need;
+    else if(v === "day") ask.days = Math.min(6, (ch.days || a.days) + 1);
+    try{ BUILD_UI.built = buildPlan(ask); }
+    catch(e){ toast("That did not work out, sorry — the plan is unchanged", "warn"); }
     renderBuildPage();
   });
   host.querySelectorAll("[data-buildadopt]").forEach(b=> b.onclick = ()=>{
@@ -11117,16 +11497,56 @@ function plannedSetValue(e){
   if(!n) return 0;
   return plannedMyo(e) ? (n - 1) + myoSetValue() : n;
 }
+/* HOW LONG A SESSION TAKES, AND WHAT A SUPERSET ACTUALLY SAVES.
+
+   A paired exercise used to be costed at its working time and NO REST AT ALL — two
+   paired three-set movements came to four minutes for six sets. That was wrong and it was
+   survivable only because pairing was rare: the old rule refused to pair two compounds,
+   so at most a couple of accessories were ever mispriced.
+
+   The owner's decision makes pairing the first and cheapest way to fit a budget, which
+   turned a bounded error into the load-bearing one: with everything pairable, a day could
+   pair itself down to an arithmetic that no human could perform. A 30-minute two-day plan
+   came out meeting every volume floor for an advanced lifter, which is not a plan, it is a
+   rounding error with a programme attached.
+
+   What a superset actually saves is ONE rest per round, not all of them. You do A, you do
+   B, and then you rest before going back to A — that rest is real and it is roughly as
+   long as either exercise's own. So a paired round costs both movements' working time plus
+   a single rest, taken as the longer of the two, and the saving is about 45% of running
+   them separately rather than 100%. Still the cheapest thing in the time-box, and now true.
+
+   WORK_SECONDS is the time under load for one set, which this has always taken as 40
+   seconds and which is about right for anything in the 5-15 rep range. */
+const WORK_SECONDS = 40;
+function restSecondsFor(e){
+  if(Array.isArray(e.rest)) return e.rest[0];
+  const guess = restTargetFor(e, {reps: String(repRange(e.reps) ? repRange(e.reps)[1] : 10)});
+  return (guess && guess.ideal && guess.ideal[0]) || 120;
+}
 function dayMinutes(list){
+  const arr = list || [];
   let sec = 0;
-  (list || []).forEach(e=>{
+  for(let i = 0; i < arr.length; i++){
+    const e = arr[i];
     const sets = parseInt(e.sets, 10) || 0;
-    const rest = Array.isArray(e.rest) ? e.rest[0]
-      : (restTargetFor(e, {reps: String(repRange(e.reps) ? repRange(e.reps)[1] : 10)}) || {ideal:[120]}).ideal[0];
-    sec += sets * (40 + (e.superset ? 0 : rest));
-    // the mini-sets and their breaths, which happen inside the last set rather than after it
-    if(plannedMyo(e) && sets > 0) sec += MYO_MINIS * (MYO_PAUSE + MYO_MINI_SECONDS);
-  });
+    const myo = (plannedMyo(e) && sets > 0) ? MYO_MINIS * (MYO_PAUSE + MYO_MINI_SECONDS) : 0;
+    /* A pair: this entry opens it and the next one closes it. Charged as rounds of both
+       movements' work plus one rest, which is what a superset is. */
+    const partner = e.superset && arr[i + 1] && arr[i + 1].supersetEnd ? arr[i + 1] : null;
+    if(partner){
+      const pSets = parseInt(partner.sets, 10) || 0;
+      const rounds = Math.max(sets, pSets);
+      const rest = Math.max(restSecondsFor(e), restSecondsFor(partner));
+      sec += rounds * (WORK_SECONDS * 2 + rest) + myo
+           + ((plannedMyo(partner) && pSets > 0) ? MYO_MINIS * (MYO_PAUSE + MYO_MINI_SECONDS) : 0);
+      i++;                                   // the partner is accounted for
+      continue;
+    }
+    /* A member of a group whose partner is missing — a plan edited by hand, or a third
+       member of a circuit — is charged as an ordinary exercise rather than as free. */
+    sec += sets * (WORK_SECONDS + restSecondsFor(e)) + myo;
+  }
   return Math.round(sec / 60);
 }
 /* Weekly sets per muscle for a whole programme, fractional credit included — fractional
@@ -11182,8 +11602,37 @@ function planQuality(program, split, opts){
     const v = weekly[g] || 0;
     const top = Math.min(L.mav, L.mrv * 0.9);
     if(v + 0.05 < L.mev){
-      add(fail, "under", G.name + " gets " + r1(v) + " sets a week, under its floor of "
-        + r1(L.mev) + ".", {muscle: g, fix: "add", want: L.mev});
+      /* UNDER MEV, IN THE TWO WORLDS THIS CHECK HAS TO LIVE IN.
+
+         For a plan somebody wrote, or one the app is reading back, under the floor is a
+         fault: nothing asked for it and nothing is being bought with it.
+
+         For a plan built against a stated time budget it is a TRADE, and the owner's
+         decision is that the budget wins. So it is a warning, it is called maintenance,
+         and it says the one true thing about maintenance volume that somebody in that
+         position needs to hear — it holds what you have and still adds slowly, which is
+         most of the benefit for a beginner. What remains a failure is going under the
+         time-limited floor beneath it: 0.7 × MEV for a big muscle, 0.5 × for a small one
+         that takes real indirect work from the compounds, and nothing at all off a muscle
+         the person chose to prioritise. */
+      const soft = !!o.maintenance && given && given[g];
+      const tf = soft ? fitFloorFor(g, given, "time") : 0;
+      if(soft && v + 0.05 >= tf){
+        add(warn, "maintenance", G.name + " gets " + r1(v) + " sets a week against a growth "
+          + "floor of " + r1(L.mev) + " — maintenance volume, to fit the time you have. That "
+          + "holds the muscle you have and still adds to it slowly, which is most of the "
+          + "benefit when the alternative is a session you cannot finish."
+          + (isBigMuscle(g) ? "" : " It also takes real indirect work from the compounds in "
+            + "this plan, so the figure understates what it gets."),
+          {muscle: g, now: v, mev: L.mev, floor: tf});
+      } else if(soft){
+        add(fail, "under", G.name + " gets " + r1(v) + " sets a week, under the "
+          + (isBigMuscle(g) ? "70%" : "50%") + " of its floor that a time-limited plan may "
+          + "not go below (" + r1(tf) + ").", {muscle: g, fix: "add", want: tf});
+      } else {
+        add(fail, "under", G.name + " gets " + r1(v) + " sets a week, under its floor of "
+          + r1(L.mev) + ".", {muscle: g, fix: "add", want: L.mev});
+      }
     } else if(v > L.mrv + 0.05){
       add(fail, "over", G.name + " gets " + r1(v) + " sets a week, past its ceiling of "
         + r1(L.mrv) + ".", {muscle: g, fix: "cut", want: top});
@@ -11231,17 +11680,17 @@ function planQuality(program, split, opts){
     if(sets > MAX_WORKING_SETS_PER_SESSION)
       add(warn, "long", dayNameOf(split, wid) + " has " + sets + " working sets in it, past the "
         + MAX_WORKING_SETS_PER_SESSION + " a session this app will propose.", {wid, fix: "shorten"});
-    if(o.budget > 0 && mins > o.budget + 5){
-      /* A day that could be shorter and is not is a fault. A day that cannot be shorter
-         without putting a muscle under its floor is a statement about how many days a
-         week you train, and the plan says so rather than failing over it. */
-      if((o.tight || []).indexOf(wid) > -1)
-        add(warn, "budget", dayNameOf(split, wid) + " comes to about " + mins + " minutes rather than "
-          + o.budget + ". With this many training days there is no way to make it shorter without "
-          + "putting a muscle under its minimum.", {wid, mins});
-      else
-        add(fail, "budget", dayNameOf(split, wid) + " needs about " + mins + " minutes against your "
-          + o.budget + ".", {wid, mins, fix: "shorten"});
+    /* THE BUDGET IS A CEILING NOW, AND THERE IS NO SUCH THING AS AN EXCUSED OVERRUN.
+
+       This used to downgrade an over-long day to a warning when the fit pass had marked
+       it unshortenable — the floors were absolute and the budget was advisory. The
+       owner's decision reverses that: volume gives way to the clock, down to the
+       time-limited floors, and a day past the stated figure plus five minutes is a
+       failure whatever the reason. The trade that was made to get there is reported
+       separately, as maintenance, above. */
+    if(o.budget > 0 && mins > o.budget + BUDGET_TOLERANCE_MIN){
+      add(fail, "budget", dayNameOf(split, wid) + " needs about " + mins + " minutes against your "
+        + o.budget + ".", {wid, mins, fix: "shorten"});
     }
   });
 

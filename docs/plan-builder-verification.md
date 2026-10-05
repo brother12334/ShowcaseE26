@@ -712,9 +712,11 @@ on a day whose remaining isolations all share a muscle. *Proposed resolution:* k
 brief's order — supersets genuinely are the cheaper saving — and leave the step in place
 for the days that need it rather than promoting it above supersets to make it fire.
 
-**The 2-day budget conflict** is recorded in full under "The one conflict the brief cannot
-resolve" in the re-measurement section, and is the one open question with a measured number
-against it: 41 of 360 combinations run over budget, the worst by 46 minutes.
+**The 2-day budget conflict is settled.** The owner ruled that the time budget wins; see
+"The time budget wins" in the re-measurement section. 0 of 360 combinations now run over
+the budget plus its tolerance, no big muscle is under 0.7 × MEV, and the one residual —
+two combinations where the abs end 0.6 of a set under their floor — is measured, failed by
+the check, and put to the person as a choice.
 
 **"Proportional cuts above MEV" is implemented as largest-headroom-first, re-measured.**
 The brief asks for proportional cuts; the pass takes one set at a time off whichever
@@ -881,18 +883,86 @@ movement, never the last direct work for any muscle, never one that drops a musc
 floor, an isolation before a second compound and a second compound before the lift that
 opens a day — and say so in the notes.
 
+## The time budget wins — the owner's decision
+
+The conflict the first re-measurement could not resolve was put to the owner, who ruled:
+
+> The time budget wins. Never generate a day longer than the user's chosen budget plus a
+> 5-minute tolerance.
+
+With the order to fit in, the floors that apply when fitting is not enough, the choice to
+put to the person when even those are not enough, and how the check should talk about all
+of it. What follows is what that produced.
+
+### The order, and what each step is worth
+
+| Step | What it does | What it costs |
+|---|---|---|
+| 1 | Superset non-competing movements, **including two compounds that share no muscle** | nothing — but see the note on what a pair really costs |
+| 2 | Myo-reps on the last set of an isolation | a quarter of a set, for most of a set's time |
+| 3 | Trim sets: to MEV first, then into the time-limited floors | volume, in the order the floors allow |
+| 4 | Drop a movement | an exercise, and only one the floors can survive without |
+
+**Allowing compound pairs was the decision that did the work.** A squat and a pulldown
+share no muscle and are run together in half the gyms in the world; the old rule forbade it
+outright. With it allowed, 41 of the 360 combinations that previously ran over budget came
+inside it before any volume was touched at all.
+
+**Drop sets are offered by the decision and are not used, for a reason worth stating.**
+Element 26 counts a drop set as **one hard set** — `DROP_EXTRA_PER_DROP` is zero, following
+the literature the app cites — so replacing two straight sets with one drop set loses a
+full set of credit and saves one rest period. It is a good technique and a bad time lever
+in this app's own accounting. Myo-reps are worth 1.75, which is the whole reason they are
+the technique in step 2. If the intention was that a drop set should be worth more than one
+set, that is a change to the volume model rather than to the time-box, and it should be
+made there.
+
+### The time-limited floors
+
+| | Floor | Muscles |
+|---|---|---|
+| Big | 0.7 × MEV | chest, lats, mid back, quads, hamstrings, glutes |
+| Small | 0.5 × MEV | side and rear delts, biceps, triceps, calves, abs |
+| Priority | the full target, in every pass | whatever the person chose |
+
+Cuts come from whatever is furthest above its floor, re-measured after each one, so they
+spread rather than landing on one muscle. Under MEV is **maintenance** and a warning;
+under a time-limited floor is a **failure**.
+
+### A defect this exposed, which made the whole budget arithmetic false
+
+A paired exercise was costed at its working time and **no rest at all** — two paired
+three-set movements came to four minutes for six sets. Survivable while pairing was rare;
+load-bearing the moment pairing became the first thing the time-box reaches for. With
+everything pairable, a 30-minute two-day plan came out meeting every volume floor for an
+advanced lifter, which is not a plan, it is a rounding error with a programme attached.
+
+A superset saves **one rest per round**, not all of them: you do A, you do B, and then you
+rest before going back to A. `dayMinutes()` now charges a paired round as both movements'
+work plus a single rest, a saving of about 45% rather than 100%. Every number in the tables
+below is on the honest model.
+
+Two smaller ones fell out of the same work: a pair was being marked on **non-adjacent**
+movements, which the app's positional superset model cannot represent and `dayMinutes()`
+could not price; and dropping one member of a pair left the other carrying a `supersetEnd`
+with no opener in front of it. Both are pinned by `budget.mjs` §5.
+
 ### The run
 
 | | |
 |---|---|
 | Combinations | **360** (days 2–6 × 4 gear tiers × 3 levels × 2 goals × budgets 45/60/75) |
-| Quality-check failures | **0** |
-| Combinations with a major muscle outside [MEV, min(MAV, 0.9·MRV)] | **0** |
-| Warnings in total (informational) | 1644 |
-| Longest single day | 91 min |
+| Quality-check failures | **2** |
+| Days over the budget plus its five-minute tolerance | **0** |
+| Combinations with a muscle under its time-limited floor | **2** |
+| Combinations with a muscle on maintenance volume | 67 |
+| …of which the choice screen was offered | 67 |
+| Combinations with a major muscle outside [MEV, min(MAV, 0.9·MRV)] | 67 — maintenance by design, see below |
+| Warnings in total (informational) | 2045 |
+| Longest single day | 80 min |
 | Shortest single day | 21 min |
 | Worst per-session load on one muscle | 10 sets (cap 24 working sets a session; 5 a movement) |
-| Weekly working sets, lowest → highest | 51 → 144 |
+| Weekly working sets, lowest → highest | 47 → 144 |
 
 ### The bands each combination was measured against
 
@@ -917,40 +987,48 @@ set in any of these runs.
 
 ### Weekly sets per muscle, across all 360 combinations
 
-| Muscle | lowest | median | highest | in band |
-|---|---|---|---|---|
-| Chest | 7 | 12 | 20.4 | 360/360 |
-| Lats | 7.1 | 11.5 | 15.5 | 360/360 |
-| Mid Back | 7 | 13.3 | 19.6 | 360/360 |
-| Side Delts | 6 | 10.2 | 15 | 360/360 |
-| Rear Delts | 4.9 | 10.2 | 19.3 | 360/360 |
-| Biceps | 5.7 | 10 | 16.1 | 360/360 |
-| Triceps | 4.7 | 10.3 | 16.4 | 360/360 |
-| Quads | 6 | 10 | 16 | 360/360 |
-| Hamstrings | 4.3 | 8.5 | 16.1 | 360/360 |
-| Glutes | 5.8 | 10 | 14.3 | 360/360 |
-| Calves | 6 | 10.4 | 13.6 | 360/360 |
-| Abs | 4.6 | 10 | 21.1 | 360/360 |
+`in band` is inside [MEV, ceiling]. `maintenance` is below MEV but at or above the
+time-limited floor — the trade the time budget buys. `under floor` is the one number
+that may not move: zero for every big muscle.
+
+| Muscle | | lowest | median | highest | in band | maintenance | under floor |
+|---|---|---|---|---|---|---|---|
+| Chest | big | 7 | 11 | 20.4 | 322 | 38 | 0 |
+| Lats | big | 6.1 | 11.1 | 15.5 | 304 | 56 | 0 |
+| Mid Back | big | 5.6 | 12.3 | 19.6 | 307 | 53 | 0 |
+| Side Delts | small | 4.2 | 9.8 | 15 | 296 | 64 | 0 |
+| Rear Delts | small | 4.2 | 9.6 | 19.3 | 324 | 36 | 0 |
+| Biceps | small | 5 | 9.6 | 16.1 | 324 | 36 | 0 |
+| Triceps | small | 4.7 | 10.2 | 16.4 | 331 | 29 | 0 |
+| Quads | big | 6 | 10 | 16 | 330 | 30 | 0 |
+| Hamstrings | big | 4.3 | 8.3 | 16.1 | 337 | 23 | 0 |
+| Glutes | big | 5.8 | 9.4 | 14.3 | 360 | 0 | 0 |
+| Calves | small | 4 | 9.4 | 13.6 | 300 | 60 | 0 |
+| Abs | small | 3 | 9.8 | 21.1 | 334 | 26 | **2** |
 
 ### Minutes a day
 
-| Days | Budget | shortest | median | longest | over budget |
-|---|---|---|---|---|---|
-| 2 | 45 | 39 | 55 | 91 | 20 of 24 |
-| 2 | 60 | 40 | 59 | 91 | 12 of 24 |
-| 2 | 75 | 55 | 72 | 80 | 3 of 24 |
-| 3 | 45 | 29 | 43.5 | 58 | 6 of 24 |
-| 3 | 60 | 40 | 54 | 60 | none |
-| 3 | 75 | 46 | 68 | 75 | none |
-| 4 | 45 | 29 | 39 | 45 | none |
-| 4 | 60 | 29 | 51 | 60 | none |
-| 4 | 75 | 29 | 57 | 74 | none |
-| 5 | 45 | 21 | 39 | 45 | none |
-| 5 | 60 | 21 | 47.5 | 60 | none |
-| 5 | 75 | 21 | 48 | 73 | none |
-| 6 | 45 | 21 | 36 | 45 | none |
-| 6 | 60 | 21 | 42 | 59 | none |
-| 6 | 75 | 21 | 42 | 68 | none |
+The ceiling is the budget plus five minutes. `over ceiling` is the number that must be
+zero everywhere; `over budget` counts days inside the tolerance but past the stated
+figure, which the decision allows.
+
+| Days | Budget | shortest | median | longest | over budget | over ceiling |
+|---|---|---|---|---|---|---|
+| 2 | 45 | 47 | 49 | 50 | 24 of 24 | none |
+| 2 | 60 | 61 | 64 | 65 | 24 of 24 | none |
+| 2 | 75 | 73 | 79 | 80 | 24 of 24 | none |
+| 3 | 45 | 45 | 49 | 50 | 24 of 24 | none |
+| 3 | 60 | 46 | 63 | 65 | 24 of 24 | none |
+| 3 | 75 | 46 | 75 | 80 | 19 of 24 | none |
+| 4 | 45 | 29 | 48 | 50 | 24 of 24 | none |
+| 4 | 60 | 29 | 57 | 65 | 17 of 24 | none |
+| 4 | 75 | 29 | 57 | 80 | 6 of 24 | none |
+| 5 | 45 | 21 | 46 | 50 | 21 of 24 | none |
+| 5 | 60 | 21 | 48 | 65 | 11 of 24 | none |
+| 5 | 75 | 21 | 48 | 79 | 4 of 24 | none |
+| 6 | 45 | 21 | 42 | 50 | 17 of 24 | none |
+| 6 | 60 | 21 | 42 | 64 | 5 of 24 | none |
+| 6 | 75 | 21 | 42 | 68 | none | none |
 
 ### Per-session maxima
 
@@ -960,7 +1038,7 @@ session has to come from more sessions rather than bigger ones.
 
 | Days | worst single-muscle session load | the muscle | worst session, total sets |
 |---|---|---|---|
-| 2 | 9.3 | Abs | 51 (average a day) |
+| 2 | 8 | Chest | 41 (average a day) |
 | 3 | 9.5 | Abs | 38 (average a day) |
 | 4 | 9.8 | Chest | 31 (average a day) |
 | 5 | 9.2 | Triceps | 26 (average a day) |
@@ -971,313 +1049,316 @@ session has to come from more sessions rather than bigger ones.
 Weekly sets per muscle, with the band check. `days/gear/level/goal/budget`; `in` is how
 many of the 12 major muscles landed inside their own band.
 
+An `m` after a figure means that muscle is on maintenance volume — below MEV, at or
+above its time-limited floor — which is what the time budget bought.
+
 | Combination | split | Chest | Lats | Mid&nbsp;Back | Side&nbsp;Delts | Rear&nbsp;Delts | Biceps | Triceps | Quads | Hamstrings | Glutes | Calves | Abs | in | day min–max | sess max |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2/full/beginner/muscle/45 | full2 | 8 | 7.3 | 7 | 6 | 6.5 | 6.1 | 4.7 | 7 | 6.3 | 5.9 | 6.4 | 5 | 12/12 | 43–58 | 5 |
-| 2/full/beginner/muscle/60 | full2 | 8 | 8.8 | 8 | 7.2 | 5.5 | 8 | 5.7 | 7 | 7.3 | 6.7 | 7.4 | 5 | 12/12 | 59–59 | 5.5 |
-| 2/full/beginner/muscle/75 | full2 | 11 | 8.8 | 9.5 | 10.8 | 8.5 | 9 | 8.6 | 9 | 9.5 | 8.2 | 8.6 | 5 | 12/12 | 72–74 | 6.3 |
-| 2/full/beginner/lean/45 | full2 | 8 | 7.3 | 7 | 6 | 6.5 | 6.1 | 4.7 | 7 | 6.3 | 5.9 | 6.4 | 5 | 12/12 | 43–58 | 5 |
-| 2/full/beginner/lean/60 | full2 | 9 | 8 | 7.5 | 7.2 | 6 | 6.5 | 6.2 | 7 | 6.3 | 5.9 | 7.4 | 5 | 12/12 | 57–57 | 5 |
-| 2/full/beginner/lean/75 | full2 | 10 | 8.8 | 9.5 | 9.8 | 8.5 | 9 | 8.2 | 9 | 8.5 | 7.4 | 7.6 | 5 | 12/12 | 67–70 | 6.3 |
-| 2/full/intermediate/muscle/45 | full2 | 10 | 11 | 11 | 8.2 | 7 | 8.4 | 6.1 | 8 | 9.3 | 9.9 | 8 | 7 | 12/12 | 60–65 | 7.3 |
-| 2/full/intermediate/muscle/60 | full2 | 10 | 11 | 11 | 8.2 | 7 | 8.4 | 6.2 | 8 | 7.5 | 7.4 | 8.4 | 6 | 12/12 | 60–61 | 7.3 |
-| 2/full/intermediate/muscle/75 | full2 | 12 | 11 | 12.5 | 10.2 | 10 | 10.4 | 9.1 | 10 | 8.8 | 8.9 | 10.4 | 9 | 12/12 | 71–72 | 7.5 |
-| 2/full/intermediate/lean/45 | full2 | 10 | 11 | 11 | 8.2 | 7 | 8.4 | 6.1 | 8 | 9.3 | 9.9 | 8 | 7 | 12/12 | 60–65 | 7.3 |
-| 2/full/intermediate/lean/60 | full2 | 10 | 11 | 11 | 8.2 | 7 | 8.4 | 6.2 | 8 | 7.5 | 7.4 | 8.4 | 6 | 12/12 | 60–61 | 7.3 |
-| 2/full/intermediate/lean/75 | full2 | 12 | 11 | 12.5 | 10.2 | 10 | 10.4 | 8.1 | 10 | 8.8 | 8.9 | 10.4 | 9 | 12/12 | 70–72 | 7.5 |
-| 2/full/advanced/muscle/45 | full2 | 12 | 12.3 | 12.3 | 10.2 | 9.9 | 10 | 7.6 | 10 | 8.8 | 8.9 | 10.4 | 8 | 12/12 | 61–91 | 8 |
-| 2/full/advanced/muscle/60 | full2 | 12 | 12.3 | 12.3 | 10.2 | 9.9 | 10 | 7.6 | 10 | 8.8 | 8.9 | 10.4 | 8 | 12/12 | 61–91 | 8 |
-| 2/full/advanced/muscle/75 | full2 | 12 | 13 | 12.3 | 10.2 | 8.4 | 11.5 | 7.7 | 10 | 8.8 | 8.9 | 10.4 | 8 | 12/12 | 74–80 | 7 |
-| 2/full/advanced/lean/45 | full2 | 12 | 12.3 | 12.3 | 10.2 | 9.9 | 10 | 7.6 | 10 | 8.8 | 8.9 | 10.4 | 8 | 12/12 | 61–91 | 8 |
-| 2/full/advanced/lean/60 | full2 | 12 | 12.3 | 12.3 | 10.2 | 9.9 | 10 | 7.6 | 10 | 8.8 | 8.9 | 10.4 | 8 | 12/12 | 61–91 | 8 |
-| 2/full/advanced/lean/75 | full2 | 12 | 13 | 12.3 | 10.2 | 8.4 | 11.5 | 7.7 | 10 | 8.8 | 8.9 | 10.4 | 8 | 12/12 | 74–80 | 7 |
-| 2/home/beginner/muscle/45 | full2 | 8 | 7.1 | 7.3 | 6 | 5.5 | 5.7 | 4.7 | 7 | 6.3 | 6.5 | 6.4 | 5 | 12/12 | 42–51 | 5 |
-| 2/home/beginner/muscle/60 | full2 | 9 | 8.5 | 9.9 | 8.2 | 7.3 | 7.5 | 7.1 | 8 | 6.5 | 7.2 | 8.4 | 6 | 12/12 | 59–59 | 6 |
-| 2/home/beginner/muscle/75 | full2 | 11 | 8.5 | 10.5 | 10.8 | 8.3 | 7.5 | 8.6 | 9 | 7.5 | 7.5 | 8.6 | 6 | 12/12 | 62–71 | 6.3 |
-| 2/home/beginner/lean/45 | full2 | 8 | 7.5 | 8.2 | 6 | 5 | 6 | 4.7 | 7 | 4.3 | 5.9 | 6 | 4.8 | 12/12 | 47–48 | 5 |
-| 2/home/beginner/lean/60 | full2 | 8 | 7.5 | 9.4 | 8.2 | 7 | 7 | 6.7 | 9 | 6.5 | 7.2 | 7.4 | 4.8 | 12/12 | 54–57 | 6 |
-| 2/home/beginner/lean/75 | full2 | 10 | 7.5 | 9.4 | 9.8 | 7 | 7 | 8.2 | 9 | 7.5 | 7.5 | 7.6 | 4.8 | 12/12 | 69–69 | 6 |
-| 2/home/intermediate/muscle/45 | full2 | 10 | 11.5 | 10.2 | 8.2 | 6 | 8 | 6.1 | 8 | 9.3 | 9.9 | 8 | 6.6 | 12/12 | 60–69 | 7 |
-| 2/home/intermediate/muscle/60 | full2 | 10 | 10.1 | 10 | 8.2 | 8.2 | 8.2 | 6.1 | 8 | 7.5 | 8 | 8.4 | 6.6 | 12/12 | 57–61 | 7 |
-| 2/home/intermediate/muscle/75 | full2 | 12 | 11.5 | 12 | 9.2 | 9 | 10 | 9.1 | 9 | 8.5 | 8.8 | 9.4 | 6.6 | 12/12 | 66–74 | 7.5 |
-| 2/home/intermediate/lean/45 | full2 | 10 | 11.5 | 10.2 | 8.2 | 6 | 8 | 6.1 | 8 | 7.5 | 8 | 8.4 | 6.6 | 12/12 | 59–64 | 7 |
-| 2/home/intermediate/lean/60 | full2 | 10 | 11.5 | 10.8 | 8.2 | 7 | 8 | 6.1 | 8 | 7.5 | 8 | 8.4 | 6.6 | 12/12 | 60–64 | 7 |
-| 2/home/intermediate/lean/75 | full2 | 11 | 11.5 | 12 | 9.2 | 9 | 8 | 7.6 | 10 | 7.8 | 8.7 | 9.4 | 6.6 | 12/12 | 64–73 | 7 |
-| 2/home/advanced/muscle/45 | full2 | 12 | 12.2 | 12.4 | 10.2 | 8.4 | 10.4 | 7.6 | 11 | 8.3 | 10.1 | 10.4 | 7.6 | 12/12 | 69–74 | 8 |
-| 2/home/advanced/muscle/60 | full2 | 12 | 12.2 | 12.4 | 10.2 | 8.4 | 10.4 | 7.6 | 11 | 8.3 | 10.1 | 10.4 | 7.6 | 12/12 | 69–74 | 8 |
-| 2/home/advanced/muscle/75 | full2 | 13 | 12.2 | 13 | 10.2 | 9.4 | 11.4 | 8.1 | 11 | 8.3 | 10.1 | 10.4 | 7.6 | 12/12 | 73–75 | 8.5 |
-| 2/home/advanced/lean/45 | full2 | 12 | 12.6 | 13.3 | 10.2 | 8 | 10.7 | 7.6 | 11 | 8.3 | 10.1 | 10.4 | 7.4 | 12/12 | 70–77 | 8 |
-| 2/home/advanced/lean/60 | full2 | 12 | 12.6 | 13.3 | 10.2 | 8 | 10.7 | 7.6 | 11 | 8.3 | 10.1 | 10.4 | 7.4 | 12/12 | 70–77 | 8 |
-| 2/home/advanced/lean/75 | full2 | 12 | 12.6 | 14.5 | 10.2 | 10 | 10.7 | 8.6 | 12 | 8.3 | 10.1 | 10.4 | 7.4 | 12/12 | 74–77 | 8 |
-| 2/dumbbell/beginner/muscle/45 | full2 | 8 | 7.8 | 7.7 | 6.2 | 4.9 | 7.1 | 5.7 | 7 | 6.8 | 7.4 | 6.4 | 5.2 | 12/12 | 45–49 | 5 |
-| 2/dumbbell/beginner/muscle/60 | full2 | 10 | 8.5 | 9.9 | 8.2 | 7.3 | 8.5 | 7.6 | 8 | 7.5 | 8.1 | 8.4 | 7.2 | 12/12 | 57–58 | 6.2 |
-| 2/dumbbell/beginner/muscle/75 | full2 | 11 | 8.5 | 10.5 | 10.8 | 8.3 | 8.5 | 8.6 | 9 | 7.7 | 8.8 | 8.4 | 7.2 | 12/12 | 62–64 | 6.3 |
-| 2/dumbbell/beginner/lean/45 | full2 | 8 | 7.8 | 7.7 | 6.2 | 4.9 | 7.1 | 5.7 | 7 | 6.8 | 7.4 | 6.4 | 5.2 | 12/12 | 45–49 | 5 |
-| 2/dumbbell/beginner/lean/60 | full2 | 9 | 8.5 | 10.5 | 8.8 | 8.3 | 8.5 | 7.7 | 8 | 6.8 | 7.4 | 7.4 | 7.2 | 12/12 | 55–58 | 6.3 |
-| 2/dumbbell/beginner/lean/75 | full2 | 9 | 8.5 | 10.5 | 8.8 | 8.3 | 8.5 | 7.7 | 8 | 6.8 | 7.4 | 7.4 | 7.2 | 12/12 | 70–71 | 6.3 |
-| 2/dumbbell/intermediate/muscle/45 | full2 | 10 | 10.1 | 10 | 8.2 | 8.2 | 8.2 | 6.1 | 8 | 6.1 | 8.1 | 8 | 6.8 | 12/12 | 54–75 | 7 |
-| 2/dumbbell/intermediate/muscle/60 | full2 | 10 | 10.8 | 10.4 | 8.2 | 7.6 | 8.6 | 6.1 | 8 | 7.1 | 8.1 | 8.4 | 6.8 | 12/12 | 59–71 | 7 |
-| 2/dumbbell/intermediate/muscle/75 | full2 | 12 | 11.5 | 11.4 | 9.2 | 8 | 10 | 8.1 | 9 | 7.7 | 8.8 | 9.4 | 6.8 | 12/12 | 73–75 | 7.5 |
-| 2/dumbbell/intermediate/lean/45 | full2 | 10 | 10.1 | 10 | 8.2 | 8.2 | 8.2 | 6.1 | 8 | 6.1 | 8.1 | 8 | 6.8 | 12/12 | 54–75 | 7 |
-| 2/dumbbell/intermediate/lean/60 | full2 | 10 | 10.8 | 10.4 | 8.2 | 7.6 | 8.6 | 6.1 | 8 | 7.1 | 8.1 | 8.4 | 6.8 | 12/12 | 59–71 | 7 |
-| 2/dumbbell/intermediate/lean/75 | full2 | 12 | 11.5 | 11.4 | 9.2 | 8 | 10 | 8.1 | 9 | 7.7 | 8.8 | 9.4 | 6.8 | 12/12 | 73–75 | 7.5 |
-| 2/dumbbell/advanced/muscle/45 | full2 | 12 | 12.2 | 12.4 | 10.2 | 8.4 | 10.4 | 7.6 | 11 | 8.3 | 10.8 | 10.4 | 7.6 | 12/12 | 56–85 | 8 |
-| 2/dumbbell/advanced/muscle/60 | full2 | 12 | 12.2 | 12.4 | 10.2 | 8.4 | 10.4 | 7.6 | 10 | 7.7 | 10.2 | 10.4 | 7.6 | 12/12 | 57–78 | 8 |
-| 2/dumbbell/advanced/muscle/75 | full2 | 13 | 12.9 | 12.8 | 10.8 | 7.8 | 12.8 | 8.6 | 10 | 9.8 | 11.4 | 10.6 | 7.6 | 12/12 | 74–75 | 8.2 |
-| 2/dumbbell/advanced/lean/45 | full2 | 12 | 12.2 | 12.4 | 10.2 | 8.4 | 10.4 | 7.6 | 10 | 8.3 | 10.1 | 10.4 | 7.2 | 12/12 | 56–85 | 8 |
-| 2/dumbbell/advanced/lean/60 | full2 | 12 | 12.2 | 12.4 | 10.2 | 8.4 | 10.4 | 7.7 | 10 | 7.7 | 9.6 | 10.4 | 7.2 | 12/12 | 60–77 | 7.9 |
-| 2/dumbbell/advanced/lean/75 | full2 | 13 | 12.9 | 12.8 | 9.8 | 7.8 | 12.8 | 7.6 | 10 | 9.7 | 10.2 | 9.8 | 7.2 | 12/12 | 74–75 | 8 |
-| 2/bodyweight/beginner/muscle/45 | full2 | 9 | 8.5 | 9.3 | 7.8 | 6.5 | 8 | 7.2 | 8 | 6.2 | 8.2 | 8.6 | 9.4 | 12/12 | 45–45 | 6.9 |
-| 2/bodyweight/beginner/muscle/60 | full2 | 11.5 | 8.5 | 10.5 | 11.2 | 8.5 | 9 | 9.8 | 9 | 6.2 | 9 | 8.6 | 10.3 | 12/12 | 50–58 | 7.8 |
-| 2/bodyweight/beginner/muscle/75 | full2 | 11.5 | 8.5 | 10.5 | 11.2 | 8.5 | 9 | 9.8 | 9 | 6.2 | 9 | 8.6 | 10.3 | 12/12 | 61–70 | 7.8 |
-| 2/bodyweight/beginner/lean/45 | full2 | 9.5 | 8.5 | 9.9 | 8.8 | 7.5 | 8 | 8.2 | 8 | 5.6 | 7.3 | 7.6 | 9 | 12/12 | 45–45 | 7.1 |
-| 2/bodyweight/beginner/lean/60 | full2 | 9.5 | 8.5 | 10.5 | 9.2 | 8.5 | 9 | 8.8 | 8 | 5.6 | 7.3 | 7.6 | 9.3 | 12/12 | 54–56 | 7.4 |
-| 2/bodyweight/beginner/lean/75 | full2 | 9.5 | 8.5 | 10.5 | 9.2 | 8.5 | 9 | 8.8 | 8 | 5.6 | 7.3 | 7.6 | 9.3 | 12/12 | 71–75 | 7.4 |
-| 2/bodyweight/intermediate/muscle/45 | full2 | 11.5 | 11.5 | 12 | 10.8 | 9.3 | 9.5 | 9.2 | 10 | 8 | 10.9 | 10.8 | 11 | 12/12 | 40–45 | 7 |
-| 2/bodyweight/intermediate/muscle/60 | full2 | 11.5 | 11.5 | 12 | 11.6 | 9.3 | 9.5 | 10.4 | 11 | 9.3 | 11.9 | 11 | 12.6 | 12/12 | 40–48 | 8.1 |
-| 2/bodyweight/intermediate/muscle/75 | full2 | 11.5 | 11.5 | 12 | 11.6 | 9.3 | 9.5 | 10.4 | 11 | 9.3 | 11.9 | 11 | 12.6 | 12/12 | 68–74 | 8.1 |
-| 2/bodyweight/intermediate/lean/45 | full2 | 11.5 | 11.5 | 12 | 10.8 | 9.3 | 9.5 | 9.2 | 10 | 7 | 10 | 10.6 | 11.1 | 12/12 | 39–45 | 7.5 |
-| 2/bodyweight/intermediate/lean/60 | full2 | 11.5 | 11.5 | 12 | 11.2 | 9.3 | 9.5 | 9.8 | 10 | 7 | 10 | 10.6 | 11.5 | 12/12 | 46–58 | 7.8 |
-| 2/bodyweight/intermediate/lean/75 | full2 | 11.5 | 11.5 | 12 | 11.2 | 9.3 | 9.5 | 9.8 | 10 | 7 | 10 | 10.6 | 11.5 | 12/12 | 70–74 | 7.8 |
-| 2/bodyweight/advanced/muscle/45 | full2 | 12 | 12.2 | 12.4 | 9.8 | 8.7 | 11 | 8.7 | 10 | 7.8 | 10.2 | 9.8 | 11.6 | 12/12 | 45–48 | 8 |
-| 2/bodyweight/advanced/muscle/60 | full2 | 14 | 13.6 | 15 | 10.8 | 10.6 | 13 | 11.2 | 12 | 9 | 12.6 | 11 | 13.4 | 12/12 | 55–59 | 9 |
-| 2/bodyweight/advanced/muscle/75 | full2 | 14 | 13.6 | 15 | 11.6 | 10.6 | 15 | 12.4 | 13 | 9.3 | 13.6 | 11 | 15.4 | 12/12 | 55–66 | 9.3 |
-| 2/bodyweight/advanced/lean/45 | full2 | 12 | 12.2 | 12.4 | 9.8 | 8.7 | 11 | 8.7 | 10 | 7.8 | 10.2 | 9.8 | 11.6 | 12/12 | 45–48 | 8 |
-| 2/bodyweight/advanced/lean/60 | full2 | 14 | 13.6 | 15 | 11.6 | 10.6 | 14 | 12.4 | 12 | 8 | 12 | 10.8 | 13.6 | 12/12 | 54–60 | 9 |
-| 2/bodyweight/advanced/lean/75 | full2 | 14 | 13.6 | 15 | 11.6 | 10.6 | 15 | 12.4 | 12 | 8 | 12 | 10.8 | 14.6 | 12/12 | 71–73 | 9.3 |
-| 3/full/beginner/muscle/45 | full3 | 11 | 10 | 11.6 | 9.8 | 8.8 | 9.8 | 8.6 | 9 | 8.5 | 8.2 | 8.4 | 8 | 12/12 | 29–45 | 6 |
-| 3/full/beginner/muscle/60 | full3 | 11 | 10.8 | 12.6 | 9.8 | 9.3 | 10.3 | 8.6 | 9 | 9.5 | 8.2 | 8.6 | 9 | 12/12 | 50–60 | 6 |
-| 3/full/beginner/muscle/75 | full3 | 11 | 10.8 | 12.6 | 9.8 | 9.3 | 10.3 | 8.6 | 9 | 9.5 | 8.2 | 8.6 | 9 | 12/12 | 61–72 | 6 |
-| 3/full/beginner/lean/45 | full3 | 10 | 9.3 | 10.6 | 9.8 | 8.3 | 9.4 | 8.2 | 9 | 7.5 | 6.6 | 8.6 | 8 | 12/12 | 40–45 | 6 |
-| 3/full/beginner/lean/60 | full3 | 10 | 9.3 | 10.6 | 9.8 | 8.3 | 9.4 | 8.2 | 9 | 7.5 | 6.6 | 8.6 | 8 | 12/12 | 52–56 | 6 |
+| 2/full/beginner/muscle/45 | full2 | 8 | 6.3m | 5.6m | 5.2m | 4.3 | 5.6 | 5.7 | 7 | 4.3 | 5.9 | 5m | 5 | 8/12 | 50–50 | 5 |
+| 2/full/beginner/muscle/60 | full2 | 8 | 8.8 | 8 | 7.2 | 5.5 | 8 | 5.7 | 7 | 7.3 | 6.7 | 7.4 | 5 | 12/12 | 63–63 | 5.5 |
+| 2/full/beginner/muscle/75 | full2 | 11 | 8.8 | 9.5 | 10.8 | 8.5 | 9 | 8.6 | 9 | 9.5 | 8.2 | 8.6 | 5 | 12/12 | 78–80 | 6.3 |
+| 2/full/beginner/lean/45 | full2 | 8 | 6.3m | 5.6m | 5.2m | 4.3 | 5.6 | 5.7 | 7 | 4.3 | 5.9 | 5m | 5 | 8/12 | 50–50 | 5 |
+| 2/full/beginner/lean/60 | full2 | 9 | 8 | 8 | 7.2 | 7 | 6.5 | 6.2 | 7 | 7.3 | 6.7 | 7.4 | 5 | 12/12 | 63–63 | 5 |
+| 2/full/beginner/lean/75 | full2 | 10 | 8.8 | 9.5 | 9.8 | 8.5 | 9 | 8.2 | 9 | 8.5 | 7.4 | 7.6 | 5 | 12/12 | 75–77 | 6.3 |
+| 2/full/intermediate/muscle/45 | full2 | 8m | 7.5m | 8.2m | 5.2m | 5.6m | 6.4m | 5.7m | 7m | 4.3m | 5.9 | 5m | 4m | 1/12 | 49–49 | 5 |
+| 2/full/intermediate/muscle/60 | full2 | 10 | 9.3m | 9.6m | 6.2m | 6.3 | 7.5m | 6.2 | 8 | 6.5 | 6.6 | 6.4m | 6 | 7/12 | 64–65 | 6 |
+| 2/full/intermediate/muscle/75 | full2 | 11 | 11 | 11.5 | 9.2 | 8 | 10.4 | 6.7 | 10 | 8.8 | 8.9 | 9.4 | 8 | 12/12 | 77–80 | 7.3 |
+| 2/full/intermediate/lean/45 | full2 | 8m | 7.5m | 8.2m | 5.2m | 5.6m | 6.4m | 5.7m | 7m | 4.3m | 5.9 | 5m | 4m | 1/12 | 49–49 | 5 |
+| 2/full/intermediate/lean/60 | full2 | 10 | 9.3m | 9.6m | 6.2m | 6.3 | 7.5m | 6.2 | 8 | 6.5 | 6.6 | 6.4m | 6 | 7/12 | 64–65 | 6 |
+| 2/full/intermediate/lean/75 | full2 | 11 | 11 | 11.5 | 9.2 | 8 | 10.4 | 6.7 | 10 | 8.8 | 8.9 | 9.4 | 8 | 12/12 | 77–80 | 7.3 |
+| 2/full/advanced/muscle/45 | full2 | 9m | 9.5m | 9.4m | 5.2m | 6.8m | 5.2m | 5.2m | 7m | 6.3m | 5.9 | 5.2m | 4m | 1/12 | 47–49 | 6 |
+| 2/full/advanced/muscle/60 | full2 | 10m | 10.3m | 10m | 7.2m | 6.5m | 8m | 6.2m | 9m | 6.5m | 6.6 | 6.4m | 6m | 1/12 | 63–64 | 6 |
+| 2/full/advanced/muscle/75 | full2 | 11m | 11.3m | 10.4m | 8.2m | 6.7m | 10.5 | 6.7m | 10 | 7.8 | 8.1 | 8.4m | 7m | 4/12 | 77–78 | 7 |
+| 2/full/advanced/lean/45 | full2 | 9m | 9.5m | 9.4m | 5.2m | 6.8m | 5.2m | 5.2m | 7m | 6.3m | 5.9 | 5.4m | 4m | 1/12 | 49–49 | 6 |
+| 2/full/advanced/lean/60 | full2 | 10m | 10.3m | 10m | 7.2m | 6.5m | 8m | 6.2m | 9m | 6.5m | 6.6 | 6.4m | 6m | 1/12 | 63–64 | 6 |
+| 2/full/advanced/lean/75 | full2 | 11m | 11.3m | 10.4m | 8.2m | 6.7m | 10.5 | 6.7m | 10 | 7.8 | 8.1 | 8.4m | 7m | 4/12 | 77–78 | 7 |
+| 2/home/beginner/muscle/45 | full2 | 8 | 6.1m | 6.2m | 5.2m | 4.2 | 5.2m | 5.7 | 7 | 6.3 | 6.5 | 4.4m | 4.8 | 7/12 | 47–49 | 5 |
+| 2/home/beginner/muscle/60 | full2 | 8 | 8.5 | 8.7 | 7.2 | 5.3 | 7.5 | 5.7 | 7 | 6.3 | 6.5 | 7.4 | 6 | 12/12 | 63–63 | 5 |
+| 2/home/beginner/muscle/75 | full2 | 11 | 8.5 | 10.5 | 10.8 | 8.3 | 7.5 | 8.6 | 9 | 7.5 | 7.5 | 8.6 | 6 | 12/12 | 79–80 | 6.3 |
+| 2/home/beginner/lean/45 | full2 | 8 | 6.8m | 7.2 | 4.2m | 4.6 | 5.6 | 5.7 | 7 | 4.3 | 5.9 | 4m | 4.8 | 9/12 | 47–50 | 5 |
+| 2/home/beginner/lean/60 | full2 | 9 | 7.5 | 8.8 | 8.2 | 6 | 7 | 6.2 | 8 | 6.5 | 7.2 | 7.4 | 4.8 | 12/12 | 64–65 | 5.4 |
+| 2/home/beginner/lean/75 | full2 | 10 | 7.5 | 9.4 | 9.8 | 7 | 7 | 8.2 | 9 | 7.5 | 7.5 | 7.6 | 4.8 | 12/12 | 76–77 | 6 |
+| 2/home/intermediate/muscle/45 | full2 | 8m | 8.1m | 7.2m | 5.2m | 4.7m | 6.2m | 5.7m | 7m | 5.3m | 6.7 | 5m | 5.2m | 1/12 | 49–50 | 5 |
+| 2/home/intermediate/muscle/60 | full2 | 10 | 9.8m | 9.3m | 7.2m | 6.4 | 8.1 | 6.2 | 8 | 7.5 | 8 | 6.4m | 6.2 | 8/12 | 64–64 | 6.1 |
+| 2/home/intermediate/muscle/75 | full2 | 11 | 11.5 | 11.4 | 9.2 | 8 | 10 | 8.6 | 9 | 8.5 | 8.8 | 9.4 | 6.6 | 12/12 | 79–80 | 7.5 |
+| 2/home/intermediate/lean/45 | full2 | 8m | 8.1m | 7.2m | 5.2m | 4.7m | 6.2m | 5.7m | 7m | 6.3 | 6.5 | 5.4m | 4.2m | 2/12 | 50–50 | 5 |
+| 2/home/intermediate/lean/60 | full2 | 9m | 9.8m | 8.7m | 6.2m | 5.4m | 9.1 | 5.7m | 8 | 6.5 | 7.2 | 6.4m | 6.4 | 5/12 | 62–64 | 6 |
+| 2/home/intermediate/lean/75 | full2 | 11 | 11.5 | 11.4 | 9.2 | 8 | 8 | 7.6 | 10 | 7.8 | 8.7 | 9.4 | 6.6 | 12/12 | 79–80 | 7 |
+| 2/home/advanced/muscle/45 | full2 | 9m | 8.5m | 8.7m | 5m | 5.3m | 6.5m | 5.2m | 7m | 6.3m | 6.5 | 5.4m | 3m | 1/12 | 50–50 | 6 |
+| 2/home/advanced/muscle/60 | full2 | 10m | 10.2m | 10.2m | 7.2m | 5.9m | 9.4m | 6.2m | 9m | 6.5m | 7.2 | 6.4m | 7.2 | 2/12 | 64–65 | 6 |
+| 2/home/advanced/muscle/75 | full2 | 12 | 12.2 | 11.8m | 8.2m | 7.4 | 10.4 | 7.7 | 11 | 8.3 | 10.1 | 8.4m | 7.6 | 9/12 | 78–80 | 7.3 |
+| 2/home/advanced/lean/45 | full2 | 9m | 8.5m | 8.7m | 5m | 5.3m | 6.5m | 5.2m | 7m | 6.3m | 6.5 | 5.4m | 3m | 1/12 | 50–50 | 6 |
+| 2/home/advanced/lean/60 | full2 | 10m | 10.2m | 10.2m | 7.2m | 5.9m | 9.4m | 6.2m | 9m | 6.5m | 7.2 | 6.4m | 7.2 | 2/12 | 64–65 | 6 |
+| 2/home/advanced/lean/75 | full2 | 12 | 11.9m | 12.3 | 9.2m | 7.6 | 10.3 | 7.6 | 10 | 8 | 9.4 | 8.4m | 7.4 | 9/12 | 78–79 | 8 |
+| 2/dumbbell/beginner/muscle/45 | full2 | 8 | 6.1m | 6.2m | 5.2m | 4.2 | 5.2m | 5.7 | 7 | 6.8 | 7.4 | 4.4m | 4m | 6/12 | 47–49 | 5 |
+| 2/dumbbell/beginner/muscle/60 | full2 | 8 | 7.8 | 8.3 | 7.2 | 5.9 | 7.1 | 5.7 | 7 | 6.8 | 7.4 | 6.4 | 6.2 | 12/12 | 61–63 | 5.2 |
+| 2/dumbbell/beginner/muscle/75 | full2 | 10 | 8.5 | 10.5 | 8.2 | 8.3 | 8.5 | 7.6 | 9 | 7.7 | 8.8 | 8.4 | 7.2 | 12/12 | 78–79 | 6.3 |
+| 2/dumbbell/beginner/lean/45 | full2 | 8 | 6.1m | 6.2m | 5.2m | 4.2 | 5.2m | 5.7 | 7 | 6.8 | 7.4 | 4.4m | 4m | 6/12 | 47–49 | 5 |
+| 2/dumbbell/beginner/lean/60 | full2 | 8 | 7.8 | 8.3 | 7.2 | 5.9 | 7.1 | 5.7 | 7 | 6.8 | 7.4 | 6.4 | 6.2 | 12/12 | 61–63 | 5.2 |
+| 2/dumbbell/beginner/lean/75 | full2 | 9 | 8.5 | 10.5 | 8.8 | 8.3 | 8.5 | 7.7 | 8 | 6.8 | 7.4 | 7.4 | 7.2 | 12/12 | 79–80 | 6.3 |
+| 2/dumbbell/intermediate/muscle/45 | full2 | 8m | 8.1m | 7.2m | 5.2m | 4.7m | 6.2m | 5.7m | 7m | 4.8m | 6.8 | 5m | 5.4m | 1/12 | 49–50 | 5.1 |
+| 2/dumbbell/intermediate/muscle/60 | full2 | 10 | 9.8m | 9.3m | 7.2m | 6.4 | 8.1 | 6.2 | 8 | 7.1 | 8.1 | 7.4m | 6.6 | 8/12 | 64–64 | 6.1 |
+| 2/dumbbell/intermediate/muscle/75 | full2 | 11 | 11.5 | 10.8 | 9.2 | 7 | 10 | 6.7 | 9 | 7.5 | 8.9 | 9.4 | 7.2 | 12/12 | 78–80 | 7.5 |
+| 2/dumbbell/intermediate/lean/45 | full2 | 8m | 8.1m | 7.2m | 5.2m | 4.7m | 6.2m | 5.7m | 7m | 4.8m | 6.8 | 5m | 5.4m | 1/12 | 49–50 | 5.1 |
+| 2/dumbbell/intermediate/lean/60 | full2 | 10 | 9.8m | 9.3m | 7.2m | 6.4 | 8.1 | 6.2 | 8 | 7.1 | 8.1 | 7.4m | 6.6 | 8/12 | 64–64 | 6.1 |
+| 2/dumbbell/intermediate/lean/75 | full2 | 11 | 11.5 | 10.8 | 9.2 | 7 | 10 | 6.7 | 9 | 7.5 | 8.9 | 9.4 | 7.2 | 12/12 | 78–80 | 7.5 |
+| 2/dumbbell/advanced/muscle/45 | full2 | 10m | 8.5m | 8.7m | 5.2m | 5.3m | 6.5m | 4.7m | 7m | 6.8m | 7.4 | 5.4m | 4.2m | 1/12 | 49–50 | 7 |
+| 2/dumbbell/advanced/muscle/60 | full2 | 10m | 11.2m | 10.7m | 6.2m | 6.2m | 9.9 | 6.7m | 9m | 6.8m | 8.1 | 6.4m | 5.8m | 2/12 | 63–65 | 6.1 |
+| 2/dumbbell/advanced/muscle/75 | full2 | 12 | 12.2 | 11.8m | 9.2m | 7.4 | 10.4 | 7.6 | 10 | 8.3 | 10.1 | 8.4m | 7.2 | 9/12 | 79–79 | 8 |
+| 2/dumbbell/advanced/lean/45 | full2 | 10m | 8.5m | 8.7m | 5.2m | 5.3m | 6.5m | 4.7m | 7m | 6.8m | 7.4 | 5.4m | 4.2m | 1/12 | 49–50 | 7 |
+| 2/dumbbell/advanced/lean/60 | full2 | 10m | 11.2m | 10.7m | 6.2m | 6.2m | 9.9 | 6.7m | 9m | 6.8m | 8.1 | 6.4m | 5.8m | 2/12 | 63–65 | 6.1 |
+| 2/dumbbell/advanced/lean/75 | full2 | 12 | 12.2 | 11.8m | 9.2m | 7.4 | 10.4 | 7.6 | 10 | 7.7 | 9.6 | 8.4m | 7.2 | 9/12 | 79–79 | 8 |
+| 2/bodyweight/beginner/muscle/45 | full2 | 7 | 7.1 | 6.7m | 4.8m | 4.6 | 6 | 6.2 | 7 | 4.6 | 7 | 4.4m | 7.7 | 9/12 | 47–50 | 5.8 |
+| 2/bodyweight/beginner/muscle/60 | full2 | 8 | 8.5 | 8.7 | 6.8 | 5.5 | 8 | 6.7 | 7 | 5.6 | 7.6 | 7.6 | 9 | 12/12 | 63–64 | 6.9 |
+| 2/bodyweight/beginner/muscle/75 | full2 | 11.5 | 8.5 | 10.5 | 9.8 | 8.5 | 9 | 9.2 | 9 | 6.2 | 9 | 8.6 | 10 | 12/12 | 79–80 | 7.5 |
+| 2/bodyweight/beginner/lean/45 | full2 | 7 | 7.1 | 6.7m | 4.8m | 4.6 | 6 | 6.2 | 7 | 4.6 | 7 | 4.4m | 7.7 | 9/12 | 47–50 | 5.8 |
+| 2/bodyweight/beginner/lean/60 | full2 | 8 | 8.5 | 9.3 | 7.8 | 6.5 | 8 | 6.7 | 7 | 5.6 | 7.3 | 7.6 | 8.7 | 12/12 | 63–65 | 6.8 |
+| 2/bodyweight/beginner/lean/75 | full2 | 9.5 | 8.5 | 10.5 | 9.2 | 8.5 | 9 | 8.8 | 8 | 5.6 | 7.3 | 7.6 | 9.3 | 12/12 | 73–80 | 7.4 |
+| 2/bodyweight/intermediate/muscle/45 | full2 | 7m | 8.1m | 7.2m | 5.8m | 4.9m | 7.5m | 5m | 7m | 5.6m | 7 | 5.6m | 7.6 | 2/12 | 49–49 | 6 |
+| 2/bodyweight/intermediate/muscle/60 | full2 | 9m | 9.8m | 8.7m | 6.8m | 5.6m | 8.5 | 7.2 | 8 | 6.2 | 8.2 | 6.6m | 9.4 | 6/12 | 62–63 | 6.5 |
+| 2/bodyweight/intermediate/muscle/75 | full2 | 11 | 11.5 | 10.8 | 8.8 | 7.3 | 9.5 | 8.2 | 9 | 7.4 | 9.5 | 9.8 | 11 | 12/12 | 79–80 | 7 |
+| 2/bodyweight/intermediate/lean/45 | full2 | 7m | 8.1m | 7.2m | 5.8m | 4.9m | 7.5m | 5m | 7m | 5.6m | 7 | 5.6m | 7.6 | 2/12 | 49–49 | 6 |
+| 2/bodyweight/intermediate/lean/60 | full2 | 10 | 9.8m | 9.3m | 6.8m | 6.6 | 8.5 | 7.7 | 8 | 6.2 | 7.9 | 6.6m | 10.3 | 8/12 | 62–65 | 6.8 |
+| 2/bodyweight/intermediate/lean/75 | full2 | 11.5 | 11.5 | 12 | 9.8 | 9.3 | 9.5 | 9.2 | 10 | 7 | 10 | 10.6 | 11.1 | 12/12 | 79–80 | 7.5 |
+| 2/bodyweight/advanced/muscle/45 | full2 | 10m | 8.5m | 8.7m | 4.8m | 5.5m | 5m | 7.7 | 7m | 6.6m | 7.8 | 4.8m | 9.6 | 3/12 | 49–50 | 6 |
+| 2/bodyweight/advanced/muscle/60 | full2 | 10m | 10.2m | 10.2m | 6.8m | 6.2m | 8m | 7.7 | 9m | 6.6m | 8.1 | 6.8m | 10.5 | 3/12 | 63–65 | 7 |
+| 2/bodyweight/advanced/muscle/75 | full2 | 12 | 11.9m | 11.7m | 7.8m | 6.9m | 11 | 8.7 | 10 | 7.8 | 10.1 | 8.8m | 11.6 | 7/12 | 78–79 | 8 |
+| 2/bodyweight/advanced/lean/45 | full2 | 9m | 8.5m | 8.7m | 4.8m | 5.5m | 5m | 5.7m | 7m | 5.6m | 7 | 5.6m | 10.8 | 2/12 | 48–50 | 6.1 |
+| 2/bodyweight/advanced/lean/60 | full2 | 10m | 10.2m | 10.2m | 6.8m | 6.2m | 8m | 7.7 | 9m | 6.6m | 8.1 | 6.8m | 10.5 | 3/12 | 63–65 | 7 |
+| 2/bodyweight/advanced/lean/75 | full2 | 12 | 11.9m | 11.7m | 7.8m | 6.9m | 11 | 8.7 | 10 | 7.8 | 10.1 | 8.8m | 11.6 | 7/12 | 78–79 | 8 |
+| 3/full/beginner/muscle/45 | full3 | 9 | 8.5 | 9.1 | 8.2 | 6.8 | 8.6 | 6.2 | 9 | 8.5 | 8.2 | 8.4 | 7 | 12/12 | 48–49 | 5.8 |
+| 3/full/beginner/muscle/60 | full3 | 11 | 10.8 | 12.6 | 9.8 | 9.3 | 10.3 | 8.6 | 9 | 9.5 | 8.2 | 8.6 | 9 | 12/12 | 61–64 | 6 |
+| 3/full/beginner/muscle/75 | full3 | 11 | 10.8 | 12.6 | 9.8 | 9.3 | 10.3 | 8.6 | 9 | 9.5 | 8.2 | 8.6 | 9 | 12/12 | 61–76 | 6 |
+| 3/full/beginner/lean/45 | full3 | 9 | 9.3 | 10.6 | 7.8 | 8.3 | 9.4 | 6.7 | 9 | 6.5 | 6.6 | 8.4 | 7 | 12/12 | 48–50 | 6 |
+| 3/full/beginner/lean/60 | full3 | 10 | 9.3 | 10.6 | 9.8 | 8.3 | 9.4 | 8.2 | 9 | 7.5 | 6.6 | 8.6 | 8 | 12/12 | 54–64 | 6 |
 | 3/full/beginner/lean/75 | full3 | 10 | 9.3 | 10.6 | 9.8 | 8.3 | 9.4 | 8.2 | 9 | 7.5 | 6.6 | 8.6 | 8 | 12/12 | 54–70 | 6 |
-| 3/full/intermediate/muscle/45 | full3 | 11 | 11 | 12.5 | 10 | 10 | 10.4 | 8.2 | 10 | 8.5 | 8.2 | 9.4 | 8 | 12/12 | 39–45 | 6.5 |
-| 3/full/intermediate/muscle/60 | full3 | 11 | 12.5 | 14.5 | 13 | 11 | 11.3 | 10.2 | 12 | 10 | 9.6 | 10.6 | 10 | 12/12 | 53–60 | 6.5 |
-| 3/full/intermediate/muscle/75 | full3 | 11 | 12.5 | 14.5 | 13 | 11 | 11.3 | 10.2 | 12 | 10 | 9.6 | 10.6 | 10 | 12/12 | 68–73 | 6.5 |
-| 3/full/intermediate/lean/45 | full3 | 11 | 11 | 12.5 | 9.4 | 10 | 10.4 | 7.7 | 9 | 7.5 | 7.4 | 9.4 | 7 | 12/12 | 35–45 | 6.5 |
-| 3/full/intermediate/lean/60 | full3 | 11 | 12.5 | 14.5 | 12.4 | 11 | 11.3 | 9.7 | 11 | 9 | 8.8 | 10.6 | 10 | 12/12 | 53–54 | 6.5 |
-| 3/full/intermediate/lean/75 | full3 | 11 | 12.5 | 14.5 | 12.4 | 11 | 11.3 | 9.7 | 11 | 9 | 8.8 | 10.6 | 10 | 12/12 | 65–68 | 6.5 |
-| 3/full/advanced/muscle/45 | full3 | 12 | 12.5 | 15 | 10 | 12 | 11.4 | 8.2 | 12 | 9.8 | 8.9 | 9.6 | 8 | 12/12 | 40–53 | 7 |
-| 3/full/advanced/muscle/60 | full3 | 13 | 12.5 | 15 | 13 | 12 | 11.4 | 10.6 | 15 | 11.5 | 11 | 12.8 | 10 | 12/12 | 40–60 | 8 |
-| 3/full/advanced/muscle/75 | full3 | 13 | 12.5 | 15 | 15 | 12 | 11.4 | 10.6 | 15 | 12.5 | 11 | 13 | 10 | 12/12 | 61–75 | 8 |
-| 3/full/advanced/lean/45 | full3 | 12 | 12.5 | 15 | 10 | 12 | 11.4 | 8.2 | 11 | 9.8 | 8.9 | 9.6 | 8 | 12/12 | 39–53 | 7 |
-| 3/full/advanced/lean/60 | full3 | 13 | 12.5 | 15 | 15 | 12 | 11.4 | 10.6 | 13 | 11.3 | 10.3 | 12.8 | 10 | 12/12 | 58–60 | 8 |
-| 3/full/advanced/lean/75 | full3 | 13 | 12.5 | 15 | 15 | 12 | 11.4 | 10.6 | 13 | 11.3 | 10.3 | 12.8 | 10 | 12/12 | 75–75 | 8 |
-| 3/home/beginner/muscle/45 | full3 | 11 | 8.6 | 11.9 | 9.8 | 8 | 8.7 | 7.6 | 9 | 7.5 | 7.5 | 8.6 | 8.6 | 12/12 | 39–45 | 6 |
-| 3/home/beginner/muscle/60 | full3 | 11 | 8.6 | 11.9 | 9.8 | 8 | 8.7 | 8.6 | 9 | 7.5 | 7.5 | 8.6 | 8.6 | 12/12 | 51–58 | 6 |
-| 3/home/beginner/muscle/75 | full3 | 11 | 8.6 | 11.9 | 9.8 | 8 | 8.7 | 8.6 | 9 | 7.5 | 7.5 | 8.6 | 8.6 | 12/12 | 51–68 | 6 |
-| 3/home/beginner/lean/45 | full3 | 10 | 7.2 | 9.9 | 9.2 | 7.2 | 6.9 | 7.7 | 9 | 7.5 | 7.5 | 8.6 | 6.6 | 12/12 | 36–42 | 5 |
-| 3/home/beginner/lean/60 | full3 | 10 | 7.2 | 9.9 | 9.2 | 7.2 | 6.9 | 7.7 | 9 | 7.5 | 7.5 | 8.6 | 6.6 | 12/12 | 46–51 | 5 |
+| 3/full/intermediate/muscle/45 | full3 | 10 | 10.3 | 11 | 7.4m | 8.5 | 9.7 | 7.3 | 9 | 7.5 | 9 | 8 | 6 | 11/12 | 48–50 | 6.3 |
+| 3/full/intermediate/muscle/60 | full3 | 11 | 12.5 | 14.5 | 12 | 11 | 11.3 | 10.2 | 12 | 10 | 9.6 | 10.6 | 10 | 12/12 | 58–65 | 6.5 |
+| 3/full/intermediate/muscle/75 | full3 | 11 | 12.5 | 14.5 | 13 | 11 | 11.3 | 10.2 | 12 | 10 | 9.6 | 10.6 | 10 | 12/12 | 73–80 | 6.5 |
+| 3/full/intermediate/lean/45 | full3 | 10 | 10.3 | 11 | 7.4m | 8.5 | 9.7 | 7.3 | 9 | 7.5 | 7.4 | 7.4m | 6 | 10/12 | 49–50 | 6.3 |
+| 3/full/intermediate/lean/60 | full3 | 11 | 12.5 | 14.5 | 11.4 | 11 | 11.3 | 9.7 | 11 | 9 | 8.8 | 10.6 | 10 | 12/12 | 63–65 | 6.5 |
+| 3/full/intermediate/lean/75 | full3 | 11 | 12.5 | 14.5 | 12.4 | 11 | 11.3 | 9.7 | 11 | 9 | 8.8 | 10.6 | 10 | 12/12 | 65–80 | 6.5 |
+| 3/full/advanced/muscle/45 | full3 | 10m | 10.3m | 10m | 7.4m | 6.5m | 8.8m | 6.8m | 9m | 8.5 | 8.2 | 7.4m | 6m | 2/12 | 48–50 | 6 |
+| 3/full/advanced/muscle/60 | full3 | 12 | 12.5 | 15 | 10 | 12 | 11.4 | 8.2 | 12 | 8.8 | 8.9 | 10.4 | 8 | 12/12 | 61–63 | 7 |
+| 3/full/advanced/muscle/75 | full3 | 13 | 12.5 | 15 | 14 | 12 | 11.4 | 10.6 | 15 | 12.5 | 11 | 13 | 10 | 12/12 | 76–80 | 8 |
+| 3/full/advanced/lean/45 | full3 | 10m | 10.3m | 10m | 7.4m | 6.5m | 8.8m | 6.8m | 9m | 8.5 | 8.2 | 7.4m | 6m | 2/12 | 48–50 | 6 |
+| 3/full/advanced/lean/60 | full3 | 12 | 12.5 | 15 | 10 | 12 | 11.4 | 8.2 | 12 | 9 | 9.6 | 10.4 | 8 | 12/12 | 61–63 | 7 |
+| 3/full/advanced/lean/75 | full3 | 13 | 12.5 | 15 | 15 | 12 | 11.4 | 10.6 | 13 | 11.3 | 10.3 | 12.8 | 10 | 12/12 | 75–76 | 8 |
+| 3/home/beginner/muscle/45 | full3 | 9 | 8.6 | 11.9 | 7.8 | 8 | 8.7 | 6.7 | 9 | 6.5 | 7.2 | 8.4 | 6.6 | 12/12 | 45–49 | 5.5 |
+| 3/home/beginner/muscle/60 | full3 | 11 | 8.6 | 11.9 | 9.8 | 8 | 8.7 | 8.6 | 9 | 7.5 | 7.5 | 8.6 | 8.6 | 12/12 | 51–64 | 6 |
+| 3/home/beginner/muscle/75 | full3 | 11 | 8.6 | 11.9 | 9.8 | 8 | 8.7 | 8.6 | 9 | 7.5 | 7.5 | 8.6 | 8.6 | 12/12 | 51–76 | 6 |
+| 3/home/beginner/lean/45 | full3 | 10 | 7.2 | 9.9 | 8.2 | 7.2 | 6.9 | 7.7 | 9 | 7.5 | 7.5 | 8.6 | 6.6 | 12/12 | 46–50 | 5 |
+| 3/home/beginner/lean/60 | full3 | 10 | 7.2 | 9.9 | 9.2 | 7.2 | 6.9 | 7.7 | 9 | 7.5 | 7.5 | 8.6 | 6.6 | 12/12 | 46–63 | 5 |
 | 3/home/beginner/lean/75 | full3 | 10 | 7.2 | 9.9 | 9.2 | 7.2 | 6.9 | 7.7 | 9 | 7.5 | 7.5 | 8.6 | 6.6 | 12/12 | 46–68 | 5 |
-| 3/home/intermediate/muscle/45 | full3 | 11 | 10.6 | 12.3 | 8.8 | 7.5 | 8.7 | 7.2 | 8 | 7.5 | 8 | 8.4 | 7 | 12/12 | 43–44 | 6 |
-| 3/home/intermediate/muscle/60 | full3 | 11 | 12 | 15.5 | 13 | 10.3 | 10.5 | 10.2 | 12 | 10 | 10 | 10.8 | 11 | 12/12 | 53–56 | 6.5 |
-| 3/home/intermediate/muscle/75 | full3 | 11 | 12 | 15.5 | 13 | 10.3 | 10.5 | 10.2 | 12 | 10 | 10 | 10.8 | 11 | 12/12 | 68–70 | 6.5 |
-| 3/home/intermediate/lean/45 | full3 | 11 | 11.6 | 14 | 9.8 | 9.7 | 9.2 | 8.2 | 11 | 8 | 8.9 | 10.6 | 8.2 | 12/12 | 33–45 | 6.5 |
-| 3/home/intermediate/lean/60 | full3 | 11 | 12.3 | 15 | 9.8 | 10.1 | 9.6 | 9.2 | 11 | 8 | 8.9 | 10.6 | 9.2 | 12/12 | 44–60 | 6.5 |
-| 3/home/intermediate/lean/75 | full3 | 11 | 12.3 | 15 | 9.8 | 10.1 | 9.6 | 9.2 | 11 | 8 | 8.9 | 10.6 | 9.2 | 12/12 | 60–74 | 6.5 |
-| 3/home/advanced/muscle/45 | full3 | 12 | 12 | 13.7 | 9.8 | 7.3 | 10.5 | 7.6 | 10 | 8 | 9.4 | 10.4 | 8 | 12/12 | 44–58 | 7 |
-| 3/home/advanced/muscle/60 | full3 | 13 | 12 | 16.1 | 13.4 | 11.3 | 10.5 | 10.1 | 15 | 10.5 | 11.9 | 12.6 | 11 | 12/12 | 59–60 | 8 |
-| 3/home/advanced/muscle/75 | full3 | 13 | 12 | 16.1 | 15 | 11.3 | 10.5 | 10.6 | 15 | 12.5 | 12.5 | 13 | 11 | 12/12 | 62–73 | 8 |
-| 3/home/advanced/lean/45 | full3 | 12 | 12 | 16.1 | 9.8 | 11.3 | 10.5 | 7.6 | 13 | 8.3 | 10.1 | 10.4 | 8 | 12/12 | 34–51 | 7 |
-| 3/home/advanced/lean/60 | full3 | 13 | 12 | 16.1 | 13.8 | 11.3 | 10.5 | 9.6 | 13 | 11.3 | 11 | 13 | 11 | 12/12 | 48–59 | 8 |
-| 3/home/advanced/lean/75 | full3 | 13 | 12 | 16.1 | 13.8 | 11.3 | 10.5 | 9.6 | 13 | 11.3 | 11 | 13 | 11 | 12/12 | 67–75 | 8 |
-| 3/dumbbell/beginner/muscle/45 | full3 | 11 | 9.6 | 12.4 | 9.8 | 8.2 | 9.2 | 7.6 | 9 | 8.1 | 8.4 | 8.6 | 8 | 12/12 | 35–45 | 6 |
-| 3/dumbbell/beginner/muscle/60 | full3 | 11 | 10.3 | 13.4 | 9.8 | 8.6 | 9.6 | 8.6 | 9 | 8.1 | 8.4 | 8.6 | 9 | 12/12 | 54–60 | 6 |
-| 3/dumbbell/beginner/muscle/75 | full3 | 11 | 10.3 | 13.4 | 9.8 | 8.6 | 9.6 | 8.6 | 9 | 8.1 | 8.4 | 8.6 | 9 | 12/12 | 60–68 | 6 |
-| 3/dumbbell/beginner/lean/45 | full3 | 10 | 8.2 | 10.4 | 9.2 | 7.4 | 8.4 | 7.7 | 9 | 5.1 | 7.5 | 8 | 8 | 12/12 | 41–45 | 6 |
-| 3/dumbbell/beginner/lean/60 | full3 | 10 | 8.2 | 10.4 | 9.2 | 7.4 | 8.4 | 7.7 | 9 | 5.1 | 7.5 | 8 | 8 | 12/12 | 49–57 | 6 |
+| 3/home/intermediate/muscle/45 | full3 | 10 | 9.9m | 11.9 | 8 | 8.1 | 9.3 | 7.8 | 10 | 7.5 | 8 | 7.4m | 6 | 10/12 | 49–50 | 6.5 |
+| 3/home/intermediate/muscle/60 | full3 | 11 | 12 | 15.5 | 12 | 10.3 | 10.5 | 9.2 | 12 | 9 | 9.7 | 10.6 | 10 | 12/12 | 63–65 | 6.5 |
+| 3/home/intermediate/muscle/75 | full3 | 11 | 12 | 15.5 | 13 | 10.3 | 10.5 | 10.2 | 12 | 10 | 10 | 10.8 | 11 | 12/12 | 70–76 | 6.5 |
+| 3/home/intermediate/lean/45 | full3 | 10 | 10.2 | 12 | 7.8m | 8.9 | 8.4 | 6.8 | 10 | 6.8 | 7.9 | 8.4 | 6.2 | 11/12 | 49–50 | 5.8 |
+| 3/home/intermediate/lean/60 | full3 | 11 | 12.3 | 15 | 9.8 | 10.1 | 9.6 | 9.2 | 11 | 8 | 8.9 | 10.6 | 9.2 | 12/12 | 60–65 | 6.5 |
+| 3/home/intermediate/lean/75 | full3 | 11 | 12.3 | 15 | 9.8 | 10.1 | 9.6 | 9.2 | 11 | 8 | 8.9 | 10.6 | 9.2 | 12/12 | 60–76 | 6.5 |
+| 3/home/advanced/muscle/45 | full3 | 11m | 10.6m | 12.9 | 7m | 8.5 | 9.7 | 7.7 | 10 | 8.5 | 8.8 | 7.4m | 6m | 7/12 | 48–50 | 7 |
+| 3/home/advanced/muscle/60 | full3 | 13 | 12 | 16.1 | 11 | 11.3 | 10.5 | 8.6 | 12 | 8.8 | 9.5 | 10.4 | 9 | 12/12 | 63–65 | 8 |
+| 3/home/advanced/muscle/75 | full3 | 13 | 12 | 16.1 | 14 | 11.3 | 10.5 | 10.6 | 15 | 12.5 | 12.5 | 13 | 11 | 12/12 | 76–80 | 8 |
+| 3/home/advanced/lean/45 | full3 | 11m | 9.9m | 11.9m | 6.8m | 8.1 | 9.3m | 6.7m | 11 | 7.8 | 8.7 | 7.4m | 6m | 4/12 | 49–50 | 7 |
+| 3/home/advanced/lean/60 | full3 | 13 | 12 | 16.1 | 10.8 | 11.3 | 10.5 | 8.6 | 13 | 9.3 | 10.4 | 11.6 | 9 | 12/12 | 62–65 | 8 |
+| 3/home/advanced/lean/75 | full3 | 13 | 12 | 16.1 | 13.8 | 11.3 | 10.5 | 9.6 | 13 | 11.3 | 11 | 13 | 11 | 12/12 | 67–79 | 8 |
+| 3/dumbbell/beginner/muscle/45 | full3 | 10 | 9.6 | 12.4 | 8.8 | 8.2 | 9.2 | 7.2 | 9 | 7.1 | 8.1 | 8.4 | 8 | 12/12 | 48–49 | 6 |
+| 3/dumbbell/beginner/muscle/60 | full3 | 11 | 10.3 | 13.4 | 9.8 | 8.6 | 9.6 | 8.6 | 9 | 8.1 | 8.4 | 8.6 | 9 | 12/12 | 60–64 | 6 |
+| 3/dumbbell/beginner/muscle/75 | full3 | 11 | 10.3 | 13.4 | 9.8 | 8.6 | 9.6 | 8.6 | 9 | 8.1 | 8.4 | 8.6 | 9 | 12/12 | 60–76 | 6 |
+| 3/dumbbell/beginner/lean/45 | full3 | 10 | 8.2 | 10.4 | 9.2 | 7.4 | 8.4 | 7.7 | 9 | 5.1 | 7.5 | 8 | 8 | 12/12 | 48–50 | 6 |
+| 3/dumbbell/beginner/lean/60 | full3 | 10 | 8.2 | 10.4 | 9.2 | 7.4 | 8.4 | 7.7 | 9 | 5.1 | 7.5 | 8 | 8 | 12/12 | 57–62 | 6 |
 | 3/dumbbell/beginner/lean/75 | full3 | 10 | 8.2 | 10.4 | 9.2 | 7.4 | 8.4 | 7.7 | 9 | 5.1 | 7.5 | 8 | 8 | 12/12 | 57–62 | 6 |
-| 3/dumbbell/intermediate/muscle/45 | full3 | 11 | 11.3 | 13.9 | 10 | 8.9 | 10.1 | 8.2 | 10 | 8.4 | 9.6 | 9.4 | 7.2 | 12/12 | 44–45 | 6.5 |
-| 3/dumbbell/intermediate/muscle/60 | full3 | 11 | 12 | 15.5 | 13 | 10.3 | 10.5 | 10.2 | 12 | 10.6 | 11.9 | 10.6 | 11.6 | 12/12 | 47–53 | 6.5 |
-| 3/dumbbell/intermediate/muscle/75 | full3 | 11 | 12 | 15.5 | 13 | 10.3 | 10.5 | 10.2 | 12 | 10.6 | 11.9 | 10.6 | 11.6 | 12/12 | 65–68 | 6.5 |
-| 3/dumbbell/intermediate/lean/45 | full3 | 11 | 11 | 15 | 8.8 | 10 | 10 | 7.2 | 9 | 8.1 | 8.7 | 9.4 | 7 | 12/12 | 37–45 | 6 |
-| 3/dumbbell/intermediate/lean/60 | full3 | 11 | 11 | 15 | 11.8 | 10 | 10 | 9.2 | 10 | 9.3 | 9.7 | 10.6 | 11 | 12/12 | 53–57 | 6 |
-| 3/dumbbell/intermediate/lean/75 | full3 | 11 | 11 | 15 | 11.8 | 10 | 10 | 9.2 | 10 | 9.3 | 9.7 | 10.6 | 11 | 12/12 | 68–72 | 6 |
-| 3/dumbbell/advanced/muscle/45 | full3 | 12 | 12 | 14.9 | 10 | 9.3 | 10.5 | 8.2 | 10 | 7.7 | 8.9 | 10.4 | 8.2 | 12/12 | 45–48 | 7 |
-| 3/dumbbell/advanced/muscle/60 | full3 | 13 | 12 | 16.1 | 15 | 11.3 | 10.5 | 10.6 | 14 | 12.3 | 13.7 | 12.8 | 13 | 12/12 | 50–60 | 8 |
-| 3/dumbbell/advanced/muscle/75 | full3 | 13 | 12 | 16.1 | 15 | 11.3 | 10.5 | 10.6 | 14 | 12.3 | 13.7 | 12.8 | 13 | 12/12 | 70–75 | 8 |
-| 3/dumbbell/advanced/lean/45 | full3 | 12 | 12 | 14.9 | 10 | 9.3 | 10.5 | 8.2 | 10 | 7.7 | 8.9 | 10.4 | 8.2 | 12/12 | 45–48 | 7 |
-| 3/dumbbell/advanced/lean/60 | full3 | 13 | 12 | 16.1 | 15 | 11.3 | 10.5 | 10.6 | 13 | 11 | 11.5 | 12.8 | 12.6 | 12/12 | 50–58 | 8 |
-| 3/dumbbell/advanced/lean/75 | full3 | 13 | 12 | 16.1 | 15 | 11.3 | 10.5 | 10.6 | 13 | 11 | 11.5 | 12.8 | 12.6 | 12/12 | 67–75 | 8 |
-| 3/bodyweight/beginner/muscle/45 | full3 | 10 | 7.9 | 11.5 | 11.2 | 8.9 | 10 | 9.8 | 9 | 7.2 | 9 | 8.8 | 13.6 | 12/12 | 40–45 | 7.1 |
-| 3/bodyweight/beginner/muscle/60 | full3 | 10 | 7.9 | 11.5 | 11.2 | 8.9 | 10 | 9.8 | 9 | 7.2 | 9 | 8.8 | 13.6 | 12/12 | 50–59 | 7.1 |
+| 3/dumbbell/intermediate/muscle/45 | full3 | 10 | 9.2m | 10.3 | 7.8m | 6.7 | 8.9 | 6.8 | 9 | 7.7 | 8.9 | 7.4m | 6.2 | 9/12 | 49–50 | 6.5 |
+| 3/dumbbell/intermediate/muscle/60 | full3 | 11 | 12 | 15.5 | 12 | 10.3 | 10.5 | 10.2 | 12 | 10.6 | 11.9 | 10.6 | 10.6 | 12/12 | 61–65 | 6.5 |
+| 3/dumbbell/intermediate/muscle/75 | full3 | 11 | 12 | 15.5 | 13 | 10.3 | 10.5 | 10.2 | 12 | 10.6 | 11.9 | 10.6 | 11.6 | 12/12 | 78–80 | 6.5 |
+| 3/dumbbell/intermediate/lean/45 | full3 | 10 | 9.6m | 12.4 | 7.8m | 8.2 | 9.2 | 6.8 | 9 | 6.1 | 8.1 | 8 | 6 | 10/12 | 49–50 | 6 |
+| 3/dumbbell/intermediate/lean/60 | full3 | 11 | 11 | 15 | 10.8 | 10 | 10 | 9.2 | 10 | 9.3 | 9.7 | 10.6 | 9 | 12/12 | 63–65 | 6 |
+| 3/dumbbell/intermediate/lean/75 | full3 | 11 | 11 | 15 | 11.8 | 10 | 10 | 9.2 | 10 | 9.3 | 9.7 | 10.6 | 11 | 12/12 | 68–80 | 6 |
+| 3/dumbbell/advanced/muscle/45 | full3 | 11m | 9.9m | 11.3m | 6.8m | 7.1m | 9.3m | 6.7m | 9m | 7.7 | 8.9 | 7.4m | 6.2m | 2/12 | 47–50 | 7 |
+| 3/dumbbell/advanced/muscle/60 | full3 | 12 | 12 | 16.1 | 10 | 11.3 | 10.5 | 8.2 | 11 | 10 | 11 | 10.4 | 8.2 | 12/12 | 63–65 | 7.3 |
+| 3/dumbbell/advanced/muscle/75 | full3 | 13 | 12 | 16.1 | 15 | 11.3 | 10.5 | 10.6 | 14 | 12.3 | 13.7 | 12.8 | 13 | 12/12 | 76–80 | 8 |
+| 3/dumbbell/advanced/lean/45 | full3 | 11m | 9.9m | 11.3m | 6.8m | 7.1m | 9.3m | 6.7m | 9m | 7.7 | 8.9 | 7.4m | 6.2m | 2/12 | 47–50 | 7 |
+| 3/dumbbell/advanced/lean/60 | full3 | 13 | 12 | 16.1 | 11 | 11.3 | 10.5 | 9.6 | 12 | 8.7 | 10.1 | 11.4 | 9.6 | 12/12 | 63–65 | 8 |
+| 3/dumbbell/advanced/lean/75 | full3 | 13 | 12 | 16.1 | 15 | 11.3 | 10.5 | 10.6 | 13 | 11 | 11.5 | 12.8 | 12.6 | 12/12 | 76–78 | 8 |
+| 3/bodyweight/beginner/muscle/45 | full3 | 9 | 7.9 | 11.5 | 8.2 | 8.9 | 10 | 7.8 | 9 | 6.2 | 8.6 | 7.6 | 11.5 | 12/12 | 46–49 | 6.5 |
+| 3/bodyweight/beginner/muscle/60 | full3 | 10 | 7.9 | 11.5 | 11.2 | 8.9 | 10 | 9.8 | 9 | 7.2 | 9 | 8.8 | 13.6 | 12/12 | 59–62 | 7.1 |
 | 3/bodyweight/beginner/muscle/75 | full3 | 10 | 7.9 | 11.5 | 11.2 | 8.9 | 10 | 9.8 | 9 | 7.2 | 9 | 8.8 | 13.6 | 12/12 | 59–70 | 7.1 |
-| 3/bodyweight/beginner/lean/45 | full3 | 7 | 7.2 | 10.5 | 9.2 | 8.5 | 8.5 | 8.3 | 9 | 4.6 | 7.5 | 8.4 | 10.9 | 12/12 | 38–43 | 5.8 |
-| 3/bodyweight/beginner/lean/60 | full3 | 7 | 7.2 | 10.5 | 9.2 | 8.5 | 8.5 | 8.3 | 9 | 4.6 | 7.5 | 8.4 | 10.9 | 12/12 | 50–55 | 5.8 |
+| 3/bodyweight/beginner/lean/45 | full3 | 7 | 7.2 | 10.5 | 9.2 | 8.5 | 8.5 | 8.3 | 9 | 4.6 | 7.5 | 8.4 | 10.9 | 12/12 | 46–50 | 5.8 |
+| 3/bodyweight/beginner/lean/60 | full3 | 7 | 7.2 | 10.5 | 9.2 | 8.5 | 8.5 | 8.3 | 9 | 4.6 | 7.5 | 8.4 | 10.9 | 12/12 | 50–64 | 5.8 |
 | 3/bodyweight/beginner/lean/75 | full3 | 7 | 7.2 | 10.5 | 9.2 | 8.5 | 8.5 | 8.3 | 9 | 4.6 | 7.5 | 8.4 | 10.9 | 12/12 | 50–64 | 5.8 |
-| 3/bodyweight/intermediate/muscle/45 | full3 | 12 | 12 | 15.5 | 11.2 | 10.8 | 11.5 | 10.8 | 12 | 9 | 11.7 | 11 | 16 | 12/12 | 31–45 | 8.9 |
-| 3/bodyweight/intermediate/muscle/60 | full3 | 12 | 12 | 15.5 | 11.2 | 10.8 | 11.5 | 10.8 | 12 | 9 | 11.7 | 11 | 18 | 12/12 | 47–60 | 8.9 |
-| 3/bodyweight/intermediate/muscle/75 | full3 | 12 | 12 | 15.5 | 11.2 | 10.8 | 11.5 | 10.8 | 12 | 9 | 11.7 | 11 | 18 | 12/12 | 63–74 | 8.9 |
-| 3/bodyweight/intermediate/lean/45 | full3 | 10.5 | 10.3 | 14 | 11.2 | 10.1 | 10.5 | 10.8 | 11 | 6.4 | 9.9 | 10.6 | 15.1 | 12/12 | 41–44 | 7.1 |
-| 3/bodyweight/intermediate/lean/60 | full3 | 10.5 | 10.3 | 14 | 11.2 | 10.1 | 10.5 | 10.8 | 11 | 6.4 | 9.9 | 10.6 | 15.1 | 12/12 | 56–59 | 7.1 |
-| 3/bodyweight/intermediate/lean/75 | full3 | 10.5 | 10.3 | 14 | 11.2 | 10.1 | 10.5 | 10.8 | 11 | 6.4 | 9.9 | 10.6 | 15.1 | 12/12 | 59–74 | 7.1 |
-| 3/bodyweight/advanced/muscle/45 | full3 | 15 | 12 | 16.1 | 13.6 | 11.8 | 11.5 | 11.4 | 13 | 9.3 | 11.3 | 13 | 20.1 | 12/12 | 30–42 | 9.5 |
-| 3/bodyweight/advanced/muscle/60 | full3 | 16 | 12 | 16.1 | 13.6 | 11.8 | 11.5 | 13.4 | 15 | 9.3 | 12.9 | 13 | 21.1 | 12/12 | 48–53 | 9.5 |
-| 3/bodyweight/advanced/muscle/75 | full3 | 16 | 12 | 16.1 | 13.6 | 11.8 | 11.5 | 13.4 | 15 | 9.3 | 12.9 | 13 | 21.1 | 12/12 | 63–69 | 9.5 |
-| 3/bodyweight/advanced/lean/45 | full3 | 12 | 12.6 | 15.1 | 13.6 | 11.4 | 11.5 | 11.4 | 13 | 9 | 11.1 | 13 | 17.2 | 12/12 | 32–45 | 7.5 |
-| 3/bodyweight/advanced/lean/60 | full3 | 12 | 12.6 | 15.1 | 13.6 | 11.4 | 11.5 | 11.4 | 13 | 9 | 11.1 | 13 | 17.2 | 12/12 | 47–60 | 7.5 |
-| 3/bodyweight/advanced/lean/75 | full3 | 12 | 12.6 | 15.1 | 13.6 | 11.4 | 11.5 | 11.4 | 13 | 9 | 11.1 | 13 | 17.2 | 12/12 | 58–75 | 7.5 |
-| 4/full/beginner/muscle/45 | ul4 | 9 | 10.5 | 11.9 | 9.8 | 10.6 | 8.7 | 10.2 | 8 | 9.3 | 7.5 | 8.6 | 9 | 12/12 | 38–45 | 6.5 |
-| 4/full/beginner/muscle/60 | ul4 | 9 | 10.5 | 11.9 | 9.8 | 10.6 | 8.7 | 10.2 | 8 | 9.3 | 7.5 | 8.6 | 9 | 12/12 | 40–57 | 6.5 |
+| 3/bodyweight/intermediate/muscle/45 | full3 | 10 | 9.9m | 11.9 | 8.2 | 8.4 | 10 | 8.3 | 10 | 6.8 | 9.5 | 8.4 | 10.6 | 11/12 | 49–50 | 6.5 |
+| 3/bodyweight/intermediate/muscle/60 | full3 | 11.5 | 12 | 15.5 | 10.2 | 10.8 | 11.5 | 9.8 | 11 | 9 | 10.9 | 11 | 16 | 12/12 | 61–64 | 8.9 |
+| 3/bodyweight/intermediate/muscle/75 | full3 | 12 | 12 | 15.5 | 11.2 | 10.8 | 11.5 | 10.8 | 12 | 9 | 11.7 | 11 | 18 | 12/12 | 68–80 | 8.9 |
+| 3/bodyweight/intermediate/lean/45 | full3 | 9m | 9.6m | 13 | 7.2m | 9.6 | 10 | 7.8 | 9 | 6.2 | 8.4 | 7.6m | 11.7 | 8/12 | 47–50 | 6 |
+| 3/bodyweight/intermediate/lean/60 | full3 | 10.5 | 10.3 | 14 | 11.2 | 10.1 | 10.5 | 10.8 | 11 | 6.4 | 9.9 | 10.6 | 15.1 | 12/12 | 59–64 | 7.1 |
+| 3/bodyweight/intermediate/lean/75 | full3 | 10.5 | 10.3 | 14 | 11.2 | 10.1 | 10.5 | 10.8 | 11 | 6.4 | 9.9 | 10.6 | 15.1 | 12/12 | 59–77 | 7.1 |
+| 3/bodyweight/advanced/muscle/45 | full3 | 10.8m | 9.9m | 10.7m | 7.8m | 6.4m | 8m | 8.1 | 9m | 7.2 | 9.7 | 6.8m | 12.1 | 4/12 | 48–50 | 5.4 |
+| 3/bodyweight/advanced/muscle/60 | full3 | 14.8 | 12 | 16.1 | 11.6 | 11.8 | 11.5 | 11.3 | 13 | 9.3 | 11.3 | 12 | 19 | 12/12 | 64–65 | 9.5 |
+| 3/bodyweight/advanced/muscle/75 | full3 | 16 | 12 | 16.1 | 13.6 | 11.8 | 11.5 | 13.4 | 15 | 9.3 | 12.9 | 13 | 21.1 | 12/12 | 72–78 | 9.5 |
+| 3/bodyweight/advanced/lean/45 | full3 | 10.8m | 11.2m | 10.7m | 7.8m | 6.5m | 9.5m | 8.1 | 9m | 8.2 | 9 | 8m | 13.8 | 4/12 | 47–48 | 7.5 |
+| 3/bodyweight/advanced/lean/60 | full3 | 12 | 12.6 | 15.1 | 12.6 | 11.4 | 11.5 | 11.4 | 13 | 9 | 11.1 | 13 | 17.2 | 12/12 | 62–65 | 7.5 |
+| 3/bodyweight/advanced/lean/75 | full3 | 12 | 12.6 | 15.1 | 13.6 | 11.4 | 11.5 | 11.4 | 13 | 9 | 11.1 | 13 | 17.2 | 12/12 | 74–77 | 7.5 |
+| 4/full/beginner/muscle/45 | ul4 | 9 | 10.5 | 11.9 | 9.8 | 10.6 | 8.7 | 10.2 | 8 | 9.3 | 7.5 | 8.6 | 9 | 12/12 | 40–49 | 6.5 |
+| 4/full/beginner/muscle/60 | ul4 | 9 | 10.5 | 11.9 | 9.8 | 10.6 | 8.7 | 10.2 | 8 | 9.3 | 7.5 | 8.6 | 9 | 12/12 | 40–62 | 6.5 |
 | 4/full/beginner/muscle/75 | ul4 | 9 | 10.5 | 11.9 | 9.8 | 10.6 | 8.7 | 10.2 | 8 | 9.3 | 7.5 | 8.6 | 9 | 12/12 | 40–62 | 6.5 |
-| 4/full/beginner/lean/45 | ul4 | 9 | 9.5 | 11 | 6.2 | 9.6 | 8.3 | 8.7 | 8 | 8.3 | 7.5 | 8.4 | 8 | 12/12 | 36–44 | 6 |
+| 4/full/beginner/lean/45 | ul4 | 9 | 9.5 | 11 | 6.2 | 9.6 | 8.3 | 8.7 | 8 | 8.3 | 7.5 | 8.4 | 8 | 12/12 | 38–50 | 6 |
 | 4/full/beginner/lean/60 | ul4 | 9 | 9.5 | 11 | 6.2 | 9.6 | 8.3 | 8.7 | 8 | 8.3 | 7.5 | 8.4 | 8 | 12/12 | 38–53 | 6 |
 | 4/full/beginner/lean/75 | ul4 | 9 | 9.5 | 11 | 6.2 | 9.6 | 8.3 | 8.7 | 8 | 8.3 | 7.5 | 8.4 | 8 | 12/12 | 38–53 | 6 |
-| 4/full/intermediate/muscle/45 | ul4 | 12 | 12 | 12.4 | 10.2 | 8.6 | 9.6 | 9 | 9 | 12 | 12 | 10.6 | 10 | 12/12 | 34–45 | 8 |
-| 4/full/intermediate/muscle/60 | ul4 | 12 | 13 | 15.3 | 11.8 | 13.8 | 10.1 | 11.5 | 9 | 12 | 12 | 10.6 | 10 | 12/12 | 51–60 | 8.1 |
+| 4/full/intermediate/muscle/45 | ul4 | 12 | 12.3 | 12.3 | 10.8 | 9.3 | 9.7 | 10.5 | 9 | 12 | 12 | 10.6 | 9 | 12/12 | 48–50 | 8 |
+| 4/full/intermediate/muscle/60 | ul4 | 12 | 13 | 15.3 | 11.8 | 13.8 | 10.1 | 11.5 | 9 | 12 | 12 | 10.6 | 10 | 12/12 | 51–65 | 8.1 |
 | 4/full/intermediate/muscle/75 | ul4 | 12 | 13 | 15.3 | 11.8 | 13.8 | 10.1 | 11.5 | 9 | 12 | 12 | 10.6 | 10 | 12/12 | 51–73 | 8.1 |
-| 4/full/intermediate/lean/45 | ul4 | 12 | 11.3 | 12.9 | 8.8 | 11.1 | 9.2 | 10.5 | 8 | 10.3 | 9.5 | 10.6 | 10 | 12/12 | 37–45 | 7.7 |
-| 4/full/intermediate/lean/60 | ul4 | 12 | 12 | 14.9 | 8.8 | 13.6 | 9.6 | 11.5 | 8 | 10.3 | 9.5 | 10.6 | 10 | 12/12 | 49–59 | 7.7 |
+| 4/full/intermediate/lean/45 | ul4 | 12 | 11.3 | 12.4 | 8.8 | 10.1 | 9.2 | 10.5 | 8 | 10.3 | 9.5 | 10.6 | 10 | 12/12 | 47–50 | 7.5 |
+| 4/full/intermediate/lean/60 | ul4 | 12 | 12 | 14.9 | 8.8 | 13.6 | 9.6 | 11.5 | 8 | 10.3 | 9.5 | 10.6 | 10 | 12/12 | 49–64 | 7.7 |
 | 4/full/intermediate/lean/75 | ul4 | 12 | 12 | 14.9 | 8.8 | 13.6 | 9.6 | 11.5 | 8 | 10.3 | 9.5 | 10.6 | 10 | 12/12 | 49–68 | 7.7 |
-| 4/full/advanced/muscle/45 | ul4 | 13 | 13 | 12.8 | 10.2 | 8.6 | 10.1 | 9 | 10 | 14.5 | 13.8 | 12.8 | 10 | 12/12 | 39–45 | 9.5 |
-| 4/full/advanced/muscle/60 | ul4 | 13 | 15.5 | 18.7 | 14.4 | 16.8 | 12.5 | 14 | 10 | 14.5 | 13.8 | 12.8 | 10 | 12/12 | 54–60 | 9.6 |
-| 4/full/advanced/muscle/75 | ul4 | 13 | 15.5 | 18.7 | 14.4 | 16.8 | 12.5 | 14 | 10 | 14.5 | 13.8 | 12.8 | 10 | 12/12 | 58–74 | 9.6 |
-| 4/full/advanced/lean/45 | ul4 | 12 | 12.3 | 12.3 | 9.8 | 9.1 | 9.7 | 9.1 | 10 | 13.5 | 11.8 | 12.8 | 10 | 12/12 | 38–44 | 8.5 |
-| 4/full/advanced/lean/60 | ul4 | 13 | 14.5 | 17.8 | 9.8 | 15.6 | 12 | 13.5 | 10 | 13.5 | 11.8 | 12.8 | 10 | 12/12 | 50–55 | 9.1 |
-| 4/full/advanced/lean/75 | ul4 | 13 | 14.5 | 17.8 | 9.8 | 15.6 | 12 | 13.5 | 10 | 13.5 | 11.8 | 12.8 | 10 | 12/12 | 53–69 | 9.1 |
-| 4/home/beginner/muscle/45 | ul4 | 10.2 | 9.2 | 11.7 | 9.2 | 10.2 | 6.9 | 10.3 | 8 | 6.3 | 7.5 | 8 | 6.6 | 12/12 | 32–45 | 7.2 |
+| 4/full/advanced/muscle/45 | ul4 | 12 | 13.3 | 12.2 | 9.2m | 8.3 | 9.2m | 8.6 | 10 | 13.5 | 11.8 | 10.8 | 9 | 10/12 | 48–48 | 8.5 |
+| 4/full/advanced/muscle/60 | ul4 | 13 | 15.5 | 18.2 | 14.4 | 15.8 | 12.5 | 14 | 10 | 14.5 | 13.8 | 12.8 | 10 | 12/12 | 58–64 | 9.6 |
+| 4/full/advanced/muscle/75 | ul4 | 13 | 15.5 | 18.7 | 14.4 | 16.8 | 12.5 | 14 | 10 | 14.5 | 13.8 | 12.8 | 10 | 12/12 | 58–79 | 9.6 |
+| 4/full/advanced/lean/45 | ul4 | 12 | 13 | 12.8 | 8.8m | 8.6 | 9.1m | 9.1 | 10 | 13.5 | 11.8 | 10.8 | 9 | 10/12 | 48–49 | 8.5 |
+| 4/full/advanced/lean/60 | ul4 | 13 | 14.5 | 17.8 | 9.8 | 15.6 | 12 | 13.5 | 10 | 13.5 | 11.8 | 12.8 | 10 | 12/12 | 53–64 | 9.1 |
+| 4/full/advanced/lean/75 | ul4 | 13 | 14.5 | 17.8 | 9.8 | 15.6 | 12 | 13.5 | 10 | 13.5 | 11.8 | 12.8 | 10 | 12/12 | 53–79 | 9.1 |
+| 4/home/beginner/muscle/45 | ul4 | 10.2 | 9.2 | 11.7 | 9.2 | 10.2 | 6.9 | 10.3 | 8 | 6.3 | 7.5 | 8 | 6.6 | 12/12 | 32–47 | 7.2 |
 | 4/home/beginner/muscle/60 | ul4 | 10.2 | 9.2 | 11.7 | 9.2 | 10.2 | 6.9 | 10.3 | 8 | 6.3 | 7.5 | 8 | 6.6 | 12/12 | 32–57 | 7.2 |
 | 4/home/beginner/muscle/75 | ul4 | 10.2 | 9.2 | 11.7 | 9.2 | 10.2 | 6.9 | 10.3 | 8 | 6.3 | 7.5 | 8 | 6.6 | 12/12 | 32–57 | 7.2 |
-| 4/home/beginner/lean/45 | ul4 | 9.2 | 9.2 | 10.5 | 6.2 | 8.2 | 5.9 | 8.9 | 8 | 6.3 | 7.5 | 8 | 4.6 | 12/12 | 29–42 | 7.2 |
+| 4/home/beginner/lean/45 | ul4 | 9.2 | 9.2 | 10.5 | 6.2 | 8.2 | 5.9 | 8.9 | 8 | 6.3 | 7.5 | 8 | 4.6 | 12/12 | 29–50 | 7.2 |
 | 4/home/beginner/lean/60 | ul4 | 9.2 | 9.2 | 10.5 | 6.2 | 8.2 | 5.9 | 8.9 | 8 | 6.3 | 7.5 | 8 | 4.6 | 12/12 | 29–50 | 7.2 |
 | 4/home/beginner/lean/75 | ul4 | 9.2 | 9.2 | 10.5 | 6.2 | 8.2 | 5.9 | 8.9 | 8 | 6.3 | 7.5 | 8 | 4.6 | 12/12 | 29–50 | 7.2 |
-| 4/home/intermediate/muscle/45 | ul4 | 12.8 | 12.6 | 13.6 | 11.8 | 10.2 | 8.2 | 11 | 9 | 10.5 | 11.6 | 10.4 | 9.8 | 12/12 | 37–45 | 8.8 |
-| 4/home/intermediate/muscle/60 | ul4 | 13.8 | 12.6 | 15.4 | 11.8 | 13.2 | 8.2 | 12.4 | 9 | 10.5 | 11.6 | 10.4 | 9.8 | 12/12 | 45–60 | 9 |
+| 4/home/intermediate/muscle/45 | ul4 | 11.8 | 12.6 | 12.4 | 9.2 | 8.2 | 8.2 | 9.8 | 9 | 10.5 | 11.6 | 10.4 | 9.8 | 12/12 | 45–48 | 7.8 |
+| 4/home/intermediate/muscle/60 | ul4 | 13.8 | 12.6 | 15.4 | 11.8 | 13.2 | 8.2 | 12.4 | 9 | 10.5 | 11.6 | 10.4 | 9.8 | 12/12 | 45–65 | 9 |
 | 4/home/intermediate/muscle/75 | ul4 | 13.8 | 12.6 | 15.4 | 11.8 | 13.2 | 8.2 | 12.4 | 9 | 10.5 | 11.6 | 10.4 | 9.8 | 12/12 | 45–73 | 9 |
-| 4/home/intermediate/lean/45 | ul4 | 11.8 | 12.6 | 14.2 | 8.2 | 11.2 | 8.2 | 11.1 | 8 | 9.3 | 10.1 | 10.4 | 8.8 | 12/12 | 34–45 | 8.8 |
-| 4/home/intermediate/lean/60 | ul4 | 11.8 | 12.6 | 14.2 | 8.2 | 11.2 | 8.2 | 11.1 | 8 | 9.3 | 10.1 | 10.4 | 8.8 | 12/12 | 45–59 | 8.8 |
+| 4/home/intermediate/lean/45 | ul4 | 11.2 | 11.6 | 13.6 | 8.2 | 10.2 | 8.2 | 10.6 | 8 | 9.3 | 10.1 | 10.4 | 8.8 | 12/12 | 45–48 | 8.4 |
+| 4/home/intermediate/lean/60 | ul4 | 11.8 | 12.6 | 14.2 | 8.2 | 11.2 | 8.2 | 11.1 | 8 | 9.3 | 10.1 | 10.4 | 8.8 | 12/12 | 45–64 | 8.8 |
 | 4/home/intermediate/lean/75 | ul4 | 11.8 | 12.6 | 14.2 | 8.2 | 11.2 | 8.2 | 11.1 | 8 | 9.3 | 10.1 | 10.4 | 8.8 | 12/12 | 45–68 | 8.8 |
-| 4/home/advanced/muscle/45 | ul4 | 13.4 | 15 | 16.2 | 10.4 | 12 | 10 | 12.3 | 11 | 12.3 | 14.1 | 12.4 | 10.8 | 12/12 | 32–45 | 9.4 |
-| 4/home/advanced/muscle/60 | ul4 | 14.4 | 14.3 | 17.6 | 14.4 | 15.6 | 9.6 | 14.7 | 11 | 12.3 | 14.1 | 12.4 | 10.8 | 12/12 | 50–56 | 9.6 |
-| 4/home/advanced/muscle/75 | ul4 | 14.4 | 14.3 | 17.6 | 14.4 | 15.6 | 9.6 | 14.7 | 11 | 12.3 | 14.1 | 12.4 | 10.8 | 12/12 | 54–70 | 9.6 |
-| 4/home/advanced/lean/45 | ul4 | 12.4 | 15 | 15.6 | 10.2 | 11 | 10 | 10.9 | 10 | 10.5 | 11.6 | 12.4 | 9.8 | 12/12 | 29–43 | 9.4 |
-| 4/home/advanced/lean/60 | ul4 | 14.4 | 15 | 16.8 | 11.2 | 13 | 10 | 13.7 | 10 | 10.5 | 11.6 | 12.4 | 9.8 | 12/12 | 49–52 | 9.4 |
-| 4/home/advanced/lean/75 | ul4 | 14.4 | 15 | 16.8 | 11.2 | 13 | 10 | 13.7 | 10 | 10.5 | 11.6 | 12.4 | 9.8 | 12/12 | 49–64 | 9.4 |
-| 4/dumbbell/beginner/muscle/45 | ul4 | 10.2 | 9.2 | 11.7 | 10.2 | 10.2 | 6.9 | 10.3 | 8 | 6.5 | 7.1 | 8 | 8.8 | 12/12 | 34–39 | 7.2 |
+| 4/home/advanced/muscle/45 | ul4 | 12.2 | 12.3 | 13.4 | 10.2 | 8.6 | 9.6 | 7.5 | 10 | 11.5 | 12.4 | 12.4 | 10.8 | 12/12 | 45–50 | 8.2 |
+| 4/home/advanced/muscle/60 | ul4 | 14.4 | 14.3 | 17 | 13.8 | 14.6 | 9.6 | 13 | 11 | 12.3 | 14.1 | 12.4 | 10.8 | 12/12 | 54–64 | 9.6 |
+| 4/home/advanced/muscle/75 | ul4 | 14.4 | 14.3 | 17.6 | 14.4 | 15.6 | 9.6 | 14.7 | 11 | 12.3 | 14.1 | 12.4 | 10.8 | 12/12 | 54–75 | 9.6 |
+| 4/home/advanced/lean/45 | ul4 | 12.2 | 12.3 | 12.8 | 10.2 | 7.6 | 9.6 | 7.5 | 10 | 10.5 | 11.6 | 12.4 | 9.8 | 12/12 | 48–50 | 8.8 |
+| 4/home/advanced/lean/60 | ul4 | 14.4 | 15 | 16.8 | 11.2 | 13 | 10 | 13.7 | 10 | 10.5 | 11.6 | 12.4 | 9.8 | 12/12 | 49–64 | 9.4 |
+| 4/home/advanced/lean/75 | ul4 | 14.4 | 15 | 16.8 | 11.2 | 13 | 10 | 13.7 | 10 | 10.5 | 11.6 | 12.4 | 9.8 | 12/12 | 49–76 | 9.4 |
+| 4/dumbbell/beginner/muscle/45 | ul4 | 10.2 | 9.2 | 11.7 | 10.2 | 10.2 | 6.9 | 10.3 | 8 | 6.5 | 7.1 | 8 | 8.8 | 12/12 | 34–50 | 7.2 |
 | 4/dumbbell/beginner/muscle/60 | ul4 | 10.2 | 9.2 | 11.7 | 10.2 | 10.2 | 6.9 | 10.3 | 8 | 6.5 | 7.1 | 8 | 8.8 | 12/12 | 34–60 | 7.2 |
 | 4/dumbbell/beginner/muscle/75 | ul4 | 10.2 | 9.2 | 11.7 | 10.2 | 10.2 | 6.9 | 10.3 | 8 | 6.5 | 7.1 | 8 | 8.8 | 12/12 | 34–60 | 7.2 |
-| 4/dumbbell/beginner/lean/45 | ul4 | 9.2 | 9.2 | 11.1 | 7.2 | 9.2 | 6.9 | 8.9 | 8 | 8.5 | 7.7 | 8.4 | 7.8 | 12/12 | 36–44 | 7.2 |
+| 4/dumbbell/beginner/lean/45 | ul4 | 9.2 | 9.2 | 11.1 | 7.2 | 9.2 | 6.9 | 8.9 | 8 | 8.5 | 7.7 | 8.4 | 7.8 | 12/12 | 36–49 | 7.2 |
 | 4/dumbbell/beginner/lean/60 | ul4 | 9.2 | 9.2 | 11.1 | 7.2 | 9.2 | 6.9 | 8.9 | 8 | 8.5 | 7.7 | 8.4 | 7.8 | 12/12 | 36–55 | 7.2 |
 | 4/dumbbell/beginner/lean/75 | ul4 | 9.2 | 9.2 | 11.1 | 7.2 | 9.2 | 6.9 | 8.9 | 8 | 8.5 | 7.7 | 8.4 | 7.8 | 12/12 | 36–55 | 7.2 |
-| 4/dumbbell/intermediate/muscle/45 | ul4 | 12.8 | 12.6 | 13.6 | 11.8 | 10.2 | 8.2 | 11 | 9 | 10.3 | 12.1 | 10.4 | 11.4 | 12/12 | 36–44 | 8.8 |
-| 4/dumbbell/intermediate/muscle/60 | ul4 | 13.8 | 12.6 | 15.4 | 11.8 | 13.2 | 8.2 | 12.4 | 9 | 10.3 | 12.1 | 10.4 | 11.4 | 12/12 | 47–60 | 9 |
+| 4/dumbbell/intermediate/muscle/45 | ul4 | 11.8 | 12.6 | 12.4 | 9.2 | 8.2 | 8.2 | 9.8 | 9 | 10.3 | 12.1 | 10.4 | 11.4 | 12/12 | 47–50 | 7.8 |
+| 4/dumbbell/intermediate/muscle/60 | ul4 | 13.8 | 12.6 | 15.4 | 11.8 | 13.2 | 8.2 | 12.4 | 9 | 10.3 | 12.1 | 10.4 | 11.4 | 12/12 | 47–65 | 9 |
 | 4/dumbbell/intermediate/muscle/75 | ul4 | 13.8 | 12.6 | 15.4 | 11.8 | 13.2 | 8.2 | 12.4 | 9 | 10.3 | 12.1 | 10.4 | 11.4 | 12/12 | 47–73 | 9 |
-| 4/dumbbell/intermediate/lean/45 | ul4 | 11.8 | 12.6 | 15.4 | 8.8 | 13.2 | 8.2 | 11.6 | 8 | 7.6 | 10 | 10 | 11 | 12/12 | 37–42 | 9 |
-| 4/dumbbell/intermediate/lean/60 | ul4 | 11.8 | 12.6 | 15.4 | 8.8 | 13.2 | 8.2 | 11.6 | 8 | 7.6 | 10 | 10 | 11 | 12/12 | 42–60 | 9 |
+| 4/dumbbell/intermediate/lean/45 | ul4 | 11.2 | 11.6 | 13.6 | 8.2 | 10.2 | 8.2 | 10.6 | 8 | 7.6 | 10 | 10 | 11 | 12/12 | 42–50 | 8.4 |
+| 4/dumbbell/intermediate/lean/60 | ul4 | 11.8 | 12.6 | 15.4 | 8.8 | 13.2 | 8.2 | 11.6 | 8 | 7.6 | 10 | 10 | 11 | 12/12 | 42–65 | 9 |
 | 4/dumbbell/intermediate/lean/75 | ul4 | 11.8 | 12.6 | 15.4 | 8.8 | 13.2 | 8.2 | 11.6 | 8 | 7.6 | 10 | 10 | 11 | 12/12 | 42–72 | 9 |
-| 4/dumbbell/advanced/muscle/45 | ul4 | 13.4 | 15 | 16.2 | 10.4 | 12 | 10 | 12.3 | 10 | 12.6 | 14.3 | 12.4 | 10.4 | 12/12 | 39–45 | 9.4 |
-| 4/dumbbell/advanced/muscle/60 | ul4 | 14.4 | 14.3 | 17.6 | 14.4 | 15.6 | 9.6 | 14.7 | 10 | 12.6 | 14.3 | 12.4 | 12.4 | 12/12 | 51–57 | 9.6 |
-| 4/dumbbell/advanced/muscle/75 | ul4 | 14.4 | 14.3 | 17.6 | 14.4 | 15.6 | 9.6 | 14.7 | 10 | 12.6 | 14.3 | 12.4 | 12.4 | 12/12 | 51–73 | 9.6 |
-| 4/dumbbell/advanced/lean/45 | ul4 | 12.8 | 14 | 16.2 | 10.2 | 12 | 10 | 11.1 | 10 | 10.3 | 12.1 | 12.4 | 12.4 | 12/12 | 37–43 | 9.8 |
-| 4/dumbbell/advanced/lean/60 | ul4 | 14.8 | 13.3 | 17.6 | 12.2 | 15.6 | 9.6 | 13.9 | 10 | 10.3 | 12.1 | 12.4 | 12.4 | 12/12 | 49–54 | 9.8 |
-| 4/dumbbell/advanced/lean/75 | ul4 | 14.8 | 13.3 | 17.6 | 12.2 | 15.6 | 9.6 | 13.9 | 10 | 10.3 | 12.1 | 12.4 | 12.4 | 12/12 | 49–68 | 9.8 |
-| 4/bodyweight/beginner/muscle/45 | ul4 | 9 | 10.9 | 13.9 | 10.8 | 10.9 | 9.2 | 10.2 | 8 | 4.4 | 8.5 | 8 | 11.5 | 12/12 | 33–41 | 7 |
+| 4/dumbbell/advanced/muscle/45 | ul4 | 12.2 | 12.3 | 13.4 | 10.2 | 8.6 | 9.6 | 7.5 | 10 | 10.3 | 12.1 | 10.4 | 9.4 | 12/12 | 45–50 | 8.2 |
+| 4/dumbbell/advanced/muscle/60 | ul4 | 14.4 | 14.3 | 17 | 13.8 | 14.6 | 9.6 | 13 | 10 | 12.6 | 14.3 | 12.4 | 12.4 | 12/12 | 51–64 | 9.6 |
+| 4/dumbbell/advanced/muscle/75 | ul4 | 14.4 | 14.3 | 17.6 | 14.4 | 15.6 | 9.6 | 14.7 | 10 | 12.6 | 14.3 | 12.4 | 12.4 | 12/12 | 51–75 | 9.6 |
+| 4/dumbbell/advanced/lean/45 | ul4 | 12.2 | 12.3 | 12.8 | 10.2 | 7.6 | 9.6 | 7.5 | 10 | 10.3 | 12.1 | 10.4 | 9.4 | 12/12 | 48–50 | 8.8 |
+| 4/dumbbell/advanced/lean/60 | ul4 | 14.8 | 13.3 | 17 | 12.2 | 14.6 | 9.6 | 13.7 | 10 | 10.3 | 12.1 | 12.4 | 12.4 | 12/12 | 49–63 | 9.8 |
+| 4/dumbbell/advanced/lean/75 | ul4 | 14.8 | 13.3 | 17.6 | 12.2 | 15.6 | 9.6 | 13.9 | 10 | 10.3 | 12.1 | 12.4 | 12.4 | 12/12 | 49–80 | 9.8 |
+| 4/bodyweight/beginner/muscle/45 | ul4 | 9 | 10.9 | 13.3 | 10.8 | 9.9 | 9.2 | 10.2 | 8 | 4.4 | 8.5 | 8 | 11.5 | 12/12 | 33–49 | 6.9 |
 | 4/bodyweight/beginner/muscle/60 | ul4 | 9 | 10.9 | 13.9 | 10.8 | 10.9 | 9.2 | 10.2 | 8 | 4.4 | 8.5 | 8 | 11.5 | 12/12 | 33–60 | 7 |
 | 4/bodyweight/beginner/muscle/75 | ul4 | 9 | 10.9 | 13.9 | 10.8 | 10.9 | 9.2 | 10.2 | 8 | 4.4 | 8.5 | 8 | 11.5 | 12/12 | 33–60 | 7 |
-| 4/bodyweight/beginner/lean/45 | ul4 | 7.5 | 9.5 | 11.3 | 7.8 | 9 | 8.2 | 8.7 | 6 | 4.4 | 6.9 | 8 | 10.5 | 12/12 | 33–39 | 6 |
+| 4/bodyweight/beginner/lean/45 | ul4 | 7.5 | 9.5 | 11.3 | 7.8 | 9 | 8.2 | 8.7 | 6 | 4.4 | 6.9 | 8 | 10.5 | 12/12 | 33–50 | 6 |
 | 4/bodyweight/beginner/lean/60 | ul4 | 7.5 | 9.5 | 11.3 | 7.8 | 9 | 8.2 | 8.7 | 6 | 4.4 | 6.9 | 8 | 10.5 | 12/12 | 33–50 | 6 |
 | 4/bodyweight/beginner/lean/75 | ul4 | 7.5 | 9.5 | 11.3 | 7.8 | 9 | 8.2 | 8.7 | 6 | 4.4 | 6.9 | 8 | 10.5 | 12/12 | 33–50 | 6 |
-| 4/bodyweight/intermediate/muscle/45 | ul4 | 13 | 13.3 | 17.6 | 11.2 | 14.1 | 10.7 | 12.8 | 9 | 7.8 | 11.5 | 10.4 | 17.1 | 12/12 | 38–45 | 9 |
-| 4/bodyweight/intermediate/muscle/60 | ul4 | 13 | 13.3 | 17.6 | 11.2 | 14.1 | 10.7 | 12.8 | 9 | 7.8 | 11.5 | 10.4 | 17.1 | 12/12 | 45–56 | 9 |
+| 4/bodyweight/intermediate/muscle/45 | ul4 | 11 | 11.2 | 11.6 | 9.8 | 7.7 | 9.2 | 9.7 | 9 | 7.8 | 11.5 | 10.4 | 15.4 | 12/12 | 45–49 | 7 |
+| 4/bodyweight/intermediate/muscle/60 | ul4 | 13 | 13.3 | 17.6 | 11.2 | 14.1 | 10.7 | 12.8 | 9 | 7.8 | 11.5 | 10.4 | 17.1 | 12/12 | 45–65 | 9 |
 | 4/bodyweight/intermediate/muscle/75 | ul4 | 13 | 13.3 | 17.6 | 11.2 | 14.1 | 10.7 | 12.8 | 9 | 7.8 | 11.5 | 10.4 | 17.1 | 12/12 | 45–73 | 9 |
-| 4/bodyweight/intermediate/lean/45 | ul4 | 10 | 10.9 | 15.1 | 11.2 | 12.9 | 9.2 | 11.3 | 8 | 7 | 9.9 | 10.4 | 14.9 | 12/12 | 34–45 | 7.6 |
-| 4/bodyweight/intermediate/lean/60 | ul4 | 10 | 10.9 | 15.1 | 11.2 | 12.9 | 9.2 | 11.3 | 8 | 7 | 9.9 | 10.4 | 14.9 | 12/12 | 45–48 | 7.6 |
+| 4/bodyweight/intermediate/lean/45 | ul4 | 10 | 10.9 | 13.3 | 10.8 | 9.9 | 9.2 | 10.7 | 8 | 7 | 9.9 | 10.4 | 14.6 | 12/12 | 45–49 | 6.9 |
+| 4/bodyweight/intermediate/lean/60 | ul4 | 10 | 10.9 | 15.1 | 11.2 | 12.9 | 9.2 | 11.3 | 8 | 7 | 9.9 | 10.4 | 14.9 | 12/12 | 45–62 | 7.6 |
 | 4/bodyweight/intermediate/lean/75 | ul4 | 10 | 10.9 | 15.1 | 11.2 | 12.9 | 9.2 | 11.3 | 8 | 7 | 9.9 | 10.4 | 14.9 | 12/12 | 45–66 | 7.6 |
-| 4/bodyweight/advanced/muscle/45 | ul4 | 12 | 14.3 | 19.2 | 13.6 | 16.1 | 12.1 | 14.4 | 10 | 9.6 | 14.1 | 12.4 | 18.8 | 12/12 | 29–43 | 9.6 |
-| 4/bodyweight/advanced/muscle/60 | ul4 | 12 | 14.3 | 19.2 | 13.6 | 16.1 | 12.1 | 14.4 | 10 | 9.6 | 14.1 | 12.4 | 18.8 | 12/12 | 47–59 | 9.6 |
-| 4/bodyweight/advanced/muscle/75 | ul4 | 12 | 14.3 | 19.2 | 13.6 | 16.1 | 12.1 | 14.4 | 10 | 9.6 | 14.1 | 12.4 | 18.8 | 12/12 | 53–64 | 9.6 |
-| 4/bodyweight/advanced/lean/45 | ul4 | 12 | 13.3 | 18.7 | 13.2 | 15.8 | 11.6 | 13.8 | 10 | 7.8 | 11.2 | 12.4 | 16.9 | 12/12 | 31–44 | 9.6 |
-| 4/bodyweight/advanced/lean/60 | ul4 | 12 | 13.3 | 18.7 | 13.2 | 15.8 | 11.6 | 13.8 | 10 | 7.8 | 11.2 | 12.4 | 16.9 | 12/12 | 49–59 | 9.6 |
-| 4/bodyweight/advanced/lean/75 | ul4 | 12 | 13.3 | 18.7 | 13.2 | 15.8 | 11.6 | 13.8 | 10 | 7.8 | 11.2 | 12.4 | 16.9 | 12/12 | 49–59 | 9.6 |
-| 5/full/beginner/muscle/45 | ulppl5 | 9 | 9.8 | 9.9 | 7.8 | 8.1 | 11.3 | 10.2 | 12 | 10 | 8.8 | 8 | 9 | 12/12 | 32–44 | 6 |
+| 4/bodyweight/advanced/muscle/45 | ul4 | 12 | 12.9 | 13 | 9.8 | 8.2 | 10.1 | 13.2 | 10 | 9 | 13.5 | 11.4 | 12.5 | 12/12 | 49–50 | 8 |
+| 4/bodyweight/advanced/muscle/60 | ul4 | 12 | 14.3 | 18.6 | 12.8 | 15.1 | 12.1 | 13.2 | 10 | 9.6 | 14.1 | 12.4 | 18.2 | 12/12 | 53–65 | 9.6 |
+| 4/bodyweight/advanced/muscle/75 | ul4 | 12 | 14.3 | 19.2 | 13.6 | 16.1 | 12.1 | 14.4 | 10 | 9.6 | 14.1 | 12.4 | 18.8 | 12/12 | 53–80 | 9.6 |
+| 4/bodyweight/advanced/lean/45 | ul4 | 11.5m | 12.6 | 13.5 | 9.8 | 8.4 | 10.1 | 12.2 | 10 | 7.8 | 11.2 | 11.4 | 15.2 | 11/12 | 49–49 | 8 |
+| 4/bodyweight/advanced/lean/60 | ul4 | 12 | 13.3 | 18.1 | 12.8 | 14.8 | 11.6 | 13.2 | 10 | 7.8 | 11.2 | 12.4 | 16.6 | 12/12 | 49–65 | 9.1 |
+| 4/bodyweight/advanced/lean/75 | ul4 | 12 | 13.3 | 18.7 | 13.2 | 15.8 | 11.6 | 13.8 | 10 | 7.8 | 11.2 | 12.4 | 16.9 | 12/12 | 49–77 | 9.6 |
+| 5/full/beginner/muscle/45 | ulppl5 | 9 | 9.8 | 9.9 | 7.8 | 8.1 | 11.3 | 10.2 | 12 | 10 | 8.8 | 8 | 9 | 12/12 | 32–49 | 6 |
 | 5/full/beginner/muscle/60 | ulppl5 | 9 | 9.8 | 9.9 | 7.8 | 8.1 | 11.3 | 10.2 | 12 | 10 | 8.8 | 8 | 9 | 12/12 | 32–53 | 6 |
 | 5/full/beginner/muscle/75 | ulppl5 | 9 | 9.8 | 9.9 | 7.8 | 8.1 | 11.3 | 10.2 | 12 | 10 | 8.8 | 8 | 9 | 12/12 | 32–53 | 6 |
 | 5/full/beginner/lean/45 | ulppl5 | 9 | 8 | 8.5 | 6.2 | 7.6 | 10.4 | 8.7 | 10 | 7.5 | 5.8 | 6.8 | 8 | 12/12 | 32–44 | 6 |
 | 5/full/beginner/lean/60 | ulppl5 | 9 | 8 | 8.5 | 6.2 | 7.6 | 10.4 | 8.7 | 10 | 7.5 | 5.8 | 6.8 | 8 | 12/12 | 32–44 | 6 |
 | 5/full/beginner/lean/75 | ulppl5 | 9 | 8 | 8.5 | 6.2 | 7.6 | 10.4 | 8.7 | 10 | 7.5 | 5.8 | 6.8 | 8 | 12/12 | 32–44 | 6 |
-| 5/full/intermediate/muscle/45 | ulppl5 | 12 | 12.3 | 13.8 | 10.8 | 12.3 | 12.7 | 11.6 | 14 | 12.5 | 11 | 11.2 | 10 | 12/12 | 33–44 | 7.5 |
-| 5/full/intermediate/muscle/60 | ulppl5 | 12 | 12.3 | 13.8 | 10.8 | 12.3 | 12.7 | 11.6 | 14 | 12.5 | 11 | 11.2 | 10 | 12/12 | 44–57 | 7.5 |
+| 5/full/intermediate/muscle/45 | ulppl5 | 12 | 12.3 | 13.8 | 10.8 | 12.3 | 12.7 | 11.6 | 14 | 12.5 | 11 | 11.2 | 10 | 12/12 | 44–50 | 7.5 |
+| 5/full/intermediate/muscle/60 | ulppl5 | 12 | 12.3 | 13.8 | 10.8 | 12.3 | 12.7 | 11.6 | 14 | 12.5 | 11 | 11.2 | 10 | 12/12 | 44–65 | 7.5 |
 | 5/full/intermediate/muscle/75 | ulppl5 | 12 | 12.3 | 13.8 | 10.8 | 12.3 | 12.7 | 11.6 | 14 | 12.5 | 11 | 11.2 | 10 | 12/12 | 44–65 | 7.5 |
-| 5/full/intermediate/lean/45 | ulppl5 | 12 | 10.5 | 11.4 | 9.8 | 9.6 | 11.7 | 11.6 | 13 | 11 | 10 | 10 | 10 | 12/12 | 32–44 | 7 |
-| 5/full/intermediate/lean/60 | ulppl5 | 12 | 10.5 | 11.4 | 9.8 | 9.6 | 11.7 | 11.6 | 13 | 11 | 10 | 10 | 10 | 12/12 | 32–55 | 7 |
+| 5/full/intermediate/lean/45 | ulppl5 | 12 | 10.5 | 11.4 | 9.8 | 9.6 | 11.7 | 11.6 | 13 | 11 | 10 | 10 | 10 | 12/12 | 32–50 | 7 |
+| 5/full/intermediate/lean/60 | ulppl5 | 12 | 10.5 | 11.4 | 9.8 | 9.6 | 11.7 | 11.6 | 13 | 11 | 10 | 10 | 10 | 12/12 | 32–65 | 7 |
 | 5/full/intermediate/lean/75 | ulppl5 | 12 | 10.5 | 11.4 | 9.8 | 9.6 | 11.7 | 11.6 | 13 | 11 | 10 | 10 | 10 | 12/12 | 32–65 | 7 |
-| 5/full/advanced/muscle/45 | ulppl5 | 13 | 13.8 | 15.8 | 11.8 | 13.1 | 13.6 | 11.6 | 16 | 16 | 12.8 | 11.6 | 10 | 12/12 | 35–44 | 9 |
-| 5/full/advanced/muscle/60 | ulppl5 | 13 | 13.8 | 15.8 | 12.4 | 13.1 | 15.6 | 14.1 | 16 | 16 | 12.8 | 11.6 | 10 | 12/12 | 46–52 | 9 |
-| 5/full/advanced/muscle/75 | ulppl5 | 13 | 13.8 | 15.8 | 12.4 | 13.1 | 15.6 | 14.1 | 16 | 16 | 12.8 | 11.6 | 10 | 12/12 | 46–66 | 9 |
-| 5/full/advanced/lean/45 | ulppl5 | 12 | 12.3 | 13.3 | 11.4 | 11.1 | 14.7 | 13.6 | 15 | 13.5 | 11.8 | 11.2 | 10 | 12/12 | 35–45 | 8 |
-| 5/full/advanced/lean/60 | ulppl5 | 12 | 12.3 | 13.3 | 11.4 | 11.1 | 14.7 | 13.6 | 15 | 13.5 | 11.8 | 11.2 | 10 | 12/12 | 36–58 | 8 |
+| 5/full/advanced/muscle/45 | ulppl5 | 12 | 12.3 | 13.8 | 10.2 | 12.1 | 12.7 | 11.4 | 15 | 13.5 | 11.8 | 11.2 | 10 | 12/12 | 46–50 | 8.3 |
+| 5/full/advanced/muscle/60 | ulppl5 | 13 | 13.8 | 15.8 | 12.4 | 13.1 | 15.6 | 14.1 | 16 | 16 | 12.8 | 11.6 | 10 | 12/12 | 46–65 | 9 |
+| 5/full/advanced/muscle/75 | ulppl5 | 13 | 13.8 | 15.8 | 12.4 | 13.1 | 15.6 | 14.1 | 16 | 16 | 12.8 | 11.6 | 10 | 12/12 | 46–79 | 9 |
+| 5/full/advanced/lean/45 | ulppl5 | 12 | 12.3 | 13.3 | 10.2 | 11.1 | 10.7 | 11.4 | 15 | 13.5 | 11.8 | 11.2 | 10 | 12/12 | 36–50 | 8 |
+| 5/full/advanced/lean/60 | ulppl5 | 12 | 12.3 | 13.3 | 11.4 | 11.1 | 14.7 | 13.6 | 15 | 13.5 | 11.8 | 11.2 | 10 | 12/12 | 36–65 | 8 |
 | 5/full/advanced/lean/75 | ulppl5 | 12 | 12.3 | 13.3 | 11.4 | 11.1 | 14.7 | 13.6 | 15 | 13.5 | 11.8 | 11.2 | 10 | 12/12 | 36–73 | 8 |
-| 5/home/beginner/muscle/45 | ulppl5 | 10.2 | 8.5 | 9.5 | 7.2 | 7.8 | 8.5 | 10.3 | 12 | 8.5 | 9 | 7.8 | 4.6 | 12/12 | 29–41 | 6.1 |
+| 5/home/beginner/muscle/45 | ulppl5 | 10.2 | 8.5 | 9.5 | 7.2 | 7.8 | 8.5 | 10.3 | 12 | 8.5 | 9 | 7.8 | 4.6 | 12/12 | 29–48 | 6.1 |
 | 5/home/beginner/muscle/60 | ulppl5 | 10.2 | 8.5 | 9.5 | 7.2 | 7.8 | 8.5 | 10.3 | 12 | 8.5 | 9 | 7.8 | 4.6 | 12/12 | 29–48 | 6.1 |
 | 5/home/beginner/muscle/75 | ulppl5 | 10.2 | 8.5 | 9.5 | 7.2 | 7.8 | 8.5 | 10.3 | 12 | 8.5 | 9 | 7.8 | 4.6 | 12/12 | 29–48 | 6.1 |
 | 5/home/beginner/lean/45 | ulppl5 | 10.2 | 7.8 | 7.9 | 6.2 | 6.4 | 7.1 | 8.3 | 10 | 4.5 | 7.8 | 6 | 4.6 | 12/12 | 25–41 | 6 |
 | 5/home/beginner/lean/60 | ulppl5 | 10.2 | 7.8 | 7.9 | 6.2 | 6.4 | 7.1 | 8.3 | 10 | 4.5 | 7.8 | 6 | 4.6 | 12/12 | 25–41 | 6 |
 | 5/home/beginner/lean/75 | ulppl5 | 10.2 | 7.8 | 7.9 | 6.2 | 6.4 | 7.1 | 8.3 | 10 | 4.5 | 7.8 | 6 | 4.6 | 12/12 | 25–41 | 6 |
-| 5/home/intermediate/muscle/45 | ulppl5 | 12.8 | 10.9 | 13.3 | 9.8 | 11.6 | 10.3 | 12 | 14 | 11 | 11.5 | 11 | 6.6 | 12/12 | 38–45 | 7.7 |
-| 5/home/intermediate/muscle/60 | ulppl5 | 12.8 | 10.9 | 13.3 | 9.8 | 11.6 | 10.3 | 12 | 14 | 11 | 11.5 | 11 | 6.6 | 12/12 | 41–56 | 7.7 |
+| 5/home/intermediate/muscle/45 | ulppl5 | 12.8 | 10.9 | 13.3 | 9.8 | 11.6 | 10.3 | 12 | 14 | 11 | 11.5 | 11 | 6.6 | 12/12 | 41–50 | 7.7 |
+| 5/home/intermediate/muscle/60 | ulppl5 | 12.8 | 10.9 | 13.3 | 9.8 | 11.6 | 10.3 | 12 | 14 | 11 | 11.5 | 11 | 6.6 | 12/12 | 41–62 | 7.7 |
 | 5/home/intermediate/muscle/75 | ulppl5 | 12.8 | 10.9 | 13.3 | 9.8 | 11.6 | 10.3 | 12 | 14 | 11 | 11.5 | 11 | 6.6 | 12/12 | 41–62 | 7.7 |
-| 5/home/intermediate/lean/45 | ulppl5 | 11.8 | 10.2 | 11.1 | 9.8 | 9.1 | 8.9 | 11.5 | 13 | 6 | 10 | 9 | 6.6 | 12/12 | 29–45 | 7 |
+| 5/home/intermediate/lean/45 | ulppl5 | 11.8 | 10.2 | 11.1 | 9.8 | 9.1 | 8.9 | 11.5 | 13 | 6 | 10 | 9 | 6.6 | 12/12 | 29–50 | 7 |
 | 5/home/intermediate/lean/60 | ulppl5 | 11.8 | 10.2 | 11.1 | 9.8 | 9.1 | 8.9 | 11.5 | 13 | 6 | 10 | 9 | 6.6 | 12/12 | 29–58 | 7 |
 | 5/home/intermediate/lean/75 | ulppl5 | 11.8 | 10.2 | 11.1 | 9.8 | 9.1 | 8.9 | 11.5 | 13 | 6 | 10 | 9 | 6.6 | 12/12 | 29–58 | 7 |
-| 5/home/advanced/muscle/45 | ulppl5 | 14.4 | 13.3 | 14.7 | 11.2 | 11.4 | 12.1 | 11.8 | 16 | 13.5 | 13.6 | 11.2 | 8.6 | 12/12 | 31–45 | 9 |
-| 5/home/advanced/muscle/60 | ulppl5 | 14.4 | 13.3 | 14.7 | 12.4 | 11.4 | 12.1 | 14.8 | 16 | 13.5 | 13.6 | 11.2 | 8.6 | 12/12 | 41–55 | 9.2 |
-| 5/home/advanced/muscle/75 | ulppl5 | 14.4 | 13.3 | 14.7 | 12.4 | 11.4 | 12.1 | 14.8 | 16 | 13.5 | 13.6 | 11.2 | 8.6 | 12/12 | 41–65 | 9.2 |
-| 5/home/advanced/lean/45 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.8 | 11 | 10.7 | 13.8 | 15 | 11 | 12 | 10.8 | 7.6 | 12/12 | 32–44 | 8.2 |
-| 5/home/advanced/lean/60 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.8 | 11 | 10.7 | 13.8 | 15 | 11 | 12 | 10.8 | 7.6 | 12/12 | 32–56 | 8.2 |
+| 5/home/advanced/muscle/45 | ulppl5 | 14.4 | 13.3 | 14.7 | 11.2 | 11.4 | 11.1 | 11.8 | 16 | 13.5 | 13.6 | 11.2 | 8.6 | 12/12 | 41–50 | 9 |
+| 5/home/advanced/muscle/60 | ulppl5 | 14.4 | 13.3 | 14.7 | 12.4 | 11.4 | 12.1 | 14.8 | 16 | 13.5 | 13.6 | 11.2 | 8.6 | 12/12 | 41–65 | 9.2 |
+| 5/home/advanced/muscle/75 | ulppl5 | 14.4 | 13.3 | 14.7 | 12.4 | 11.4 | 12.1 | 14.8 | 16 | 13.5 | 13.6 | 11.2 | 8.6 | 12/12 | 41–76 | 9.2 |
+| 5/home/advanced/lean/45 | ulppl5 | 13.4 | 12.6 | 13.7 | 10.2 | 11 | 10.7 | 11.3 | 15 | 11 | 12 | 10.8 | 7.6 | 12/12 | 32–50 | 8 |
+| 5/home/advanced/lean/60 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.8 | 11 | 10.7 | 13.8 | 15 | 11 | 12 | 10.8 | 7.6 | 12/12 | 32–65 | 8.2 |
 | 5/home/advanced/lean/75 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.8 | 11 | 10.7 | 13.8 | 15 | 11 | 12 | 10.8 | 7.6 | 12/12 | 32–69 | 8.2 |
-| 5/dumbbell/beginner/muscle/45 | ulppl5 | 10.2 | 8.5 | 9.5 | 7.2 | 7.8 | 9.5 | 10.3 | 12 | 4.9 | 8.9 | 7 | 5.8 | 12/12 | 34–42 | 6.1 |
+| 5/dumbbell/beginner/muscle/45 | ulppl5 | 10.2 | 8.5 | 9.5 | 7.2 | 7.8 | 9.5 | 10.3 | 12 | 4.9 | 8.9 | 7 | 5.8 | 12/12 | 34–48 | 6.1 |
 | 5/dumbbell/beginner/muscle/60 | ulppl5 | 10.2 | 8.5 | 9.5 | 7.2 | 7.8 | 9.5 | 10.3 | 12 | 4.9 | 8.9 | 7 | 5.8 | 12/12 | 34–48 | 6.1 |
 | 5/dumbbell/beginner/muscle/75 | ulppl5 | 10.2 | 8.5 | 9.5 | 7.2 | 7.8 | 9.5 | 10.3 | 12 | 4.9 | 8.9 | 7 | 5.8 | 12/12 | 34–48 | 6.1 |
 | 5/dumbbell/beginner/lean/45 | ulppl5 | 10.2 | 7.8 | 8.5 | 6.2 | 7.4 | 8.1 | 8.3 | 7 | 4.9 | 6.8 | 6 | 4.6 | 12/12 | 21–41 | 6 |
 | 5/dumbbell/beginner/lean/60 | ulppl5 | 10.2 | 7.8 | 8.5 | 6.2 | 7.4 | 8.1 | 8.3 | 7 | 4.9 | 6.8 | 6 | 4.6 | 12/12 | 21–41 | 6 |
 | 5/dumbbell/beginner/lean/75 | ulppl5 | 10.2 | 7.8 | 8.5 | 6.2 | 7.4 | 8.1 | 8.3 | 7 | 4.9 | 6.8 | 6 | 4.6 | 12/12 | 21–41 | 6 |
-| 5/dumbbell/intermediate/muscle/45 | ulppl5 | 12.8 | 11.9 | 13.8 | 10.8 | 11.8 | 11.8 | 12 | 13 | 9.5 | 11.5 | 10.8 | 11.4 | 12/12 | 38–43 | 8 |
-| 5/dumbbell/intermediate/muscle/60 | ulppl5 | 12.8 | 11.9 | 13.8 | 10.8 | 11.8 | 11.8 | 12 | 13 | 9.5 | 11.5 | 10.8 | 11.4 | 12/12 | 49–54 | 8 |
+| 5/dumbbell/intermediate/muscle/45 | ulppl5 | 12.8 | 11.9 | 13.8 | 10.8 | 11.8 | 11.8 | 12 | 13 | 9.5 | 11.5 | 10.8 | 11.4 | 12/12 | 47–50 | 8 |
+| 5/dumbbell/intermediate/muscle/60 | ulppl5 | 12.8 | 11.9 | 13.8 | 10.8 | 11.8 | 11.8 | 12 | 13 | 9.5 | 11.5 | 10.8 | 11.4 | 12/12 | 49–64 | 8 |
 | 5/dumbbell/intermediate/muscle/75 | ulppl5 | 12.8 | 11.9 | 13.8 | 10.8 | 11.8 | 11.8 | 12 | 13 | 9.5 | 11.5 | 10.8 | 11.4 | 12/12 | 49–64 | 8 |
-| 5/dumbbell/intermediate/lean/45 | ulppl5 | 11.8 | 10.2 | 11.1 | 9.8 | 9.1 | 9.9 | 11.5 | 12 | 7.5 | 10.2 | 9.4 | 7.8 | 12/12 | 38–42 | 7 |
+| 5/dumbbell/intermediate/lean/45 | ulppl5 | 11.8 | 10.2 | 11.1 | 9.8 | 9.1 | 9.9 | 11.5 | 12 | 7.5 | 10.2 | 9.4 | 7.8 | 12/12 | 40–50 | 7 |
 | 5/dumbbell/intermediate/lean/60 | ulppl5 | 11.8 | 10.2 | 11.1 | 9.8 | 9.1 | 9.9 | 11.5 | 12 | 7.5 | 10.2 | 9.4 | 7.8 | 12/12 | 40–58 | 7 |
 | 5/dumbbell/intermediate/lean/75 | ulppl5 | 11.8 | 10.2 | 11.1 | 9.8 | 9.1 | 9.9 | 11.5 | 12 | 7.5 | 10.2 | 9.4 | 7.8 | 12/12 | 40–58 | 7 |
-| 5/dumbbell/advanced/muscle/45 | ulppl5 | 14.4 | 13.3 | 15.3 | 11.2 | 12.4 | 13.1 | 11.8 | 15 | 12.9 | 14.1 | 11 | 11.2 | 12/12 | 29–43 | 8.8 |
-| 5/dumbbell/advanced/muscle/60 | ulppl5 | 14.4 | 13.3 | 15.3 | 12.4 | 12.4 | 13.1 | 14.8 | 15 | 12.9 | 14.1 | 11 | 11.2 | 12/12 | 50–60 | 9.2 |
-| 5/dumbbell/advanced/muscle/75 | ulppl5 | 14.4 | 13.3 | 15.3 | 12.4 | 12.4 | 13.1 | 14.8 | 15 | 12.9 | 14.1 | 11 | 11.2 | 12/12 | 54–62 | 9.2 |
-| 5/dumbbell/advanced/lean/45 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.8 | 11 | 12.7 | 13.8 | 14 | 10.5 | 11.4 | 10.8 | 9.8 | 12/12 | 33–44 | 8.2 |
-| 5/dumbbell/advanced/lean/60 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.8 | 11 | 12.7 | 13.8 | 14 | 10.5 | 11.4 | 10.8 | 9.8 | 12/12 | 47–60 | 8.2 |
+| 5/dumbbell/advanced/muscle/45 | ulppl5 | 14.4 | 13.3 | 15.3 | 11.2 | 12.4 | 12.1 | 11.8 | 15 | 12.9 | 14.1 | 11 | 11.2 | 12/12 | 45–50 | 8.8 |
+| 5/dumbbell/advanced/muscle/60 | ulppl5 | 14.4 | 13.3 | 15.3 | 12.4 | 12.4 | 13.1 | 14.8 | 15 | 12.9 | 14.1 | 11 | 11.2 | 12/12 | 54–64 | 9.2 |
+| 5/dumbbell/advanced/muscle/75 | ulppl5 | 14.4 | 13.3 | 15.3 | 12.4 | 12.4 | 13.1 | 14.8 | 15 | 12.9 | 14.1 | 11 | 11.2 | 12/12 | 54–76 | 9.2 |
+| 5/dumbbell/advanced/lean/45 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.2 | 11 | 11.7 | 11.3 | 14 | 10.5 | 11.4 | 10.8 | 9.8 | 12/12 | 47–50 | 8 |
+| 5/dumbbell/advanced/lean/60 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.8 | 11 | 12.7 | 13.8 | 14 | 10.5 | 11.4 | 10.8 | 9.8 | 12/12 | 47–64 | 8.2 |
 | 5/dumbbell/advanced/lean/75 | ulppl5 | 13.4 | 12.6 | 13.7 | 11.8 | 11 | 12.7 | 13.8 | 14 | 10.5 | 11.4 | 10.8 | 9.8 | 12/12 | 47–69 | 8.2 |
-| 5/bodyweight/beginner/muscle/45 | ulppl5 | 9 | 10.2 | 12.3 | 10.8 | 9.5 | 11.7 | 10.2 | 12 | 5.2 | 8.9 | 7.4 | 9.9 | 12/12 | 32–39 | 6.3 |
+| 5/bodyweight/beginner/muscle/45 | ulppl5 | 9 | 10.2 | 12.3 | 10.8 | 9.5 | 11.7 | 10.2 | 12 | 5.2 | 8.9 | 7.4 | 9.9 | 12/12 | 32–48 | 6.3 |
 | 5/bodyweight/beginner/muscle/60 | ulppl5 | 9 | 10.2 | 12.3 | 10.8 | 9.5 | 11.7 | 10.2 | 12 | 5.2 | 8.9 | 7.4 | 9.9 | 12/12 | 32–55 | 6.3 |
 | 5/bodyweight/beginner/muscle/75 | ulppl5 | 9 | 10.2 | 12.3 | 10.8 | 9.5 | 11.7 | 10.2 | 12 | 5.2 | 8.9 | 7.4 | 9.9 | 12/12 | 32–55 | 6.3 |
-| 5/bodyweight/beginner/lean/45 | ulppl5 | 8 | 9.5 | 11.3 | 8.8 | 9 | 11.2 | 8.2 | 7 | 5.2 | 6.5 | 6.4 | 9.6 | 12/12 | 25–37 | 5.7 |
+| 5/bodyweight/beginner/lean/45 | ulppl5 | 8 | 9.5 | 11.3 | 8.8 | 9 | 11.2 | 8.2 | 7 | 5.2 | 6.5 | 6.4 | 9.6 | 12/12 | 25–48 | 5.7 |
 | 5/bodyweight/beginner/lean/60 | ulppl5 | 8 | 9.5 | 11.3 | 8.8 | 9 | 11.2 | 8.2 | 7 | 5.2 | 6.5 | 6.4 | 9.6 | 12/12 | 25–48 | 5.7 |
 | 5/bodyweight/beginner/lean/75 | ulppl5 | 8 | 9.5 | 11.3 | 8.8 | 9 | 11.2 | 8.2 | 7 | 5.2 | 6.5 | 6.4 | 9.6 | 12/12 | 25–48 | 5.7 |
-| 5/bodyweight/intermediate/muscle/45 | ulppl5 | 13 | 11.9 | 15 | 11.2 | 12.2 | 12.7 | 12.8 | 13 | 9 | 11.4 | 11 | 14.4 | 12/12 | 28–45 | 7.4 |
-| 5/bodyweight/intermediate/muscle/60 | ulppl5 | 13 | 11.9 | 15 | 11.2 | 12.2 | 12.7 | 12.8 | 13 | 9 | 11.4 | 11 | 14.4 | 12/12 | 38–53 | 7.4 |
+| 5/bodyweight/intermediate/muscle/45 | ulppl5 | 12.5 | 11.9 | 15 | 10.8 | 12.2 | 11.7 | 11.2 | 13 | 9 | 11.4 | 11 | 14.1 | 12/12 | 38–48 | 7.4 |
+| 5/bodyweight/intermediate/muscle/60 | ulppl5 | 13 | 11.9 | 15 | 11.2 | 12.2 | 12.7 | 12.8 | 13 | 9 | 11.4 | 11 | 14.4 | 12/12 | 38–60 | 7.4 |
 | 5/bodyweight/intermediate/muscle/75 | ulppl5 | 13 | 11.9 | 15 | 11.2 | 12.2 | 12.7 | 12.8 | 13 | 9 | 11.4 | 11 | 14.4 | 12/12 | 38–67 | 7.4 |
-| 5/bodyweight/intermediate/lean/45 | ulppl5 | 10 | 11.9 | 15 | 11.2 | 12.2 | 12.7 | 11.3 | 13 | 6 | 10.2 | 9.4 | 13.1 | 12/12 | 33–45 | 7.4 |
+| 5/bodyweight/intermediate/lean/45 | ulppl5 | 10 | 11.9 | 15 | 10.8 | 12.2 | 11.7 | 10.7 | 13 | 6 | 10.2 | 9.4 | 12.8 | 12/12 | 38–48 | 7.4 |
 | 5/bodyweight/intermediate/lean/60 | ulppl5 | 10 | 11.9 | 15 | 11.2 | 12.2 | 12.7 | 11.3 | 13 | 6 | 10.2 | 9.4 | 13.1 | 12/12 | 38–60 | 7.4 |
 | 5/bodyweight/intermediate/lean/75 | ulppl5 | 10 | 11.9 | 15 | 11.2 | 12.2 | 12.7 | 11.3 | 13 | 6 | 10.2 | 9.4 | 13.1 | 12/12 | 38–60 | 7.4 |
-| 5/bodyweight/advanced/muscle/45 | ulppl5 | 12 | 14.3 | 18.6 | 11.6 | 15.1 | 16.1 | 14.4 | 15 | 11.2 | 13.3 | 11.2 | 16.8 | 12/12 | 32–45 | 9 |
-| 5/bodyweight/advanced/muscle/60 | ulppl5 | 12 | 14.3 | 18.6 | 11.6 | 15.1 | 16.1 | 14.4 | 15 | 11.2 | 13.3 | 11.2 | 16.8 | 12/12 | 45–56 | 9 |
-| 5/bodyweight/advanced/muscle/75 | ulppl5 | 12 | 14.3 | 18.6 | 11.6 | 15.1 | 16.1 | 14.4 | 15 | 11.2 | 13.3 | 11.2 | 16.8 | 12/12 | 45–62 | 9 |
-| 5/bodyweight/advanced/lean/45 | ulppl5 | 12 | 14.3 | 18.6 | 11.2 | 15.1 | 16.1 | 13.8 | 15 | 8.6 | 11.7 | 10.8 | 16.5 | 12/12 | 32–45 | 9 |
-| 5/bodyweight/advanced/lean/60 | ulppl5 | 12 | 14.3 | 18.6 | 11.2 | 15.1 | 16.1 | 13.8 | 15 | 8.6 | 11.7 | 10.8 | 16.5 | 12/12 | 45–58 | 9 |
+| 5/bodyweight/advanced/muscle/45 | ulppl5 | 12 | 13.6 | 17.6 | 10.8 | 14.6 | 13.6 | 13.2 | 14 | 11.2 | 13.3 | 11.2 | 15.8 | 12/12 | 45–50 | 9 |
+| 5/bodyweight/advanced/muscle/60 | ulppl5 | 12 | 14.3 | 18.6 | 11.6 | 15.1 | 16.1 | 14.4 | 15 | 11.2 | 13.3 | 11.2 | 16.8 | 12/12 | 45–62 | 9 |
+| 5/bodyweight/advanced/muscle/75 | ulppl5 | 12 | 14.3 | 18.6 | 11.6 | 15.1 | 16.1 | 14.4 | 15 | 11.2 | 13.3 | 11.2 | 16.8 | 12/12 | 45–76 | 9 |
+| 5/bodyweight/advanced/lean/45 | ulppl5 | 12 | 13.6 | 17.6 | 10.8 | 14.6 | 13.6 | 13.2 | 14 | 8.6 | 11.7 | 10.8 | 15.8 | 12/12 | 45–50 | 9 |
+| 5/bodyweight/advanced/lean/60 | ulppl5 | 12 | 14.3 | 18.6 | 11.2 | 15.1 | 16.1 | 13.8 | 15 | 8.6 | 11.7 | 10.8 | 16.5 | 12/12 | 45–60 | 9 |
 | 5/bodyweight/advanced/lean/75 | ulppl5 | 12 | 14.3 | 18.6 | 11.2 | 15.1 | 16.1 | 13.8 | 15 | 8.6 | 11.7 | 10.8 | 16.5 | 12/12 | 45–73 | 9 |
-| 6/full/beginner/muscle/45 | ppl6 | 14 | 10.8 | 10.8 | 6.2 | 9.5 | 12.2 | 10.5 | 12 | 10.5 | 8.6 | 9 | 9 | 12/12 | 36–42 | 9 |
+| 6/full/beginner/muscle/45 | ppl6 | 14 | 10.8 | 10.8 | 6.2 | 9.5 | 12.2 | 10.5 | 12 | 10.5 | 8.6 | 9 | 9 | 12/12 | 36–47 | 9 |
 | 6/full/beginner/muscle/60 | ppl6 | 14 | 10.8 | 10.8 | 6.2 | 9.5 | 12.2 | 10.5 | 12 | 10.5 | 8.6 | 9 | 9 | 12/12 | 36–47 | 9 |
 | 6/full/beginner/muscle/75 | ppl6 | 14 | 10.8 | 10.8 | 6.2 | 9.5 | 12.2 | 10.5 | 12 | 10.5 | 8.6 | 9 | 9 | 12/12 | 36–47 | 9 |
 | 6/full/beginner/lean/45 | ppl6 | 12 | 10.8 | 10.8 | 6.2 | 9.5 | 10 | 8.5 | 10 | 8.3 | 7.5 | 8.4 | 9 | 12/12 | 32–40 | 7 |
 | 6/full/beginner/lean/60 | ppl6 | 12 | 10.8 | 10.8 | 6.2 | 9.5 | 10 | 8.5 | 10 | 8.3 | 7.5 | 8.4 | 9 | 12/12 | 32–40 | 7 |
 | 6/full/beginner/lean/75 | ppl6 | 12 | 10.8 | 10.8 | 6.2 | 9.5 | 10 | 8.5 | 10 | 8.3 | 7.5 | 8.4 | 9 | 12/12 | 32–40 | 7 |
-| 6/full/intermediate/muscle/45 | ppl6 | 17 | 12.5 | 14.2 | 11.8 | 14 | 13 | 12.3 | 13 | 13.3 | 11.1 | 11.2 | 12 | 12/12 | 33–43 | 10 |
+| 6/full/intermediate/muscle/45 | ppl6 | 17 | 12.5 | 14.2 | 11.8 | 14 | 13 | 12.3 | 13 | 13.3 | 11.1 | 11.2 | 12 | 12/12 | 40–50 | 10 |
 | 6/full/intermediate/muscle/60 | ppl6 | 17 | 12.5 | 14.2 | 11.8 | 14 | 13 | 12.3 | 13 | 13.3 | 11.1 | 11.2 | 12 | 12/12 | 40–55 | 10 |
 | 6/full/intermediate/muscle/75 | ppl6 | 17 | 12.5 | 14.2 | 11.8 | 14 | 13 | 12.3 | 13 | 13.3 | 11.1 | 11.2 | 12 | 12/12 | 40–55 | 10 |
-| 6/full/intermediate/lean/45 | ppl6 | 14 | 10.8 | 11.8 | 8.8 | 11.5 | 12.1 | 11.4 | 13 | 11.8 | 10.1 | 11 | 12 | 12/12 | 33–45 | 10 |
+| 6/full/intermediate/lean/45 | ppl6 | 14 | 10.8 | 11.8 | 8.8 | 11.5 | 12.1 | 11.4 | 13 | 11.8 | 10.1 | 11 | 12 | 12/12 | 38–50 | 10 |
 | 6/full/intermediate/lean/60 | ppl6 | 14 | 10.8 | 11.8 | 8.8 | 11.5 | 12.1 | 11.4 | 13 | 11.8 | 10.1 | 11 | 12 | 12/12 | 38–55 | 10 |
 | 6/full/intermediate/lean/75 | ppl6 | 14 | 10.8 | 11.8 | 8.8 | 11.5 | 12.1 | 11.4 | 13 | 11.8 | 10.1 | 11 | 12 | 12/12 | 38–55 | 10 |
-| 6/full/advanced/muscle/45 | ppl6 | 18 | 14.5 | 16 | 14.4 | 16.2 | 16.1 | 14.3 | 15 | 16.1 | 11.6 | 13.6 | 15 | 12/12 | 30–43 | 10 |
-| 6/full/advanced/muscle/60 | ppl6 | 18 | 14.5 | 16 | 14.4 | 16.2 | 16.1 | 14.3 | 15 | 16.1 | 11.6 | 13.6 | 15 | 12/12 | 45–57 | 10 |
+| 6/full/advanced/muscle/45 | ppl6 | 18 | 14.5 | 15.5 | 14.4 | 15.2 | 16.1 | 13.3 | 13 | 12 | 11.6 | 12.8 | 12 | 12/12 | 45–50 | 10 |
+| 6/full/advanced/muscle/60 | ppl6 | 18 | 14.5 | 16 | 14.4 | 16.2 | 16.1 | 14.3 | 15 | 16.1 | 11.6 | 13.6 | 15 | 12/12 | 50–64 | 10 |
 | 6/full/advanced/muscle/75 | ppl6 | 18 | 14.5 | 16 | 14.4 | 16.2 | 16.1 | 14.3 | 15 | 16.1 | 11.6 | 13.6 | 15 | 12/12 | 50–64 | 10 |
-| 6/full/advanced/lean/45 | ppl6 | 17 | 12.5 | 13.7 | 13.4 | 13 | 15.2 | 14 | 14 | 13.7 | 11.6 | 13.2 | 15 | 12/12 | 28–45 | 10 |
-| 6/full/advanced/lean/60 | ppl6 | 17 | 12.5 | 13.7 | 13.4 | 13 | 15.2 | 14 | 14 | 13.7 | 11.6 | 13.2 | 15 | 12/12 | 45–59 | 10 |
+| 6/full/advanced/lean/45 | ppl6 | 17 | 12.5 | 13.7 | 13.4 | 13 | 15.2 | 14 | 14 | 12 | 10.8 | 13 | 12 | 12/12 | 45–48 | 10 |
+| 6/full/advanced/lean/60 | ppl6 | 17 | 12.5 | 13.7 | 13.4 | 13 | 15.2 | 14 | 14 | 13.7 | 11.6 | 13.2 | 15 | 12/12 | 45–61 | 10 |
 | 6/full/advanced/lean/75 | ppl6 | 17 | 12.5 | 13.7 | 13.4 | 13 | 15.2 | 14 | 14 | 13.7 | 11.6 | 13.2 | 15 | 12/12 | 45–61 | 10 |
 | 6/home/beginner/muscle/45 | ppl6 | 14.8 | 11.5 | 11.1 | 10.2 | 9.3 | 6.5 | 10.4 | 11 | 5.3 | 7.9 | 8 | 9 | 12/12 | 27–40 | 8 |
 | 6/home/beginner/muscle/60 | ppl6 | 14.8 | 11.5 | 11.1 | 10.2 | 9.3 | 6.5 | 10.4 | 11 | 5.3 | 7.9 | 8 | 9 | 12/12 | 27–40 | 8 |
@@ -1285,16 +1366,16 @@ many of the 12 major muscles landed inside their own band.
 | 6/home/beginner/lean/45 | ppl6 | 12 | 8.5 | 11.1 | 6.2 | 9.3 | 6.5 | 8.5 | 10 | 4.3 | 5.9 | 8 | 9 | 12/12 | 21–36 | 7 |
 | 6/home/beginner/lean/60 | ppl6 | 12 | 8.5 | 11.1 | 6.2 | 9.3 | 6.5 | 8.5 | 10 | 4.3 | 5.9 | 8 | 9 | 12/12 | 21–36 | 7 |
 | 6/home/beginner/lean/75 | ppl6 | 12 | 8.5 | 11.1 | 6.2 | 9.3 | 6.5 | 8.5 | 10 | 4.3 | 5.9 | 8 | 9 | 12/12 | 21–36 | 7 |
-| 6/home/intermediate/muscle/45 | ppl6 | 18.8 | 12.2 | 13.3 | 11.8 | 11.7 | 8.9 | 13.2 | 13 | 11.8 | 11.6 | 11 | 13 | 12/12 | 34–43 | 10 |
+| 6/home/intermediate/muscle/45 | ppl6 | 18.8 | 12.2 | 13.3 | 11.8 | 11.7 | 8.9 | 13.2 | 13 | 11.8 | 11.6 | 11 | 13 | 12/12 | 34–50 | 10 |
 | 6/home/intermediate/muscle/60 | ppl6 | 18.8 | 12.2 | 13.3 | 11.8 | 11.7 | 8.9 | 13.2 | 13 | 11.8 | 11.6 | 11 | 13 | 12/12 | 34–55 | 10 |
 | 6/home/intermediate/muscle/75 | ppl6 | 18.8 | 12.2 | 13.3 | 11.8 | 11.7 | 8.9 | 13.2 | 13 | 11.8 | 11.6 | 11 | 13 | 12/12 | 34–55 | 10 |
-| 6/home/intermediate/lean/45 | ppl6 | 14.8 | 11.5 | 12.3 | 11.2 | 11.3 | 8.5 | 11.4 | 11 | 9.3 | 10.1 | 10.4 | 13 | 12/12 | 34–42 | 8 |
+| 6/home/intermediate/lean/45 | ppl6 | 14.8 | 11.5 | 12.3 | 11.2 | 11.3 | 8.5 | 11.4 | 11 | 9.3 | 10.1 | 10.4 | 13 | 12/12 | 34–47 | 8 |
 | 6/home/intermediate/lean/60 | ppl6 | 14.8 | 11.5 | 12.3 | 11.2 | 11.3 | 8.5 | 11.4 | 11 | 9.3 | 10.1 | 10.4 | 13 | 12/12 | 34–47 | 8 |
 | 6/home/intermediate/lean/75 | ppl6 | 14.8 | 11.5 | 12.3 | 11.2 | 11.3 | 8.5 | 11.4 | 11 | 9.3 | 10.1 | 10.4 | 13 | 12/12 | 34–47 | 8 |
-| 6/home/advanced/muscle/45 | ppl6 | 20.4 | 14.6 | 17.7 | 14.4 | 16.5 | 11.7 | 15.5 | 15 | 13.6 | 14.1 | 13 | 15 | 12/12 | 28–41 | 10 |
+| 6/home/advanced/muscle/45 | ppl6 | 20.4 | 13.2 | 15.7 | 14.4 | 15.7 | 9.9 | 15.5 | 12 | 11 | 12 | 9.8 | 15 | 12/12 | 34–50 | 10 |
 | 6/home/advanced/muscle/60 | ppl6 | 20.4 | 14.6 | 17.7 | 14.4 | 16.5 | 11.7 | 15.5 | 15 | 13.6 | 14.1 | 13 | 15 | 12/12 | 41–58 | 10 |
 | 6/home/advanced/muscle/75 | ppl6 | 20.4 | 14.6 | 17.7 | 14.4 | 16.5 | 11.7 | 15.5 | 15 | 13.6 | 14.1 | 13 | 15 | 12/12 | 41–60 | 10 |
-| 6/home/advanced/lean/45 | ppl6 | 18.4 | 14.6 | 15.9 | 12.2 | 13.5 | 9.7 | 13.7 | 13 | 8.5 | 9.6 | 12.8 | 15 | 12/12 | 25–44 | 9 |
+| 6/home/advanced/lean/45 | ppl6 | 18.4 | 13.2 | 13.9 | 10.2 | 12.7 | 9.9 | 13.7 | 12 | 11 | 12 | 9.8 | 15 | 12/12 | 34–48 | 10 |
 | 6/home/advanced/lean/60 | ppl6 | 18.4 | 14.6 | 15.9 | 12.2 | 13.5 | 9.7 | 13.7 | 13 | 8.5 | 9.6 | 12.8 | 15 | 12/12 | 39–55 | 9 |
 | 6/home/advanced/lean/75 | ppl6 | 18.4 | 14.6 | 15.9 | 12.2 | 13.5 | 9.7 | 13.7 | 13 | 8.5 | 9.6 | 12.8 | 15 | 12/12 | 39–55 | 9 |
 | 6/dumbbell/beginner/muscle/45 | ppl6 | 14.8 | 11.5 | 11.1 | 7.2 | 9.3 | 6.5 | 10.4 | 11 | 5.6 | 8.8 | 8 | 10.2 | 12/12 | 32–38 | 8 |
@@ -1303,16 +1384,16 @@ many of the 12 major muscles landed inside their own band.
 | 6/dumbbell/beginner/lean/45 | ppl6 | 12 | 8.5 | 11.1 | 6.2 | 9.3 | 6.5 | 8.5 | 8 | 5.1 | 7.4 | 8 | 10.2 | 12/12 | 25–38 | 7 |
 | 6/dumbbell/beginner/lean/60 | ppl6 | 12 | 8.5 | 11.1 | 6.2 | 9.3 | 6.5 | 8.5 | 8 | 5.1 | 7.4 | 8 | 10.2 | 12/12 | 25–38 | 7 |
 | 6/dumbbell/beginner/lean/75 | ppl6 | 12 | 8.5 | 11.1 | 6.2 | 9.3 | 6.5 | 8.5 | 8 | 5.1 | 7.4 | 8 | 10.2 | 12/12 | 25–38 | 7 |
-| 6/dumbbell/intermediate/muscle/45 | ppl6 | 18.8 | 12.2 | 14.5 | 11.8 | 13.7 | 9.9 | 13.2 | 12 | 10.5 | 11.4 | 10.8 | 14.2 | 12/12 | 35–43 | 10 |
+| 6/dumbbell/intermediate/muscle/45 | ppl6 | 18.8 | 12.2 | 14.5 | 11.8 | 13.7 | 9.9 | 13.2 | 12 | 10.5 | 11.4 | 10.8 | 14.2 | 12/12 | 38–49 | 10 |
 | 6/dumbbell/intermediate/muscle/60 | ppl6 | 18.8 | 12.2 | 14.5 | 11.8 | 13.7 | 9.9 | 13.2 | 12 | 10.5 | 11.4 | 10.8 | 14.2 | 12/12 | 38–55 | 10 |
 | 6/dumbbell/intermediate/muscle/75 | ppl6 | 18.8 | 12.2 | 14.5 | 11.8 | 13.7 | 9.9 | 13.2 | 12 | 10.5 | 11.4 | 10.8 | 14.2 | 12/12 | 38–55 | 10 |
-| 6/dumbbell/intermediate/lean/45 | ppl6 | 14.8 | 11.5 | 12.3 | 8.2 | 11.3 | 8.5 | 11.4 | 11 | 8.3 | 10.2 | 10.4 | 14.2 | 12/12 | 34–42 | 8 |
+| 6/dumbbell/intermediate/lean/45 | ppl6 | 14.8 | 11.5 | 12.3 | 8.2 | 11.3 | 8.5 | 11.4 | 11 | 8.3 | 10.2 | 10.4 | 14.2 | 12/12 | 34–47 | 8 |
 | 6/dumbbell/intermediate/lean/60 | ppl6 | 14.8 | 11.5 | 12.3 | 8.2 | 11.3 | 8.5 | 11.4 | 11 | 8.3 | 10.2 | 10.4 | 14.2 | 12/12 | 34–47 | 8 |
 | 6/dumbbell/intermediate/lean/75 | ppl6 | 14.8 | 11.5 | 12.3 | 8.2 | 11.3 | 8.5 | 11.4 | 11 | 8.3 | 10.2 | 10.4 | 14.2 | 12/12 | 34–47 | 8 |
-| 6/dumbbell/advanced/muscle/45 | ppl6 | 20.4 | 14.9 | 17.2 | 14.4 | 16.3 | 11.8 | 15.5 | 15 | 12.2 | 13.9 | 12.8 | 16.4 | 12/12 | 27–41 | 10 |
-| 6/dumbbell/advanced/muscle/60 | ppl6 | 20.4 | 14.9 | 17.2 | 14.4 | 16.3 | 11.8 | 15.5 | 15 | 12.2 | 13.9 | 12.8 | 16.4 | 12/12 | 41–58 | 10 |
+| 6/dumbbell/advanced/muscle/45 | ppl6 | 20.4 | 14.2 | 16.2 | 14.4 | 15.9 | 11.4 | 15.5 | 12 | 10.8 | 12.1 | 10.8 | 16.4 | 12/12 | 38–50 | 10 |
+| 6/dumbbell/advanced/muscle/60 | ppl6 | 20.4 | 14.9 | 17.2 | 14.4 | 16.3 | 11.8 | 15.5 | 15 | 12.2 | 13.9 | 12.8 | 16.4 | 12/12 | 41–62 | 10 |
 | 6/dumbbell/advanced/muscle/75 | ppl6 | 20.4 | 14.9 | 17.2 | 14.4 | 16.3 | 11.8 | 15.5 | 15 | 12.2 | 13.9 | 12.8 | 16.4 | 12/12 | 41–62 | 10 |
-| 6/dumbbell/advanced/lean/45 | ppl6 | 18.4 | 13.2 | 13.9 | 13.2 | 12.7 | 9.9 | 13.7 | 14 | 10.5 | 11.4 | 12.8 | 16.2 | 12/12 | 32–44 | 10 |
+| 6/dumbbell/advanced/lean/45 | ppl6 | 18.4 | 13.2 | 13.9 | 13.2 | 12.7 | 9.9 | 13.7 | 11 | 10.5 | 11.4 | 11.8 | 16.2 | 12/12 | 34–48 | 9 |
 | 6/dumbbell/advanced/lean/60 | ppl6 | 18.4 | 13.2 | 13.9 | 13.2 | 12.7 | 9.9 | 13.7 | 14 | 10.5 | 11.4 | 12.8 | 16.2 | 12/12 | 34–58 | 10 |
 | 6/dumbbell/advanced/lean/75 | ppl6 | 18.4 | 13.2 | 13.9 | 13.2 | 12.7 | 9.9 | 13.7 | 14 | 10.5 | 11.4 | 12.8 | 16.2 | 12/12 | 34–58 | 10 |
 | 6/bodyweight/beginner/muscle/45 | ppl6 | 10.5 | 11.5 | 14.1 | 8.8 | 12.5 | 11.2 | 10.2 | 11 | 7.8 | 8.7 | 8.8 | 12.8 | 12/12 | 29–42 | 8 |
@@ -1321,36 +1402,51 @@ many of the 12 major muscles landed inside their own band.
 | 6/bodyweight/beginner/lean/45 | ppl6 | 8 | 9.1 | 10.5 | 8.8 | 9.6 | 6.8 | 8.2 | 8 | 5.8 | 6.5 | 8.4 | 11.5 | 12/12 | 24–42 | 6.1 |
 | 6/bodyweight/beginner/lean/60 | ppl6 | 8 | 9.1 | 10.5 | 8.8 | 9.6 | 6.8 | 8.2 | 8 | 5.8 | 6.5 | 8.4 | 11.5 | 12/12 | 24–42 | 6.1 |
 | 6/bodyweight/beginner/lean/75 | ppl6 | 8 | 9.1 | 10.5 | 8.8 | 9.6 | 6.8 | 8.2 | 8 | 5.8 | 6.5 | 8.4 | 11.5 | 12/12 | 24–42 | 6.1 |
-| 6/bodyweight/intermediate/muscle/45 | ppl6 | 14 | 13.2 | 17.4 | 11.2 | 16.2 | 13.2 | 13.3 | 13 | 9.2 | 11.8 | 10.8 | 17.5 | 12/12 | 29–44 | 10 |
+| 6/bodyweight/intermediate/muscle/45 | ppl6 | 14 | 13.2 | 17.4 | 11.2 | 16.2 | 13.2 | 13.3 | 13 | 9.2 | 11.8 | 10.8 | 17.5 | 12/12 | 36–49 | 10 |
 | 6/bodyweight/intermediate/muscle/60 | ppl6 | 14 | 13.2 | 17.4 | 11.2 | 16.2 | 13.2 | 13.3 | 13 | 9.2 | 11.8 | 10.8 | 17.5 | 12/12 | 36–53 | 10 |
 | 6/bodyweight/intermediate/muscle/75 | ppl6 | 14 | 13.2 | 17.4 | 11.2 | 16.2 | 13.2 | 13.3 | 13 | 9.2 | 11.8 | 10.8 | 17.5 | 12/12 | 36–53 | 10 |
-| 6/bodyweight/intermediate/lean/45 | ppl6 | 11 | 11.5 | 15.3 | 10 | 14.5 | 11.2 | 10 | 12 | 8 | 9.4 | 10.8 | 15.2 | 12/12 | 28–42 | 9 |
+| 6/bodyweight/intermediate/lean/45 | ppl6 | 11 | 11.5 | 15.3 | 10 | 14.5 | 11.2 | 10 | 12 | 8 | 9.4 | 10.8 | 15.2 | 12/12 | 28–50 | 9 |
 | 6/bodyweight/intermediate/lean/60 | ppl6 | 11 | 11.5 | 15.3 | 10 | 14.5 | 11.2 | 10 | 12 | 8 | 9.4 | 10.8 | 15.2 | 12/12 | 28–50 | 9 |
 | 6/bodyweight/intermediate/lean/75 | ppl6 | 11 | 11.5 | 15.3 | 10 | 14.5 | 11.2 | 10 | 12 | 8 | 9.4 | 10.8 | 15.2 | 12/12 | 28–50 | 9 |
-| 6/bodyweight/advanced/muscle/45 | ppl6 | 16 | 15.5 | 19.6 | 13.6 | 19.3 | 16.1 | 16.4 | 15 | 12.2 | 13.3 | 13.2 | 20.2 | 12/12 | 26–44 | 10 |
-| 6/bodyweight/advanced/muscle/60 | ppl6 | 16 | 15.5 | 19.6 | 13.6 | 19.3 | 16.1 | 16.4 | 15 | 12.2 | 13.3 | 13.2 | 20.2 | 12/12 | 43–58 | 10 |
+| 6/bodyweight/advanced/muscle/45 | ppl6 | 15.9 | 15.5 | 19.6 | 13.6 | 19.3 | 16.1 | 16.2 | 14 | 12.4 | 13.2 | 12.2 | 20.2 | 12/12 | 42–50 | 10 |
+| 6/bodyweight/advanced/muscle/60 | ppl6 | 16 | 15.5 | 19.6 | 13.6 | 19.3 | 16.1 | 16.4 | 15 | 12.2 | 13.3 | 13.2 | 20.2 | 12/12 | 47–63 | 10 |
 | 6/bodyweight/advanced/muscle/75 | ppl6 | 16 | 15.5 | 19.6 | 13.6 | 19.3 | 16.1 | 16.4 | 15 | 12.2 | 13.3 | 13.2 | 20.2 | 12/12 | 47–68 | 10 |
-| 6/bodyweight/advanced/lean/45 | ppl6 | 13 | 12.5 | 17.5 | 12.8 | 17.5 | 13.6 | 13.7 | 14 | 10.6 | 12 | 13 | 18 | 12/12 | 34–42 | 10 |
-| 6/bodyweight/advanced/lean/60 | ppl6 | 13 | 12.5 | 17.5 | 12.8 | 17.5 | 13.6 | 13.7 | 14 | 10.6 | 12 | 13 | 18 | 12/12 | 38–56 | 10 |
+| 6/bodyweight/advanced/lean/45 | ppl6 | 12.9 | 12.5 | 17.5 | 12.8 | 17.5 | 13.6 | 13.5 | 12 | 9 | 10.3 | 12.8 | 18 | 12/12 | 38–50 | 9 |
+| 6/bodyweight/advanced/lean/60 | ppl6 | 13 | 12.5 | 17.5 | 12.8 | 17.5 | 13.6 | 13.7 | 14 | 10.6 | 12 | 13 | 18 | 12/12 | 38–63 | 10 |
 | 6/bodyweight/advanced/lean/75 | ppl6 | 13 | 12.5 | 17.5 | 12.8 | 17.5 | 13.6 | 13.7 | 14 | 10.6 | 12 | 13 | 18 | 12/12 | 38–63 | 10 |
 
-### The one conflict the brief cannot resolve
+### The residual: two combinations of 360
 
-Forty-one of the 360 combinations contain a day longer than its budget: all of them at two
-training days, and six at three days on 45 minutes. The worst is 46 minutes over.
+Everything the decision asks for holds, with one exception measured and named:
 
-This is a genuine conflict between two of the brief's own requirements. A full-body session
-that meets every floor for an advanced lifter does not fit in 45 minutes, and the ways out
-are to miss the floors (which the in-band requirement forbids) or to run long (which the
-budget forbids). The builder chooses the floors, marks the day `tight`, and the check
-reports it as a **warning that names the real length and says why it cannot be shorter** —
-"comes to about 91 minutes rather than 45. With this many training days there is no way to
-make it shorter without putting a muscle under its minimum."
+**2 days, 45 minutes, advanced, home equipment** (both goals) ends with the abs at 3.0 sets
+a week against a time-limited floor of 3.6 — a shortfall of 0.6 of a set. Ninety minutes a
+week is not enough for an advanced lifter's floors even at 0.5 × MEV with everything
+pairable paired, every accessory at one set, and the cuts spread by least-harm. At that
+point the decision's first line governs: the budget is never breached, so the floor is.
+The check fails it, the choice screen appears, and (b) or (c) produce a plan with no
+failures. No **big** muscle is under its floor in any of the 360, and no priority muscle is
+touched in any of them.
 
-A day that *could* be shorter and is not is still a failure. Recorded here rather than
-resolved, because which of the two to break is the owner's decision and not mine: the
-alternative — cutting to the budget and telling somebody their plan is under its floors —
-is defensible and would be a different product.
+### The choice screen
+
+Shown before anything is saved, whenever volume was traded for time — 67 of the 360
+combinations, and every one of them offered it. Three answers, (a) selected by default and
+nothing applied until **Use this plan** is pressed:
+
+- **(a) Keep the budget.** Names the muscles on maintenance and says what maintenance
+  volume is worth: it holds the muscle you have and still adds to it slowly, which is most
+  of the benefit when the alternative is a session you cannot finish.
+- **(b) Make sessions N minutes**, where N is the length at which nothing is on maintenance
+  — measured, not estimated: it is the day's length at the moment the MEV-respecting
+  passes ran out.
+- **(c) Add a training day**, with the same budget.
+
+(b) and (c) rebuild the plan on the spot, so the preview under the buttons is always the
+plan the selected answer actually produces. The question stays on screen once offered, so
+all three remain reachable. Where a **priority** muscle's target is beyond what the budget
+can reach, the screen says so in its own line: the time is the thing to change, not the
+priority.
 
 ## Phase log
 
@@ -1365,3 +1461,4 @@ is defensible and would be a different product.
 | 7 | M4, M5, M6, M10, L2 | done — `phase7.mjs`, invariant 11 |
 | 8 | Streaks + coach view | done — `streak.mjs`, `share.mjs`, `tests/share-worker.mjs` |
 | 9 | Re-measurement, then bump `APP_VERSION` and `sw.js` `VERSION` | done — "The re-measurement" above; 44.0 / 37.0 |
+| — | The owner's decision: the time budget wins | done — `budget.mjs`, 45.0 / 38.0 |
