@@ -27,22 +27,28 @@ await p.evaluate(()=>{
   save(); goTab("body"); BODY_OPEN.nbadv = true; render();
 });
 
+/* THE STEPPER IS FIVE SEGMENTS NOW, so `step` picks the next or previous view by name
+   rather than pressing an arrow. Everything this spec protects is about what happens to
+   the FIGURE when the view changes, and none of that moved. */
 const shot = ()=> p.evaluate(()=>{
   const fig = document.querySelector(".bm-figs");
   const gs = [...fig.querySelectorAll("g.bm-m")];
+  const on = document.querySelector("[data-metricpick].on");
   return {metric: BODY_METRIC,
-          label: (document.querySelector(".ms-mid b")||{}).textContent || "",
+          label: on ? metricLabel(on.dataset.metricpick, bodyAnalysis().win) : "",
           fills: gs.map(g=> g.getAttribute("fill")).join(","),
           ids: gs.map(g=> g.dataset.g || g.dataset.m).join(","),
           nodes: gs.length,
           swapping: !!document.querySelector(".ms-swap"),
-          /* which dot is lit, not merely that one is: joining the class names gives "on"
-             either way and would pass however the dots moved */
-          dots: [...document.querySelectorAll(".ms-dots i")].findIndex(i=> i.classList.contains("on"))
-                + "/" + document.querySelectorAll(".ms-dots i").length};
+          /* which segment is lit, not merely that one is */
+          dots: [...document.querySelectorAll("[data-metricpick]")].findIndex(i=> i.classList.contains("on"))
+                + "/" + document.querySelectorAll("[data-metricpick]").length};
 });
 const step = (dir)=> p.evaluate(d=>{
-  document.querySelector('[data-metricstep="'+d+'"]').click();
+  const at = METRICS.findIndex(m=> m.id === BODY_METRIC);
+  const to = METRICS[(at + d + METRICS.length) % METRICS.length].id;
+  const b2 = document.querySelector('[data-metricpick="' + to + '"]');
+  if(b2) b2.click();
 }, dir);
 
 console.log("1 - THE SHAPES SURVIVE THE STEP, SO THE COLOUR CAN MOVE");
@@ -73,8 +79,10 @@ console.log("2 - AND THE COLOUR IS TRANSITIONED, NOT SNAPPED");
 console.log("3 - THE WORDS COME IN FROM THE SIDE THE ARROW POINTED");
 {
   await step(1);
+  /* The travelling label belonged to the stepper; with five fixed segments the thing
+     that moves is the SENTENCE under them, and it still arrives from the side you went. */
   const r = await p.evaluate(()=>({
-    swap: !!document.querySelector(".ms-mid.ms-swap"),
+    swap: !!document.querySelector(".nb-map-say.ms-swap"),
     mx: document.querySelector(".nb-map").style.getPropertyValue("--mx").trim()
   }));
   ck("forwards arrives from the right", r.swap && r.mx === "16px", JSON.stringify(r));
@@ -89,7 +97,12 @@ console.log("4 - THE PAGE AROUND IT IS LEFT ALONE");
     window.scrollTo(0, 400);
     const y = window.pageYOffset;
     const hero = document.querySelector(".nb-hero");
-    document.querySelector('[data-metricstep="1"]').click();
+    (function(){
+      const at = METRICS.findIndex(m=> m.id === BODY_METRIC);
+      const to = METRICS[(at + 1) % METRICS.length].id;
+      const b2 = document.querySelector('[data-metricpick="' + to + '"]');
+      if(b2) b2.click();
+    })();
     let moving = 0;
     document.querySelectorAll("#app *").forEach(e=>{
       const st = getComputedStyle(e);
@@ -108,7 +121,12 @@ console.log("5 - IT STILL WORKS WHEN A MUSCLE IS SELECTED");
   const r = await p.evaluate(()=>{
     BODY_FOCUS = "chest"; render();
     const before = (document.querySelector(".ms-sel-t span")||{}).textContent || "";
-    document.querySelector('[data-metricstep="1"]').click();
+    (function(){
+      const at = METRICS.findIndex(m=> m.id === BODY_METRIC);
+      const to = METRICS[(at + 1) % METRICS.length].id;
+      const b2 = document.querySelector('[data-metricpick="' + to + '"]');
+      if(b2) b2.click();
+    })();
     const after = (document.querySelector(".ms-sel-t span")||{}).textContent || "";
     return {before, after, still: !!document.querySelector('.bm-m.bm-sel[data-g="chest"]')};
   });
@@ -123,11 +141,22 @@ console.log("6 - AND IT FALLS BACK RATHER THAN BREAKING");
     return repaintMuscleMap(1);
   });
   ck("no card, no repaint", r === false, String(r));
+  /* It used to refuse unless Advanced was open, because that was the only place the view
+     could be changed from. The picker is out in the open now, so the repaint is what the
+     simple view uses too -- and refusing there is what made every change a full render,
+     with nothing for the fills to fade from. */
   const r2 = await p.evaluate(()=>{
-    goTab("body"); BODY_OPEN.nbadv = false; render();   // the simple view has no stepper
+    goTab("body"); BODY_OPEN.nbadv = false; render();
     return repaintMuscleMap(1);
   });
-  ck("simple view, no repaint", r2 === false, String(r2));
+  ck("THE SIMPLE VIEW REPAINTS TOO", r2 === true, String(r2));
+  const r3 = await p.evaluate(()=>{
+    goTab("body"); render();
+    const figs = document.querySelector(".bm-figs");
+    figs.remove();                                   // nothing left to repaint
+    return repaintMuscleMap(1);
+  });
+  ck("and with no figure it still falls back rather than throwing", r3 === false, String(r3));
 }
 
 console.log("7 - EVERY VIEW IS REACHABLE AND NAMES ITSELF");
@@ -137,7 +166,12 @@ console.log("7 - EVERY VIEW IS REACHABLE AND NAMES ITSELF");
     const seen = [];
     for(let i=0;i<METRICS.length;i++){
       seen.push(BODY_METRIC + ":" + (document.querySelector(".ms-mid b")||{}).textContent);
-      document.querySelector('[data-metricstep="1"]').click();
+      (function(){
+      const at = METRICS.findIndex(m=> m.id === BODY_METRIC);
+      const to = METRICS[(at + 1) % METRICS.length].id;
+      const b2 = document.querySelector('[data-metricpick="' + to + '"]');
+      if(b2) b2.click();
+    })();
     }
     return seen;
   });

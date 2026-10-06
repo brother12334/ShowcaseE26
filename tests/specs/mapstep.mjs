@@ -30,56 +30,66 @@ await p.evaluate(()=>{
 
 let bad=0;
 const ck=(n,c,extra)=>{ console.log((c?"  ok  ":"  BROKEN  ")+n+(c?"":" :: "+(extra||""))); if(!c) bad++; };
+/* THE STEPPER IS A ROW OF FIVE SEGMENTS NOW. Everything this spec was written to protect
+   is unchanged -- the views are named in plain English, the sentence travels with the
+   selected one, the legend sits below, the figures are untouched, and the selected muscle
+   reads above them. What is gone is the stepper's own machinery: one at a time, arrows,
+   dots, and the wrap-around at each end. Five visible segments have no ends to wrap. */
 const st = ()=> p.evaluate(()=>{
-  const step=document.querySelector('.metric-step');
+  const seg = document.querySelector('.nb-metric');
+  const on  = seg && seg.querySelector('[data-metricpick].on');
   return {adv: !!BODY_OPEN.nbadv, metric: BODY_METRIC,
-    has: !!step, name: step? step.querySelector('b').innerText : "",
-    say: step? step.querySelector('.ms-mid>span').innerText : "",
-    dots: step? [...step.querySelectorAll('.ms-dots i')].length : 0,
-    on: step? [...step.querySelectorAll('.ms-dots i')].findIndex(i=>i.classList.contains('on')) : -1,
-    oldrow: !!document.querySelector('.metric-seg, .metric-scroll'),
+    has: !!seg,
+    name: on ? on.innerText.trim() : "",
+    full: on ? metricLabel(on.dataset.metricpick, bodyAnalysis().win) : "",
+    say: (document.querySelector('.nb-map .nb-map-say')||{}).innerText || "",
+    segs: seg ? seg.querySelectorAll('[data-metricpick]').length : 0,
+    lit: seg ? [...seg.querySelectorAll('[data-metricpick]')].findIndex(i=>i.classList.contains('on')) : -1,
+    oldrow: !!document.querySelector('.metric-seg, .metric-scroll, .metric-step'),
     legend: [...document.querySelectorAll('.bm-legend .bm-lg')].map(x=>x.innerText).join(" | "),
     figs: document.querySelectorAll('.bm-fig svg').length,
     say0: (document.querySelector('.nb-map-say')||{}).innerText || ""};
 });
+/* Pick a view by name, which is what the control now is. */
+const pick = id=> p.evaluate(x=>{
+  const b2 = document.querySelector('[data-metricpick="' + x + '"]');
+  if(b2) b2.click();
+}, id);
 
-console.log("1 - SIMPLE VIEW IS UNCHANGED");
+console.log("1 - THE VIEWS ARE NOT AN ADVANCED FEATURE");
 let d = await st();
-ck("no stepper", !d.has, "");
-ck("no old row either", !d.oldrow, "");
-ck("still the plain sentence", /Green is rested/.test(d.say0), d.say0);
+ck("the picker is on the screen, with Advanced shut", d.has && !d.adv, JSON.stringify({has:d.has, adv:d.adv}));
+ck("the old scrolling row is gone, and so is the stepper", !d.oldrow, "");
+ck("all five are there", d.segs===5, String(d.segs));
+ck("one of them is lit", d.lit===0, String(d.lit));
 ck("two figures", d.figs===2, String(d.figs));
 ck("the legend bar is there", /fresh/.test(d.legend) && /getting tired/.test(d.legend), d.legend);
 
-console.log("2 - ADVANCED SHOWS ONE VIEW AT A TIME");
-await p.evaluate(()=>{ BODY_OPEN.nbadv = true; render(); });
-d = await st();
-ck("the stepper is there", d.has, "");
-ck("the old scrolling row is gone", !d.oldrow, "");
-ck("named in plain English", d.name==="Tiredness", d.name);
+console.log("2 - THE SENTENCE TRAVELS WITH THE VIEW");
+ck("named in plain English", d.full==="Tiredness", d.full);
 ck("its sentence is attached", /How tired each muscle/.test(d.say), d.say);
-ck("five dots", d.dots===5, String(d.dots));
-ck("first one lit", d.on===0, String(d.on));
 ck("legend still below", /fresh/.test(d.legend), d.legend);
 ck("figures untouched", d.figs===2, String(d.figs));
 
-console.log("3 - THE ARROWS WALK THROUGH THEM");
+console.log("3 - EVERY ONE OF THEM IS ONE TAP AWAY");
 const names=[];
-for(let i=0;i<5;i++){
-  const cur = await st(); names.push(cur.name + " / " + cur.on);
-  await p.click('[data-metricstep="1"]');
+for(const m of ["fatigue","volume","recovery","growth","injury"]){
+  await pick(m);
+  const cur = await st();
+  names.push(cur.full + " / " + cur.lit);
 }
-ck("all five, in order, dot following",
+ck("all five, each lighting its own segment",
    names.join(" | ")==="Tiredness / 0 | Sets this cycle / 1 | Ready to go / 2 | Progress / 3 | Overdoing it / 4",
    names.join(" | "));
 console.log("     " + names.join(" | "));
 
-console.log("4 - AND IT WRAPS BOTH WAYS");
-d = await st(); ck("back to the first after five", d.name==="Tiredness", d.name);
-await p.click('[data-metricstep="-1"]');
-d = await st(); ck("left from the first lands on the last", d.name==="Overdoing it", d.name);
-await p.click('[data-metricstep="1"]');
-d = await st(); ck("and right returns", d.name==="Tiredness", d.name);
+console.log("4 - AND GOING BACK IS A TAP, NOT A WALK");
+await pick("fatigue");
+d = await st(); ck("straight back to the first", d.full==="Tiredness", d.full);
+await pick("injury");
+d = await st(); ck("and straight to the last", d.full==="Overdoing it", d.full);
+await pick("fatigue");
+d = await st(); ck("with no wrap-around to think about", d.full==="Tiredness", d.full);
 
 console.log("5 - NO JARGON LEFT IN THE NAMES");
 const labels = await p.evaluate(()=> METRICS.map(m=> metricLabel(m.id, bodyAnalysis().win)));
@@ -99,6 +109,7 @@ console.log("6 - THE SELECTION READS ABOVE THE FIGURES");
         && c.className && /ms-sel|bm-drill|nb-pick|bm-tap/.test(c.className)),
       words: card.innerText, opens: !!(s && s.querySelector('[data-gdetail]'))};
   });
+  await p.evaluate(()=>{ BODY_FOCUS=null; BODY_EXPAND=false; render(); });
   let r = await sel();
   ck("nothing shown until you tap", !r.has, r.txt);
   await p.evaluate(()=>{ BODY_FOCUS="lats"; BODY_EXPAND=false; render(); });

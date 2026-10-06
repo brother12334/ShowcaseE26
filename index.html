@@ -35315,11 +35315,19 @@ function bodyViewSVG(view, A, metric, label){
    falls back to a full render. This is an optimisation of a correct path, never a
    replacement for one. */
 function repaintMuscleMap(dir){
+  /* C — THE TWO THINGS THIS USED TO REQUIRE ARE BOTH GONE.
+
+     It refused unless BODY_OPEN.nbadv was true, because the only way to change view was
+     a stepper that lived inside Advanced; and it needed .ms-mid, the stepper's own
+     travelling label. With the picker out in the open and the stepper replaced by five
+     segments, both tests failed every time — so every view change fell through to a
+     full render(), which rebuilds every shape in the figure and leaves the cross-fade
+     nothing to fade from. The whole point of this function is that the figure is
+     REPAINTED rather than redrawn; it now asks only for the figure. */
   const card = document.querySelector("#app .nb-map");
-  if(!card || !BODY_OPEN.nbadv) return false;
+  if(!card) return false;
   const figs = card.querySelector(".bm-figs");
-  const mid  = card.querySelector(".ms-mid");
-  if(!figs || !mid) return false;
+  if(!figs) return false;
   let A;
   try{ A = bodyAnalysis(); }catch(e){ return false; }
   const metric = BODY_METRIC;
@@ -35335,7 +35343,6 @@ function repaintMuscleMap(dir){
     const t = el.querySelector("title");
     if(t) t.textContent = pt.title;
   });
-  /* The words, arriving from the side the arrow pointed. */
   const swap = (el, html)=>{
     if(!el) return;
     el.innerHTML = html;
@@ -35343,11 +35350,16 @@ function repaintMuscleMap(dir){
     void el.offsetWidth;
     el.classList.add("ms-swap");
   };
+  /* The control and the sentence, in place. The selection moves between five fixed
+     segments, so there is no travelling label any more — the sentence underneath is the
+     part that changes, and it arrives from the side you moved. */
   card.style.setProperty("--mx", (dir > 0 ? 16 : -16) + "px");
-  swap(mid, `<b>${esc(metricLabel(metric, A.win))}</b>
-    <span>${esc(metricOneLiner(metric, A.win))}</span>
-    <span class="ms-dots">${METRICS.map(m=>
-      `<i class="${m.id === metric ? "on" : ""}"></i>`).join("")}</span>`);
+  card.querySelectorAll("[data-metricpick]").forEach(bt=>{
+    const on = bt.dataset.metricpick === metric;
+    bt.classList.toggle("on", on);
+    bt.setAttribute("aria-selected", String(on));
+  });
+  swap(card.querySelector(".nb-map-say"), esc(metricOneLiner(metric, A.win)));
   const legend = card.querySelector(".bm-legend");
   if(legend) swap(legend, metricLegend(metric)
     + `<span class="bm-lg"><span class="bm-sw" style="background:${C_GREY}"></span>`
@@ -35832,10 +35844,17 @@ function sparkSVG(vals, color, id, domain, minSpan){
    beside it, which are the right controls for somebody studying a muscle and clutter for
    somebody who tapped their chest to see whether it was still sore. Those live in
    Advanced now. */
+/* WHAT A SELECTED MUSCLE SAYS, BELOW THE LEGEND — AND IT NO LONGER SAYS IT.
+
+   There were always two of these: this one under the figures for the simple view, and
+   mapSelHTML() above them for Advanced, with `advanced` picking between them. Taking the
+   view picker out of Advanced took the condition with it: mapSelHTML runs whenever a
+   muscle is selected now, so leaving this in printed the same reading twice on one
+   screen, once at each end of the figure.
+
+   The one above the figures wins, because that is where the thing you tapped is. */
 function nbMapPickHTML(A, metric, advanced){
-  // advanced says it above the figures instead, in mapSelHTML()
-  if(advanced) return "";
-  if(!BODY_FOCUS) return "";
+  return "";
   const g = BODY_FOCUS;
   const gm = groupTileMetric(A, g, metric);
   const queued = (A.cyc && A.cyc.pending[g]) || 0;
@@ -44593,7 +44612,11 @@ function bind(){
   });
   if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; HIST_VIEW = "records"; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
-  if(rbBack) rbBack.onclick = ()=>{ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; HIST_VIEW = "lifts"; render(); window.scrollTo(0,0); };
+  /* Back out of the record book lands on the segment the book BELONGS to, not on the
+     one the tab happens to open with. The book is a page inside Records; leaving it
+     should put you where you were, and dropping somebody into Lifts instead is the
+     app choosing for them. */
+  if(rbBack) rbBack.onclick = ()=>{ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; HIST_VIEW = "records"; render(); window.scrollTo(0,0); };
   /* A movement's own page is a state of the record book, not a modal: the same tab, the
      same back button one step further in. */
   document.querySelectorAll("[data-rbex]").forEach(b=> b.onclick = ()=>{
@@ -44719,17 +44742,6 @@ function bind(){
        fade from. It answers false if the card is not in the shape it expects, and the
        ordinary path takes over. */
     if(!repaintMuscleMap(to > at ? 1 : -1)) render();
-    else {
-      /* The control and its sentence are outside the repainted figure, so they are
-         written here — the same in-place rule the rest of this screen follows. */
-      document.querySelectorAll("[data-metricpick]").forEach(x=>{
-        const on = x.dataset.metricpick === id;
-        x.classList.toggle("on", on);
-        x.setAttribute("aria-selected", String(on));
-      });
-      const say = document.querySelector(".nb-map .nb-map-say");
-      if(say) say.textContent = metricOneLiner(id, bodyAnalysis().win);
-    }
   });
   /* Figure taps. A tap SELECTS a major muscle and nothing more; splitting it into its
      individual heads is an explicit button, not something a second tap does by accident.

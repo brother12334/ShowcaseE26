@@ -63,16 +63,23 @@ console.log("2 - AND NOTHING REDRAWS ITSELF AFTERWARDS");
   }
 }
 
-console.log("3 - STEPPING THE MUSCLE MAP DOES NOT REBUILD THE PAGE");
+console.log("3 - CHANGING THE MUSCLE MAP'S VIEW DOES NOT REBUILD THE PAGE");
 {
+  /* The stepper this used to drive is a row of five segments now. The behaviour it was
+     written to protect is unchanged and is the whole reason repaintMuscleMap exists: the
+     figure is REPAINTED, so the fills can cross-fade, and nothing else on the tab
+     re-arrives. */
   const r = await p.evaluate(()=>{
-    goTab("body"); BODY_OPEN.nbadv = true; render();
+    goTab("body"); render();
     const before = BODY_METRIC;
-    const btn = document.querySelector('[data-metricstep="1"]');
-    if(!btn) return {err:"no stepper"};
+    const next = METRICS[(METRICS.findIndex(m=> m.id === before) + 1) % METRICS.length].id;
+    const btn = document.querySelector('[data-metricpick="' + next + '"]');
+    if(!btn) return {err:"no picker"};
+    /* The shapes themselves have to survive, or there was nothing to repaint. */
+    const was = document.querySelector("#app .bm-figs g.bm-m");
     btn.click();
-    /* The words naming the view are MEANT to move \u2014 that is the step. What must not
-       move is the rest of the tab. */
+    const still = document.querySelector("#app .bm-figs g.bm-m");
+    /* The sentence under the control is MEANT to move. What must not move is the rest. */
     let c = 0, swap = 0;
     document.querySelectorAll("#app, #app *").forEach(e=>{
       const st = getComputedStyle(e);
@@ -80,10 +87,11 @@ console.log("3 - STEPPING THE MUSCLE MAP DOES NOT REBUILD THE PAGE");
       if(st.animationName === "msSwap"){ swap++; return; }
       c++;
     });
-    return {before, after: BODY_METRIC, moving: c, swap};
+    return {before, after: BODY_METRIC, moving: c, swap, same: was === still};
   });
   ck("the view actually changes", r.after && r.after !== r.before, JSON.stringify(r));
-  ck("its name comes in from the side", r.swap > 0, JSON.stringify(r));
+  ck("THE FIGURE IS REPAINTED, NOT REDRAWN", r.same === true, JSON.stringify(r));
+  ck("its sentence comes in from the side", r.swap > 0, JSON.stringify(r));
   ck("and nothing else re-arrives", r.moving === 0, JSON.stringify(r));
 }
 
