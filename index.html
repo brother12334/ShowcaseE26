@@ -3242,6 +3242,10 @@ body.pfl-open{overflow:hidden}
   display:flex;align-items:center;justify-content:center;flex:0 0 auto;
   transition:border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease)}
 .ex-more:active{border-color:var(--acc-line);color:var(--acc)}
+/* The two states the six glyphs used to carry, on the one button that replaced them. */
+.ex-more.hu-on{color:var(--bad);border-color:var(--bad)}
+.ex-more.has-note::before{content:"";position:absolute;top:-2px;right:-2px;width:5px;height:5px;
+  border-radius:50%;background:var(--acc);box-shadow:0 0 0 1.5px var(--card)}
 .spec-opt.exact-dng b{color:var(--bad)}
 .spec-opt.exact-dng{border-color:rgba(209,88,79,.3)}
 
@@ -6576,7 +6580,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "50.0";
+const APP_VERSION = "50.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -32560,8 +32564,18 @@ function viewActiveSession(){
                an exercise at the same size and weight as everything else. They are all
                still here, in a sheet, with names. */
             const doneEx = en.sets.length && en.sets.every(x=>x.done);
-            return `<button class="ex-more" data-exmore="${ei}"
-              aria-label="More for ${esc(en.name)}"${doneEx ? ' data-exdone="1"' : ''}>\u22ef</button>`;
+            /* AND IT SAYS WHEN SOMETHING IS IN IT. The six glyphs carried their own
+               state — the pain icon went red, the note icon filled in — and an
+               overflow that looks identical whether or not this movement is flagged
+               loses both. A flagged movement turns the button red; a note puts a dot
+               on it. The label says which, for anyone not reading colour. */
+            const hurt = !!hurtFor(en.name);
+            const noted = hasAnyNote(en);
+            const says = hurt ? "flagged, and has more"
+                       : noted ? "has a note, and more" : "More";
+            return `<button class="ex-more${hurt ? " hu-on" : ""}${noted ? " has-note" : ""}"
+              data-exmore="${ei}" aria-label="${esc(says)} for ${esc(en.name)}"${
+              doneEx ? ' data-exdone="1"' : ''}>\u22ef</button>`;
           })()}        </span>
       </div>`;
     /* C1 — THE SETS COME FIRST.
@@ -32585,7 +32599,6 @@ function viewActiveSession(){
     h += effortCeilingLineHTML(en);
     h += exContextHTML(en, ei, {
       cue:   exNoteLineHTML(en),
-      rest:  restNoteLineHTML(en),
       tech:  techniqueCardHTML(en),
       ss:    supersetNoteHTML(supersetInfo(a.entries, ei)),
       last:  ll || "",
@@ -32604,6 +32617,10 @@ function viewActiveSession(){
        the question you are holding a plate to ask. The warm-up goes with it: it is a
        CHECKLIST you tick your way through on the way to the first working set, not
        something to look up, and a warm-up behind a tap is a warm-up that gets skipped. */
+    /* And the rest-note conflict, which only exists when there is a disagreement to
+       settle: a question with a one-tap answer, folded away, is a question nobody ever
+       answers. */
+    h += restNoteLineHTML(en);
     h += plateLineHTML(en, last);
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
@@ -55342,7 +55359,7 @@ function exSkipConfirm(i){
 }
 function exCtxKey(en){ return nrm(en && en.name || ""); }
 function exContextHTML(en, ei, parts){
-  const inner = [parts.cue, parts.rest, parts.tech, parts.ss, parts.last, parts.tip]
+  const inner = [parts.cue, parts.tech, parts.ss, parts.last, parts.tip]
                 .filter(x=> x && String(x).trim()).join("");
   if(!inner) return "";
   const k = exCtxKey(en);

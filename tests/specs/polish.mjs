@@ -309,7 +309,54 @@ console.log("6 - P5: THE MUSCLE SQUARE IS CARRIED INTO ITS SHEET");
   ck("and so it does where the browser cannot animate", r.bb === true, String(r.bb));
 }
 
-console.log("7 - UNDER REDUCED MOTION, NONE OF IT MOVES");
+/* C3's rule, written down so it cannot drift back. The chip strip folds away what you
+   LOOK UP. It must never fold away work to do, or a rule the app is enforcing on the set
+   in front of you — the app was capping reps at a number it had stopped showing. */
+console.log("7 - WHAT THE CHIP STRIP IS ALLOWED TO HIDE");
+{
+  const r = await ev(()=>{
+    const src = exContextHTML.toString();
+    return {inner: (src.match(/const inner = \[([^\]]*)\]/) || [])[1] || ""};
+  });
+  const has = k=> r.inner.indexOf("parts." + k) > -1;
+  ck("the cue is reference, and folds", has("cue"), r.inner);
+  ck("so are the technique, last time and the tip",
+     has("tech") && has("last") && has("tip"), r.inner);
+  ck("THE PLATE COUNT IS NOT REFERENCE", !has("plate"), r.inner);
+  ck("NEITHER IS THE WARM-UP, which is a checklist", !has("warm"), r.inner);
+  ck("nor which side to start on", !has("alt"), r.inner);
+  ck("nor the cap the weaker side sets for both", !has("asym"), r.inner);
+  ck("nor a rest note waiting to be settled", !has("rest"), r.inner);
+}
+{
+  const r = await ev(async ()=>{
+    if(!S.active) startWorkout(DAYS[0]);
+    const pf = document.getElementById("preflight"); if(pf) pf.remove();
+    try{PF=null}catch(e){}
+    S.active.entries[0].warm = "ramp";
+    render();
+    const plain = {
+      more: !!document.querySelector(".ex-more"),
+      lit: !!document.querySelector(".ex-more.hu-on"),
+      dot: !!document.querySelector(".ex-more.has-note"),
+      warm: !!document.querySelector(".warm")};
+    hurtAdd(S.active.entries[0].name, "shoulder", "sore", "");
+    render();
+    const flagged = {lit: !!document.querySelector(".ex-more.hu-on"),
+                     label: (document.querySelector(".ex-more")||{}).ariaLabel || ""};
+    S.hurts = []; save(); render();
+    return {plain, flagged};
+  });
+  ck("the card carries one overflow, not six glyphs", r.plain.more === true, "");
+  ck("the warm-up is on the card", r.plain.warm === true, "");
+  ck("a clean movement's overflow is quiet",
+     r.plain.lit === false && r.plain.dot === false, JSON.stringify(r.plain));
+  ck("A FLAGGED MOVEMENT SHOWS IT WITHOUT OPENING THE SHEET", r.flagged.lit === true,
+     JSON.stringify(r.flagged));
+  ck("and says so in words too", /flag/i.test(r.flagged.label), r.flagged.label);
+}
+
+console.log("8 - UNDER REDUCED MOTION, NONE OF IT MOVES");
 {
   const q = await (await b.newContext({viewport:{width:390,height:900},
                                        reducedMotion:'reduce'})).newPage();
@@ -342,7 +389,7 @@ console.log("7 - UNDER REDUCED MOTION, NONE OF IT MOVES");
   await q.close();
 }
 
-console.log("8 - NOTHING THREW");
+console.log("9 - NOTHING THREW");
 await ev(()=> hideModal());
 ck("no page errors", errs.length === 0, errs.join(" | "));
 console.log(bad ? "BROKEN: " + bad : "all good");
