@@ -134,19 +134,54 @@
   --gut:clamp(18px, 5.6vw, 26px);
   --air:clamp(14px, 2.4vh, 22px);
 
-  /* ONE MOTION VOCABULARY FOR THE WHOLE APP. Durations and curves were written inline at
-     the point of use — .15s here, .26s there, three different easings — which is how an
-     interface ends up feeling almost-consistent: nothing is wrong on any single screen
-     and the whole is subtly uneven. Three durations and two curves cover everything this
-     app does, and a change to the feel is now a change to four lines.
+  /* ================================================================================
+     THE MOTION SYSTEM — SIX ROLES, AND A THING MAY ONLY MOVE FOR ONE OF THEM.
 
-     Deliberately short. This is used standing up, between sets, on a phone, and a
-     transition you can perceive as a transition is a transition that is in the way. */
-  --t-fast:.13s;    /* press feedback, hovers, colour changes */
-  --t-mid:.24s;     /* things appearing and disappearing */
+     Durations and curves used to be written inline at the point of use — .15s here,
+     .26s there — which is how an interface ends up feeling almost-consistent: nothing
+     is wrong on any single screen and the whole is subtly uneven. Three durations and
+     two curves fixed that. They did not answer the harder question, which is not "how
+     long" but "WHY IS THIS MOVING AT ALL".
+
+     So motion is typed now. Every animation in this app belongs to exactly one of six
+     roles, and the role decides the duration and the curve:
+
+       RESPONSE     you touched it                     --t-fast     --ease-out
+       REVEAL       it arrived from an edge it owns    --t-reveal   --ease-reveal
+       NAVIGATE     you went somewhere                 --t-nav      --ease-nav
+       TRANSFORM    a thing became another thing       --t-form     --ease-nav
+       TIME         real time is passing               real-time    LINEAR, always
+       CONSEQUENCE  a number changed because of you    --t-conseq   --ease-conseq
+
+     And six rules, which are what keep it from becoming a screensaver:
+
+       1. ONE TRANSFORM ON SCREEN AT A TIME. Two things becoming two other things at
+          once is not continuity, it is noise.
+       2. Nothing animates more than three properties.
+       3. Nothing runs longer than --t-form except CONSEQUENCE, which is rare and has
+          to be earned: a grade, a record, a landmark moving. Never decoration.
+       4. Everything is interruptible. A tap during a transition takes the tap.
+       5. Reverse is the same motion backwards, never a second animation.
+       6. TIME IS NEVER EASED. An eased clock lies about how much rest is left, and
+          this app is used by people counting on it.
+
+     Deliberately short throughout. This is used standing up, between sets, on a phone,
+     and a transition you can perceive as a transition is a transition in the way. */
+  --t-fast:.13s;    /* RESPONSE: press feedback, hovers, colour changes */
+  --t-mid:.24s;     /* the old general-purpose "appearing and disappearing" */
   --t-slow:.42s;    /* progress and value changes, where the movement IS the message */
+  --t-reveal:.26s;  /* REVEAL: a sheet, a disclosure, anything with an edge */
+  --t-nav:.26s;     /* NAVIGATE: tabs, pages, segments */
+  --t-form:.3s;     /* TRANSFORM: a row becoming a record, a tick becoming a clock */
+  --t-conseq:.9s;   /* CONSEQUENCE: the one number that was worth waiting for */
+  --stagger:22ms;   /* between siblings arriving in reading order */
   --ease:cubic-bezier(.2,.7,.3,1);        /* settles quickly, no overshoot */
   --ease-out:cubic-bezier(.33,1,.68,1);
+  --ease-reveal:cubic-bezier(.2,.9,.25,1);  /* leaves fast, lands soft */
+  --ease-nav:cubic-bezier(.2,.8,.3,1);      /* NAVIGATE and TRANSFORM share a curve,
+                                               because going somewhere and becoming
+                                               something are the same kind of move */
+  --ease-conseq:cubic-bezier(.65,0,.35,1);  /* in-out: builds, then lands */
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -1835,11 +1870,11 @@ button.side-chip.sc-set::after{
 /* A sheet that arrives from the edge it is attached to. Without this the score card was
    simply present on one frame and absent the next, which on top of a fading celebration
    is indistinguishable from a glitch. */
-.modal-bg.show .modal{animation:sheetUp .34s cubic-bezier(.2,.9,.25,1) both}
+.modal-bg.show .modal{animation:sheetUp var(--t-reveal) var(--ease-reveal) both}   /* REVEAL */
 @keyframes sheetUp{from{transform:translateY(26px);opacity:0}to{transform:translateY(0);opacity:1}}
 /* Blocks of a long card revealed in the order they are read, on a fixed schedule set by
    --d, rather than all at once. Deterministic: same order, same timing, every time. */
-.rv{animation:rvIn .34s cubic-bezier(.2,.9,.25,1) both;animation-delay:var(--d,0s)}
+.rv{animation:rvIn var(--t-reveal) var(--ease-reveal) both;animation-delay:var(--d,0s)}  /* REVEAL */
 @keyframes rvIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
 @media (prefers-reduced-motion: reduce){
   .modal-bg.show,.modal-bg.show .modal,.rv{animation:none}
@@ -2282,7 +2317,7 @@ body.onboarding #app{padding:0}
 .icon-btns button .ico{width:1.15em;height:1.15em;vertical-align:-.2em}
 
 /* the note sheet, growing out of the button that opened it */
-.modal-bg.show .modal.from-btn{animation:noteGrow .26s cubic-bezier(.2,.9,.25,1) both}
+.modal-bg.show .modal.from-btn{animation:noteGrow var(--t-reveal) var(--ease-reveal) both}
 @keyframes noteGrow{
   from{opacity:0;transform:scale(.72)}
   to{opacity:1;transform:scale(1)}
@@ -2843,8 +2878,10 @@ body.tour-live{overflow:hidden}
 }
 @keyframes aiBeam{0%{top:4px}50%{top:calc(100% - 30px)}100%{top:4px}}
 .ai-prog{height:4px;border-radius:var(--r-xs);background:var(--line);overflow:hidden;margin:0 0 14px}
+/* TIME. This tracks a real import working through a real document, so it is linear and
+   it is allowed to be slow: easing a progress bar makes it lie about where it is. */
 .ai-prog span{display:block;height:100%;background:var(--acc);border-radius:var(--r-xs);
-  transition:width .5s cubic-bezier(.3,.8,.3,1)}
+  transition:width .5s linear}
 .ai-steplist{display:flex;flex-direction:column;gap:2px}
 .ai-stepline{display:flex;gap:11px;align-items:flex-start;padding:8px 2px;opacity:.42;
   transition:opacity var(--t-mid)}
@@ -3691,7 +3728,7 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
 .nav-pair{display:flex;flex:1 1 0;min-width:0;position:relative;align-items:stretch;
   transition:flex-grow .32s cubic-bezier(.4,0,.2,1)}
 .nav-pair::before{
-  content:"";position:absolute;top:-1px;bottom:-1px;left:3px;right:-3px;border-radius:var(--r-lg);
+  content:"";position:absolute;top:-1px;bottom:-1px;left:3px;right:1px;border-radius:var(--r-lg);
   background:var(--card2);border:1px solid var(--line);
   opacity:0;transform:scaleX(.72);transform-origin:18% 50%;
   transition:opacity .26s ease, transform var(--t-slow) cubic-bezier(.2,.9,.28,1.14);
@@ -3705,8 +3742,15 @@ body.voice-rest .voice-dot{background:var(--faint);animation:none}
    "TODAYWORKOUT", which is the one thing a navigation bar must never do.
 
    A floor of 138px holds both labels; the remaining four tabs take 63px each, which
-   clears the widest of them ("SETTINGS", 51px) with room to spare. */
-body.has-workout-tab .nav-pair{flex:2 1 auto;min-width:138px}
+   clears the widest of them ("SETTINGS", 51px) with room to spare.
+
+   AND A CEILING, because the floor was only half of it. `flex:2 1 auto` asks for twice
+   the share and then TAKES it: measured mid-session on a 390px screen the pair was 181px
+   — 91px for each of two tabs that needed 45 — and the four remaining tabs were
+   squeezed to 52px against a 47px label, with the tray's own 3px overhang landing on top
+   of HISTORY. Two labels need about 150px, so that is what they get; the rest goes back
+   to the tabs that were short. */
+body.has-workout-tab .nav-pair{flex:0 0 auto;min-width:138px;max-width:152px}
 body.has-workout-tab .tabbar>button{min-width:0}
 body.has-workout-tab .nav-pair::before{opacity:1;transform:scaleX(1)}
 .nav-pair>button{position:relative;z-index:1;flex:1 1 0}
@@ -3879,13 +3923,15 @@ nav .nav-ic.catch{animation:navCatch .52s cubic-bezier(.34,1.32,.5,1) both}
    `backwards`, not `both`: the from-state applies during the delay and the element is
    left entirely alone once it lands. `both` would pin transform:none forever and take
    the press compression off any row that happens to sit at the top level. */
-#app.view-in > *{animation:viewIn .3s var(--ease) backwards}
+/* NAVIGATE, with the stagger read off the one token so the rhythm of arriving is the
+   same everywhere it happens. */
+#app.view-in > *{animation:viewIn var(--t-nav) var(--ease-nav) backwards}
 #app.view-in > *:nth-child(1){animation-delay:0ms}
-#app.view-in > *:nth-child(2){animation-delay:22ms}
-#app.view-in > *:nth-child(3){animation-delay:44ms}
-#app.view-in > *:nth-child(4){animation-delay:66ms}
-#app.view-in > *:nth-child(5){animation-delay:88ms}
-#app.view-in > *:nth-child(n+6){animation-delay:110ms}
+#app.view-in > *:nth-child(2){animation-delay:calc(var(--stagger) * 1)}
+#app.view-in > *:nth-child(3){animation-delay:calc(var(--stagger) * 2)}
+#app.view-in > *:nth-child(4){animation-delay:calc(var(--stagger) * 3)}
+#app.view-in > *:nth-child(5){animation-delay:calc(var(--stagger) * 4)}
+#app.view-in > *:nth-child(n+6){animation-delay:calc(var(--stagger) * 5)}
 /* Anything you can press gets the same small compression. It was on .btn and the nav
    already; the rows and cards that are also buttons had nothing, so half the app
    answered a tap and half did not. */
@@ -4225,7 +4271,10 @@ button:disabled:active, button[aria-disabled="true"]:active,
   display:flex;align-items:center;justify-content:center;
   transform:translateZ(0);
 }
-#celebrate.out{opacity:0;transition:opacity .5s ease}
+/* Leaving is a REVEAL in reverse, and its duration is the 420ms the dismiss timer
+   waits before removing the node — a fade that outlives its own element just gets cut
+   off at the end. */
+#celebrate.out{opacity:0;transition:opacity var(--t-slow) var(--ease)}
 body.cele-open{overflow:hidden}
 
 /* ===== THE QUIET FINISH =====
@@ -5806,7 +5855,9 @@ body.news-open{overflow:hidden}
   position:relative;width:104px;height:104px;flex-shrink:0;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
   background:conic-gradient(var(--scc,var(--ok)) var(--scp,0%), var(--card2) 0);
-  transition:--scp .9s cubic-bezier(.2,.8,.3,1) var(--t-fast);
+  /* CONSEQUENCE — the one number on this card worth waiting for. The only role
+     allowed to run this long, and it says which role it is. */
+  transition:--scp var(--t-conseq) var(--ease-conseq) var(--t-fast);
 }
 .sc-grade{opacity:0;transform:scale(.82)}
 .sc-ring.lit .sc-grade{opacity:1;transform:scale(1);
@@ -6580,7 +6631,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "50.1";
+const APP_VERSION = "51.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
