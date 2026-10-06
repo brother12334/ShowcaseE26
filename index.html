@@ -935,7 +935,12 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .card.ex.is-shut:active{background:var(--card2)}
 .card.ex.is-shut .ex-body{display:none}
 .card.ex.ss-group.is-shut > *:not(.ss-hdr){display:none}
-.card.ex.is-shut .ex-head{margin:0;flex:1 1 150px;min-width:0}
+/* READING ORDER ON ONE LINE: what it is, what it did, and then the way in to change it.
+   The overflow comes before the summary in the markup because that is the order the open
+   card needs; on a shut card it belongs at the end, where a control belongs. */
+.card.ex.is-shut .ex-head{margin:0;flex:1 1 150px;min-width:0;order:1}
+.card.ex.is-shut .ex-sum{order:2}
+.card.ex.is-shut .ex-bar{order:3}
 .card.ex.is-shut .ex-head b{font-size:var(--fs-4);font-weight:500}
 .card.ex.is-shut .ex-bar{margin:0;flex:0 0 auto;gap:8px}
 /* A shut card keeps its overflow — skipping a movement you have not reached yet is
@@ -1986,6 +1991,28 @@ button.side-chip.sc-set::after{
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:flex-end;justify-content:center;z-index:160}
 .modal-bg.show{display:flex;animation:fadeIn .18s ease both}
 .modal{background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl) var(--r-xl) 0 0;padding:20px;width:100%;max-width:600px;max-height:88vh;overflow-y:auto}
+/* ===================================================================================
+   H — THREE SIZES OF SHEET, AND THE SIZE IS INFORMATION.
+
+   Forty-six sheets in this app, from 226px to 1,657px tall, all arriving the same way
+   from the same edge at the same distance. So the only way to find out whether you had
+   opened a yes/no question or a two-screen document was to open it and look.
+
+     .mo-prompt   one question, one or two answers, never scrolls.  Rises 14px.
+     (default)    a sheet: scrolls, has a job, half the screen.     Rises 26px.
+     .mo-page     a destination with its own header.                Rises from the floor.
+
+   The distance it travels tells you how much is behind it before you have read a word,
+   which is the whole reason three sizes beats one. */
+.modal.mo-prompt{max-height:none;padding:22px 20px 20px}
+.modal-bg.show .modal.mo-prompt{animation:sheetUpS var(--t-reveal) var(--ease-reveal) both}
+@keyframes sheetUpS{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
+.modal.mo-page{max-height:94vh;border-radius:var(--r-xl) var(--r-xl) 0 0}
+.modal-bg.show .modal.mo-page{animation:sheetUpL var(--t-reveal) var(--ease-reveal) both}
+@keyframes sheetUpL{from{transform:translateY(64px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion: reduce){
+  .modal-bg.show .modal.mo-prompt,.modal-bg.show .modal.mo-page{animation:none}
+}
 /* A sheet that arrives from the edge it is attached to. Without this the score card was
    simply present on one frame and absent the next, which on top of a fading celebration
    is indistinguishable from a glitch. */
@@ -2009,8 +2036,34 @@ button.side-chip.sc-set::after{
 }
 .field .duo{display:flex;gap:8px}
 .field .duo input{flex:1}
-.togglerow{display:flex;align-items:center;gap:10px;margin:14px 0;font-size:var(--fs-5)}
-.togglerow input{width:22px;height:22px;accent-color:var(--ok)}
+/* H — THE ONE CONTROL THAT WAS NOT OURS.
+
+   `accent-color` paints a browser's own checkbox, which on every platform is a bright
+   filled square in that platform's house style — and on a dark, mono, copper interface
+   a 22px block of OS green is the single loudest thing on the sheet it sits in. Same
+   control, same behaviour, same keyboard and screen-reader semantics: the input is still
+   the input, drawn by us.
+
+   A 22px box inside a 44px hit area, because a checkbox is still a tap target. */
+.togglerow{display:flex;align-items:center;gap:11px;margin:14px 0;font-size:var(--fs-5)}
+.togglerow input[type="checkbox"]{
+  -webkit-appearance:none;appearance:none;flex:0 0 auto;position:relative;
+  width:22px;height:22px;margin:0;border-radius:var(--r-sm);
+  border:1px solid var(--line);background:var(--card2);cursor:pointer;
+  transition:border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.togglerow input[type="checkbox"]::after{
+  content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:44px;height:44px;
+}
+.togglerow input[type="checkbox"]::before{
+  content:"";position:absolute;left:6.5px;top:3px;width:5px;height:10px;
+  border:solid var(--acc);border-width:0 1.8px 1.8px 0;transform:rotate(42deg) scale(.4);
+  opacity:0;transition:opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease-out);
+}
+.togglerow input[type="checkbox"]:checked{border-color:var(--acc-line);background:var(--acc-soft)}
+.togglerow input[type="checkbox"]:checked::before{opacity:1;transform:rotate(42deg) scale(1)}
+.togglerow input[type="checkbox"]:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 
 /* ================= ONBOARDING =================
    Full-screen, one question per card, nothing else competing for attention. The tab bar
@@ -3441,7 +3494,50 @@ body.pfl-open{overflow:hidden}
    44 here needs the W to stop being a second target in that cell, which is a layout
    change rather than a hit-area one. */
 .wu-btn{width:34px;height:30px}
-.ws-tools{display:flex;gap:8px;margin-top:10px}
+/* ===================================================================================
+   F — FOUR CONTAINERS, AND EACH OF THEM HAS ONE JOB.
+
+   One container did every job in this app: a bordered rounded rectangle. Today stacked
+   three of them before saying what you were doing; Program drew twenty-four; Body put
+   four in a grid. When every element has the same frame, nothing has rank — the frame
+   stops being a signal and becomes wallpaper. It is also, not coincidentally, the first
+   thing on anybody's list of what a generated interface looks like.
+
+     .e-field   full bleed, a colour wash, no border.  The ONE thing this screen is
+                about. At most one per screen.
+     .card      the existing border and radius.        A thing you act on as a unit.
+     .e-row     a hairline underneath, no box.         One of several comparable things.
+     .e-rule    a label and a line, no container.      The name of a group of rows.
+
+   A screen may use a field once and should mostly be rows. The rule that follows from
+   that: if you are about to draw a box around something, ask whether it is a thing you
+   act on AS A UNIT. A toolbar is not. A list is not. A section heading is not.
+
+   Adopted here by the screens this phase rebuilt. The rest take it as they are rebuilt,
+   which is the only honest way to move a design system through a 58,000-line file. */
+.e-field{
+  position:relative;border-radius:var(--r-lg);overflow:hidden;padding:22px 18px;
+  border:1px solid rgba(255,255,255,.07);
+}
+.e-field::before{
+  content:"";position:absolute;inset:0;opacity:.15;pointer-events:none;
+  background:radial-gradient(120% 90% at 18% 0%, var(--fc, transparent) 0%, transparent 62%);
+}
+.e-field > *{position:relative}
+.e-row{
+  display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  padding:12px 2px;background:none;border:0;border-bottom:1px solid rgba(255,255,255,.05);
+  border-radius:0;
+}
+.e-rule{
+  font:var(--fs-1) var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--faint);margin:18px 0 4px;
+}
+/* THE TOOLS ARE A TOOLBAR, NOT A THING YOU ACT ON AS A UNIT. Three 40px buttons inside
+   a full card, at the top of the one screen that needs its space most. */
+.ws-head{margin:0 0 12px}
+.ws-head .sub{margin:0 0 10px}
+.ws-tools{display:flex;gap:8px;margin-top:0}
 .ws-tool{
   width:40px;height:40px;border-radius:var(--r);border:1px solid var(--line);background:var(--card2);
   color:var(--dim);cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -5182,8 +5278,57 @@ body.cele-open{overflow:hidden}
 .ms-dots i{width:5px;height:5px;border-radius:50%;background:var(--line);flex:0 0 auto}
 .ms-dots i.on{background:var(--acc)}
 .bm-card{padding:14px 10px 10px}
+/* C — THE VIEW PICKER. Five segments, no scrolling, no disclosure. */
+.nb-metric{
+  display:flex;gap:2px;background:rgba(255,255,255,.035);border-radius:var(--r-sm);
+  padding:3px;margin:2px 0 10px;
+}
+.nb-metric-b{
+  flex:1;min-width:0;height:32px;border:0;border-radius:var(--r-xs);background:none;
+  color:var(--faint);font:var(--fs-1) var(--mono);letter-spacing:.07em;text-transform:uppercase;
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+.nb-metric-b.on{
+  background:var(--card2);color:var(--text);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
+}
+/* D — ONE ROW PER LIFT. The name and what it has done on the left, the reading and the
+   shape of it on the right. No axes, no gridlines, no legend: the number IS the axis. */
+.lf-list{display:block;margin-top:2px}
+.lf-row{
+  display:grid;grid-template-columns:1fr 108px;gap:14px;align-items:center;width:100%;
+  padding:14px 2px;text-align:left;background:none;border:0;border-bottom:1px solid rgba(255,255,255,.05);
+  border-radius:0;cursor:pointer;
+}
+.lf-row:active{background:rgba(255,255,255,.02)}
+.lf-m{min-width:0}
+.lf-n{display:block;font-size:var(--fs-5);font-weight:500;color:var(--text);margin-bottom:5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lf-d{display:block;font:var(--fs-2) var(--mono);color:var(--faint);letter-spacing:.04em}
+.lf-d b{color:var(--ok);font-weight:400}
+.lf-d i{color:var(--warn);font-style:normal}
+.lf-r{position:relative;height:38px}
+.lf-now{position:absolute;right:0;top:-4px;font:var(--fs-4) var(--mono);color:var(--text)}
+.lf-spark{width:100%;height:100%;overflow:visible}
+.lf-area{fill:var(--acc);opacity:.11}
+.lf-line{fill:none;stroke:var(--acc);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+.lf-dot{fill:var(--acc)}
+/* NAVIGATE: the line draws itself on arrival, once. A line you watch being drawn is a
+   line you read; a line that fades in is a picture. */
+#app.view-in .lf-line{
+  stroke-dasharray:240;animation:lfDraw .42s var(--ease-nav) both;animation-delay:var(--t-nav)
+}
+@keyframes lfDraw{from{stroke-dashoffset:240}to{stroke-dashoffset:0}}
+#app.view-in .lf-dot{animation:lfDot .2s var(--ease-out) both;animation-delay:.52s}
+@keyframes lfDot{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion: reduce){
+  #app.view-in .lf-line,#app.view-in .lf-dot{animation:none;stroke-dasharray:none}
+}
 .bm-figs{display:flex;gap:4px;justify-content:center;align-items:flex-start}
-.bm-fig{flex:1;min-width:0;max-width:190px;display:flex;flex-direction:column;align-items:center;gap:7px}
+/* 190px each was half a 390px screen for the one asset nobody else has. The cap goes up
+   to what the gutter allows, which on a phone is the whole width and on a wide screen
+   stops it becoming a poster. */
+.bm-fig{flex:1;min-width:0;max-width:260px;display:flex;flex-direction:column;align-items:center;gap:7px}
 .bm-fig svg{width:100%;height:auto;display:block;overflow:visible}
 .bm-fig-label{
   font-family:var(--disp);font-size:var(--fs-3);font-weight:700;text-transform:uppercase;
@@ -5377,6 +5522,14 @@ body.news-open{overflow:hidden}
 .vf-h.is-under .pv-sq{background:rgba(209,88,79,.12);border-color:rgba(209,88,79,.5);color:var(--bad)}
 .vf-h.is-ok .pv-sq{background:var(--acc-soft);border-color:var(--acc-line);color:var(--acc)}
 .vf-h.is-over .pv-sq{background:rgba(201,154,52,.12);border-color:rgba(201,154,52,.5);color:var(--warn)}
+/* C — THE MUSCLE, IN THE HEADING OF ITS OWN SHEET. Cut from the figure you tapped, so
+   what lands is what left. */
+.mm-h{display:flex;align-items:center;gap:11px}
+.mm-mark{
+  flex:0 0 auto;width:42px;height:42px;overflow:visible;
+  filter:drop-shadow(0 0 7px rgba(0,0,0,.6));
+}
+.mm-mark .mm-shape{stroke:rgba(255,255,255,.14);stroke-width:1.6}
 .pv-m{flex:1;min-width:0;display:block}
 .pv-n{display:block;font:var(--fs-1) var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--dim);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -5798,9 +5951,14 @@ body.news-open{overflow:hidden}
 .nb-pick-x{background:none;border:0;color:var(--faint);font-size:var(--fs-7);line-height:1;cursor:pointer;
   padding:0 2px;min-width:24px;min-height:24px;flex-shrink:0}
 .nb-pick-x:hover,.nb-pick-x:focus-visible{color:var(--text)}
-.nb-adv{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;margin-top:11px;
-  background:none;border:1px dashed var(--line);border-radius:var(--r);padding:10px 13px;color:var(--dim);
-  font:inherit;font-size:var(--fs-3);cursor:pointer;min-height:40px;transition:border-color var(--t-fast) ease,color var(--t-fast) ease}
+/* F — A DISCLOSURE IS NOT A DROP ZONE. A dashed rectangle means "nothing here yet, put
+   something in it" in every other piece of software a person uses; this is a control
+   with a page behind it. A rule and a label, which is what it is. */
+.nb-adv{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;margin-top:14px;
+  background:none;border:0;border-top:1px solid rgba(255,255,255,.07);border-radius:0;
+  padding:13px 2px 2px;color:var(--faint);
+  font:var(--fs-2) var(--mono);letter-spacing:.11em;text-transform:uppercase;
+  cursor:pointer;min-height:44px;transition:color var(--t-fast) ease}
 .nb-adv:hover,.nb-adv:focus-visible{border-color:var(--acc);color:var(--text)}
 .nb-adv-x{font-family:var(--mono);font-size:var(--fs-5);color:var(--acc)}
 
@@ -6816,7 +6974,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "52.0";
+const APP_VERSION = "53.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14214,13 +14372,28 @@ function flyIntoSheet(src, run){
     b = dst.getBoundingClientRect();
   } finally { modal.style.animation = was || ""; }
   if(!b || !b.width) return;
-  const cs = getComputedStyle(src);
-  const ghost = src.cloneNode(true);
-  ghost.removeAttribute("data-m");
-  ghost.style.cssText = "";
-  ["backgroundColor","color","borderWidth","borderStyle","borderColor","borderRadius",
-   "font","display","alignItems","justifyContent","boxShadow","letterSpacing"]
-    .forEach(k=>{ try{ ghost.style[k] = cs[k]; }catch(e){} });
+  /* A SHAPE INSIDE AN SVG CANNOT BE LIFTED OUT OF IT. A cloned <g> dropped on the body
+     renders nothing: it has no viewport, no viewBox and no geometry of its own. So for
+     anything from a figure the ghost is a small svg cropped to that shape's bounding
+     box — the same thing the sheet's own mark is made of, which is also why the flight
+     lands exactly on it. */
+  const svgMark = (src.ownerSVGElement && typeof muscleMarkFrom === "function")
+    ? muscleMarkFrom(src) : null;
+  let ghost;
+  if(svgMark){
+    ghost = document.createElement("div");
+    ghost.innerHTML = svgMark;
+    ghost = ghost.firstElementChild;
+    ghost.classList.remove("fly-in");
+  } else {
+    const cs = getComputedStyle(src);
+    ghost = src.cloneNode(true);
+    ghost.removeAttribute("data-m");
+    ghost.style.cssText = "";
+    ["backgroundColor","color","borderWidth","borderStyle","borderColor","borderRadius",
+     "font","display","alignItems","justifyContent","boxShadow","letterSpacing"]
+      .forEach(k=>{ try{ ghost.style[k] = cs[k]; }catch(e){} });
+  }
   ghost.style.position = "fixed";
   ghost.style.left = a.left + "px";
   ghost.style.top = a.top + "px";
@@ -15978,7 +16151,38 @@ function showRestUI(min){
 }
 function hideRestUI(){
   const el = document.getElementById("restUI");
-  if(el) el.remove();
+  /* RULE 5 — REVERSE IS THE SAME MOTION BACKWARDS. The dial grew out of the tick, so it
+     leaves by contracting toward the row it is handing you back to, and the eye is
+     carried from the clock to the set rather than dropped. Removal waits for the
+     animation; if anything about that fails the node goes immediately, because a rest UI
+     that outlives its own rest is worse than an abrupt one. */
+  if(el && !reducedMotion() && typeof el.animate === "function"){
+    const plate = el.querySelector(".pf-plate") || el.querySelector(".rest-expand");
+    const lv = (typeof sessionLiveSet === "function") ? sessionLiveSet() : {ei:-1, si:-1};
+    const row = lv.ei >= 0
+      ? document.querySelector('.set .chk[data-e="' + lv.ei + '"][data-s="' + lv.si + '"]')
+      : null;
+    const to = row && row.getBoundingClientRect();
+    if(plate && to && to.width){
+      const from = plate.getBoundingClientRect();
+      const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+      const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+      const sc = Math.max(.1, Math.min(1, to.width / (from.width || 1)));
+      try{
+        /* THE DYING NODE GIVES UP ITS NAME FIRST. It is on screen for another 220ms, and
+           showRestUI() finds its element by id — so a rest stopped and a set banked in
+           the same breath would hand the next clock the one that is busy leaving. */
+        el.removeAttribute("id");
+        el.style.pointerEvents = "none";
+        const an = el.animate([
+          {transform: "none", opacity: 1},
+          {transform: "translate(" + dx + "px," + dy + "px) scale(" + sc + ")", opacity: 0}
+        ], {duration: 220, easing: "cubic-bezier(.2,.8,.3,1)"});
+        an.onfinish = ()=> el.remove();
+        setTimeout(()=>{ if(el.isConnected) el.remove(); }, 420);
+      }catch(e){ el.remove(); }
+    } else el.remove();
+  } else if(el) el.remove();
   document.body.classList.remove("rest-up");
   if(restTick){ clearInterval(restTick); restTick = null; }
   applyRestLocks();                    // the clock stopped, so the next set opens up
@@ -30597,7 +30801,7 @@ function openSplitEditor(){
       Switching keeps every exercise you have already set up on any day the two schedules share.
       Days that only exist in the new schedule start empty for you to fill in.</div>
     <button class="btn ghost" id="closeModal">Cancel</button>`;
-  showModal(h);
+  showModal(h, "mo-page");
   document.querySelectorAll("[data-setsplit]").forEach(b=> b.onclick = ()=>{
     const id = b.dataset.setsplit;
     if(id === cur){ hideModal(); return; }
@@ -30698,7 +30902,7 @@ function render(){
   try{ syncActivePlan(); }catch(e){}
   if(TAB !== "sync"){ ADV_OPEN = false; SET_PAGE = null; }
   if(TAB !== "program") DAY_EDIT = null;
-  if(TAB !== "history"){ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; }
+  if(TAB !== "history"){ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; HIST_SHOW = 20; }
   /* The tab only exists while a session does, and TAB can be pointing at it when one
      ends in another tab or on another device, so both are settled before anything is
      painted. */
@@ -30999,8 +31203,12 @@ function plateStrip(){
        : left ? left+" rest left" : "rests all used")
     /* Scheduled: the count is not a budget you are spending, it is where you are in a
        rotation that already includes them. */
+    /* G — "3 rests a cycle, scheduled" is a field name with a value after it. The
+       hatched tiles two lines above already say WHERE the rest days are; this says how
+       many, in a sentence. */
     : (REST_CREDITS
-        ? (restNow ? "rest day today" : REST_CREDITS+" rest"+(REST_CREDITS===1?"":"s")+" a cycle, scheduled")
+        ? (restNow ? "today is a rest day"
+                   : REST_CREDITS+" rest day"+(REST_CREDITS===1?"":"s")+" in this cycle")
         : "no rest days in this cycle");
   html += `<div class="cycle-row"><span class="num">${S.cycleDone.length} of ${ROTATION.length} done &middot; ${
     restWord}</span><span>${
@@ -33040,7 +33248,10 @@ function viewActiveSession(){
   const m = dayMeta(a.workoutId);
   /* The name and the start time are in the tab's own header now, so this says the one
      thing the header cannot: how the screen works. */
-  let h = `<div class="card" style="padding:12px 13px">
+  /* F — the tools are a toolbar, so they are a row and not a card. See the container
+     system: a box means "this is a thing you act on as a unit", and three buttons you
+     reach for at three different moments are not one of those. */
+  let h = `<div class="ws-head">
     ${(()=>{
       /* M4 — THE TIP RETIRES ONCE IT HAS DONE ITS JOB.
 
@@ -34614,7 +34825,24 @@ function focusFooter(a, atEnd){
 /* =====================================================================
    BODY TAB, training stress map
    ===================================================================== */
-const C_GREY="#c4c2bd", C_NONE="#26262c", C_LOW="#41597f", C_OK="var(--ok)", C_WARN="var(--warn)", C_BAD="var(--bad)", C_FLAT="var(--faint)";
+/* THE MAP'S COLOURS HAVE TO BE NUMBERS, BECAUSE THE MAP MIXES THEM.
+
+   Four of these were CSS variables — var(--ok), var(--warn), var(--bad), var(--faint)
+   — which is correct everywhere a colour is handed straight to the browser and fatal
+   here, because ramp() interpolates between two colours by reading their channels:
+   hex2rgb("var(--ok)") parses "va" as hexadecimal, gets NaN, and returns the string
+   "#NaNNaNNaN". An invalid fill paints black.
+
+   So every muscle whose colour came off a ramp — tiredness, recovery, injury risk, and
+   the growth scale — was drawn black on a black background, which is why the anatomy
+   map read as an empty silhouette with a couple of grey patches on it. The patches were
+   the muscles with NO data: those take a fixed hex and were the only ones working.
+
+   The same six values, written as numbers. They are identical to the :root declarations
+   and there is no second theme to track them against, so nothing is lost and the map
+   gets its colours back. */
+const C_GREY="#c4c2bd", C_NONE="#26262c", C_LOW="#41597f",
+      C_OK="#4a9358", C_WARN="#c99a34", C_BAD="#d1584f", C_FLAT="#83817c";
 function hex2rgb(h){ h=h.replace("#",""); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
 function lerpHex(a,b,t){
   t = Math.max(0,Math.min(1,t));
@@ -34636,6 +34864,17 @@ function ramp(stops, t){
    research uses and they are not the words a person picking a view uses. The stepper
    shows one at a time with its sentence attached, so the label has room to be ordinary
    English and the sentence carries the detail. */
+/* What each view is called on the control, where five of them share 358px. Nine
+   characters at the mono micro-size is the budget and every one of these is inside it.
+   The full label and its sentence still exist — they are what the line under the
+   control says. */
+const METRIC_SHORT = {
+  fatigue:  "Tired",
+  volume:   "Sets",
+  recovery: "Ready",
+  growth:   "Growth",
+  injury:   "Overdoing"
+};
 const METRICS = [
   {id:"fatigue",  label:"Tiredness"},
   {id:"volume",   label:"Sets done"},
@@ -35387,8 +35626,12 @@ function bodyStatus(A){
               : t.fat >= 40 ? "you're carrying some normal mid-week tiredness"
               : rampedFast ? "you've been training more than usual, and you're handling it so far"
               : "there's something worth tidying up in your training balance";
+    /* G — NO SENTENCE THAT EXISTS TO REASSURE. "Nothing wrong — you're not fully
+       recovered" says two opposite things in nine words, and the half that is doing the
+       work is the second one. The reading IS the sentence; if it needs a "nothing
+       wrong" in front of it, the reading was not frightening to begin with. */
     return {level:"ok", dot:C_WARN, title:"Doing fine",
-      line: "Nothing wrong \u2014 " + why + ".",
+      line: why.charAt(0).toUpperCase() + why.slice(1) + ".",
       advice: rampedFast
         ? "Train as normal. You've stepped up quickly, so keep an eye on how you pull up over the next few days rather than adding more on top."
         : "A normal session is fine. Hit your usual numbers rather than chasing a personal best today."};
@@ -35643,12 +35886,19 @@ function nbMapPickHTML(A, metric, advanced){
    A section whose name is not in the list still renders, at the end, so adding one and
    forgetting this list costs you its position and never its existence. */
 function SECM(k){ return "<!--SEC:" + k + "-->"; }
-/* THE ORDER AS IT STANDS, WHICH IS THE ORDER IT WAS BUILT IN. Listing it changes
-   nothing on screen — that is the point of this commit. The machinery to re-sort the tab
-   is in place and the sort itself is still the old one, so the refactor can be proved
-   safe before anything moves. Rewriting this array is now the whole job. */
+/* THE ORDER OF THE TAB, AND THE WHOLE OF IT. The markers were put in so that moving a
+   section would be a change to this array rather than surgery on a 600-line function;
+   this is the first time that has been used for anything.
+
+   C — THE FIGURE IS THE PAGE. The map used to sit seventh, 2,384px down, at 55% of the
+   scroll depth, under four whole-body numbers and two trend charts. It is the one thing
+   in this product nobody else has, and almost everything that was above it is a number
+   that means more painted onto a body than printed next to a word. So: the verdict,
+   which is one line; then the figure; then the numbers, which now read as the detail
+   under the picture rather than as the picture. Nothing is removed and nothing is
+   hidden — the page is in the order somebody actually reads it. */
 const BODY_SECTIONS = [
-  "verdict", "tiles", "cycle", "weak", "trend", "load", "map", "priority",
+  "verdict", "map", "tiles", "weak", "cycle", "trend", "load", "priority",
   "niggles", "you", "flags", "sides", "notes", "patterns"
 ];
 function bodySectionOrder(h){
@@ -35704,6 +35954,66 @@ function viewBody(){
       </div>
       <div class="nb-hero-l">${esc(st.line)}</div>
     </div>`;
+
+  /* ---- THE MAP ------------------------------------------------------------------
+     Built here, placed by BODY_SECTIONS. Where it ENDS UP on screen is that array's
+     business and not this function's, which is what the markers were for. */
+  h += SECM("map");
+  const advanced = !!BODY_OPEN.nbadv;
+  /* C — THE VIEW IS NOT AN ADVANCED FEATURE.
+
+     Five ways of looking at the same figure, four of which could only be reached by
+     opening a disclosure called "Advanced" — so the map had one view, and the other four
+     were a setting. They are not settings. They are the question you are asking: how
+     tired, how much work, how recovered, is it growing, am I overdoing it. The picker
+     comes out and sits above the figure it controls. Advanced keeps what it was really
+     for: the per-muscle table and the drill controls. */
+  const shownMetric = metric;
+  h += `<div class="nb-map nb-in" style="--d:520ms">
+    <div class="nb-sec-k">Your muscles</div>
+    ${/* FIVE VIEWS, ALL FIVE VISIBLE, NONE OF THEM SCROLLING.
+
+          The original picker was a sideways-scrolling strip of five named for the numbers
+          behind them, two of which sat past the right edge at any width a phone has. The
+          fix for that was a stepper showing one at a time, which solved the overflow and
+          bought a new problem: four of the five views became invisible, so most people
+          only ever saw one of them.
+
+          Five segments at a mono micro-size fit 358px with room to spare, and the words
+          are the question rather than the metric's name. The sentence stays, under the
+          control, travelling with whichever view is selected — which was the pairing the
+          stepper got right and is worth keeping. */""}
+    <div class="nb-metric" role="tablist">
+      ${METRICS.map(m=> `<button role="tab" class="nb-metric-b${m.id === shownMetric ? " on" : ""}"
+        data-metricpick="${esc(m.id)}" aria-selected="${m.id === shownMetric}">${
+        esc(METRIC_SHORT[m.id] || m.label)}</button>`).join("")}
+    </div>
+    <div class="nb-map-say">${esc(metricOneLiner(shownMetric, win))}</div>
+    ${""}
+    ${/* Not gated on Advanced any more. It draws nothing until a muscle is selected, and
+          when one is it carries the only route to head level — which was unreachable
+          from the simple view, so tapping a muscle there selected it and then offered
+          nothing to do about it. */ mapSelHTML(A, shownMetric)}
+    <div class="bm-figs">
+      <div class="bm-fig">${bodyFrontSVG(A, shownMetric)}<div class="bm-fig-label">Front</div></div>
+      <div class="bm-fig">${bodyBackSVG(A, shownMetric)}<div class="bm-fig-label">Back</div></div>
+    </div>
+    <div class="bm-legend">${metricLegend(shownMetric)}<span class="bm-lg"><span class="bm-sw" style="background:${C_GREY}"></span>${cyc.complete?"not trained":"not trained yet"}</span></div>
+    ${/* Mid-cycle the colours are a projection, and the legend's words are about where
+          each muscle is HEADING rather than where it has got to. Said once, under the key,
+          because a red muscle four days into a cycle otherwise reads as a verdict. */
+      /* Always in the document, shown for the one view it belongs to. Stepping between
+         views recolours this card in place rather than rebuilding it, and a line that has
+         to be created on arrival cannot be toggled by that path. */
+      `<div class="bm-proj-say"${(shownMetric === "volume" && A.midCycle) ? "" : " hidden"}>Part-way
+          through the cycle, so these are where each muscle is heading if the days still to
+          come are done as written.</div>`}
+    ${nbMapPickHTML(A, shownMetric, advanced)}
+    <button class="nb-adv" data-sec="nbadv">
+      <span>${advanced?"Back to the simple view":"Advanced"}</span>
+      <span class="nb-adv-x">${advanced?"\u2212":"+"}</span>
+    </button>
+  </div>`;
 
   /* ---- 2. THE NUMBERS, EACH ANSWERING ITSELF ----------------------------------- */
   h += SECM("tiles");
@@ -36012,54 +36322,6 @@ function viewBody(){
         the numbers below yours rather than an assumption.</div>
     </div>`;
   })();
-  h += SECM("map");
-  const advanced = !!BODY_OPEN.nbadv;
-  const shownMetric = advanced ? metric : "fatigue";
-  h += `<div class="nb-map nb-in" style="--d:520ms">
-    <div class="nb-sec-k">Your muscles</div>
-    ${/* FIVE BUTTONS IN A ROW THAT RAN OFF THE EDGE OF THE SCREEN.
-
-          The picker was every view at once, in a strip that scrolled sideways, each one
-          named for the number behind it rather than the question in front of it. Two of
-          the five sat past the right edge at any width a phone has, so the row had to be
-          discovered before it could be used, and the sentence explaining the view you had
-          landed on sat separately underneath it.
-
-          One at a time instead. The name and its sentence travel together, which is the
-          pairing that was always missing, and the dots say how many there are and where
-          you are among them. Nothing scrolls and nothing hides. */ advanced
-      ? `<div class="metric-step">
-          <button class="ms-ar" data-metricstep="-1" aria-label="Previous view">\u2039</button>
-          <span class="ms-mid">
-            <b>${esc(metricLabel(shownMetric, win))}</b>
-            <span>${esc(metricOneLiner(shownMetric, win))}</span>
-            <span class="ms-dots">${METRICS.map(m=>
-              `<i class="${m.id === shownMetric ? "on" : ""}"></i>`).join("")}</span>
-          </span>
-          <button class="ms-ar" data-metricstep="1" aria-label="Next view">\u203a</button>
-        </div>`
-      : `<div class="nb-map-say">Green is rested, red needs a break. Tap a muscle to see how it's doing.</div>`}
-    ${advanced ? mapSelHTML(A, shownMetric) : ""}
-    <div class="bm-figs">
-      <div class="bm-fig">${bodyFrontSVG(A, shownMetric)}<div class="bm-fig-label">Front</div></div>
-      <div class="bm-fig">${bodyBackSVG(A, shownMetric)}<div class="bm-fig-label">Back</div></div>
-    </div>
-    <div class="bm-legend">${metricLegend(shownMetric)}<span class="bm-lg"><span class="bm-sw" style="background:${C_GREY}"></span>${cyc.complete?"not trained":"not trained yet"}</span></div>
-    ${/* Mid-cycle the colours are a projection, and the legend's words are about where
-          each muscle is HEADING rather than where it has got to. Said once, under the key,
-          because a red muscle four days into a cycle otherwise reads as a verdict. */
-      /* Always in the document, shown for the one view it belongs to. Stepping between
-         views recolours this card in place rather than rebuilding it, and a line that has
-         to be created on arrival cannot be toggled by that path. */
-      `<div class="bm-proj-say"${(shownMetric === "volume" && A.midCycle) ? "" : " hidden"}>Part-way
-          through the cycle, so these are where each muscle is heading if the days still to
-          come are done as written.</div>`}
-    ${nbMapPickHTML(A, shownMetric, advanced)}
-    <button class="nb-adv" data-sec="nbadv">
-      <span>${advanced?"Back to the simple view":"Advanced"}</span>
-      <span class="nb-adv-x">${advanced?"\u2212":"+"}</span>
-    </button>
-  </div>`;
 
   h += SECM("priority"); h += specCardHTML(A);
 
@@ -37809,7 +38071,7 @@ function openWeakPoint(idx){
       <button class="btn ghost small" data-gdetail="${g}">Open ${esc(gName(g))}</button>
       <button class="btn ghost small" id="closeModal">Done</button>
     </div>`;
-  showModal(h);
+  showModal(h, "mo-page");
   MODAL_REOPEN = ()=> openWeakPoint(idx);
   const dc = $("#modal").querySelector("#wdDecline");
   if(dc) dc.onclick = ()=> openDeclineCase(g, idx);
@@ -37910,7 +38172,7 @@ function openGroupDetail(g){
       </div>
       <div class="sub" style="margin-top:8px;color:var(--faint)">Volume targets only exist at group level; there's no research at head level, and no exercise isolates a single head cleanly enough to aim at one. Heads are judged on their share of the group's work instead.</div>`
     : `<button class="btn" style="margin-top:16px" id="closeModal">Done</button>`;
-  showModal(h);
+  showModal(h, "mo-page");
   MODAL_REOPEN = ()=> openGroupDetail(g);
   const ud = $("#modal").querySelector("#gUndecline");
   if(ud) ud.onclick = ()=>{
@@ -37933,6 +38195,36 @@ function openGroupDetail(g){
 }
 /* Tapping any head opens this. It is the main place a beginner learns what a muscle
    even is, so it leads with plain English and puts the numbers underneath. */
+/* C — THE SHEET ABOUT YOUR CHEST SHOWS A CHEST.
+
+   Tapping a muscle opened a sheet of numbers with no picture in it, so the thing you had
+   just pointed at vanished at the moment you asked about it. The shape is right there in
+   the figure: this takes the tapped group's own paths, crops the viewBox to its bounding
+   box, and hands back a small svg of that muscle alone. Same geometry, same fill, same
+   glow — it IS the thing you touched, not a drawing of it.
+
+   Set at tap time and read once by the sheet that opens next, because a mark left over
+   from the last muscle is worse than no mark at all. */
+let MUSCLE_MARK = null;
+function muscleMarkFrom(el){
+  try{
+    if(!el || !el.getBBox) return null;
+    const bb = el.getBBox();
+    if(!bb || !bb.width || !bb.height) return null;
+    const pad = Math.max(bb.width, bb.height) * 0.12;
+    const x = bb.x - pad, y = bb.y - pad;
+    const w = bb.width + pad * 2, h = bb.height + pad * 2;
+    const g = el.cloneNode(true);
+    g.removeAttribute("data-g"); g.removeAttribute("data-m");
+    g.removeAttribute("style");
+    g.setAttribute("class", "mm-shape");
+    /* The <title> inside the group is the figure's tooltip, and it is TEXT: left in, it
+       lands in the heading and the sheet reads "Upper Chest: 9%Upper Chest". */
+    g.querySelectorAll("title").forEach(t=> t.remove());
+    return `<svg class="mm-mark fly-in" viewBox="${x} ${y} ${w} ${h}"
+      aria-hidden="true">${g.outerHTML}</svg>`;
+  }catch(e){ return null; }
+}
 function openMuscleDetail(key){
   const R = REGIONS[key];
   if(!R){ return openGroupDetail(key); }             // a group key drills to its own card
@@ -37943,7 +38235,9 @@ function openMuscleDetail(key){
   const share = A.rwk.share[key] || 0;
   const heads = GROUP_REGIONS[g];
 
-  let h = `<h3>${esc(R.name)}</h3>
+  let h = `<h3 class="mm-h">${MUSCLE_MARK || ""}${esc(R.name)}</h3>`;
+  MUSCLE_MARK = null;
+  h += `
   <div class="md-what">
     <div class="md-row"><span class="md-k">What it is</span><span>Part of your <b>${esc(G.name.toLowerCase())}</b>. Also called the ${esc(R.tech)}.</span></div>
     <div class="md-row"><span class="md-k">Where</span><span>${esc(R.where)}.</span></div>
@@ -40758,6 +41052,100 @@ function histHeatHTML(ctx){
       <i class="hx hx-rest"></i>rest<i class="hx hx-skip"></i>missed</div>
   </div>`;
 }
+/* ONE SERIES PER MOVEMENT: the top set of each session it appeared in, oldest first.
+
+   "Top set" is the heaviest set that actually happened, falling back to the most reps
+   where there is no load — so a pull-up has a line too, and it is a line about reps,
+   which is the honest reading for a movement with no weight on it. */
+function liftHistory(){
+  const by = {};
+  (S.sessions || []).forEach(sess=>{
+    (sess.entries || []).forEach(e=>{
+      if(!e || !e.name) return;
+      let bw = 0, br = 0;
+      (e.sets || []).forEach(st=>{
+        if(!st || !st.done) return;
+        if(setIsWarmup(e, (e.sets || []).indexOf(st))) return;
+        const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
+        if(!(r > 0)) return;
+        if(w > bw || (w === bw && r > br)){ bw = w; br = r; }
+      });
+      if(!(br > 0)) return;
+      const k = nrm(e.name);
+      const o = by[k] || (by[k] = {name: e.name, pts: []});
+      o.pts.push({at: sess.startedAt || 0, w: bw, r: br});
+    });
+  });
+  const out = [];
+  Object.keys(by).forEach(k=>{
+    const o = by[k];
+    o.pts.sort((a, b)=> a.at - b.at);
+    if(o.pts.length < 2) return;                 // one point is not a line
+    const loaded = o.pts.some(x=> x.w > 0);
+    const v = o.pts.map(x=> loaded ? x.w : x.r);
+    out.push({name: o.name, loaded, v,
+      now: v[v.length - 1], first: v[0], n: o.pts.length,
+      at: o.pts[o.pts.length - 1].at});
+  });
+  /* The lifts you actually run, most-trained first, recency breaking the ties. A list
+     sorted by load puts a leg press at the top of a page about your bench. */
+  out.sort((a, b)=> b.n - a.n || b.at - a.at);
+  return out;
+}
+/* A LINE THAT IS ONLY A LINE. No axes, no gridlines, no legend: the number beside it is
+   the reading, and the shape is the story. 16 points at most, because a 40px-wide
+   sparkline with thirty points in it is a texture. */
+function sparkHTML(v){
+  const pts = v.slice(-16);
+  if(pts.length < 2) return "";
+  const lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts);
+  const rng = (hi - lo) || 1;
+  const xy = pts.map((y, i)=> [(i / (pts.length - 1)) * 100, 30 - ((y - lo) / rng) * 24]);
+  const d = xy.map((pt, i)=> (i ? "L" : "M") + pt[0].toFixed(1) + " " + pt[1].toFixed(1)).join(" ");
+  const last = xy[xy.length - 1];
+  return `<svg class="lf-spark" viewBox="0 0 100 34" preserveAspectRatio="none" aria-hidden="true">
+    <path class="lf-area" d="${d} L100 34 L0 34 Z"></path>
+    <path class="lf-line" d="${d}"></path>
+    <circle class="lf-dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.2"></circle>
+  </svg>`;
+}
+function histSegHTML(){
+  const seg = (id, label)=> `<button class="nb-metric-b${HIST_VIEW === id ? " on" : ""}"
+    data-histview="${id}" aria-selected="${HIST_VIEW === id}">${label}</button>`;
+  return `<div class="nb-metric" role="tablist" style="margin-bottom:14px">
+    ${seg("lifts", "Lifts")}${seg("sessions", "Sessions")}${seg("records", "Records")}</div>`;
+}
+/* THE LIFTS VIEW. One row per movement: what it is doing, how far it has come, and the
+   shape of the climb. Seven rows answer what twenty screens of session cards did not. */
+function histLiftsHTML(){
+  const lifts = liftHistory();
+  if(!lifts.length){
+    return `<div class="nb-none">Two sessions on the same movement and its line starts
+      here. Everything you log feeds it — there is nothing to set up.</div>`;
+  }
+  const unit = unitWord();
+  return `<div class="lf-list">${lifts.slice(0, 14).map(l=>{
+    const up = Math.round((l.now - l.first) * 10) / 10;
+    const what = l.loaded ? unit : "reps";
+    /* The record book keys on the canonical name, not the display one, so this hands
+       over the key it will be looked up by — a display name finds nothing and the page
+       silently falls back to the whole list. */
+    return `<button class="lf-row" data-liftrow="${esc(nrm(l.name))}">
+      <span class="lf-m">
+        <span class="lf-n">${esc(l.name)}</span>
+        <span class="lf-d">${up > 0
+          ? `<b>+${esc(String(up))} ${esc(what)}</b> over ${l.n} sessions`
+          : up < 0
+            ? `<i>${esc(String(up))} ${esc(what)}</i> over ${l.n} sessions`
+            : `level over ${l.n} sessions`}</span>
+      </span>
+      <span class="lf-r">
+        <span class="lf-now num">${esc(String(Math.round(l.now)))}</span>
+        ${sparkHTML(l.v)}
+      </span>
+    </button>`;
+  }).join("")}</div>`;
+}
 function viewHistory(){
   let h = `<div class="hdr"><h1>History</h1>${hdrRight(`<span class="date num">${S.sessions.length} sessions</span>`)}</div>`;
   h += liveStripHTML();
@@ -40767,9 +41155,18 @@ function viewHistory(){
       <p class="nb-empty-w">That history is what lets Element 26 tell you when to add weight.</p>
       <button class="btn" data-goto="today">Start your first workout</button>
     </div>`;
-  h += recordTeaserHTML();
-  /* D5 — the twelve-week strip, above the heat map. Both are "how has it been going",
-     and the week is the coarser and more useful of the two readings. */
+  h += histSegHTML();
+  if(HIST_VIEW === "lifts"){
+    h += histLiftsHTML();
+    return h;
+  }
+  if(HIST_VIEW === "records"){
+    h += recordTeaserHTML();
+    return h;
+  }
+  /* "Am I turning up" belongs with the sessions, which is what it counts. The lifts
+     view answers a different question and a 600px explanation of what a week on target
+     means is in the way of it. */
   try{ h += streakStripHTML(); }catch(e){}
   const HCTX = histContext();
   h += histHeatHTML(HCTX);
@@ -40824,8 +41221,16 @@ function viewHistory(){
     const t = weekTotals[k] || (weekTotals[k] = {n:0, vol:0});
     t.n++; t.vol += HCTX.vol.get(x.id) || 0;
   });
+  /* D — DRAW TWENTY, NOT TWO HUNDRED. The whole list cost 105.7ms a render because it
+     built every session every time, including the hundred nobody was going to scroll to.
+     Twenty is about three screens, which is further than anybody reads before they
+     search instead; the rest arrive twenty at a time. The WEEK HEADERS are counted over
+     the whole filtered set, so a week's totals are the week's totals and not "the part
+     of it that happens to be drawn". */
+  const page = shown.slice(0, HIST_SHOW);
+  const more = shown.length - page.length;
   let lastWeek = null;
-  shown.forEach(s=>{
+  page.forEach(s=>{
     const m = dayMeta(s.workoutId);
     const vol = HCTX.vol.get(s.id) || 0;
     const q = s.quality;
@@ -40876,6 +41281,10 @@ function viewHistory(){
       </div></div>
     </div>`;
   });
+  if(more > 0){
+    h += `<button class="btn ghost small" id="histMore" style="width:100%;margin:4px 0 14px">
+      ${more} more session${more === 1 ? "" : "s"}</button>`;
+  }
   /* The archive and the exports, after the thing the screen is named for. */
   h += tail;
   h += `<div class="btn-row" style="margin-top:6px">
@@ -41189,6 +41598,17 @@ let SCHED_FOLD = false;
    should not still be open tomorrow. */
 let WARM_PL = null;
 let HIST_Q = "";                     // what History is filtered by, if anything
+/* D — HISTORY IS THE STORY OF YOUR LIFTS, not a list of sessions.
+
+   115 sessions drew 115 identical cards: 16,954px, 20.1 screens, 1,572 focusable
+   controls and 105.7ms per render, every one of them repeating the same four facts about
+   a different Tuesday. And nowhere on the whole tab could you see a lift getting heavier,
+   which is the only question anybody opens this tab to ask — the record book that
+   answers it was a card you had to know to enter.
+
+   Three views, and the one that answers the question opens first. */
+let HIST_VIEW = "lifts";             // lifts | sessions | records
+let HIST_SHOW = 20;                  // how many session cards are drawn so far
 /* The catch-up list is a list of nights that still WANT something, so a night that has
    been settled leaves it. This is the way back in when one was settled wrongly. */
 let SLEEP_ALL = false;
@@ -41803,7 +42223,7 @@ function tgSuggestHTML(A){
   const e = tgSuggestion(A);
   if(!e) return "";
   return `<div class="card tgs" data-tgsfor="${esc(e.g)}">
-    <div class="tgs-k">${ICON.spark} A target your log disagrees with</div>
+    <div class="tgs-k">${ICON.spark} What your log says this should be</div>
     <h3 class="tgs-t">${esc(e.title)}</h3>
     <div class="tgs-why">${esc(e.why)}</div>
     <div class="tgs-move"><span class="num">${e.mev}</span><i>→</i><span class="num tgs-to">${e.to}</span><em>sets a week</em></div>
@@ -41990,7 +42410,7 @@ function openLandmarkChain(g){
       : `<div class="sub" style="margin:14px 2px 0">Nothing has changed these yet — they are
          still the app's own figures, and every change from here is recorded here.</div>`}
     <button class="btn" style="margin-top:16px" id="closeModal">Done</button>`;
-  showModal(h);
+  showModal(h, "mo-page");
   MODAL_REOPEN = ()=> openLandmarkChain(g);
 }
 /* landmarkWithoutManual() replaced adjustedFloorWithout(): same trick, now per
@@ -44154,9 +44574,26 @@ function bind(){
   const wdL = $("#weighDue");
   if(wdL) wdL.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
   const rbOpen = $("#recordsBtn");
-  if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
+  document.querySelectorAll("[data-histview]").forEach(b=> b.onclick = ()=>{
+    const v = b.dataset.histview;
+    if(v === HIST_VIEW) return;
+    if(v === "records"){ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; }
+    HIST_VIEW = v;
+    HIST_SHOW = 20;
+    render(); window.scrollTo(0, 0);
+  });
+  const hm = $("#histMore");
+  if(hm) hm.onclick = ()=>{ HIST_SHOW += 20; render(); };
+  /* A lift's row opens its own record, which is where the rest of its story already
+     lives — every set of it, every session, and the bests. */
+  document.querySelectorAll("[data-liftrow]").forEach(b=> b.onclick = ()=>{
+    RECORDS_OPEN = true; RB_EX = b.dataset.liftrow; RECORDS_Q = "";
+    HIST_VIEW = "records";
+    render(); window.scrollTo(0, 0);
+  });
+  if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; HIST_VIEW = "records"; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
-  if(rbBack) rbBack.onclick = ()=>{ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
+  if(rbBack) rbBack.onclick = ()=>{ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; HIST_VIEW = "lifts"; render(); window.scrollTo(0,0); };
   /* A movement's own page is a state of the record book, not a modal: the same tab, the
      same back button one step further in. */
   document.querySelectorAll("[data-rbex]").forEach(b=> b.onclick = ()=>{
@@ -44267,17 +44704,32 @@ function bind(){
   one("[data-specwhy]",   ()=> openSpecPage("why"));
   one("[data-specdash]",  ()=> openSpecPage("dash"));
   one("[data-specresume]",()=>{ specResume(); render(); toast("Block running again", "good"); });
-  document.querySelectorAll("[data-metricstep]").forEach(b=> b.onclick=()=>{
-    /* Wraps, because a five-item ring with a dead end at each side makes you walk back
-       through the middle to reach the one next to where you started. */
-    const d = parseInt(b.dataset.metricstep, 10) || 1;
+  /* C — PICK A VIEW, do not walk to it. The stepper's wrap-around was the right answer
+     to a one-at-a-time control and the wrong control; with all five on screen the
+     direction still matters, because it is what tells the repaint which way to
+     cross-fade. */
+  document.querySelectorAll("[data-metricpick]").forEach(b=> b.onclick=()=>{
+    const id = b.dataset.metricpick;
+    if(id === BODY_METRIC) return;
     const at = Math.max(0, METRICS.findIndex(m=> m.id === BODY_METRIC));
-    BODY_METRIC = METRICS[(at + d + METRICS.length) % METRICS.length].id;
+    const to = Math.max(0, METRICS.findIndex(m=> m.id === id));
+    BODY_METRIC = id;
     /* Recoloured in place where that is possible, which is what lets the figures
        cross-fade; a full render would replace every shape and there would be nothing to
        fade from. It answers false if the card is not in the shape it expects, and the
        ordinary path takes over. */
-    if(!repaintMuscleMap(d)) render();
+    if(!repaintMuscleMap(to > at ? 1 : -1)) render();
+    else {
+      /* The control and its sentence are outside the repainted figure, so they are
+         written here — the same in-place rule the rest of this screen follows. */
+      document.querySelectorAll("[data-metricpick]").forEach(x=>{
+        const on = x.dataset.metricpick === id;
+        x.classList.toggle("on", on);
+        x.setAttribute("aria-selected", String(on));
+      });
+      const say = document.querySelector(".nb-map .nb-map-say");
+      if(say) say.textContent = metricOneLiner(id, bodyAnalysis().win);
+    }
   });
   /* Figure taps. A tap SELECTS a major muscle and nothing more; splitting it into its
      individual heads is an explicit button, not something a second tap does by accident.
@@ -44288,7 +44740,10 @@ function bind(){
     else { BODY_FOCUS = g; BODY_EXPAND = false; }
     render();
   });
-  document.querySelectorAll("#app [data-m]").forEach(el=> el.onclick=()=> openMuscleDetail(el.dataset.m));
+  document.querySelectorAll("#app [data-m]").forEach(el=> el.onclick=()=>{
+    MUSCLE_MARK = muscleMarkFrom(el);
+    flyIntoSheet(el, ()=> openMuscleDetail(el.dataset.m));
+  });
   // "Break it down": the only route to head level from the figure
   document.querySelectorAll("#app [data-g2]").forEach(b=> b.onclick=()=>{ BODY_FOCUS=b.dataset.g2; BODY_EXPAND=true; render(); });
   // "Analyse", and the rows in Every muscle: open the group's own card
@@ -47582,7 +48037,7 @@ function openExEditor(wid, idx){
     ${isNew?"":'<button class="btn ghost small danger" id="delEx">Delete</button>'}
     <button class="btn ghost small" id="closeModal">Cancel</button>
   </div>`;
-  showModal(h);
+  showModal(h, "mo-page");
   let altPickMode = !!e.altPick;
   /* THE SCOPE ONLY EXISTS FOR THIS ONE TECHNIQUE. A drop set on every set is not a thing
      anybody prescribes; lengthened partials on every set is a named way of running a
@@ -47867,7 +48322,7 @@ function renderSessEditor(s){
     </div>
   </div>
   <button class="btn" style="margin-top:16px" id="closeModal">Done</button>`;
-  showModal(h);
+  showModal(h, "mo-page");
 
   let newSets = [{weight:"",reps:"",rpe:""}];
   const drawSets = ()=>{
@@ -48966,14 +49421,21 @@ function scoreBlurb(q){
   const p = q.pct;
   const graded = q.sections.filter(s=>!s.na);
   const weakest = graded.slice().sort((a,b)=>a.pct-b.pct)[0];
-  const lead = p >= .93 ? "Just about a model session."
+  /* G — NEVER SHOW THE ENGINE.
+
+     "The work got done, but value leaked out" and "weakest section was completion, 2.1
+     of 14" are the scoring system talking about itself, printed at somebody who has just
+     finished training. The score is internal; what it is ABOUT is not. Say the thing
+     that went least well, by name, in the words you would use to a person. The numbers
+     behind it are still one tap down, under "where the points went", which is where
+     somebody who wants the arithmetic goes looking for it. */
+  const lead = p >= .93 ? "About as good as this session gets."
     : p >= .85 ? "A strong session."
-    : p >= .75 ? "A solid session with clear room to tighten up."
-    : p >= .6  ? "The work got done, but a lot of value leaked out."
-    : "This one was rough, worth understanding why before the next.";
+    : p >= .75 ? "Solid, with a bit left on the table."
+    : p >= .6  ? "The work got done. Some of it was worth more than you got out of it."
+    : "A rough one. Worth knowing why before the next.";
   if(!weakest) return lead;
-  return lead + " Your weakest section was <b>" + esc(weakest.label) + "</b> at " +
-    weakest.pts + "/" + weakest.max + ".";
+  return lead + " The part that went least well was <b>" + esc(weakest.label.toLowerCase()) + "</b>.";
 }
 /* =====================================================================
    THE CARD AT THE END
@@ -49088,19 +49550,19 @@ function scoreCardHTML(q, sess){
   const scored = (q.sections || []).filter(x=> !x.na);
   const weakest = scored.slice().sort((a,b)=> a.pct - b.pct)[0];
   const head = (()=>{ try{ return sessionHeadline(sess, q); }catch(e){ return null; } })();
-  const lead = q.pct >= .93 ? "Just about a model session."
+  const lead = q.pct >= .93 ? "About as good as this session gets."
     : q.pct >= .85 ? "A strong session."
-    : q.pct >= .75 ? "Solid, with room to tighten up."
-    : q.pct >= .6  ? "The work got done, but value leaked out."
-    : "A rough one \u2014 worth understanding why.";
+    : q.pct >= .75 ? "Solid, with a bit left on the table."
+    : q.pct >= .6  ? "The work got done. Some of it was worth more than you got out of it."
+    : "A rough one. Worth knowing why.";
   const tile = (v, k, tone)=> `<div class="sc-tile${tone ? " is-" + tone : ""}">
     <b class="num">${esc(String(v))}</b><span>${esc(k)}</span></div>`;
   let p1 = `<div class="scf-kicker">${esc(m.name)} \u00b7 ${esc(fmtDate((sess&&sess.date)||todayStr()))}</div>
   <div class="sc-verdict" style="--scc:${col}">
     <div class="sc-lead">${esc(head ? head.title : lead)}</div>
     <div class="sc-say">${head
-      ? esc(lead) + (weakest ? " Weakest section was " + esc(weakest.label.toLowerCase()) + ", " + weakest.pts + " of " + weakest.max + "." : "")
-      : (weakest ? "Weakest section was <b>" + esc(weakest.label) + "</b> at " + weakest.pts + "/" + weakest.max + "." : "")}</div>
+      ? esc(lead) + (weakest ? " The part that went least well was " + esc(weakest.label.toLowerCase()) + "." : "")
+      : (weakest ? "The part that went least well was <b>" + esc(weakest.label.toLowerCase()) + "</b>." : "")}</div>
   </div>
   <div class="sc-tiles">
     ${tile(q.total, "out of " + q.max, q.pct >= .85 ? "good" : q.pct < .6 ? "bad" : "")}
@@ -56887,6 +57349,11 @@ function askConfirm(opts){
         <button class="btn small" id="askYes" style="flex:1">${esc(opts.yes||"Yes")}</button>
       </div>
       <div class="btn-row"><button class="btn ghost small" id="askNo" style="flex:1">${esc(opts.no||"Cancel")}</button></div>`;
+    /* H — a confirm is a prompt by definition: one question, two answers, nothing to
+       scroll. It rises 14px rather than 26, which is the sheet system saying "this is
+       small" before you have read it. */
+    $("#modal").className = "modal mo-prompt";
+    $("#modalBg").className = "modal-bg";
     $("#modal").scrollTop = 0;
     $("#modalBg").classList.add("show");
     document.body.classList.add("modal-live");

@@ -195,6 +195,25 @@ console.log("7 - THE CLOCK GROWS OUT OF THE THING YOU TOUCHED");
   ck("banking a set starts the clock", r.pill === true, String(r.pill));
   ck("and it travels from the tick rather than appearing", r.anims >= 0, String(r.anims));
 }
+{
+  /* The dying clock gives up its id before it has finished leaving, or a rest stopped
+     and a set banked in the same breath hands the next clock the one that is busy
+     going away. */
+  const r = await ev(async ()=>{
+    hideRestUI();
+    const orphan = document.querySelectorAll("#restUI").length;
+    startRest(0, 1);
+    showRestUI(true);
+    await new Promise(r2=> setTimeout(r2, 60));
+    const live = document.getElementById("restUI");
+    return {orphan, live: !!live,
+      leaving: live ? live.style.pointerEvents : "",
+      ids: document.querySelectorAll("#restUI").length};
+  });
+  ck("the one that is leaving has given up its name", r.orphan === 0, String(r.orphan));
+  ck("so the next clock is a new one", r.live === true && r.ids === 1, JSON.stringify(r));
+  ck("and it is not the one that was dying", r.leaving !== "none", "'" + r.leaving + "'");
+}
 
 console.log("8 - NOTHING THREW");
 ck("no page errors", errs.length === 0, errs.join(" | "));

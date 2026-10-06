@@ -661,3 +661,62 @@ so and I will apply it to what already exists without changing any layout.
 **Not drawn yet:** F, G, H, the completion sequence, Program, and the sheets. If you want
 images of those before deciding, say which and I will build them the same way — nothing
 gets implemented either way until you say so.
+
+---
+
+# PART 6 — WHAT SHIPPED
+
+Approved: A, B, C, D, F, G, H, R-1. Declined: E (Today), which is untouched.
+
+Directions taken, as recommended: A-1 **and** A-2, C-1, D-1, R-1.
+
+## The measured result
+
+| | Before | After |
+|---|---|---|
+| Session | 3,458px · 4.1 screens · 20 rows that are all forms | 1,593px · 1.9 screens · **1 form** |
+| History | 16,954px · 20.1 screens · 1,572 controls · 105.7ms | 1,079px · 1.3 screens · 17 controls · **5.2ms** |
+| Body figure | 2,384px down (55%), fills `#NaNNaNNaN` | first screen, **in colour** |
+| Rest rim | `(sec % 60) / 60` — the current minute | this rest, either direction |
+| Tab bar mid-session | pair 181px, HISTORY clipped | pair 138px, every label clear |
+
+## Three things that were bugs, not design
+
+1. **`#NaNNaNNaN`.** `C_OK`, `C_WARN`, `C_BAD` and `C_FLAT` were CSS variables, and
+   `ramp()` interpolates by reading colour channels: `hex2rgb("var(--ok)")` parses `va` as
+   hexadecimal. Every muscle whose colour came off a ramp — tiredness, recovery, injury
+   risk, growth — was filled with an invalid colour, which paints black. The signature
+   asset of this product was a black silhouette, and the only visible patches were the
+   muscles with *no* data, because those take a fixed hex. One `const` brought the whole
+   map back.
+2. **The rest rim measured the wrong thing** — `(sec % 60) / 60`, a sweep of the current
+   minute, on a dial people read to find out how much rest is left.
+3. **"Live" was asked of each exercise, not of the session**, so opening a card three
+   movements ahead lit a copper edge on a row you are not on.
+
+## Where I departed from what I proposed, and why
+
+- **The tick becomes the *pill*, not the dial.** Building it showed the full dial covers
+  the card, and the reason the clock is a pill by default is that you have to go on using
+  the session while it runs. So the tick grows into the pill and the pill grows into the
+  dial. Same continuity, no behaviour lost.
+- **Body's ranked bar list was not built.** The Program tab's plan check is already
+  exactly that list, for the same muscles, with the same squares. A second copy on Body
+  would be duplication, not a feature.
+- **F is applied, not finished.** The four containers are defined and adopted by the
+  screens this phase rebuilt. Pushing them through all 58,000 lines in one pass would be
+  a rewrite of every screen including the one you declined; the rest adopt it as they are
+  rebuilt.
+- **G is the worst offenders, not all ~180 strings.** The score card's "value leaked
+  out" and "weakest section was completion, 2.1 of 14", the Body verdict that said two
+  opposite things in nine words, "a target your log disagrees with", and the cycle line
+  that read as a field name. The rest of the pass remains.
+- **R-1 means nothing was built**, which is the recommendation you accepted.
+
+## New tests
+
+`motion`, `stack`, `rest2`, `bodymap`, `histlift`, `sheets` — 160 checks across six
+specs, all in the required manifest. They pin the things that would otherwise drift back:
+exactly one row on screen is a form, nothing a collapsed card holds is unreachable, no
+clock is eased, no muscle fill is `NaN`, no nav label is covered, and a confirm is a
+prompt.
