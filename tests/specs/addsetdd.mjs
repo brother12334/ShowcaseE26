@@ -103,7 +103,12 @@ console.log("4 - IT CLOSES THE WAYS A MENU SHOULD");
 console.log("5 - IT OPENS UPWARDS WHEN THERE IS NO ROOM BELOW");
 {
   const r = await p.evaluate(()=>{
-    const btns = [...document.querySelectorAll("[data-addset]")];
+    /* The last one that is actually on screen. The session is a stack now, so the
+       movements you have not reached are one line each and their + set buttons are in
+       the document but not drawn — scrolling to one and asking where a menu would open
+       is asking about a button nobody can see. */
+    const btns = [...document.querySelectorAll("[data-addset]")]
+      .filter(b=> b.getBoundingClientRect().height > 0);
     const btn = btns[btns.length-1];
     btn.scrollIntoView({block:"end"});
     btn.click();
