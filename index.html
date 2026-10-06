@@ -6974,7 +6974,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "53.0";
+const APP_VERSION = "53.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -23976,6 +23976,61 @@ document.querySelectorAll("nav button").forEach(b=>{
      • The only write is a custom property that flips at most twice per gesture, because
        setHidden() returns early when nothing changed, and it animates a transform,
        which the compositor handles without touching layout at all.                  */
+/* WHERE THE BAR SHOULD SIT, AS ARITHMETIC ON SIX NUMBERS.
+
+   Pulled out of the DOM so that it can be reasoned about, and tested, without an iPhone
+   in the room — which is most of why the old version was wrong for so long.
+
+   IT MEASURES THE BAR INSTEAD OF INFERRING THE STRIP, and that is the whole fix. The
+   old rule computed `innerHeight - (vv.height + vv.offsetTop)` and lifted the bar by
+   it. That expression can only ever be positive, so the correction could only ever push
+   the bar UP: once a sample lifted it, nothing in the system could ever discover that it
+   had been lifted too far, and the bar stayed where the bad sample left it.
+
+   The residual cannot do that. navBottom is where the bar's bottom edge actually is;
+   visibleBottom is where the bottom of the screen actually is, in the same coordinate
+   space. The difference is the error, with a sign:
+
+     bar below the visible bottom (hidden behind the toolbar)  → positive → lift it
+     bar above the visible bottom (floating, the complaint)    → negative → put it back
+     browser already pins it to the visual viewport            → zero    → do nothing
+
+   Which also retires the iOS sniff. The correction is no longer a guess that has to be
+   aimed at the right platform; on anything that needs none, the residual is zero and
+   nothing is applied. That was the other half of the old bug: the same arithmetic that
+   described Safari's toolbar described Android Chrome's URL bar, where nothing was
+   hidden and the bar was lifted anyway. */
+const NAV_GAP_MAX = 90;    // a toolbar is 40-90px; a keyboard is 250 and is not ours
+function navGapFor(m){
+  /* A KEYBOARD IS NOT A TOOLBAR. A weight is being typed; the tab bar is not what
+     anybody is aiming for, so it stays where it is rather than climbing to sit on it. */
+  if(m.typing) return m.gapNow;
+  /* RUBBER-BANDING IS NOT A MEASUREMENT.
+
+     This is the bug you can see: at the very top of a page, pulling down is the gesture
+     that brings Safari's bottom toolbar BACK, so the visual viewport is in the middle of
+     changing size at exactly the moment the page reports a scroll. Every number read
+     during that describes a state that will not exist a moment later, and the old rule
+     acted on it and had no way back. Overscrolled at either end, the reading is thrown
+     away and the bar is left where it is until the page is still again. */
+  if(m.overscrolled) return m.gapNow;
+  /* A BAR THAT IS SLIDING AWAY IS NOT WHERE IT LOOKS. --navY translates it a full height
+     down; measured mid-slide its bottom edge is far below the screen and the residual
+     would read as "hidden behind a 90px toolbar". The auto-hide and the correction never
+     measure each other. */
+  if(m.hidden) return m.gapNow;
+  const residual = m.navBottom - m.visibleBottom;
+  if(!isFinite(residual)) return m.gapNow;
+  const want = Math.round(m.gapNow + residual);
+  /* OUT OF RANGE IS REJECTED, NOT CLAMPED. A residual bigger than any toolbar is not a
+     toolbar — it is a keyboard that slipped the typing guard, or a frame of one on its
+     way up — and clamping it would answer with a 90px lift, which is wrong and visible.
+     Declining the reading leaves the bar where it was and costs nothing: the confirmation
+     pass measures again once whatever is animating has stopped. */
+  if(want > NAV_GAP_MAX) return m.gapNow;
+  /* Below the bottom of the screen there is nothing to sit on. */
+  return Math.max(0, want);
+}
 let showNav = ()=>{};
 let refreshNavBounds = ()=>{};
 (function(){
@@ -23989,7 +24044,8 @@ let refreshNavBounds = ()=>{};
      further down would still be in its temporal dead zone at that point, and `typeof` does
      NOT save you from one: it throws like any other read. That trap has taken this file
      down before. */
-  let navHeld = false, navPend = null, gapNow = 0, heldHide = null;
+  let navHeld = false, navPend = null, gapNow = 0, heldHide = null,
+      navConfirm = null, navBack = null;
   const setHidden = v=>{
     if(v === hidden) return;
     /* Same rule as the correction: not while a finger is on it. Sliding the bar away from
@@ -23997,6 +24053,10 @@ let refreshNavBounds = ()=>{};
     if(navHeld){ heldHide = v; return; }
     hidden = v;
     nav.style.setProperty("--navY", v ? "calc(100% + 2px)" : "0px");
+    /* Coming back, it has to be re-measured: the correction skips a bar that is moving,
+       so the one that slid away while the chrome changed would otherwise arrive anchored
+       to where the bottom of the screen used to be. 300ms is the 260ms slide and a frame. */
+    if(!v){ clearTimeout(navBack); navBack = setTimeout(()=> anchorNav(), 300); }
   };
   /* THE CACHED HEIGHT WAS THE BUG. docH was read on render and on resize and trusted in
      between, and a page changes height without either: a card expands, an image or a
@@ -24092,9 +24152,6 @@ let refreshNavBounds = ()=>{};
      It is also dropped outright while a text field has focus. A keyboard is 250px+ and is
      rejected by the 90px cap, but the cap is sampled DURING the open animation too, and a
      frame that lands between 1 and 90 would otherwise stick until the next viewport event. */
-  const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent || "")
-    || /iPad|iPhone|iPod/.test(navigator.platform || "")
-    || (/Mac/.test(navigator.platform || "") && (navigator.maxTouchPoints || 0) > 1);
   let typing = false;
   /* AND IT HOLDS STILL WHILE YOU ARE TOUCHING IT. Between a finger going down and coming
      up, the bar does not move for any reason: a correction that arrives mid-tap moves the
@@ -24107,17 +24164,28 @@ let refreshNavBounds = ()=>{};
   };
   const anchorNav = ()=>{
     if(!vv) return;
-    let gap = 0;
-    if(IOS && !typing){
-      const strip = Math.round(window.innerHeight - (vv.height + vv.offsetTop));
-      if(vv.offsetTop < 1 && strip > 0 && strip <= 90) gap = strip;
-    }
+    const rect = nav.getBoundingClientRect();
+    const maxY = Math.max(0, docH - window.innerHeight);
+    const raw = window.pageYOffset || 0;
+    const gap = navGapFor({
+      gapNow, typing, hidden,
+      navBottom: rect.bottom,
+      visibleBottom: vv.offsetTop + vv.height,
+      overscrolled: raw < -0.5 || raw > maxY + 1 || vv.offsetTop > 0.5
+    });
     /* A CORRECTION UNDER FOUR PIXELS IS NOISE, NOT A CORRECTION. iOS reports the visual
        viewport to sub-pixel accuracy and it wobbles by a pixel as momentum settles; acting
        on every one of those moved the bar continuously for no visible benefit. */
     if(Math.abs(gap - gapNow) < 4 && !(gap === 0 && gapNow !== 0)) return;
     if(navHeld){ navPend = gap; return; }
     putGap(gap);
+    /* AND IT CHECKS ITS OWN WORK. Browser chrome animates, so a reading taken while it is
+       moving is a reading of a frame. Two cheap re-measures after it has settled mean a
+       mid-animation sample can never be the last word — and because the residual is
+       self-correcting, the second look is what undoes an over-correction rather than
+       leaving it on screen until the next gesture. */
+    clearTimeout(navConfirm);
+    navConfirm = setTimeout(()=>{ anchorNav(); navConfirm = setTimeout(anchorNav, 340); }, 180);
   };
   nav.addEventListener("pointerdown", ()=>{ navHeld = true; }, {passive:true});
   const navRelease = ()=>{

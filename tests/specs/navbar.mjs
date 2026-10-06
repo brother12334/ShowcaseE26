@@ -51,20 +51,35 @@ const where = p=> p.evaluate(()=>{
 const ANDROID = null;   // headless Chromium's own UA: no bottom toolbar anywhere
 const IPHONE  = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 
-console.log("1 - ON A BROWSER WITH ITS CHROME AT THE TOP, THE BAR SITS ON THE BOTTOM");
+console.log("1 - THE BAR SITS ON THE BOTTOM OF THE VISIBLE AREA, WHATEVER THE BROWSER IS");
 {
+  /* THIS SECTION USED TO ASSERT THE SNIFF, and the sniff was the reported bug.
+     It said: on a non-iPhone user agent, a bottom strip must not lift the bar, because a
+     top URL bar reports the same measurement as Safari's bottom toolbar. Which is true of
+     this FIXTURE but not of a top URL bar: chrome at the top is already outside
+     innerHeight, so it produces no strip at all. What the fixture actually describes —
+     vv.height short of innerHeight with offsetTop at 0 — is a bottom toolbar, on any
+     browser that has one, and the right answer to it is the same everywhere.
+
+     So the invariant is no longer "only iOS gets corrected". It is "the bar ends up on the
+     bottom of the visible area", which is the thing a person can see, and which no longer
+     needs the app to guess what it is running on. */
   const {p, errs} = await open(ANDROID);
   const a = await where(p);
   ck("flush with the bottom to start", a.bottom === a.h, a.bottom+" of "+a.h);
-  /* This is the bug: a top URL bar produces exactly the same measurement as Safari's
-     bottom toolbar, and the old correction lifted the bar 72px for it. */
   await p.evaluate(()=> window.__setStrip(72));
-  await p.waitForTimeout(60);
+  await p.waitForTimeout(600);          // the correction confirms itself at 180ms and 520ms
   const c = await where(p);
-  ck("a hidden strip does not lift it", c.bottom === c.h, c.bottom+" of "+c.h);
-  /* unset is the same as 0px: the property is only written when the bar actually moves */
-  ck("the correction stays at zero", c.gap === "0px" || c.gap === "", c.gap || "(unset)");
+  ck("a bottom strip lifts it clear, by exactly the strip", c.gap === "72px", c.gap || "(unset)");
+  ck("so it rests on the visible bottom", c.bottom === c.h - 72, c.bottom+" of "+(a.h-72));
+  /* AND THIS IS THE HALF THE OLD RULE COULD NOT DO. Its correction was computed from a
+     quantity that is always positive, so a bar that had been lifted could never come back
+     down. The residual has a sign, so the strip going away puts it back. */
   await p.evaluate(()=> window.__setStrip(0));
+  await p.waitForTimeout(600);
+  const d = await where(p);
+  ck("and the strip going away puts it back down", d.bottom === d.h, d.bottom+" of "+d.h);
+  ck("with the correction returned to zero", d.gap === "0px" || d.gap === "", d.gap || "(unset)");
   ck("no page errors", errs.length===0, errs.join(" | "));
 }
 
@@ -89,8 +104,11 @@ console.log("2 - ON iOS, WHERE THE TOOLBAR IS AT THE BOTTOM, THE CORRECTION STIL
     await new Promise(r=> setTimeout(r, 300));
     return {big, mid, after: document.querySelector("nav").style.getPropertyValue("--navGap").trim()};
   });
-  ck("a full keyboard is ignored", kb.big === "0px" || kb.big === "", kb.big || "(unset)");
-  ck("and so is a frame of it on the way up", kb.mid === "0px" || kb.mid === "", kb.mid || "(unset)");
+  /* Both readings are refused, and refusing means the bar does not move: it keeps the 72px
+     it was correctly given for the toolbar, rather than being zeroed and then having to
+     climb back up once the keyboard closes, which is a jump you would see. */
+  ck("a full keyboard is ignored", kb.big === "72px", kb.big || "(unset)");
+  ck("and so is a frame of it on the way up", kb.mid === "72px", kb.mid || "(unset)");
   ck("the correction comes back once typing is over", kb.after === "72px", kb.after);
   ck("no page errors", errs.length===0, errs.join(" | "));
 }
