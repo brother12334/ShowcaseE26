@@ -43,10 +43,12 @@ Brief §3.1 and §3.2 are now answerable from evidence rather than preference:
 | Bickel 2011, *Med Sci Sports Exerc* — maintenance dosing | **read in full** (§1A.1) |
 | Scarpelli 2022, *J Strength Cond Res* — individualised volume | **read** (§1A.2) |
 
-Still to read: Schoenfeld 2017, Baz-Valle 2022, the individual high-volume trials
-(Schoenfeld 2019, Brigatto 2022, Aubé 2022, Heaselgrave 2019, Barbalho 2019, Enes 2024),
-Hammarström 2020, Damas 2019, Robinson 2024, Refalo 2023, Halperin 2022, Zourdos 2016,
-Remmert 2025, Murphy & Koehler 2022, Roberts 2020.
+| Schoenfeld 2017, Hammarström 2020, Brigatto 2022, Aubé 2022, Enes 2024, Robinson 2024, Murphy & Koehler 2022, Roberts 2020, Helms/Zourdos RIR scale | **read** (§1A.3) |
+| Barbalho 2019 | **RETRACTED — not used** (§1A.3) |
+
+Not read, and not load-bearing for anything below: Baz-Valle 2022 (superseded by Pelland
+on the same question), Damas 2019, Refalo 2023 (superseded by Robinson 2024), Halperin
+2022, Remmert 2025.
 
 ---
 
@@ -272,6 +274,47 @@ So the starting target is **the user's own recent weekly volume + 0–20%, clamp
 band**, and only falls back to a level-based position in 11–18 when there is no history to
 read. Grade **M** — one within-subject randomised trial, n=16, quadriceps, 8 weeks; strong
 design, narrow scope.
+
+### 1A.3 The rest of the reading, and one citation that must not be used
+
+| Paper | What it gives | Grade |
+|---|---|---|
+| **Schoenfeld, Ogborn & Krieger 2017** (J Sports Sci 35:1073) | 34 groups, 15 studies. Each extra weekly set → ES +0.023, **+0.37% gain**; higher-vs-lower ES difference 0.241 (3.9%). A linear estimate on far fewer studies than Pelland's 0.24%/set marginal slope, same direction, same order of magnitude. Triangulates. | S |
+| **Hammarström 2020** (J Physiol 598:543) | 34 untrained, **contralateral** (within-subject), 12 weeks. Moderate volume beat low for CSA, strength and type II transitions. Supports more-is-better at the *low* end. | M |
+| **Brigatto 2022** (JSCR 36:22) | 16 vs 24 vs 32 weekly sets, trained men, 8 weeks, n=9/group. Higher volume enhanced muscle thickness. | E |
+| **Aubé 2022** (JSCR 36:600) | 12 vs 18 vs 24 sets, 35 trained, 8 weeks. **No group differences in hypertrophy** — and numerically the *lowest* volume was largest (ΣMT 7.7% at 12 sets vs 6.1% at 24). 1RM favoured 18. Real counter-evidence at the top end. | E |
+| **Enes 2024** (MSSE 56:553) | 31 trained men, 12 weeks, constant vs +4 vs +6 sets per fortnight. Strength: 6SG > 4SG > CG, all significant. **Hypertrophy: no between-group difference** (CSA p=0.067, ΣMT p=0.076), with CIs "appearing to plateau in the higher volume conditions". The brief described this as "quads specialisation, progressively up to ~52 sets"; it is a set-progression study and its hypertrophy result was null. | E |
+| **Robinson 2024** (Sports Med 54:2209) | Proximity-to-failure meta-regressions. **Strength: RIR slope contains the null.** **Hypertrophy: RIR slope negative, CI excludes the null** — growth improves as sets end closer to failure. Authors caution it is exploratory. | M |
+| **Murphy & Koehler 2022** (Scand J Med Sci Sports 32:125) | Energy deficit impairs **lean mass** gains (ES = −0.57) **but not strength**, with a meta-regression on deficit size. | S |
+| **Roberts 2020** (JSCR 34:1448) | **No sex difference in hypertrophy** (ES = 0.07 ± 0.06, p = 0.31, I² = 0). Upper-body strength favours females. | S |
+| **Helms/Zourdos RIR-RPE scale** (Strength Cond J 38:42) | The RIR-based RPE scale this app's effort credit is expressed in. | P |
+
+**Barbalho 2019 — RETRACTED, and not used.** *Evidence for an Upper Threshold for
+Resistance Training Volume in Trained Women*, Med Sci Sports Exerc 2019;51(3):515–22, was
+**retracted** (MSSE 2021;53(6):1318) after an expression of concern (MSSE
+2020;52(11):2490). The brief lists it as "evidence of a ceiling, or worse results, at very
+high volumes". It is one of the two most-cited planks of that argument and it no longer
+stands. Per the brief's own rule, it is named here and **not used anywhere in this model**.
+
+**What the top of the curve actually rests on, then.** With Barbalho withdrawn, the
+evidence that very high volumes do *worse* is thin: Aubé's non-significant reversal and
+Enes's non-significant plateau. The Pelland curve never turns down — it flattens. So the
+model says "the gain is getting small" above the band and "there is no evidence" past 43,
+and it does **not** say "this is harming you". Only the user's own recovery signal says
+that. That is why the ladder in §5A tops out where it does.
+
+**Three findings that settle adjustment factors directly** (brief §3.4):
+
+- **Sex: not used.** Roberts found no hypertrophy difference. The default stands, now with
+  a citation rather than an absence of one.
+- **Energy deficit: real, and it belongs on the target, not the floor.** Murphy & Koehler
+  found lean-mass gains impaired but strength preserved. So a deficit lowers what the extra
+  volume buys; it does not lower the minimum needed to hold what you have.
+- **Effort: the set-level discount is supported; a second penalty on the ceiling is not.**
+  Robinson found hypertrophy improves as sets end closer to failure, which is exactly what
+  `EFFORT_CREDIT` encodes. It found nothing about recovery cost, so the separate MRV
+  penalty for high average RPE can only be a recovery claim, and is kept inside the bounded
+  product in §4 rather than applied on its own authority.
 
 ## 2. FINDING — the counting basis, measured
 
@@ -566,14 +609,265 @@ be inventing precision. So training status enters where the evidence supports it
 the band table above already puts it: **the starting point within 11–18**, not a different
 curve.
 
+## 5B. THE MIGRATION FOR PEOPLE WHO ALREADY HAVE A HISTORY
+
+Shipping a new model to a new account is easy. Shipping it to somebody with two years of
+logs is where the damage would be, so the migration (`volMigrate()`, run once per profile
+and version-stamped in `S.volModelVersion`) is written around five promises.
+
+**1. What the app learned about *you* is carried over in sets, not in ratios.**
+`S.lmCal[g]` is a multiplier against the population prior. Move the prior and the same
+multiplier means a different number of sets — somebody’s learned ceiling of 22 would read
+19 overnight with nothing anywhere saying why. The migration reads the old chain (with the
+new clamp bypassed, so the comparison is against the figures that were actually on screen),
+reads the new one, and re-bases each stored ratio by `was / now`. A muscle with no stored
+calibration has no learned position to preserve and simply gets the new prior.
+
+**2. A number you set by hand is never touched.** `lmFloor`, `lmMav`, `lmMrv` and `lmScale`
+are instructions, not estimates. Where the model’s own estimate has moved more than 25%
+away from one of them, that gets **one note** in the plan history (`S.manualDisagreement`)
+and nothing else. Measured by standing the overrides aside for the length of one read — the
+only way to see what the chain would say on its own — and restored in a `finally`, because
+a blank hand-set ceiling would be a far worse bug than the one the note is for.
+
+**3. A block already running finishes on the numbers it was planned against.** Changing
+the target somebody is three weeks into chasing, and then judging the block against a line
+that was not there when they planned it, is not an improvement. The migration snapshots the
+old figures for whatever block was live (`S.volHold`, keyed to `S.blockStart`) and
+`adjustedLandmarks` returns them until that block ends. Expiry is by comparing block
+starts, not by a timer, and a hand-set number is never held — people can still change
+their own mind mid-block.
+
+**4. The plan is not rewritten.** `S.program` is untouched, byte for byte. The plan check
+reports against the new numbers and the person decides what to do about it. Warnings the
+new numbers no longer support are **withdrawn, not deleted**: `S.volAck[g].withdrawn`
+records that they were raised and why they stopped applying.
+
+**5. Training age is repaired only where the question will never reach them.** A profile
+with no `priorTrainingWeeks` reads as a beginner, which moves every landmark it touches —
+so it is worth filling in from `expManual`, `setup.level`, the builder’s answers, the
+importer’s metadata, or failing all of those, the weeks between the first logged session
+and the last. But A3 made training age something the app **asks** about rather than infers,
+and anything written here would satisfy `priorTrainingAskDue()` and quietly cancel the
+question. So the repair is gated on that function: it runs for people who were asked and
+declined, and for people past the point where the ask is offered, and for nobody else.
+`tests/specs/migrate.mjs` caught this, which is the whole reason it exists.
+
+**And it is said out loud, once.** A one-time card on the Program tab names the muscles
+whose limits moved and the warnings that no longer apply, and disappears when dismissed.
+It is not shown at all to somebody whose numbers did not move: a card that says "nothing
+changed" is worse than no card.
+
+Where it runs: `runOneTimeSeeds()`, not `migrate()`. `migrate()` is called at module level,
+before the landmark tables exist, and the same mistake has been made in this file before.
+The stamp, the card state, the hold and the note all travel in `BACKUP_FIELDS`, because a
+restore that re-ran the re-basing would apply it twice.
+
+Covered by `tests/specs/volmig.mjs` (34 checks): idempotency, learned volumes unchanged in
+sets, hand-set numbers untouched and the disagreement note firing, the block hold and its
+expiry at the block boundary, withdrawal rather than deletion, the training-age gate in both
+directions, `S.program` unchanged, every field present in `BACKUP_FIELDS`, and the card
+shown once and only when something moved.
+
+## 5C. FINDING ONE PERSON’S DOSE, AND HOW BIG A CHANGE HAS TO BE
+
+The population curve says what sets buy on average. What they buy *you* is a different
+question, and the only instrument the app has for it is your own log. The ladder already
+existed — **over / up / hold / unclear**, with a single reversible probe after two flat
+cycles (`decideForMuscle`) — and what was wrong was the bar it was measured against.
+
+**The old bar was +1% and −2% for everybody.** An e1RM estimated off a top set carries
+measurement noise: sleep, caffeine, a rounder bar, a rep called at 8 that was really a 9.
+How much noise it carries is a fact about that person and that lift, not about lifting.
+Somebody whose bench wobbles ±4% session to session was being told they were "responding"
+by a +1% rule roughly as often as a coin lands heads; somebody rock-steady at ±0.6% was
+told "no call" when a real 1.5% gain had happened. One of those is a false alarm generator
+and the other throws away signal.
+
+**The new bar is MDC95, measured per muscle from their own scatter** (`trendNoise`). Take
+the session-to-session percentage differences in that muscle’s usable exposures; their
+standard deviation is √2 × the typical error of one reading. The trend statistic compares
+the median of the last two exposures with the median of the two before, so its own standard
+error is that typical error again:
+
+    MDC95 = 1.96 × TE = 1.96 × SD(differences) / √2 ≈ 1.386 × SD(differences)
+
+A ±2% alternating lift comes out at **2.96%**, not 1% — three times the old bar, and the
+difference between a verdict and a coin toss.
+
+**Bounded, and never silent about being a fallback.** Eight usable exposures is the least
+it is computed from; under that the published figures stand and the result says
+`personal: false`. The MDC is clamped to 0.75–4.0% because four near-identical readings can
+produce 0.2% (chasing rounding error) and one bad week can produce 12% (ignoring a real
+collapse) — both are the estimator being asked for more than the data holds. The fall that
+counts as overreaching is the same figure read downwards, clamped to 1.5–6.0%, because a
+drop is the reading the app acts on hardest. One noise figure, not two independent
+judgements.
+
+It is a calibration, so it respects the same switch calibration does (`lmNoCal`). And it is
+said out loud: the landmark explainer prints the person’s own session-to-session scatter,
+the two thresholds it produced, how many readings they came from, and whether the figure
+had to be held inside the bounds — or, for a thin log, that the general figures are
+standing in and roughly when that changes.
+
+Covered by `tests/specs/trendnoise.mjs` (26 checks), including the arithmetic computed
+independently of the implementation, both bounds, the switch, and the ladder behaving
+unchanged on the published figures.
+
+## 5D. THE SIMULATION STUDY: 1,000 LIFTERS PER SCENARIO, TWO YEARS EACH
+
+`tests/sim/volume-sim.mjs`. Five populations, 1,000 synthetic lifters each, 24 four-week
+cycles, seeded so a run is reproducible. Each lifter has a true personal optimum, a true
+measurement noise and a true responsiveness that the app cannot see. Three policies are run
+on **the same lifters and the same noise draws**:
+
+- **oracle** — trained at their true optimum from cycle one. Nobody can do this; it is the
+  ceiling the others are scored against.
+- **fixed** — the 54.1 rule: responding at +1%, going backwards at −2%, for everybody.
+- **mdc** — the 55.1 rule: both thresholds measured from that lifter’s own scatter.
+
+It runs **in the page**, calling `decideForMuscle()`, `volGrowthAt()`, `volStartTarget()`
+and the real MDC bounds. Only the world is synthetic. A simulation of a reimplementation
+would prove nothing about what ships.
+
+### Results (n = 1,000, 24 cycles, seed 26)
+
+| scenario | policy | % of oracle | overreached blocks | below floor | false alarms | cycles to ±10% | reached ±10% |
+|---|---|---|---|---|---|---|---|
+| typical | fixed | 89.0% | 51.7% | 0% | 0.35% | 6.0 | 98.2% |
+| typical | **mdc** | **89.2%** | **50.4%** | 0% | **0.31%** | 6.1 | **98.6%** |
+| noisy | fixed | 88.6% | 41.5% | 0% | 1.94% | 6.8 | 96.3% |
+| noisy | **mdc** | **88.7%** | **41.4%** | 0% | **1.37%** | 7.0 | 96.3% |
+| steady | fixed | 88.9% | 58.2% | 0% | 0.18% | 5.3 | 98.5% |
+| steady | **mdc** | 88.9% | 58.7% | 0% | 0.20% | 5.3 | **98.7%** |
+| low-ceiling | fixed | 76.6% | 76.6% | 0% | 0.52% | 7.8 | 96.7% |
+| low-ceiling | **mdc** | **77.0%** | **75.1%** | 0% | **0.45%** | 7.8 | 96.3% |
+| high-ceiling | fixed | 76.1% | 3.0% | 0% | 0.65% | 17.2 | 56.5% |
+| high-ceiling | **mdc** | 75.8% | **2.7%** | 0% | **0.59%** | 17.5 | 54.8% |
+
+**Verdict: ship.** The measured rule matches or beats the fixed one in every scenario on
+the three gates set in the brief (growth, overreached blocks, false alarms). Re-run on a
+different seed (`--n=600 --seed=991`) for the same verdict, so it is not seed luck.
+
+**And it is a modest win, not a dramatic one.** Worth saying plainly, because the table is
+easy to oversell:
+
+- **Growth is effectively a wash** — ±0.4% of oracle in every scenario. The dose-finding
+  ladder was already doing most of the work; the threshold was never the binding
+  constraint on growth.
+- **The real gain is in false alarms for noisy lifters: 1.94% → 1.37%, a 29% reduction.**
+  That is exactly what MDC was introduced for, and it is the only place the effect is
+  large. For steady lifters it is a rounding error in the other direction (0.18% → 0.20%),
+  which is the price of a bar that can also be *tighter* than −2%.
+- **Overreached blocks fall slightly** in three of five scenarios and rise slightly in one.
+
+### What the simulation changed about the design
+
+**It killed the "one noise figure, read both ways" idea.** The first version used the same
+MDC for the rise and the fall, which read as the clean answer. The simulation said noisy
+lifters then spent *more* of their blocks overreached than under the old flat −2% — a wider
+bar confirms a real decline a cycle or two later, and those are cycles spent past their own
+limit. The fix is in the code and the reasoning is in the comment: a decline must show in
+**two consecutive cycles** before the verdict fires, and two independent draws buy back a
+factor of √2, so the per-cycle bar can be that much tighter at the same false-alarm rate.
+`TREND_DECLINE_MAX` came down from 6.0 to 3.0 at the same time, because with the √2 the
+old bound was unreachable and so was not a bound.
+
+### A finding the simulation surfaced that is NOT fixed
+
+**High-ceiling lifters are not reached in two years.** Only ~55% of lifters whose true
+optimum is 24–40 sets get within 10% of it inside 24 cycles, under either policy, and both
+end ~76% of oracle. The cause is not the threshold — it is the step size: one set per cycle
+cannot climb from a starting target of ~14 to an optimum of 32 inside two years, and
+`ADD_SETS_MAX` of 2 is only reached in a cycle that already said "responding".
+
+This is a real shortfall and it is **deliberately left alone here.** Making the climb
+accelerate while a lifter keeps responding is a change to progression behaviour, not to the
+volume model, and it should be designed and simulated on its own rather than slipped in
+under a threshold change. It is the first thing in §6.
+
+## 5E. THE 360-COMBINATION RE-MEASUREMENT, AGAINST THE NEW BANDS
+
+`tools/science/band-sweep.mjs`. Every plan the builder can produce — 5 day counts × 4 gear
+sets × 3 levels × 2 goals × 3 time budgets — counted three ways per muscle: this app’s
+graded shares, the paper’s own 1 / 0.5 / 0 count, and where the paper count lands on the
+bands from §5A. All 360 build; nothing throws.
+
+| muscle | app sets | paper sets | band | under floor | in target | past the evidence |
+|---|---|---|---|---|---|---|
+| Traps | 10.5 | 11.0 | target | 3.6% | 46.9% | 0% |
+| Mid Back | 11.1 | 11.0 | target | 1.1% | 61.9% | 0% |
+| Chest | 10.0 | 10.0 | target | 1.4% | 48.6% | 0% |
+| Quads | 9.0 | 9.0 | building | 4.4% | 48.1% | 0% |
+| Biceps | 8.3 | 8.5 | building | 5.3% | 32.5% | 0% |
+| Triceps | 8.1 | 8.5 | building | 10.6% | 31.7% | 0% |
+| Lats | 9.5 | 8.0 | building | 1.1% | 30.6% | 0% |
+| Side Delts | 7.8 | 7.5 | building | 8.9% | 23.1% | 0% |
+| Rear Delts | 8.1 | 7.5 | building | 19.4% | 30.8% | 0% |
+| Glutes | 9.6 | 7.0 | building | 5.0% | 17.2% | 0% |
+| Hamstrings | 8.8 | 7.0 | building | 8.9% | 24.7% | 0% |
+| Calves | 7.8 | 7.0 | building | 13.9% | 16.7% | 0% |
+| Lower Back | 5.7 | 6.5 | building | 5.6% | 3.1% | 0% |
+| Abs | 7.0 | 6.0 | building | 18.9% | 17.2% | 0% |
+
+Held out of the pass/fail counts and reported separately: Neck, Front Delts and Adductors
+(optional), Forearms and Obliques (§3.3 — they score zero paper sets in every plan, which is
+itself the finding).
+
+### Three things this says, and one of them settles an argument
+
+**1. NO PLAN THE BUILDER PRODUCES IS EVER OVER A CEILING. Not one, for any muscle, in any
+of the 360.** The "past the evidence" column is zero all the way down, and the band totals
+across every muscle × plan put 50 readings in "earning" and none beyond it.
+
+This is the answer to the bug that started all of this. A user’s volume sheet was telling
+them the glutes were over their limit on a plan the builder itself had just produced, and
+the explanation is in the first two numeric columns: the glutes read **9.6 app sets and 7.0
+paper sets** on the median plan. The gap is partial credit from compound lifts. The plan was
+never over anything — the counting was. §3 and §4 are what fix it; this is the measurement
+that shows the fix is complete rather than merely plausible.
+
+**2. The builder systematically lands BELOW the target band, not above it.** Only three
+muscles have a median in 10–18 at all, and most sit in 4–9 — above the floor, under the
+target. "In target" is 3% to 62% depending on the muscle. That is the opposite of the
+problem the volume sheet was reporting, and it is worth knowing before anybody tunes the
+builder to produce less.
+
+**3. The 25.6% of plans with a muscle under the floor are a time problem, not a model
+problem.** 268 of 360 plans have every muscle it cares about at or above 4 paper sets.
+Where the rest are:
+
+| | clean |
+|---|---|
+| 2 days a week | 4 of 72 |
+| 3 days | 52 of 72 |
+| 4 days | 68 of 72 |
+| 5 days | 72 of 72 |
+| 6 days | 72 of 72 |
+| 45 minutes | 72 of 120 |
+| 75 minutes | 100 of 120 |
+
+Gear barely matters (23/22/24/23 problem plans across full, dumbbell, home and minimal —
+i.e. none of them). **Days a week is nearly the whole effect**, and 2 days is nearly all of
+it. A fortnightly-ish full-body plan at 45 minutes cannot give fourteen muscles four hard
+sets each; no model can make it. The honest response is for the builder to say so, which is
+what the plan check already does, rather than for the floor to be lowered until the plan
+passes.
+
 ## 6. Still to do
 
-Everything in Parts 3–7 of the brief: the dose-response curve and the landmarks derived
-from it, the measured counting correction, the bounded adjustment chain, per-user dose
-finding with noise thresholds from real logs, the simulation study against an oracle, the
-existing-user migration, the 360-combination re-measurement, and the tests.
+1. **The climb rate for high-ceiling lifters** (§5D). Measured, specified, not implemented.
+   The only item from Parts 1–7 of the brief that is deliberately left undone, and §5D says
+   why: it is a change to progression, not to the volume model, and it deserves its own
+   design and its own simulation rather than being slipped in under a threshold change.
 
-All of it waits on §0.
+The plain-English version of all of this, for deciding whether to ship it, is
+`docs/volume-model-summary.md`.
+
+Done: the curve and the landmarks derived from it (§1, §5A), the measured counting basis
+and the paper’s own counting rule (§2, §3), the bounded adjustment chain (§4), the
+existing-user migration (§5B), per-user dose finding with measured noise thresholds
+(§5C), the simulation study (§5D), and the 360-combination re-measurement (§5E).
 
 ## 7. Open questions
 

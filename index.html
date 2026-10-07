@@ -6865,7 +6865,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "54.1";
+const APP_VERSION = "55.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20034,6 +20034,83 @@ function muscleTrend(g, opts){
           recent, before, lifts: (opts && opts.lifts) || indexLifts(g)};
 }
 
+/* HOW BIG A CHANGE HAS TO BE BEFORE IT IS A CHANGE: MDC95, FROM THE USER'S OWN LOG.
+
+   The two thresholds below (+1%, −2%) are a coaching judgement applied to everybody, and
+   for a lot of people they are the wrong size. An e1RM estimated off a top set carries
+   measurement noise — sleep, caffeine, a rounder bar, a rep called at 8 that was really a
+   9 — and how much noise it carries is a fact about that person and that lift, not about
+   lifting. Somebody whose bench e1RM wobbles ±4% session to session will be told they are
+   "responding" by a +1% rule roughly as often as a coin lands heads, and somebody whose
+   readings are rock steady at ±0.6% will be told "no call" when a real 1.5% gain has
+   happened.
+
+   MINIMAL DETECTABLE CHANGE is the standard answer to this question, and it needs nothing
+   the app does not already have. Take the session-to-session percentage differences in a
+   muscle's usable exposures; their standard deviation is √2 × the typical error of one
+   reading. The trend statistic compares the median of the last two exposures with the
+   median of the two before, so its own standard error is that typical error again, and
+
+       MDC95 = 1.96 × TE = 1.96 × SD(differences) / √2 ≈ 1.386 × SD(differences)
+
+   Below that, a move is indistinguishable from the person’s own noise, and calling it
+   either way is guessing with a number attached.
+
+   BOUNDED, AND NEVER SILENT ABOUT BEING A FALLBACK. Eight usable exposures is the least
+   this is worth computing from; under that the population figures stand, and the result
+   says so. The bounds exist because a log with four near-identical readings can produce an
+   MDC of 0.2%, which would have the app chasing rounding error, and one bad week can
+   produce 12%, which would have it ignoring a real collapse. Both are the estimator being
+   asked for more than the data holds. */
+const TREND_NOISE_MIN_N   = 8;     // usable exposures before a personal figure is used
+const TREND_MDC_MIN       = 0.75;  // %; below this we are measuring the rounding
+const TREND_MDC_MAX       = 4.0;   // %; above this the estimate has stopped being useful
+const TREND_DECLINE_MIN   = 1.5;   // %; a fall smaller than this is never an overreach
+const TREND_DECLINE_MAX   = 3.0;   // %; and a bigger bar than this would hide a collapse
+function trendNoise(g, opts){
+  const usable = muscleExposures(g, opts).filter(x=> !x.skip.length && x.v > 0);
+  const diffs = [];
+  for(let i = 1; i < usable.length; i++){
+    const a = usable[i - 1].v, b = usable[i].v;
+    if(a > 0 && b > 0) diffs.push((b - a) / a * 100);
+  }
+  const base = {up: RESPOND_TREND_PCT, down: DECLINE_TREND_PCT,
+                n: usable.length, personal: false, mdc: null, sd: null};
+  if(usable.length < TREND_NOISE_MIN_N || diffs.length < TREND_NOISE_MIN_N - 1) return base;
+  const mean = diffs.reduce((a, c)=> a + c, 0) / diffs.length;
+  const sd = Math.sqrt(diffs.reduce((a, c)=> a + (c - mean) * (c - mean), 0) / (diffs.length - 1));
+  if(!(sd > 0)) return base;
+  let mdc = 1.96 * sd / Math.SQRT2;
+  const clamped = mdc < TREND_MDC_MIN || mdc > TREND_MDC_MAX;
+  mdc = Math.max(TREND_MDC_MIN, Math.min(TREND_MDC_MAX, mdc));
+  /* THE FALL THAT COUNTS AS OVERREACHING IS A TIGHTER BAR THAN THE RISE, and the
+     simulation is why. Reading the same MDC downwards looked like the clean answer —
+     one noise figure, not two judgements — and tests/sim/volume-sim.mjs said it left
+     noisy lifters overreached for MORE of their blocks than the old flat −2% did: a
+     wider bar means a real decline is confirmed a cycle or two later, and those are
+     cycles spent past their own limit.
+
+     But a decline is not judged on one reading. It has to show up in two consecutive
+     cycles before the verdict fires, and two independent draws buy back a factor of
+     √2 of noise — so the per-cycle bar can be that much tighter and carry the same
+     false alarm rate. That is where the √2 comes from; it is not a fudge factor. */
+  const down = -Math.max(TREND_DECLINE_MIN,
+                          Math.min(TREND_DECLINE_MAX, mdc / Math.SQRT2));
+  return {up: Math.round(mdc * 100) / 100, down: Math.round(down * 100) / 100,
+          n: usable.length, personal: true, clamped,
+          mdc: Math.round(mdc * 100) / 100, sd: Math.round(sd * 100) / 100};
+}
+/* What the decision actually uses. Separate so a caller can pass thresholds in — which is
+   how this is tested, and how the simulation runs a thousand lifters through the same
+   ladder without touching S. */
+function trendThresholds(g, opts){
+  if(trainPrefs().lmNoCal === true) return {up: RESPOND_TREND_PCT, down: DECLINE_TREND_PCT,
+                                            personal: false, n: 0, mdc: null, sd: null};
+  try{ return trendNoise(g, opts); }
+  catch(e){ return {up: RESPOND_TREND_PCT, down: DECLINE_TREND_PCT,
+                    personal: false, n: 0, mdc: null, sd: null}; }
+}
+
 /* B4 THE DECISION, ONCE PER CYCLE, PER MUSCLE.
 
    Three outcomes, and the thresholds are all named because none of them is a measured
@@ -20160,11 +20237,17 @@ function decideForMuscle(g, cycle){
   /* cycle: {V, trendPct, sore, joint, prev} — assembled by cycleReview() so this stays
      a pure decision and can be tested on made-up numbers. */
   const {V, trendPct, sore, joint, prev, soreBy} = cycle;
+  /* THE BAR IS THIS PERSON'S OWN NOISE WHERE THERE IS ENOUGH LOG TO MEASURE IT, and the
+     population figures otherwise. Passed in on the cycle rather than read from S, so the
+     decision stays pure and the same ladder can be run on made-up lifters. */
+  const thr = cycle.thr || {up: RESPOND_TREND_PCT, down: DECLINE_TREND_PCT, personal: false};
+  const UP = (thr.up > 0) ? thr.up : RESPOND_TREND_PCT;
+  const DOWN = (thr.down < 0) ? thr.down : DECLINE_TREND_PCT;
   const soreBad  = sore != null && sore >= SORE_OVER;
   const soreOk   = sore == null || sore <= SORE_OK;
   const jointBad = joint != null && joint >= JOINT_OVER;
-  const fell     = trendPct != null && trendPct <= DECLINE_TREND_PCT;
-  const fellBefore = prev && prev.trendPct != null && prev.trendPct <= DECLINE_TREND_PCT;
+  const fell     = trendPct != null && trendPct <= DOWN;
+  const fellBefore = prev && prev.trendPct != null && prev.trendPct <= DOWN;
   const soreBefore = prev && prev.sore != null && prev.sore >= SORE_OVER;
 
   if((fell && fellBefore) || (soreBad && soreBefore) || jointBad){
@@ -20175,31 +20258,35 @@ function decideForMuscle(g, cycle){
          next session, and somebody reading this deserves to know which. */
       : soreBy === SORE_BY_PEAK ? "still sore when the recovery window was up, two cycles running"
       : "real soreness two cycles running";
-    return {k:"over", V, why,
+    return {k:"over", V, why, thr,
             observe:{mrv:V},
             cut: CUT_SETS_OVER,
             say:"Overreached — " + why + " at about " + r1(V) + " sets a week"};
   }
-  if(trendPct != null && trendPct >= RESPOND_TREND_PCT && soreOk && !jointBad){
-    return {k:"up", V, why:"the lift is still climbing at this volume",
+  if(trendPct != null && trendPct >= UP && soreOk && !jointBad){
+    return {k:"up", V, why:"the lift is still climbing at this volume", thr,
             add: ADD_SETS_PER_CYCLE, max: ADD_SETS_MAX,
             say:"Responding — up " + r1(trendPct) + "% at about " + r1(V) + " sets a week"};
   }
-  if(trendPct != null && trendPct > DECLINE_TREND_PCT && trendPct < RESPOND_TREND_PCT && soreOk){
+  if(trendPct != null && trendPct > DOWN && trendPct < UP && soreOk){
     /* HOLD, and after two of them a single probe. A plateau at a volume that is not
        costing you anything is the one case where the honest move is to find out, and
        the probe is reversible by design: one cycle, one set, and it goes back if the
        answer is no. */
     const held = (prev && prev.k === "hold" ? (prev.heldFor || 1) : 0) + 1;
     const probe = held >= HOLD_CYCLES_BEFORE_PROBE;
-    return {k:"hold", V, heldFor: held, probe,
+    return {k:"hold", V, heldFor: held, probe, thr,
             why: probe ? "flat for two cycles, so worth one more set to find out"
                        : "flat, and not costing you anything",
             add: probe ? ADD_SETS_PER_CYCLE : 0,
             say: probe ? "Flat twice — try one more set and see"
                        : "Holding at about " + r1(V) + " sets a week"};
   }
-  return {k:"unclear", V, why: trendPct == null ? "not enough usable exposures yet" : "mixed signals",
+  return {k:"unclear", V, thr,
+          why: trendPct == null ? "not enough usable exposures yet"
+             : thr.personal ? "the lift moved less than your own week-to-week noise ("
+                              + r1(Math.abs(DOWN)) + "% either way), so there is nothing to read"
+             : "mixed signals",
           say:"No call this cycle"};
 }
 
@@ -20417,6 +20504,16 @@ function runOneTimeSeeds(){
   try{
     if(!S.jointSeeded){ seedJointFromHurts(); dirty = true; }
   }catch(e){ S.jointSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
+  /* THE VOLUME MODEL MIGRATION RUNS HERE, FOR THE SAME REASON THE SEEDS DO: it reads
+     the landmark chain, which is declared thousands of lines below migrate()'s call
+     site. It is version-stamped rather than guarded by SEEDS_RUN, so a backup restored
+     from before the change is migrated on the load that adopts it, not skipped because
+     this tab had already run its seeds. */
+  try{
+    const r = volMigrate();
+    if(r){ S.volMigrated = {at: Date.now(), moved: r.moved, withdrawn: r.withdrawn}; dirty = true; }
+  }catch(e){ S.volModelVersion = VOL_MODEL_VERSION;
+             S.volMigrated = {at: Date.now(), failed: String((e && e.message) || e)}; dirty = true; }
   if(dirty) saveQuiet();
 }
 
@@ -20485,7 +20582,8 @@ function cycleReview(){
     const cur = cycles[cycles.length - 1];
     const prev = cycles[cycles.length - 2];
     const d = decideForMuscle(g, {V: cur.V, trendPct: cur.trendPct, sore: cur.sore,
-                                  joint: cur.joint, prev: {trendPct: prev.trendPct,
+                                  joint: cur.joint, thr: trendThresholds(g),
+                                  prev: {trendPct: prev.trendPct,
                                   sore: prev.sore, k: (prev.decision || {}).k}});
     if(d.k === "unclear") return;
     out.push(Object.assign({g, name: gName(g)}, d));
@@ -22834,8 +22932,11 @@ function seedCalibrationFromHistory(){
     const rated = (all.rpeSets || 0), un = (all.noRpe || 0);
     if(rated + un <= 0 || rated/(rated + un) < SEED_MIN_RPE_SHARE) return;
     const chain = (A.lm && A.lm[g]) ? A.lm[g] : adjustedLandmarks(A, g);
-    const responding = cycles.filter(c=> c.trendPct != null && c.trendPct >= RESPOND_TREND_PCT);
-    const over = cycles.filter(c=> (c.trendPct != null && c.trendPct <= DECLINE_TREND_PCT)
+    /* The same personal bar the live decision uses, so the figure seeded from history and
+       the figure learned from here on are measured against one thing. */
+    const thr = trendThresholds(g);
+    const responding = cycles.filter(c=> c.trendPct != null && c.trendPct >= thr.up);
+    const over = cycles.filter(c=> (c.trendPct != null && c.trendPct <= thr.down)
                                 || (c.sore != null && c.sore >= SORE_OVER));
     if(over.length){
       const firstOver = cycles.indexOf(over[0]);
@@ -22873,6 +22974,195 @@ function seedCalibrationFromHistory(){
    accruing quietly, so turning it back on restores everything it had worked out. Kept for
    one release, as the plan for this rework said it should be. */
 function calibrationOff(){ return trainPrefs().lmNoCal === true; }
+/* =====================================================================
+   CARRYING EXISTING USERS ACROSS, WITHOUT MOVING THEIR NUMBERS
+
+   The adjustment chain is now bounded (volClampAdj), which narrows the extremes. For most
+   people nothing moves. For somebody who was sitting at one of those extremes the chain
+   value changes — and their stored calibration is a RATIO to the old chain value, so if
+   the chain moves and the ratio does not, their learned ceiling in SETS moves with it.
+   That is exactly the "changed behind your back" this migration exists to prevent.
+
+   So the migration re-bases: it records what each landmark came out as before, recomputes
+   after, and rewrites the stored ratio so the product — the number of sets the person
+   actually sees — is unchanged. Their learned position is preserved in the units they
+   care about.
+
+   WHAT IT DOES NOT TOUCH. Manual landmarks (lmFloor/lmMav/lmMrv), the overall scale
+   (lmScale), and the programme itself are left exactly as they are. A plan is never
+   rewritten; the plan check simply reports against the new numbers and the person decides.
+
+   IDEMPOTENT, AND SAFE ON AN OLD BACKUP. Stamped with S.volModelVersion. Running it twice
+   changes nothing, because the second run finds the stamp and returns. A backup restored
+   from before the change arrives without the stamp and is migrated on load, which is the
+   behaviour that makes a two-device account safe: whichever device is newer migrates, and
+   a device still on the old build writes no stamp and so cannot un-migrate anything. */
+const VOL_MODEL_VERSION = 1;
+
+function volMigrate(){
+  if(S.volModelVersion >= VOL_MODEL_VERSION) return null;
+
+  /* What the chain produced BEFORE, read with the clamp disabled so the comparison is
+     against the numbers this user was actually being shown. */
+  const before = {};
+  VOL_MIGRATION_BYPASS = true;
+  try{
+    const A = (()=>{ try{ return bodyAnalysis(); }catch(e){ return null; } })();
+    GKEYS.forEach(g=>{
+      if(!A) return;
+      try{ const L = adjustedLandmarks(A, g); before[g] = {mev: L.mev, mav: L.mav, mrv: L.mrv}; }
+      catch(e){}
+    });
+  } finally { VOL_MIGRATION_BYPASS = false; }
+
+  /* And after. Where they differ, the stored ratio absorbs the difference so the figure
+     in sets is unchanged. Only a muscle with a stored calibration can be re-based — one
+     without has no learned position to preserve, and simply gets the new prior. */
+  const moved = [];
+  if(S.lmCal && typeof S.lmCal === "object"){
+    const A = (()=>{ try{ return bodyAnalysis(); }catch(e){ return null; } })();
+    GKEYS.forEach(g=>{
+      const c = S.lmCal[g], b4 = before[g];
+      if(!c || !b4 || !A) return;
+      let after;
+      try{ after = adjustedLandmarks(A, g); }catch(e){ return; }
+      ["mev", "mav", "mrv"].forEach(k=>{
+        const was = b4[k], now = after[k];
+        if(!(was > 0) || !(now > 0)) return;
+        if(Math.abs(was - now) < 0.05) return;
+        const prev = (typeof c[k] === "number" && c[k] > 0) ? c[k] : 1;
+        c[k] = prev * (was / now);
+        if(k === "mrv") moved.push({g, was: Math.round(was * 10) / 10,
+                                    now: Math.round(now * 10) / 10});
+      });
+    });
+  }
+
+  /* TRAINING AGE, REPAIRED. A profile with no priorTrainingWeeks reverts to beginner on
+     the next session, which then moves every landmark it touches. Filled from whatever
+     the person already told the app, in the order of how directly they said it. */
+  if(!(S.priorTrainingWeeks > 0) && !(()=>{
+        try{ return priorTrainingAskDue(); }catch(e){ return false; } })()){
+    /* NOTHING IS FILLED IN WHILE THE QUESTION IS STILL GOING TO BE ASKED.
+
+       A3 made training age something the app asks about rather than infers, and
+       priorTrainingAskDue() is the one place that decides whether the ask is still
+       coming. Anything written here would satisfy it and cancel the question \u2014 an
+       old self-reported "intermediate" from onboarding, or a count off the log, standing
+       in for an answer nobody has given yet. So the repair only runs for the people the
+       question will never reach: those who were asked and declined, and those who are
+       past the point where it is offered. */
+    const lvl = (S.expManual)
+      || (S.setup && S.setup.level)
+      || (S.builtPlan && S.builtPlan.answers && S.builtPlan.answers.level)
+      || (S.importMeta && S.importMeta.level);
+    const WEEKS = {beginner: 26, intermediate: 104, advanced: 260};
+    if(lvl && WEEKS[lvl]) S.priorTrainingWeeks = WEEKS[lvl];
+    else {
+      /* ONLY ONCE THE QUESTION HAS ALREADY BEEN PUT. A3 exists because training age is
+         something to ASK about rather than infer, and filling it in from the log here
+         would satisfy priorTrainingAskDue() and quietly cancel the question for everybody
+         who had not yet been asked \u2014 a guess standing in for an answer, which is the
+         exact mistake A3 was written to stop. Somebody who was asked and declined to say
+         is different: they have answered, so the log is the best thing left.
+
+         Count what the app watched: weeks between the first logged session and the last.
+         Never a reason to call somebody a beginner who is not. */
+      const ss = (S.sessions || []).filter(x=> x && x.startedAt).sort((a, c)=> a.startedAt - c.startedAt);
+      if(ss.length >= 2){
+        const wk = Math.round((ss[ss.length - 1].startedAt - ss[0].startedAt) / (7 * DAY_MS));
+        if(wk > 0) S.priorTrainingWeeks = wk;
+      }
+    }
+  }
+
+  /* A BLOCK ALREADY UNDER WAY KEEPS THE FIGURES IT WAS PLANNED AGAINST. Snapshotted
+     only when there is a block to protect \u2014 somebody who has not started one has
+     nothing to hold, and an empty hold would just be a stale object to reason about. */
+  if(S.blockStart > 0 && (S.sessions || []).some(x=> x && x.startedAt >= S.blockStart)){
+    const lm = {};
+    GKEYS.forEach(g=>{ if(before[g]) lm[g] = before[g]; });
+    if(Object.keys(lm).length) S.volHold = {blockStart: S.blockStart, lm, at: Date.now()};
+  }
+
+  /* WHERE THE APP NOW DISAGREES WITH A NUMBER THE PERSON SET THEMSELVES, by more than a
+     quarter, that is worth one note \u2014 and nothing more than a note. A hand-set
+     landmark is an instruction, not an estimate, so it is never overwritten; but somebody
+     who typed 30 when the model now reads 20 deserves to be told the two have parted
+     company rather than find out from a plan check that reads oddly.
+
+     Measured by standing the overrides aside for the length of the read, which is the
+     only way to see what the chain would have said on its own. Restored in a finally,
+     because leaving somebody's hand-set ceiling blank would be a far worse bug than the
+     one this note is for. */
+  const disagree = [];
+  const KEYSTORE = {mev: "lmFloor", mav: "lmMav", mrv: "lmMrv"};
+  const stash = {};
+  Object.keys(KEYSTORE).forEach(k=>{ stash[k] = S[KEYSTORE[k]]; });
+  /* And the block hold stands aside too. It was just written, a few lines up, and it
+     returns the figures from BEFORE the change \u2014 comparing somebody\u2019s own number
+     against those would be comparing it to the old model, which is the opposite of the
+     question being asked. */
+  const heldStash = S.volHold;
+  const anyManual = Object.keys(KEYSTORE).some(k=>
+    stash[k] && typeof stash[k] === "object" && Object.keys(stash[k]).length);
+  if(anyManual){
+    try{
+      Object.keys(KEYSTORE).forEach(k=>{ S[KEYSTORE[k]] = {}; });
+      S.volHold = null;
+      const A = (()=>{ try{ return bodyAnalysis(); }catch(e){ return null; } })();
+      if(A) GKEYS.forEach(g=>{
+        let L; try{ L = adjustedLandmarks(A, g); }catch(e){ return; }
+        Object.keys(KEYSTORE).forEach(k=>{
+          const mine = stash[k] && stash[k][g], est = L[k];
+          if(!(mine > 0) || !(est > 0)) return;
+          if(Math.abs(mine - est) / mine > 0.25)
+            disagree.push({g, k, mine: Math.round(mine * 10) / 10,
+                           est: Math.round(est * 10) / 10});
+        });
+      });
+    } finally {
+      Object.keys(KEYSTORE).forEach(k=>{ S[KEYSTORE[k]] = stash[k]; });
+      S.volHold = heldStash;
+    }
+  }
+  if(disagree.length){
+    const NM = {mev: "minimum", mav: "target", mrv: "limit"};
+    S.manualDisagreement = {at: Date.now(), v: VOL_MODEL_VERSION, items: disagree};
+    try{
+      logPlanChange("targets", null, "Your own numbers",
+        disagree.map(d=> ((GROUPS[d.g] && GROUPS[d.g].name) || d.g) + " "
+          + NM[d.k] + ": yours " + d.mine + ", the app now reads " + d.est),
+        {note: "Your figures were kept exactly as you set them. This is only to say that "
+          + "the app\u2019s own estimate has moved away from them, in case you want to "
+          + "look again."});
+    }catch(e){}
+  }
+
+  /* STALE WARNINGS THE NEW NUMBERS NO LONGER SUPPORT are withdrawn rather than deleted,
+     so the history still shows they were raised and why they stopped applying. */
+  let withdrawn = 0;
+  if(S.volAck && typeof S.volAck === "object"){
+    Object.keys(S.volAck).forEach(g=>{
+      const a = S.volAck[g];
+      if(a && a.state === "over"){ a.withdrawn = "targets update v" + VOL_MODEL_VERSION; withdrawn++; }
+    });
+  }
+
+  S.volModelVersion = VOL_MODEL_VERSION;
+  try{
+    logPlanChange("targets", null, "Volume targets",
+      ["Updated to volume model v" + VOL_MODEL_VERSION],
+      {note: "Targets rebuilt on the published dose-response curve. Your learned limits "
+        + "were carried over in sets, your own settings were left alone, and your plan was "
+        + "not changed."});
+  }catch(e){}
+  save();
+  return {moved, withdrawn};
+}
+/* Set while the migration measures the old chain, so volClampAdj can stand aside and let
+   it see the numbers the user was actually shown. */
+let VOL_MIGRATION_BYPASS = false;
 function landmarkCalibration(g){
   if(calibrationOff()) return {mev:1, mav:1, mrv:1, blocks:0, w:0, off:true};
   const c = (S.lmCal && S.lmCal[g]) || null;
@@ -22927,6 +23217,186 @@ function lmScale(){
   if(!isFinite(v) || v <= 0) return 1;
   return Math.max(LM_SCALE_MIN, Math.min(LM_SCALE_MAX, v));
 }
+/* =====================================================================
+   THE VOLUME MODEL — A DOSE-RESPONSE CURVE, NOT A TABLE OF OPINIONS
+
+   Everything below traces to docs/volume-science.md, which records what was read, what
+   was measured, and what was rejected. The short version:
+
+   Pelland, Remmert, Robinson, Hinson & Zourdos (2024/2025), 67 studies and 2,058
+   participants, fitted seven functional forms to weekly set volume against muscle growth
+   and selected between them by Bayes Factor. The square-root model won for hypertrophy.
+   Their published marginal-effects table gives the fitted curve at every integer set
+   count from 0 to 45, and that table is what this app uses — not an equation refitted to
+   it, so every number here traces to a published figure.
+
+   HOW THEY COUNTED, which is the part that matters most for this app. Every set was
+   classified direct or indirect and weighted three ways; the FRACTIONAL weighting —
+   indirect sets at half a set — beat both alternatives on every outcome, strongly. That
+   independently validates the partial credit this app already pays assisting muscles,
+   and it fixes the exchange rate at 0.5.
+
+   WHAT THE BANDS ARE. They are efficiency tiers: how many more sets buy one more
+   detectable increment of growth. They are NOT targets and they are NOT recovery limits,
+   and this file is careful not to present them as either. The personal limit is learned
+   per user from that user's own response; the bands only say what a volume buys on
+   average across a thousand people.                                                   */
+
+/* The smallest change the measurement can detect, from the paper. Every tier boundary is
+   "one more of these". [S] Pelland et al., derived from Steele et al.'s control-group
+   data: 124 strength studies and 69 hypertrophy studies. */
+const VOL_SDES_PCT = 2.05;
+
+/* THE CURVE. Control-adjusted marginal effects, % change in muscle size, at each weekly
+   fractional set count. Published in the supplementary materials
+   (osf.io/6z3xu, Primary Meta-Regressions / Weekly Volume / Hypertrophy, fractional).
+   Index is the set count; docs/data/pelland-hypertrophy-volume.json holds the same
+   numbers with their credible and prediction intervals. [S] */
+const VOL_CURVE_PCT = [
+  0.00, 0.74, 1.30, 1.78, 2.21, 2.60, 2.95, 3.29, 3.60, 3.90, 4.18,
+  4.45, 4.72, 4.97, 5.21, 5.45, 5.68, 5.90, 6.12, 6.33, 6.54,
+  6.74, 6.94, 7.14, 7.33, 7.52, 7.70, 7.88, 8.06, 8.24, 8.41,
+  8.58, 8.75, 8.92, 9.08, 9.24, 9.40, 9.56, 9.72, 9.87, 10.03,
+  10.18, 10.33, 10.47, 10.62, 10.77
+];
+/* Expected growth at a weekly volume, interpolated between published points. Past the
+   end of the table there is no evidence, so it returns the last value and the caller is
+   expected to say so rather than extrapolate. */
+function volGrowthAt(v){
+  if(!(v > 0)) return 0;
+  const last = VOL_CURVE_PCT.length - 1;
+  if(v >= last) return VOL_CURVE_PCT[last];
+  const i = Math.floor(v), f = v - i;
+  return VOL_CURVE_PCT[i] + (VOL_CURVE_PCT[i + 1] - VOL_CURVE_PCT[i]) * f;
+}
+
+/* THE BANDS, in the paper's own units. Floor is the minimum effective dose — the first
+   volume whose estimate clears the SDES, which re-derives from the curve above as
+   exactly 4, the paper's own figure. The rest are the efficiency tiers of its Table 2A. */
+const VOL_BANDS = {
+  /* [E] Bickel 2011: 3 sets a week held muscle size for 32 weeks in young adults, while
+     9 sets held it and added. The curve puts 3 sets below the detectable-growth
+     threshold and 9 well above it — two independent sources agreeing on where the floor
+     is, which is the strongest check in the document. */
+  maintain: 3,
+  floor:    4,     // minimum effective dose
+  knee:     10,    // end of the higher-efficiency tier: ~6 sets bought the last increment
+  useful:   18,    // end of the intermediate tier: ~8.5 sets for the next
+  expensive:29,    // end of the lower tier: ~10.75 sets for the next
+  thin:     42,    // end of the lowest tier: ~12.5 sets for the next
+  unknown:  43     // past here the paper reports insufficient data, or possibly less
+};
+
+/* COUNTING A SET THE WAY THE CURVE WAS FITTED.
+
+   The paper: direct if the muscle "was likely to be the primary force generator in the
+   exercise", indirect if "meaningfully trained but not the primary force generator (i.e.
+   synergist)". Checked against their Table 1A, which lists every exercise they
+   classified: all 17 pairs they call direct, this app pays exactly 1.00; all 15 they call
+   indirect, it pays 0.30 to 0.60. So the cut-off is theirs, not ours.
+
+   AND GRIP AND BRACING ARE NOT TRAINING. This app pays the forearms 0.35 for a barbell
+   row — the same range as real synergy — when what the forearms are doing is holding the
+   bar. "Meaningfully TRAINED" means through a range, so the three muscles whose
+   involvement in a compound is grip or bracing earn a set only when the movement is
+   actually for them. Nothing else is excluded: the trapezius keeps its half set in a row,
+   because the paper classified it that way. */
+const VOL_SYNERGIST_MIN = 0.3;
+const VOL_GRIP_OR_BRACE = ["forearms", "abs", "obliques"];
+function paperSetsFor(f, g){
+  if(!(f > 0)) return 0;
+  if(f >= 1) return 1;
+  if(VOL_GRIP_OR_BRACE.indexOf(g) > -1) return 0;
+  return f >= VOL_SYNERGIST_MIN ? 0.5 : 0;
+}
+/* A whole programme's weekly volume for one muscle, in the curve's units. */
+function paperWeeklyFor(program, dayIds, g){
+  let t = 0;
+  (dayIds || DAYS).forEach(wid=> (program[wid] || []).forEach(e=>{
+    const n = parseInt(e.sets, 10) || 0;
+    if(!n) return;
+    t += paperSetsFor(muscleFrac(e.name, g), g) * n;
+  }));
+  return Math.round(t * 10) / 10;
+}
+
+/* WHERE A VOLUME SITS, AND WHAT THE APP IS ENTITLED TO SAY ABOUT IT.
+
+   The ladder is deliberately shallow at the top. Above the band the app says the gain is
+   getting small, and past the end of the evidence it says there is no evidence — neither
+   of which is "you are doing too much". Only the user's own recovery signal makes it
+   that, which is volVerdict's business, not this function's. */
+function volBandOf(v){
+  if(v + 0.05 < VOL_BANDS.maintain) return "under";
+  if(v + 0.05 < VOL_BANDS.floor)    return "maintain";
+  if(v < VOL_BANDS.knee)            return "building";
+  if(v <= VOL_BANDS.useful)         return "target";
+  if(v <= VOL_BANDS.expensive)      return "earning";
+  if(v <= VOL_BANDS.thin)           return "thin";
+  return "unknown";
+}
+
+/* THE STARTING TARGET.
+
+   [M] Scarpelli 2022, within-subject, 16 trained lifters, one leg each: 1.2x the sets
+   that person's own training log recorded beat a standardised 22 sets a week — more
+   growth, and more individuals clearing the measurement error. A population number, even
+   one chosen from the middle of the efficiency band, lost to reading the person's logs.
+
+   So the user's own recent volume leads, plus up to a fifth, clamped into the band. With
+   no history to read it falls back to a position inside the intermediate tier chosen by
+   training level and by how much time there is — which is the only place training status
+   enters, because there is no trained-only curve that can responsibly be used (see
+   docs/volume-science.md 5A.1). */
+/* HOW FAR THE ADJUSTMENTS MAY COMBINE.
+
+   Every step in adjustedLandmarks is defensible on its own and nothing bounded their
+   product. Measured at both extremes (tools/science/multiplier-bounds.mjs), an MRV could
+   fall to 0.37x its base or rise to 2.43x — a span of 6.6x between two states a real
+   person could be in, producing a worst-case floor of 1.1 sets a week for the forearms
+   and a best-case trap ceiling of 54.5, past the hard calibration cap of 35 the app
+   already imposes elsewhere.
+
+   The recovery-related factors are now clamped as a product. The range is stated rather
+   than derived, because there is no evidence that prices a stack of recovery modifiers;
+   what the evidence does say is that the underlying curve is one curve, so a person's
+   band should not move by more than a fifth either way before their own logged response
+   has earned it. Calibration is deliberately OUTSIDE this clamp: it is the one factor
+   measured from the person rather than inferred about them. [P] */
+const VOL_ADJ_MIN = 0.80;
+const VOL_ADJ_MAX = 1.20;
+function volClampAdj(x){
+  if(!isFinite(x) || !(x > 0)) return 1;
+  /* The migration needs to see what the chain produced BEFORE the clamp existed, so it
+     can re-base each user's learned ratios against it. Nothing else ever sets this. */
+  if(typeof VOL_MIGRATION_BYPASS !== "undefined" && VOL_MIGRATION_BYPASS) return x;
+  return Math.max(VOL_ADJ_MIN, Math.min(VOL_ADJ_MAX, x));
+}
+const VOL_OWN_STEP = 1.2;
+function volStartTarget(opts){
+  const o = opts || {};
+  const own = o.own > 0 ? o.own : 0;
+  if(own > 0){
+    const want = own * VOL_OWN_STEP;
+    return Math.max(VOL_BANDS.floor, Math.min(VOL_BANDS.expensive, Math.round(want * 10) / 10));
+  }
+  const lvl = o.level === "advanced" ? 1 : o.level === "beginner" ? 0 : 0.5;
+  const span = VOL_BANDS.useful - VOL_BANDS.knee;
+  let v = VOL_BANDS.knee + span * lvl;
+  /* Time is a real constraint and pretending otherwise writes plans nobody finishes. */
+  if(o.tight) v = Math.max(VOL_BANDS.floor, v * 0.75);
+  return Math.round(v * 10) / 10;
+}
+/* The snapshot the migration leaves behind, valid only for the block it was taken in.
+   Read, never written, from inside the landmark chain: a getter that saves would write
+   on every render. Expiry is by comparison rather than deletion for the same reason. */
+function volHoldFor(g){
+  const h = S.volHold;
+  if(!h || !h.lm) return null;
+  if(h.blockStart !== (S.blockStart || 0)) return null;
+  const v = h.lm[g];
+  return (v && (v.mev > 0 || v.mav > 0 || v.mrv > 0)) ? v : null;
+}
 function adjustedLandmarks(A, g){
   const G = GROUPS[g];
   const exp = experience();
@@ -22944,6 +23414,10 @@ function adjustedLandmarks(A, g){
     why.push({k:"Training for", v:(GOALS[goal] || {}).name || goal, note:gs.note});
   }
 
+  /* The recovery-side factors accumulate here and are applied once, clamped, rather than
+     multiplying into mrv as they are discovered. Experience and goal are NOT in this
+     product: they say which band this person is on, not how much recovery they have. */
+  let rAdj = 1;
   const o = A.wk[g] || {};
   /* 2 - FREQUENCY, counted in days that actually trained it (see windowStats).
 
@@ -22953,8 +23427,8 @@ function adjustedLandmarks(A, g){
      weekly volume is held equal. RECOVERY is a different claim and the evidence for it
      is not in that finding, so the MRV adjustments stay. */
   const freq = o.effDays != null ? o.effDays : (o.days || 0);
-  if(freq >= 3){ mrv *= 1.15; why.push({k:"Frequency", v:freq+" days", note:"spreading volume over 3+ sessions raises what you can recover from. It does not raise how much you grow \u2014 with weekly volume equal, frequency has no consistent effect on growth"}); }
-  else if(freq === 1 && o.eff > 0){ mrv *= 0.90; why.push({k:"Frequency", v:"1 day", note:"one big session a week is harder to recover from than the same volume split up"}); }
+  if(freq >= 3){ rAdj *= 1.15; why.push({k:"Frequency", v:freq+" days", note:"spreading volume over 3+ sessions raises what you can recover from. It does not raise how much you grow \u2014 with weekly volume equal, frequency has no consistent effect on growth"}); }
+  else if(freq === 1 && o.eff > 0){ rAdj *= 0.90; why.push({k:"Frequency", v:"1 day", note:"one big session a week is harder to recover from than the same volume split up"}); }
   else if(freq === 2){ why.push({k:"Frequency", v:"2 days", note:"a solid default, no adjustment"}); }
 
   /* 3 - INTENSITY. Effort is now discounted set by set in setEffective(), so the easy-
@@ -22964,7 +23438,7 @@ function adjustedLandmarks(A, g){
      credit does NOT make \u2014 that sets taken to the edge cost more to recover from. */
   const rpe = o.rpeAvg;
   if(rpe > 0){
-    if(rpe >= 9.2){ mrv *= 0.85; why.push({k:"Intensity", v:"RPE "+r1(rpe), note:"training this close to failure costs a lot more recovery. It does not change the floor \u2014 effort is already counted set by set"}); }
+    if(rpe >= 9.2){ rAdj *= 0.85; why.push({k:"Intensity", v:"RPE "+r1(rpe), note:"training this close to failure costs a lot more recovery. It does not change the floor \u2014 effort is already counted set by set"}); }
     else why.push({k:"Intensity", v:"RPE "+r1(rpe), note:"no adjustment; effort is counted per set instead"});
   }
 
@@ -22982,15 +23456,15 @@ function adjustedLandmarks(A, g){
     if(comp > 0.6 && alwaysCompound){
       why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"nearly all of this muscle's work comes from compounds whatever you do, which is already allowed for in its range rather than charged for twice"});
     }
-    else if(comp > 0.6){ mrv *= 0.90; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"compound lifts carry systemic fatigue that isolation work does not"}); }
-    else if(comp < 0.3){ mrv *= 1.08; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"isolation-heavy work is cheaper to recover from, so you can tolerate more"}); }
+    else if(comp > 0.6){ rAdj *= 0.90; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"compound lifts carry systemic fatigue that isolation work does not"}); }
+    else if(comp < 0.3){ rAdj *= 1.08; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"isolation-heavy work is cheaper to recover from, so you can tolerate more"}); }
     else why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"a balanced mix, no adjustment"});
   }
 
   // 5 - recovery: sleep from the morning sheet, energy from the start of a session
   const mod = A.modInfo.mod;
   if(mod !== 0){
-    mrv *= (1 + mod/100 * 0.7);
+    rAdj *= (1 + mod/100 * 0.7);
     mav *= (1 + mod/100 * 0.4);
     why.push({k:"Recovery", v:(mod>0?"+":"")+mod, note: mod<0
       ? "short sleep or low energy lowers what you can recover from"
@@ -23033,6 +23507,27 @@ function adjustedLandmarks(A, g){
      is what makes "this one number is wrong" say exactly that rather than being quietly
      re-scaled afterwards. Everything above still runs either way — the experience,
      frequency and cycle-length adjustments shape MAV and MRV too. */
+  /* THE RECOVERY FACTORS, APPLIED ONCE AND BOUNDED.
+
+     Each of them argued for itself above; this is where their product is priced. Without
+     the clamp the stack reached 0.37x and 2.43x of base at the two extremes, which is a
+     6.6x span between two states a real person could be in, and no evidence anywhere
+     prices that. Clamped, the band moves by at most a fifth either way before the user's
+     own logged response has earned more. */
+  const rApplied = volClampAdj(rAdj);
+  if(rApplied !== 1){
+    mrv *= rApplied;
+    if(Math.abs(rAdj - rApplied) > 0.005){
+      why.push({k:"Held at the limit", v:Math.round(rApplied * 100) + "% of the base ceiling",
+        note:"the adjustments above multiplied out to " + Math.round(rAdj * 100)
+          + "%, past what this app will move a ceiling on inference alone. Your own logged "
+          + "response can move it further, because that is measured rather than assumed"});
+    }
+  }
+  /* AND THE CEILING IS NEVER BELOW THE TARGET. Whatever the factors did, a band whose top
+     is under its own middle is not a band. */
+  if(mrv < mav + 1) mrv = mav + 1;
+
   /* STEP 7.5: PERSONAL CALIBRATION.
 
      Everything above this line is a population figure scaled by things the app can read
@@ -23081,6 +23576,23 @@ function adjustedLandmarks(A, g){
     why.push({k:"Your MRV", v:man.mrv + " sets a week",
       note:"you set this yourself, so the computed ceiling is not used for it"});
   }
+  /* A BLOCK IN PROGRESS FINISHES ON THE NUMBERS IT STARTED ON.
+
+     Changing the model mid-block would move the target somebody is three weeks into
+     chasing, and then judge the block against a line that was not there when they
+     planned it. The migration snapshots the old figures for whatever block was running
+     when it ran, and they stand until that block ends. A number the person set by hand
+     is never held \u2014 they can still change their own mind mid-block. */
+  const hold = volHoldFor(g);
+  if(hold){
+    let held = false;
+    if(man.mev == null && hold.mev > 0){ mev = hold.mev; held = true; }
+    if(man.mav == null && hold.mav > 0){ mav = hold.mav; held = true; }
+    if(man.mrv == null && hold.mrv > 0){ mrv = hold.mrv; held = true; }
+    if(held) why.push({k:"Held for this block", v:"the figures you started on",
+      note:"the targets were updated while this block was running, so it finishes on the "
+        + "numbers it was planned against. The new figures take over at the next block"});
+  }
   const R = v => Math.max(0, Math.round(v*10)/10);
   mev = R(mev); mav = R(Math.max(mav, mev+1)); mrv = R(Math.max(mrv, mav+1));
   /* The same three numbers expressed over this cycle rather than a week. Secondary
@@ -23111,6 +23623,25 @@ function landmarkExplainerHTML(A){
       L.why.map(w=>`<tr><td>${esc(w.k)}</td><td><b>${esc(String(w.v))}</b><br><span style="color:var(--faint)">${esc(w.note)}</span></td></tr>`).join("") +
       `<tr><td><b>Yours</b></td><td><b>MEV ${fmtLandmark(L.mev)} / MAV ${fmtLandmark(L.mav)} / MRV ${fmtLandmark(L.mrv)}</b> sets a week</td></tr>
       </table>`;
+    /* AND HOW BIG A CHANGE HAS TO BE BEFORE THE APP BELIEVES IT. This is the number that
+       decides whether a cycle counts as responding, and it is measured from the person's
+       own session-to-session scatter rather than applied to everybody. Worth saying,
+       because somebody whose readings are noisy is being held to a higher bar than
+       somebody whose are steady, and that is the point rather than an accident. */
+    const t = trendThresholds(best);
+    h += `<div class="rev-head">How big a change has to be</div>
+      <div class="sub">${t.personal
+        ? `Your ${esc(gName(best).toLowerCase())} lifts move about <b>\u00b1${t.sd}%</b> from
+           session to session when nothing has changed, measured over ${t.n} readings. So a
+           cycle counts as responding at <b>+${t.up}%</b> and as going backwards at
+           <b>${t.down}%</b> \u2014 anything between those is inside your own noise, and the app
+           says so rather than reading it as a trend.${t.clamped
+             ? " (Held inside the app\u2019s bounds: the raw figure was outside the range this"
+               + " estimate is reliable over.)" : ""}`
+        : `Not enough readings yet to measure your own week-to-week noise, so the general
+           figures stand: responding at <b>+${RESPOND_TREND_PCT}%</b>, going backwards at
+           <b>${DECLINE_TREND_PCT}%</b>. After about ${TREND_NOISE_MIN_N} logged exposures
+           of a lift, these become your numbers instead.`}</div>`;
   }
   h += `<div class="gl-note">Head-level regions like the three triceps heads do not get their own thresholds.
     There is no research at that level and no exercise isolates a single head cleanly enough to aim at one.
@@ -29632,6 +30163,48 @@ function periodCardHTML(){
    gated on and the import review reports, pointed at whatever is in S.program now \u2014
    because a plan drifts: you add a movement, cut a day short, swap something out, and
    nothing was watching the shape of the whole thing. It never blocks anything here. */
+/* WHAT CHANGED FOR YOUR PLAN, SAID ONCE.
+
+   The volume model migration moves some people's ceilings. Saying nothing would mean a
+   number somebody had got used to changed overnight with no explanation, which is the
+   kind of silence that makes an app feel unreliable. Saying it on every open would be
+   nagging, so it is shown until it is dismissed and then never again.
+
+   ONLY FOR PEOPLE WHOSE PLAN ACTUALLY READS DIFFERENTLY. A migration that moved nothing
+   and withdrew nothing has nothing to report, and a card that says "nothing changed" is
+   worse than no card. */
+function volMigrationCardHTML(){
+  const m = S.volMigrated;
+  if(!m || m.seen) return "";
+  const moved = Array.isArray(m.moved) ? m.moved : [];
+  if(!moved.length && !(m.withdrawn > 0)) return "";
+  const name = g => (GROUPS[g] && GROUPS[g].name) || g;
+  /* Three at most, by how far they moved \u2014 the rest are on the Body tab, where a
+     number per muscle belongs. */
+  const top = moved.slice().sort((a, b)=>
+    Math.abs(b.now - b.was) - Math.abs(a.now - a.was)).slice(0, 3);
+  let lines = "";
+  top.forEach(x=> lines += `<div class="st-row st-ok"><b>${esc(name(x.g))}</b><span>your limit reads ${
+    lm(x.now)} sets a week now, where it read ${lm(x.was)}</span></div>`);
+  if(moved.length > top.length) lines += `<div class="sub" style="margin:6px 2px 0;font-size:var(--fs-3);color:var(--faint)">and ${
+    moved.length - top.length} more, on the Body tab.</div>`;
+  if(m.withdrawn > 0) lines += `<div class="st-row st-ok"><b>Warnings</b><span>${
+    m.withdrawn === 1 ? "one \u201ctoo much\u201d warning no longer applies" :
+    m.withdrawn + " \u201ctoo much\u201d warnings no longer apply"} under the new numbers</span></div>`;
+  return `<div class="card" id="volMigCard">
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+      <span class="dot" style="background:var(--accent)"></span><h3>Your volume targets have been updated</h3>
+    </div>
+    <div class="sub" style="margin:4px 0 10px">The minimums, targets and limits are now
+      built on the published dose-response curve rather than a fixed table. What the app
+      had learned about <i>you</i> was carried over in sets, your own settings were left
+      alone, and your plan was not changed.</div>
+    ${lines}
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn ghost small" id="volMigOk" style="flex:1">Got it</button>
+    </div>
+  </div>`;
+}
 function planQualityCardHTML(){
   if(!DAYS.length) return "";
   let q;
@@ -41512,6 +42085,7 @@ function viewProgram(){
   <div class="sub" style="margin:-8px 2px 16px;font-size:var(--fs-3);color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
+  h += volMigrationCardHTML();
   h += planQualityCardHTML();
   /* FOLDED, NOT REMOVED. Where the rest days sit and which weeks are tests are things
      somebody sets once and then leaves alone for months — but they were two full cards
@@ -44752,6 +45326,11 @@ function bind(){
   if(aiB) aiB.onclick = ()=> openAIImport(false);
   const phB = $("#planHistBtn");
   if(phB) phB.onclick = openPlanHistory;
+  const vmOk = $("#volMigOk");
+  if(vmOk) vmOk.onclick = ()=>{
+    if(S.volMigrated) S.volMigrated.seen = Date.now();
+    save(); render();
+  };
   const rep = $("#reportBtn");
   if(rep) rep.onclick = openReport;
   const docB = $("#docBtn");
@@ -57518,7 +58097,12 @@ const BACKUP_FIELDS = [
      one-shot migration markers and SHOULD re-run against restored data; active, fresh and
      override are this-moment state; and sync carries the old gist token, which
      syncSafeState() strips on purpose and must never travel in a file. */
-  "pushOn","pushAsked","pushNever","ciAsked","sleepGuard","seenNews","eatPhase"
+  "pushOn","pushAsked","pushNever","ciAsked","sleepGuard","seenNews","eatPhase",
+  /* The volume-model stamp and its one-time summary. Carried deliberately, unlike the
+     one-shot markers above: re-running the migration against already-migrated
+     calibrations would re-base them a second time, so the stamp has to travel with
+     the data it describes. */
+  "volModelVersion","volMigrated","volHold","manualDisagreement"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */

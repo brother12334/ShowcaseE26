@@ -85,3 +85,19 @@ console and returns the result, so a test can assert on it.
 
 The browser is pre-installed. Never run `playwright install`. If the bundled path fails,
 launch with `executablePath: '/opt/pw-browsers/chromium'`.
+
+## tests/sim — the simulation study
+
+`node tests/sim/volume-sim.mjs` is not part of `tests/run.js` and is not a pass/fail spec
+in the ordinary sense. It is the evidence for a design decision: a thousand synthetic
+lifters per scenario, each with a true personal optimum and a true measurement noise the
+app cannot see, run for two years of cycles under the old threshold rule, the new one, and
+an oracle that trained at their optimum from the start.
+
+It exits non-zero if the new rule is worse than the old one on growth, overreached blocks
+or false alarms, so it can be run as a gate before changing anything in the dose-finding
+ladder. Flags: `--n=1000 --cycles=24 --seed=26 --json`.
+
+The results, what they mean, and the two design changes they forced are written up in
+`docs/volume-science.md` §5D. It runs in the real page and calls the app's own functions —
+a simulation of a reimplementation would prove nothing about what ships.
