@@ -715,8 +715,40 @@ Directions taken, as recommended: A-1 **and** A-2, C-1, D-1, R-1.
 
 ## New tests
 
-`motion`, `stack`, `rest2`, `bodymap`, `histlift`, `sheets` — 160 checks across six
-specs, all in the required manifest. They pin the things that would otherwise drift back:
-exactly one row on screen is a form, nothing a collapsed card holds is unreachable, no
-clock is eased, no muscle fill is `NaN`, no nav label is covered, and a confirm is a
-prompt.
+`motion`, `logger`, `rest2`, `bodymap`, `histlift`, `sheets` — all in the required
+manifest. They pin the things that would otherwise drift back: no clock is eased, no
+muscle fill is `NaN`, no nav label is covered, a confirm is a prompt, and the logging
+screen is a form all the way down.
+
+# PART 7 — WHAT WAS REVERTED
+
+## Proposal A, the session as a stack — TAKEN OUT (v53.2)
+
+Shipped in v51.0 and removed after use. The verdict from the person who trains on it was
+that the logging screen had become **confusing**, and that is the only verdict that
+counts for a screen you stand in front of between sets with a loaded bar waiting.
+
+What the measurements said was that a session went from 4.1 screens to 1.8. What they
+could not say is what it costs to not be able to see your own workout. Collapsing an
+exercise to one line and a set row to a read-only record meant the app was deciding, on
+your behalf and on a rule you did not write, which part of your session you were allowed
+to look at — and when that rule guesses wrong, there is no obvious way back. 4.1 screens
+of everything beats 1.8 screens of what an algorithm thinks you want. Scrolling is cheap;
+hunting for your own numbers is not.
+
+**Removed:** the three exercise states (`ex-now`/`ex-done`/`ex-ahead`, `is-shut`) and
+tap-to-open; the one-line done summary; the cue line; the third set state (`is-ahead`)
+and the collapsed set-row chrome; the per-set rail on the session bar.
+
+**Kept, because neither was the stack:**
+
+- **One live set per session, not one per exercise.** The old code asked each exercise
+  which of its rows was next, so a session lit six copper "you are here" marks at once.
+  That was a bug before the stack existed and the rest clock reads the same answer.
+- **The gym-mode switch on the session.** One exercise at a time has existed since the
+  app did, buried on the second page of a settings group. The switch stays in the tool
+  row, because that is where you are when the room is busy. It is opt-in, which is the
+  whole difference between it and the stack.
+
+A lesson worth keeping: a redesign measured only in pixels saved will keep proposing to
+hide things, because hiding things is what makes that number go down.
