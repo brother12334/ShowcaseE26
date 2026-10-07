@@ -40,10 +40,13 @@ Brief §3.1 and §3.2 are now answerable from evidence rather than preference:
 | Pelland, Remmert, Robinson, Hinson & Zourdos (2024/2025), *The Resistance Training Dose-Response*, SportRxiv preprint v586, 45pp | **read in full**, numbers extracted below |
 | Same work, *Sports Medicine* 2025, doi 10.1007/s40279-025-02344-w | paywalled at `link.springer.com`; the preprint is the same analysis and is what is cited here |
 
+| Bickel 2011, *Med Sci Sports Exerc* — maintenance dosing | **read in full** (§1A.1) |
+| Scarpelli 2022, *J Strength Cond Res* — individualised volume | **read** (§1A.2) |
+
 Still to read: Schoenfeld 2017, Baz-Valle 2022, the individual high-volume trials
 (Schoenfeld 2019, Brigatto 2022, Aubé 2022, Heaselgrave 2019, Barbalho 2019, Enes 2024),
-Scarpelli 2022, Hammarström 2020, Damas 2019, Robinson 2024, Refalo 2023, Halperin 2022,
-Zourdos 2016, Remmert 2025, Bickel 2011, Murphy & Koehler 2022, Roberts 2020.
+Hammarström 2020, Damas 2019, Robinson 2024, Refalo 2023, Halperin 2022, Zourdos 2016,
+Remmert 2025, Murphy & Koehler 2022, Roberts 2020.
 
 ---
 
@@ -186,6 +189,89 @@ curve is a central estimate across 1,032 people, not a promise to any one of the
 is the whole argument for the per-user dose-finding in brief §3.5.
 
 ---
+
+---
+
+## 1A. THE SUPPORTING PAPERS
+
+### 1A.1 Bickel 2011 — the maintenance dose, and an independent check on the floor
+
+Bickel CS, Cross JM, Bamman MM. *Exercise dosing to retain resistance training adaptations
+in young and older adults.* Med Sci Sports Exerc 2011;43(7):1177–87. PMID 21131862.
+**Read in full.**
+
+Seventy adults, two phases. Phase 1 was resistance training **3 d/wk for 16 weeks**: three
+exercises (knee extension, leg press, squats), **three sets of 8–12 reps** each — so the
+quadriceps received **27 direct sets a week**. All three are "direct" under the Pelland
+classification, so this is cleanly in the curve's units.
+
+Phase 2 ran 32 weeks, randomised to detraining or one of two maintenance doses:
+
+| Arm | How it was reduced | Weekly sets | Result in the young |
+|---|---|---|---|
+| **one-third** (n=19) | same 3 sets × 3 exercises, frequency 3 → 1 d/wk | **9** | hypertrophy preserved, *and added to* |
+| **one-ninth** (n=21) | sets 3 → 1 **and** frequency 3 → 1 d/wk | **3** | hypertrophy preserved |
+| detraining | — | 0 | lost; strength largely retained |
+
+> "Both maintenance prescriptions preserved phase 1 muscle hypertrophy in the young but not
+> the old. In fact, the one-third maintenance dose led to additional myofiber hypertrophy
+> in the young."
+
+**Two things come out of this, and the second is the more valuable.**
+
+**The maintenance figure.** Brief §3.2 asks for a separate `maintenance` number, below MEV,
+for time-limited plans and for non-priority muscles during a specialisation block. Bickel
+gives it directly: **3 sets a week held muscle size for 32 weeks** in young adults. That is
+the figure, and it is measured rather than assumed. Grade **E** — one randomised trial,
+quadriceps only, previously-untrained adults trained up over 16 weeks first.
+
+**And it checks the curve's floor from a completely independent direction.** Read Bickel's
+two doses off the Pelland curve, which was fitted on different studies entirely:
+
+| Bickel dose | Weekly sets | Curve says | Against SDES 2.05% | Bickel observed |
+|---|---|---|---|---|
+| one-ninth | 3 | **1.78%** | **below** — no detectable growth | preserved size, did not add |
+| minimum effective dose | 4 | 2.21% | just above | — |
+| one-third | 9 | **3.90%** | **well above** — nearly 2× SDES | preserved size **and added** |
+
+The curve says three sets is not enough to grow detectably and nine sets is; Bickel found
+exactly that, in a trial the curve was not fitted on. **The floor of 4 sits precisely in the
+gap between "maintains" and "adds".** That is the strongest validation of the model in this
+document, and it was not designed for — it falls out of two independent sources agreeing.
+
+**The age caveat, which matters for the app.** Neither dose maintained muscle size in the
+60–75 group. Older adults need more. Brief §3.4 defaults age to "not used"; this is the one
+piece of direct evidence for it, and it concerns *maintenance*, not the growth target. It
+should be recorded and not yet acted on, because a single trial on the maintenance end is
+too thin to start scaling targets by age.
+
+### 1A.2 Scarpelli 2022 — why the target has to be personal
+
+Scarpelli MC, Nóbrega SR, Santanielo N, Alvarez IF, Otoboni GB, Ugrinowitsch C, Libardi CA.
+*Muscle Hypertrophy Response Is Affected by Previous Resistance Training Volume in Trained
+Individuals.* J Strength Cond Res 2022;36(4):1153–7. PMID 32108724.
+
+**Within-subject design — each of 16 trained subjects had one leg on each protocol**, which
+removes between-person variation entirely. Eight weeks.
+
+| Arm | Prescription |
+|---|---|
+| N-IND | **22 sets·wk⁻¹**, "based on the number of weekly sets prescribed in studies" |
+| IND | **1.2 × the sets·wk⁻¹ recorded in that subject's own training logs** |
+
+Individualised won: vastus lateralis CSA change higher by **1.08 cm² [CI 0.04–2.11]**,
+p = 0.042, effect size **0.75 [0.03–1.47]**, and more individuals exceeded the typical
+measurement error (χ², p = 0.0035).
+
+**This is the citation for the starting point.** A population number — even a well-chosen
+one from the middle of the efficiency band — was beaten by taking each person's own recent
+volume and adding 20%. Note where 22 sets falls on the curve: inside the *lower efficiency*
+tier, a perfectly defensible population choice. It still lost to personalisation.
+
+So the starting target is **the user's own recent weekly volume + 0–20%, clamped into the
+band**, and only falls back to a level-based position in 11–18 when there is no history to
+read. Grade **M** — one within-subject randomised trial, n=16, quadriceps, 8 weeks; strong
+design, narrow scope.
 
 ## 2. FINDING — the counting basis, measured
 
