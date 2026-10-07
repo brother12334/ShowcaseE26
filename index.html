@@ -5401,6 +5401,21 @@ body.news-open{overflow:hidden}
 .pv-r.is-under .pv-f{background:var(--bad)}
 .pv-r.is-ok .pv-sq{background:var(--acc-soft);border-color:var(--acc-line);color:var(--acc)}
 .pv-r.is-ok .pv-f{background:var(--acc)}
+/* KEPT ON PURPOSE. The number and the bar stay; the alarm colour does not. Drawn in the
+   dim grey the app uses for a fact rather than a question, with a dotted edge so it reads
+   as deliberately set aside rather than as a row that failed to load. */
+.pv-r.is-kept{border-style:dashed;border-color:rgba(255,255,255,.12)}
+.pv-r.is-kept .pv-sq{background:var(--card2);border-color:var(--line);color:var(--dim)}
+.pv-r.is-kept .pv-f{background:var(--dim)}
+.pv-r.is-kept .pv-n{color:var(--dim)}
+/* The line in the sheet that says an acknowledgement is in force, and offers the way out. */
+.vf-kept{
+  margin:10px 0 0;padding:10px 12px;border:1px dashed rgba(255,255,255,.12);
+  border-radius:var(--r-sm);background:var(--card2);
+  font-size:var(--fs-3);color:var(--dim);line-height:1.5;
+}
+.vf-kept b{color:var(--text);font-weight:500}
+.vf-kept .nb-link{margin-left:4px}
 .pv-r.is-over{border-color:rgba(201,154,52,.34)}
 .pv-r.is-over .pv-sq{background:rgba(201,154,52,.12);border-color:rgba(201,154,52,.5);color:var(--warn)}
 .pv-r.is-over .pv-f{background:var(--warn)}
@@ -6830,7 +6845,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "53.6";
+const APP_VERSION = "54.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -11333,9 +11348,30 @@ function buildFit(program, dayIds, targets, a){
        the pass that has no floors left to respect, where the cut has to happen and the
        only question is which one does least harm. */
     const needRoom = mode === "none" ? -Infinity : 1;
-    const cut = list.map(e=> ({e, r: room(e)}))
-      .filter(x=> (parseInt(x.e.sets,10) || 0) > floorSets(x.e) && x.r >= needRoom)
-      .sort((p2, q2)=> q2.r - p2.r)[0];
+    /* AND A PRIORITY MUSCLE IS STILL NEVER TOUCHED, which is what the phase-four comment
+       below has always claimed and what fitFloorFor() has always said \u2014 but mode "none"
+       sets needRoom to -Infinity, which waves every floor through including that one.
+
+       Caught by the builder sweep: raising the floors of the compound-fed muscles made
+       phase four run on three of the 360 combinations where it had not run before, and on
+       those it took the sets off the side delts somebody had asked for by name. The
+       budget still wins in the end \u2014 it has to, a day longer than the budget is a day
+       nobody does \u2014 but it takes from everything else first, and only comes back for a
+       priority muscle when there is genuinely nothing else left to take. */
+    const priRoom = e=>{
+      let worst = Infinity;
+      GKEYS.forEach(g=>{
+        if(!(targets[g] && targets[g].priority)) return;
+        const f = muscleFrac(e.name, g);
+        if(f <= 0) return;
+        worst = Math.min(worst, (weekly[g] - fitFloorFor(g, targets, "time")) / Math.max(f, 0.01));
+      });
+      return worst;
+    };
+    const able = list.map(e=> ({e, r: room(e), p: priRoom(e)}))
+      .filter(x=> (parseInt(x.e.sets,10) || 0) > floorSets(x.e) && x.r >= needRoom);
+    const spare = able.filter(x=> x.p >= 1);
+    const cut = (spare.length ? spare : able).sort((p2, q2)=> q2.r - p2.r)[0];
     if(!cut) return false;
     cut.e.sets = (parseInt(cut.e.sets,10) || 0) - 1;
     if(Array.isArray(cut.e.rpes) && cut.e.rpes.length > 1) cut.e.rpes.pop();
@@ -17459,11 +17495,39 @@ const LANDMARK_SOURCE = {
    volume against a base figure that did not expect it. Their numbers are therefore not
    strictly comparable to a muscle that only ever gets direct sets.
 
-   Every entry is 1.0 today: correcting them by hand would be swapping one guess for
-   another. The per-user calibration learns the real correction from how each muscle
-   actually responds, and this constant is where a population-level correction would go
-   if one is ever justified. */
-const INDIRECT_BASIS_CORRECTION = blankMuscleMapStatic(1.0);
+   FIVE OF THEM ARE NOW CORRECTED, and the glutes are why.
+
+   A plan with a Smith squat, Romanian deadlifts and Bulgarian split squats in it feeds
+   the glutes 0.8, 0.8 and 0.9 of a set each time, and never once trains them directly.
+   Counted that way the week reads 16.8 sets against a published ceiling of 16 — a
+   failure — when what is actually happening is a normal leg day. The ceiling was written
+   for a muscle whose sets are mostly its own; the count is of a muscle whose sets are
+   mostly somebody else\'s.
+
+   So the five groups that are fed chiefly by compounds get a wider band. The figure is
+   the ratio between what the app counts for them and what the published tables assumed:
+   roughly half again for the glutes and front delts, which take partial credit from
+   nearly every lower-body and pressing movement respectively, and a little less for the
+   traps, lower back and adductors.
+
+   EVIDENCE GRADE: INFERRED, not measured. These are a correction for a counting
+   mismatch this app created, not a claim about physiology, and they are deliberately
+   round. The per-user calibration still learns the real number from how each muscle
+   actually responds; this is the population-level starting point it moves away from.
+
+   Everything else stays at 1.0. A muscle whose sets are mostly direct needs no
+   correction, and inventing one for it would be swapping one guess for another. */
+const INDIRECT_BASIS_CORRECTION = Object.assign(blankMuscleMapStatic(1.0), {
+  glutes:      1.5,
+  delts_front: 1.5,
+  traps:       1.4,
+  lower_back:  1.4,
+  adductors:   1.4
+});
+/* The same five, named once, because the correction has a second half: see step 4 of
+   adjustedLandmarks. A muscle corrected for being compound-fed must not then be
+   penalised for being compound-fed. */
+const COMPOUND_FED = ["glutes", "delts_front", "traps", "lower_back", "adductors"];
 function blankMuscleMapStatic(v){
   const o = {}; Object.keys(GROUPS).forEach(k=> o[k] = v); return o;
 }
@@ -17595,6 +17659,19 @@ const EX_MUSCLES = {
   "leg curl":                      {hams:1, calves:.2},
   "leg extension":                 {quads:1},
   "hip thrust":                    {glutes:1, hams:.5, adductors:.2},
+  /* THE HIP-THRUST FAMILY, BY NAME. A table entry is checked before the keyword list, and
+     these three were falling through to it: the keyword row pays hams .4 and no
+     adductors, so the same movement was scored differently depending on which piece of
+     kit was in its name. The bar, the Smith machine and the plain one load the same joint
+     through the same range. */
+  "smith machine hip thrust":      {glutes:1, hams:.5, adductors:.2},
+  "machine hip thrust":            {glutes:1, hams:.5, adductors:.2},
+  /* AND THE KICKBACKS, which the keyword list files under TRICEPS — /kickback/ sits in
+     the triceps row and matches "glute kickback" long before the glute row is reached.
+     A glute isolation counted as arm work is not a small error: it is missing from the
+     muscle it trains and inflating the one it does not. */
+  "glute kickback":                {glutes:1, hams:.35},
+  "cable glute kickback":          {glutes:1, hams:.35},
   // Hamstring involvement in a squat is small (it lengthens at the hip and shortens at
   // the knee, so net length barely changes); the adductors do far more than most
   // people credit, especially out of the hole.
@@ -17663,6 +17740,11 @@ const MUSCLE_KEYWORDS = [
   [/(leg|lying|seated|standing|kneeling|nordic|stability ball|swiss ball|slider).*(curl)|nordic curl|rdl|romanian|good ?morning|stiff[- ]?leg/,
                                                                             {hams:1, glutes:.6, lower_back:.4}],
   [/curl/,                                                                 {biceps:1, forearms:.4}],
+  /* BEFORE THE TRICEPS ROW, because /kickback/ lives in it and matches "glute kickback".
+     First match wins, so the glute row below could never be reached for a kickback and
+     every glute kickback in the library was being counted as triceps work. The glute row
+     is the specific one — it names the movement — so it asks first. */
+  [/kickback.*glute|glute.*kickback/,                                      {glutes:1, hams:.35}],
   [/tricep|skull|pushdown|kickback|overhead extension|close[- ]?grip/,      {triceps:1}],
   /* M8 \u2014 SUMO AND WIDE STANCE. Taking the stance out shortens the knee's travel and
      puts the load through the adductors and the glutes; read as a plain squat or a plain
@@ -22867,9 +22949,20 @@ function adjustedLandmarks(A, g){
   }
 
   // 4 - exercise selection: share of this group's sets that came from compound lifts
+  /* EXCEPT FOR THE FIVE THAT ARE ALWAYS COMPOUND-FED, and this is the other half of
+     INDIRECT_BASIS_CORRECTION. The glutes come out above 60% compound in every plan that
+     has a squat in it — that is not a property of your programme, it is a property of
+     the glutes — so applying the penalty here taxed them for the same fact the basis
+     correction had just widened their band for. Counted generously, capped harshly,
+     twice over: the glutes read 16.8 against a ceiling of 16 × 0.9. A muscle is not
+     penalised for a mix it has no way of avoiding. */
+  const alwaysCompound = COMPOUND_FED.indexOf(g) > -1;
   if(o.sets > 0){
     const comp = (o.compound||0)/o.sets;   // share of SETS, not of effective volume
-    if(comp > 0.6){ mrv *= 0.90; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"compound lifts carry systemic fatigue that isolation work does not"}); }
+    if(comp > 0.6 && alwaysCompound){
+      why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"nearly all of this muscle's work comes from compounds whatever you do, which is already allowed for in its range rather than charged for twice"});
+    }
+    else if(comp > 0.6){ mrv *= 0.90; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"compound lifts carry systemic fatigue that isolation work does not"}); }
     else if(comp < 0.3){ mrv *= 1.08; why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"isolation-heavy work is cheaper to recover from, so you can tolerate more"}); }
     else why.push({k:"Exercise mix", v:Math.round(comp*100)+"% compound", note:"a balanced mix, no adjustment"});
   }
@@ -29523,10 +29616,7 @@ function planQualityCardHTML(){
   if(!DAYS.length) return "";
   let q;
   try{
-    q = planQuality(S.program, currentSplit(),
-      {budget: (S.builtPlan && S.builtPlan.answers && S.builtPlan.answers.minutes) || 0,
-       priority: (S.builtPlan && S.builtPlan.answers && S.builtPlan.answers.priority) || [],
-       gear: (S.setup || {}).gear});
+    q = planQuality(S.program, currentSplit(), planCheckOpts());
   }catch(e){
     /* IT USED TO RETURN "" HERE, which is the worst of the three things it could do: the
        card did not appear, nothing said why, and the plan looked unexamined rather than
@@ -29583,8 +29673,14 @@ function planQualityCardHTML(){
     </details>` : "";
 
   const vol = Array.isArray(q.volume) ? q.volume : [];
-  const nUnder = vol.filter(x=> x.state === "under").length;
-  const nOver  = vol.filter(x=> x.state === "over").length;
+  /* THE HEADLINE COUNTS WHAT IS STILL A QUESTION. A muscle somebody has already said
+     "leave it" to, or told the builder to prioritise, is not one of the things this card
+     is asking them to look at \u2014 counting it keeps the number up and makes the sentence
+     above the bars wrong. */
+  const live = vol.filter(x=> !volAckActive(x));
+  const nUnder = live.filter(x=> x.state === "under").length;
+  const nOver  = live.filter(x=> x.state === "over").length;
+  const nKept  = vol.length - live.length;
   /* A PLAN WITH NOTHING WRONG WITH IT IS STILL A PLAN YOU HAVE NOT SEEN.
 
      This used to return early on a clean check: a two-line "Your plan checks out" and no
@@ -29606,7 +29702,9 @@ function planQualityCardHTML(){
         + " getting more than you can recover from."
       : clean
         ? "Every muscle is inside its range, every session inside the caps, nothing unbalanced."
-        : "Every muscle is inside its range.";
+        : nKept
+          ? "Every muscle is inside its range, or kept where you put it."
+          : "Every muscle is inside its range.";
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
       <span class="dot" style="background:${clean ? "var(--ok)" : "var(--acc)"}"></span><h3>A look at your plan</h3>
@@ -29625,6 +29723,161 @@ function planQualityCardHTML(){
    it: one more set on a movement already training that muscle, which is the cheapest fix
    there is, or a new movement on a chosen day. Both go through the plan log like every
    other change to what you are being asked to do. */
+/* THE CHECK HAS TO BE ASKED THE SAME QUESTION EVERYWHERE IT IS DRAWN.
+
+   The card passed the budget and the builder's priority muscles; the sheet behind a row
+   and the stepper screen passed only the gear. So the same muscle could read "over" on
+   the card and "in range" in the sheet you opened by tapping it, and a muscle you had
+   told the builder to prioritise was exempt in one place and not the other. Three call
+   sites, one set of options. */
+/* "LEAVE IT AS IT IS" HAS TO MEAN IT.
+
+   The button closed the sheet and changed nothing, which is the same thing as not having
+   pressed it: the muscle was still red on the card on the next render, and on every
+   render after that. A decision somebody made about their own training was being asked
+   again every time they opened the tab, which is how an app teaches people to ignore it.
+
+   So it is stored. S.volAck[g] = {state, v, at} \u2014 what was acknowledged, at what weekly
+   volume, and when.
+
+   IT EXPIRES, and that is the point of storing `v`. An acknowledgement is about the plan
+   you were looking at. Move the volume by more than a set and it is a different plan and
+   a different question, so the warning comes back. And it never outranks the body: if the
+   per-cycle verdict says this muscle is overreached, the acknowledgement is set aside and
+   the warning is shown with that reason, because "I meant to do this" and "this is
+   costing you" are answers to different questions. */
+const VOL_ACK_DRIFT = 1;   // sets a week; past this the plan is not the one you agreed to
+function volAckGet(g){
+  const a = (S.volAck && typeof S.volAck === "object") ? S.volAck[g] : null;
+  return (a && typeof a === "object" && isFinite(a.v)) ? a : null;
+}
+function volAckSet(g, x){
+  if(!S.volAck || typeof S.volAck !== "object") S.volAck = {};
+  S.volAck[g] = {state: x.state, v: Math.round(x.v * 10) / 10, at: Date.now()};
+  save(); queueSync();
+}
+function volAckClear(g){
+  if(S.volAck && S.volAck[g]){ delete S.volAck[g]; save(); queueSync(); }
+}
+/* A MUSCLE THE BUILDER WAS TOLD TO PRIORITISE IS ACKNOWLEDGED UP TO ITS CEILING.
+
+   Somebody answered "push my glutes" in the builder and the plan was written to do it.
+   Flagging the result as a fault is the app arguing with an instruction it was given. It
+   stops at the ceiling: a priority block is a decision about where the volume goes, not
+   permission to ignore what recovery costs. */
+function volPriority(g){
+  const ans = (S.builtPlan && S.builtPlan.answers) || {};
+  const list = Array.isArray(ans.priority) ? ans.priority : [];
+  return list.indexOf(g) > -1;
+}
+/* IS THIS ROW KEPT ON PURPOSE? Returns the reason it is being left alone, or "". */
+function volAckActive(x){
+  if(!x || x.state === "ok") return "";
+  /* The body outranks the decision. */
+  if(x.state === "over" && volOverSignal(x.g)) return "";
+  if(x.state === "over" && volPriority(x.g)) return "priority";
+  const a = volAckGet(x.g);
+  if(!a || a.state !== x.state) return "";
+  if(Math.abs(x.v - a.v) > VOL_ACK_DRIFT + 0.05) return "";
+  return "kept";
+}
+/* IS THE BODY SAYING THIS VOLUME IS TOO MUCH?
+
+   Not "is it above a number off a table" \u2014 that is what the ceiling already answers.
+   This asks the three questions the per-cycle verdict asks of the log: soreness still
+   there when the recovery window was up, two cycles running; joint pain on this muscle's
+   own lifts; or the lift falling two cycles running. Returns the reason in the words the
+   verdict uses, or "" when there is nothing to report, which includes every case where
+   there is not yet enough history to have an opinion. */
+function volOverSignal(g){
+  try{
+    const r = cycleReview();
+    const hit = (r && r.list || []).find(x=> x.g === g && x.k === "over");
+    return hit ? (hit.why || "overreached") : "";
+  }catch(e){ return ""; }
+}
+function planCheckOpts(){
+  const ans = (S.builtPlan && S.builtPlan.answers) || {};
+  return {budget: ans.minutes || 0,
+          priority: Array.isArray(ans.priority) ? ans.priority : [],
+          gear: (S.setup || {}).gear};
+}
+/* WHAT ONE SET OFF THIS MOVEMENT COSTS EVERYTHING ELSE IT TRAINS.
+
+   The sheet used to pick the movement carrying the most of the muscle \u2014 sets \u00d7 share \u2014
+   and say nothing about what else came off with it. On a plan where the glutes are over
+   their ceiling and a Smith squat is the biggest single contributor, that advice reads
+   "take 2 sets off Smith Machine Squat" and quietly removes a fifth of the quad work to
+   fix a glute number that was mostly partial credit in the first place.
+
+   A cut is a change to the whole week. This works out the whole change. */
+function volCutEffect(cand, g, vol, nSets){
+  const n = nSets || 1;
+  const map = musclesFor(cand.e.name) || {};
+  const by = {}; (vol || []).forEach(x=> by[x.g] = x);
+  /* What this movement is FOR: the muscles it trains at full share. */
+  const main = Object.keys(map).filter(k=> map[k] >= 1);
+  const hits = [];
+  let belowFloor = 0, belowTarget = 0, ownMainHurt = false;
+  Object.keys(map).forEach(k=>{
+    const f = map[k];
+    if(!(f > 0)) return;
+    const x = by[k];
+    /* Optional groups are not measured by the check, so there is no floor to fall below
+       and nothing honest to say about them. */
+    if(!x) return;
+    const after = x.v - f * n;
+    const under = after + 0.05 < x.mev;
+    const below = after + 0.05 < x.top;
+    if(k !== g){
+      if(under) belowFloor++;
+      else if(below) belowTarget++;
+      if(main.indexOf(k) > -1 && below) ownMainHurt = true;
+    }
+    hits.push({g: k, name: (GROUPS[k] || {}).name || k, lost: Math.round(f * n * 10) / 10,
+               after: Math.round(after * 10) / 10, under, below,
+               main: main.indexOf(k) > -1});
+  });
+  return {hits, belowFloor, belowTarget, ownMainHurt,
+          isMain: (map[g] || 0) >= 1, f: cand.f};
+}
+/* RANKED BY SIDE EFFECT, NOT BY CONTRIBUTION.
+
+   0  this movement's own job is the muscle that is over \u2014 a hip thrust for the glutes.
+      Taking a set off it does exactly one thing.
+   1  nothing else it trains drops below its target.
+   2  something drops below its target but nothing below its floor.
+   3  something drops below its FLOOR, or the cut guts what the movement is for \u2014 a
+      Smith squat whose quads would fall under their target. Never offered first. */
+function volCutTier(eff){
+  if(eff.belowFloor) return 3;
+  if(eff.ownMainHurt) return 3;
+  if(eff.isMain) return 0;
+  if(eff.belowTarget) return 2;
+  return 1;
+}
+/* The side effect in the words somebody would use: "glutes \u22121.0, hamstrings \u22120.5".
+   The muscle you are fixing comes first, then whatever else it costs, biggest first. */
+function volEffectSay(eff, g){
+  return eff.hits
+    .filter(h=> h.lost >= 0.05)
+    .sort((a, b)=> (a.g === g ? -1 : b.g === g ? 1 : 0) || b.lost - a.lost)
+    .map(h=> h.name.toLowerCase() + " \u2212" + r1(h.lost))
+    .join(", ");
+}
+/* Every movement that could give up a set, best first. `room` is the honesty rule the
+   one-tap buttons have always had: a movement cannot go below one set or below what its
+   slot is for, so it is never offered for more than it can give. */
+function volCutRanked(g, vol, nSets){
+  return volEntriesFor(g)
+    .map(c=> ({c, room: Math.max(0, (parseInt(c.e.sets, 10) || 0) - Math.max(1, buildMinSets(c.e)))}))
+    .filter(z=> z.room > 0)
+    .map(z=>{
+      const eff = volCutEffect(z.c, g, vol, nSets || 1);
+      return {c: z.c, room: z.room, eff, tier: volCutTier(eff)};
+    })
+    .sort((a, b)=> a.tier - b.tier || b.eff.f - a.eff.f || b.room - a.room);
+}
 function volEntriesFor(g){
   const out = [];
   DAYS.forEach(wid=> (S.program[wid] || []).forEach((e, ei)=>{
@@ -29654,24 +29907,49 @@ function volChoiceHTML(id, title, sub, primary){
     <span class="spec-opt-go">\u203a</span>
   </button>`;
 }
-function volChoicesHTML(x, g, best, fat, canCut, canAdd, toFloor, addBy){
+function volChoicesHTML(x, g, best, fat, canCut, canAdd, toFloor, addBy, opts){
+  const o = opts || {};
   const spread = volEntriesFor(g).filter(c=> c.sets > 0).length;
   const rows = [];
   if(x.state === "over"){
-    if(fat && canCut > 0)
+    if(fat && canCut > 0){
+      /* WHAT IT COSTS, ON THE BUTTON. A cut is a change to the whole week, and the one
+         thing the old sheet never said was what else came off with it. */
+      const eff = o.cutEff;
+      const cost = eff ? volEffectSay(eff, g) : "";
+      const tier = o.tier;
       rows.push(volChoiceHTML("cut",
         `Take ${canCut} set${canCut === 1 ? "" : "s"} off ${esc(fat.e.name)}`,
-        `On ${esc(widName(fat.wid))}, which is carrying the most of it.`
+        (cost ? esc(cost) : `On ${esc(widName(fat.wid))}.`)
+          + ` \u00b7 ${esc(widName(fat.wid))}`
+          + (tier === 0 ? " \u2014 this movement is for this muscle, so nothing else changes much." : "")
           + (canCut < x.v - x.mrv ? " It cannot give up the whole cut on its own." : ""), true));
-    if(fat && canCut === 0)
-      /* Every movement doing this muscle is already at its own minimum, so there is no
-         set to take without removing a movement. Said plainly rather than left as the
-         absence of a button. */
+      /* AND WHEN THE ONLY CUTS LEFT TAKE SOMETHING ELSE'S MAIN WORK, say it rather than
+         letting the numbers on the button carry it alone. */
+      if(tier === 3)
+        rows.push(volChoiceHTML("pick", "Every cut here costs another muscle",
+          `Nothing trains this muscle on its own in your plan \u2014 whatever comes off takes `
+          + `main work for something else with it. Open them and decide yourself.`));
+    }
+    /* Every movement doing this muscle is already at its own minimum, so there is no set
+       to take without removing a movement. Said plainly rather than left as the absence
+       of a button \u2014 and keyed off there being candidates at all rather than off `fat`,
+       which is now null in exactly this case because the ranking only considers movements
+       with a set to spare. */
+    if(!fat && o.hasCandidates)
       rows.push(volChoiceHTML("pick", "Every movement is already at its minimum",
         `Nothing can be trimmed further \u2014 open them and take one out instead.`, true));
+    /* THE SECOND DECISION, KEPT SEPARATE FROM THE FIRST. Getting under the ceiling is the
+       fix; going on down to the productive middle is a choice about how hard you want to
+       push this muscle, and it is not the app's to make for you. */
+    if(fat && o.canCutDeep > o.canCutShallow)
+      rows.push(volChoiceHTML("cutdeep",
+        `Go further, to the middle of your range`,
+        `${o.canCutDeep} set${o.canCutDeep === 1 ? "" : "s"} off ${esc(fat.e.name)} instead, `
+        + `down to about ${r1(x.top)} \u2014 where each further set still pays for itself.`));
     if(spread > 1 && canCut > 0)
       rows.push(volChoiceHTML("spread", "Spread the cut across every movement",
-        `A set at a time, off whatever has most to spare, until it is back inside the range.`));
+        `A set at a time, off whatever costs the least elsewhere, until it is under the ceiling.`));
     if(canCut > 0)
       rows.push(volChoiceHTML("pick", "Choose where it comes off",
         `Every movement that trains this muscle, with the weekly total as you change it.`));
@@ -29730,7 +30008,7 @@ function openVolAdjust(g){
 function volAdjTotals(){
   const a = VOL_ADJ;
   let q;
-  try{ q = planQuality(S.program, currentSplit(), {gear: (S.setup || {}).gear}); }catch(e){ return null; }
+  try{ q = planQuality(S.program, currentSplit(), planCheckOpts()); }catch(e){ return null; }
   const x = (q.volume || []).find(v=> v.g === a.g);
   if(!x) return null;
   /* The muscle's week as it WOULD be: every other movement untouched, these at the
@@ -29837,15 +30115,18 @@ function renderVolAdjust(){
 }
 function openVolFix(g){
   let q;
-  try{ q = planQuality(S.program, currentSplit(), {gear: (S.setup || {}).gear}); }catch(e){ return; }
+  try{ q = planQuality(S.program, currentSplit(), planCheckOpts()); }catch(e){ return; }
   const x = (q.volume || []).find(v=> v.g === g);
   if(!x) return;
   const cands = volEntriesFor(g);
   const best = cands[0];
-  /* To CUT, the opposite exercise from the one you would add to: whatever is carrying the
-     most sets of this muscle, so the trim comes off the pile rather than off the movement
-     that is only just contributing. */
-  const fat = cands.slice().sort((a2, b2)=> (b2.sets * b2.f) - (a2.sets * a2.f))[0];
+  /* TO CUT, THE MOVEMENT WITH THE LEAST TO LOSE, not the one with the most of it.
+     It used to be whatever scored highest on sets \u00d7 share, which on a leg day is always
+     the squat \u2014 so a glute number built mostly out of partial credit was fixed by
+     removing quad work. Ranked by what the cut costs instead: see volCutRanked. */
+  const ranked = volCutRanked(g, q.volume, 1);
+  const pick = ranked[0] || null;
+  const fat = pick ? pick.c : null;
 
   /* THE BAR, DRAWN HONESTLY WHEN YOU ARE PAST THE END OF IT.
 
@@ -29864,7 +30145,15 @@ function openVolFix(g){
      plan at \u2014 above the floor, at or below the point where each further set stops
      paying for itself. */
   const aim = Math.max(x.mev, Math.min(x.top, x.mrv));
-  const cutBy = Math.max(1, Math.ceil(x.v - aim - 0.05));
+  /* CUT WHAT IS NEEDED, NOT WHAT WOULD BE TIDIEST.
+
+     This used to aim at `top`, the productive middle \u2014 so the sheet said "past 13.9" and
+     then cut you to 11.8. Being over the ceiling is the problem that was reported; the
+     fix for it is to be under the ceiling. Going further than that is a different
+     decision, it belongs to the person whose training it is, and it is offered below as
+     its own line rather than taken on their behalf. */
+  const cutBy = Math.max(1, Math.ceil(x.v - x.mrv + 0.05));
+  const deepBy = Math.max(0, Math.ceil(x.v - aim - 0.05));
   const addBy = Math.max(1, Math.ceil(aim - x.v - 0.05));
   const toFloor = Math.max(1, Math.ceil(x.mev - x.v - 0.05));
 
@@ -29875,20 +30164,41 @@ function openVolFix(g){
   const fatNow = fat ? fat.sets : 0;
   const fatFloor = fat ? Math.max(1, buildMinSets(fat.e)) : 0;
   const canCut = fat ? Math.max(0, Math.min(cutBy, fatNow - fatFloor)) : 0;
+  const canCutDeep = fat ? Math.max(0, Math.min(deepBy, fatNow - fatFloor)) : 0;
+  /* What the offered cut actually costs, in the sizes it is offered in. */
+  const cutEff = (fat && canCut > 0) ? volCutEffect(fat, g, q.volume, canCut) : null;
   /* The same honesty on the way up. One movement cannot go past the five-set cap, so a
      muscle six sets short of its floor does not get a button offering six. */
   const bestNow = best ? best.sets : 0;
   const canAdd = best ? Math.max(0, Math.min(toFloor, MAX_SETS_PER_EXERCISE_GEN - bestNow)) : 0;
 
+  /* IS BEING OVER THE CEILING A PROBLEM, OR JUST A READING?
+
+     The ceiling is an estimate off a published table, scaled for a training age the app
+     INFERRED. Calling that a failure in red, on a plan somebody may be running perfectly
+     well, claims more than it knows. What would make it a failure is the body saying so,
+     and the app already asks: the per-cycle verdict turns soreness that outlasts the
+     recovery window, joint pain on the muscle's own lifts, or a lift falling two cycles
+     running into one word. With one of those, over the ceiling is a problem and is drawn
+     as one. Without any, it is a number worth watching. */
+  const signal = volOverSignal(g);
+  const kept = volAckActive(x);
   const say = x.state === "under"
     ? `<b>Add ${toFloor} set${toFloor === 1 ? "" : "s"} a week</b> to clear the minimum of `
       + `${r1(x.mev)}.` + (aim > x.mev + 0.05
           ? ` Work up to <b>${r1(aim)}</b> over the block and it is doing as much as it usefully can.`
           : "")
     : x.state === "over"
-      ? `<b>Cut ${cutBy} set${cutBy === 1 ? "" : "s"} a week</b>, down to about ${r1(x.v - cutBy)}. `
-        + `Past ${r1(x.mrv)} the extra sets are bought with recovery you then do not have for `
-        + `everything else \u2014 they are not making this muscle grow faster.`
+      ? (signal
+          ? `<b>Cut ${cutBy} set${cutBy === 1 ? "" : "s"} a week</b>, to about ${r1(x.v - cutBy)}, `
+            + `back under the ceiling of ${r1(x.mrv)}. Your last cycle says `
+            + `<b>${esc(signal)}</b>, which is the body saying this volume is costing more `
+            + `than it returns.`
+          : `<b>High \u2014 watch how it recovers.</b> Past about ${r1(x.mrv)} sets a week, extra `
+            + `sets usually cost more recovery than they return. This ceiling is an estimate `
+            + `for your training age \u2014 your own recovery decides the real one. Nothing in your `
+            + `last cycle says this volume is hurting you, so this is worth watching rather `
+            + `than fixing. Cutting ${cutBy} set${cutBy === 1 ? "" : "s"} would bring it under.`)
       : `This is the range to be in. Nothing needs doing.`;
 
   /* WHAT THE RANGE IS, AND WHY IT IS THAT. Four lines, because this is the question
@@ -29897,17 +30207,20 @@ function openVolFix(g){
   const level = (()=>{ try{ return inferExperience(); }catch(e){ return "intermediate"; } })();
   const science = `<div class="vf-sci">
     <div class="vf-sci-k">What to aim for</div>
-    <div class="vf-row"><span>Sets a week</span><b>${Math.round(x.mev)}\u2013${
-      Math.round(x.top)}</b></div>
+    <div class="vf-row"><span>Minimum, to grow at all</span><b>${r1(x.mev)}</b></div>
+    <div class="vf-row"><span>Target, the useful middle</span><b>${r1(x.top)}</b></div>
+    <div class="vf-row"><span>Ceiling, past which it costs more than it returns</span><b>${r1(x.mrv)}</b></div>
     <div class="vf-row"><span>Spread over</span><b>2 or more days</b></div>
     <div class="vf-row"><span>Reps</span><b>5\u201330, most in 6\u201312</b></div>
     <div class="vf-row"><span>How close to failure</span><b>${MESO_RIR[0]} reps left, down to ${
       MESO_RIR[MESO_RIR.length - 1]} by the end of the block</b></div>
-    <div class="vf-sci-p">More sets grow more muscle, but only up to a point: the gain per
-      set shrinks as you climb and stops at <span class="term" data-term="mrv" role="button" tabindex="0">MRV</span>
-      \u2014 about ${Math.round(x.mrv)} for ${esc(x.name.toLowerCase())} at your training age.
-      Start a block near ${Math.round(x.mev)} and let it climb a set a week; the useful work
-      is in the middle, not at the top.</div>
+    <div class="vf-sci-p">More sets grow more muscle, but the gain per set shrinks as you
+      climb, and past <span class="term" data-term="mrv" role="button" tabindex="0">MRV</span>
+      the extra sets usually cost more recovery than they return \u2014 about ${r1(x.mrv)} for
+      ${esc(x.name.toLowerCase())} at your training age. That figure is an estimate scaled
+      off published tables, not a measurement of you: your own recovery decides the real
+      one, and this app watches your cycles for it. Start a block near ${r1(x.mev)} and let
+      it climb a set a week; the useful work is in the middle, not at the top.</div>
   </div>`;
 
   showModal(`<h3 class="vf-h is-${x.state}"><span class="pv-sq fly-in">${
@@ -29917,13 +30230,25 @@ function openVolFix(g){
       ${overPart > 0 ? `<span class="pf-over" style="left:${pctOf(x.mrv)}%;width:${
         pctOf(x.v) - pctOf(x.mrv)}%"></span>` : ""}
       ${x.mev > 0 ? `<span class="pv-k" style="left:${pctOf(x.mev)}%"></span>` : ""}
+      ${x.top > 0 && x.top < span ? `<span class="pv-k is-aim" style="left:${pctOf(x.top)}%"></span>` : ""}
       ${x.mrv > 0 && x.mrv < span ? `<span class="pv-k" style="left:${pctOf(x.mrv)}%"></span>` : ""}
     </div>
-    <div class="pf-scale"><span>0</span><span>${r1(x.mev)} MIN</span><span>${r1(x.mrv)} MAX</span>${
+    <div class="pf-scale"><span>0</span><span>${r1(x.mev)} MIN</span><span>${r1(x.top)} TARGET</span><span>${
+      r1(x.mrv)} CEILING</span>${
       overPart > 0 ? `<span style="color:var(--warn)">${r1(x.v)} NOW</span>` : ""}</div>
     <div class="sub" style="margin:12px 0 0;text-transform:none;letter-spacing:0">
       Your plan gives ${esc(x.name.toLowerCase())} <b>${r1(x.v)} sets a week</b>. ${say}</div>
-    ${volChoicesHTML(x, g, best, fat, canCut, canAdd, toFloor, addBy)}
+    ${kept ? `<div class="vf-kept">${kept === "priority"
+      ? `<b>Kept on purpose</b> \u2014 you asked the builder to prioritise this one, so it is not
+         flagged below its ceiling.`
+      : `<b>Kept on purpose</b> \u2014 you left this as it is at ${r1((volAckGet(g) || {}).v || x.v)}
+         sets a week. It comes back if the figure moves by more than a set, or if a cycle
+         says this muscle is overreached.
+         <button type="button" class="nb-link" data-volpick="unleave">undo</button>`
+    }</div>` : ""}
+    ${volChoicesHTML(x, g, best, fat, canCut, canAdd, toFloor, addBy,
+        {cutEff, tier: pick ? pick.tier : null, canCutDeep, canCutShallow: canCut,
+         hasCandidates: cands.length > 0})}
     ${science}
     <div class="btn-row" style="margin-top:10px">
       <button class="btn ghost small" id="closeModal" style="flex:1">Done</button></div>`);
@@ -29933,11 +30258,14 @@ function openVolFix(g){
      one does exactly what its own label said it would and nothing else. */
   m.querySelectorAll("[data-volpick]").forEach(b=> b.onclick = ()=>{
     const pick = b.dataset.volpick;
-    if(pick === "leave"){ hideModal(); return; }
+    if(pick === "leave"){ volAckSet(g, x); hideModal(); render(); toast("Kept on purpose \u2014 "
+      + GROUPS[g].name.toLowerCase() + " will not be flagged while it stays about here"); return; }
+    if(pick === "unleave"){ volAckClear(g); hideModal(); render(); return; }
     if(pick === "pick"){ hideModal(); openVolAdjust(g); return; }
     if(pick === "ex"){ hideModal(); volAddExercise(g); return; }
     if(pick === "spread"){ volSpread(g, x.state); return; }
-    if(pick === "cut"){ volCutOne(); return; }
+    if(pick === "cut"){ volCutOne(canCut); return; }
+    if(pick === "cutdeep"){ volCutOne(canCutDeep); return; }
     if(pick === "add"){ volAddOne(); return; }
   });
   /* A SET AT A TIME, OFF (OR ONTO) WHATEVER HAS MOST TO SPARE, until the muscle is back
@@ -29948,7 +30276,7 @@ function openVolFix(g){
     const changes = [];
     while(guard++ < 60){
       let q2;
-      try{ q2 = planQuality(S.program, currentSplit(), {gear: (S.setup || {}).gear}); }catch(e){ break; }
+      try{ q2 = planQuality(S.program, currentSplit(), planCheckOpts()); }catch(e){ break; }
       const v2 = (q2.volume || []).find(z=> z.g === gg);
       if(!v2) break;
       if(state === "over" && v2.state !== "over") break;
@@ -29956,13 +30284,35 @@ function openVolFix(g){
       const cands = volEntriesFor(gg).map(c=> ({c, n: parseInt(c.e.sets, 10) || 0}));
       let hit = null;
       if(state === "over"){
-        hit = cands.filter(z=> z.n > Math.max(1, buildMinSets(z.c.e)))
-                   .sort((p2, q3)=> q3.n - p2.n)[0]
-           || cands.filter(z=> z.n > 1).sort((p2, q3)=> q3.n - p2.n)[0];
-        if(!hit) break;
+        /* OFF WHATEVER COSTS THE LEAST, NOT WHATEVER IS BIGGEST.
+
+           This used to take a set from the movement with the most sets in it, whatever
+           that movement was mainly for \u2014 so "spread the cut" across the glutes walked
+           down the squat, set by set, taking the quads with it. The same ranking the
+           one-tap button uses decides each step: main-target work first, then whatever
+           leaves every other muscle at or above its target.
+
+           The last line is the hard one: a step that would push another muscle below its
+           target is not taken at all. If every remaining step would, the spread stops
+           and says so rather than trading one muscle's problem for another's. */
+        /* STRICTER THAN THE RANKING, ON PURPOSE. The ranked list puts a main-target
+           movement first even when it costs something else, because the button says so
+           and a person can read it and decide. The spread takes many steps without
+           asking, so it may not take one that costs anything: a hip thrust is the right
+           first cut for the glutes AND it pays the hamstrings half a set, and nine of
+           them in a row walks the hamstrings under their target while nobody is looking.
+           Any step with a side effect is simply not available here. */
+        const order = volCutRanked(gg, q2.volume, 1)
+          .filter(z=> !z.eff.belowTarget && !z.eff.belowFloor && !z.eff.ownMainHurt);
+        const take = order[0];
+        if(!take) break;
+        hit = {c: take.c, n: parseInt(take.c.e.sets, 10) || 0};
+        const eff = volCutEffect(take.c, gg, q2.volume, 1);
+        const cost = volEffectSay(eff, gg);
         hit.c.e.sets = hit.n - 1;
         if(Array.isArray(hit.c.e.rpes)) hit.c.e.rpes = hit.c.e.rpes.slice(0, hit.n - 1);
-        changes.push(hit.c.e.name + " " + hit.n + " \u2192 " + (hit.n - 1));
+        changes.push(hit.c.e.name + " " + hit.n + " \u2192 " + (hit.n - 1)
+          + (cost ? " (" + cost + ")" : ""));
       } else {
         hit = cands.filter(z=> z.n < MAX_SETS_PER_EXERCISE_GEN)
                    .sort((p2, q3)=> p2.n - q3.n)[0];
@@ -29974,12 +30324,35 @@ function openVolFix(g){
       }
       moved++;
     }
-    if(!moved){ toast("Nothing left to move \u2014 set them yourself instead", "warn"); return; }
+    if(!moved){
+      toast(state === "over"
+        ? "Every cut left would take another muscle under its target \u2014 set them yourself instead"
+        : "Nothing left to move \u2014 set them yourself instead", "warn");
+      return;
+    }
     logPlanChange("sets", null, GROUPS[gg].name, changes,
       {note: "Spread across every movement from the plan check."});
     save(); hideModal(); render();
-    toast(moved + " set" + (moved === 1 ? "" : "s") + " moved across "
-      + GROUPS[gg].name.toLowerCase());
+    /* The toast names what else moved, for the same reason the button did. */
+    const said = changes.map(c=>{
+      const m2 = c.match(/\(([^)]+)\)$/);
+      return m2 ? m2[1] : "";
+    }).filter(Boolean);
+    /* AND IT SAYS WHEN IT STOPPED SHORT. The spread will not take a step that costs
+       another muscle, so on a plan where every remaining cut would, it does what it
+       safely can and leaves the rest. Reporting that as a finished job would be a lie
+       somebody only finds out about on the card afterwards. */
+    let short = false;
+    try{
+      const q3 = planQuality(S.program, currentSplit(), planCheckOpts());
+      const v3 = (q3.volume || []).find(z=> z.g === gg);
+      short = !!(v3 && state === "over" && v3.state === "over");
+    }catch(e){}
+    toast(moved + " set" + (moved === 1 ? "" : "s") + " off "
+      + GROUPS[gg].name.toLowerCase()
+      + (said.length ? " \u00b7 " + said[said.length - 1] : "")
+      + (short ? " \u2014 still over, every further cut would cost another muscle" : ""),
+      short ? "warn" : undefined);
   };
   const volAddExercise = gg=>{
     const counts = DAYS.map(wid=> ({wid,
@@ -29988,22 +30361,29 @@ function openVolFix(g){
     const wid = (counts[0] && counts[0].wid) || DAYS[0];
     if(wid) openAddExercise(wid);
   };
-  const volCutOne = ()=>{
+  const volCutOne = (by)=>{
+    if(!fat) return;
     const e = (S.program[fat.wid] || [])[fat.ei];
     if(!e) return;
     const was = parseInt(e.sets, 10) || 0;
     const floor = Math.max(1, buildMinSets(e));
-    const now = Math.max(floor, was - canCut);
+    const now = Math.max(floor, was - (by || canCut));
     if(now === was){
       toast(e.name + " is already at its minimum \u2014 take the sets off another movement", "warn");
       return;
     }
+    /* The side effect goes in the plan history too. "Sets 4 \u2192 2" six weeks later does not
+       say why a muscle you were not thinking about moved with it. */
+    const eff = volCutEffect(fat, g, q.volume, was - now);
+    const cost = volEffectSay(eff, g);
     e.sets = now;
     if(Array.isArray(e.rpes)) e.rpes = e.rpes.slice(0, now);
-    logPlanChange("sets", fat.wid, e.name, ["Sets " + was + " \u2192 " + now],
+    logPlanChange("sets", fat.wid, e.name,
+      ["Sets " + was + " \u2192 " + now + (cost ? " (" + cost + ")" : "")],
       {note: "Cut from the plan check: " + GROUPS[g].name.toLowerCase() + " was over its ceiling."});
     save(); hideModal(); render();
-    toast((was - now) + " set" + (was - now === 1 ? "" : "s") + " off " + e.name);
+    toast((was - now) + " set" + (was - now === 1 ? "" : "s") + " off " + e.name
+      + (cost ? " \u00b7 " + cost : ""));
   };
   const volAddOne = ()=>{
     const e = (S.program[best.wid] || [])[best.ei];
@@ -30034,8 +30414,14 @@ function planVolHTML(vol){
     const ceiling = Math.max(x.mrv, x.v, 1);
     const pct = Math.max(2, Math.min(100, (x.v / ceiling) * 100));
     const mark = Math.max(0, Math.min(100, (x.mev / ceiling) * 100));
-    return `<button type="button" class="pv-r is-${x.state}" data-vol="${esc(x.g)}"
-        aria-label="${esc(x.name)}, ${r1(x.v)} sets a week of at least ${r1(x.mev)}">
+    /* A ROW SOMEBODY HAS ALREADY ANSWERED FOR IS NOT A WARNING ANY MORE. It keeps its
+       number and its bar \u2014 nothing is hidden \u2014 and loses the colour that says "deal with
+       this", because it has been dealt with. */
+    const kept = volAckActive(x);
+    return `<button type="button" class="pv-r is-${kept ? "kept" : x.state}" data-vol="${esc(x.g)}"${
+        kept ? ` data-volkept="${esc(kept)}"` : ""}
+        aria-label="${esc(x.name)}, ${r1(x.v)} sets a week of at least ${r1(x.mev)}${
+          kept ? ", kept on purpose" : ""}">
       <span class="pv-sq">${esc(groupSym(x.g))}</span>
       <span class="pv-m"><span class="pv-n">${esc(x.name)}</span>
         <span class="pv-t"><span class="pv-f" style="width:${pct}%"></span>${
@@ -57058,7 +57444,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 

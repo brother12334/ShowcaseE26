@@ -195,8 +195,20 @@ console.log("7 - BEING OVER THE CEILING IS AS ACTIONABLE AS BEING UNDER IT");
             aim: !!(m && m.querySelector(".vf-sci"))};
   });
   ck("the chest really is over its ceiling", r.state === "over", JSON.stringify(r.state));
-  ck("the sheet names a number of sets to cut", /Cut \d+ set/.test(r.text), r.text.slice(0,180));
-  ck("and what that would leave", /down to about \d/.test(r.text), r.text.slice(0,200));
+  /* THE VERDICT DEPENDS ON WHETHER THE BODY HAS SAID ANYTHING.
+
+     This used to assert "Cut N sets" unconditionally. Over the ceiling is now amber
+     until the per-cycle verdict reports soreness outlasting the recovery window, joint
+     pain on the muscle's own lifts, or a lift falling two cycles running \u2014 because the
+     ceiling is an estimate scaled off a published table, and calling an estimate a
+     failure on a plan somebody may be running perfectly well claims more than it knows.
+     The fixture here has no logged cycles at all, so there is no signal and this is the
+     amber path. The red path is section 7b below, and volfix.mjs drives both. */
+  ck("it says what being over the ceiling costs", /cost more recovery than they return/.test(r.text),
+     r.text.slice(0,200));
+  ck("and names the cut that would clear it", /Cutting \d+ set/.test(r.text), r.text.slice(0,240));
+  ck("without claiming the sets are doing nothing",
+     !/not making this muscle grow faster/.test(r.text), "");
   ck("there is a button that does it", r.cut === true, r.text.slice(0,240));
   ck("and it names the movement and the count",
      /^Take \d+ sets? off \S/.test(r.label), r.label);
@@ -281,9 +293,17 @@ console.log("8 - THE SHEET SAYS WHAT TO AIM FOR, NOT ONLY WHAT IS WRONG");
     return {rows, text: m.textContent.replace(/\s+/g," ").trim(),
             terms: Array.from(m.querySelectorAll("[data-term]")).map(x=> x.dataset.term)};
   });
-  ck("it gives a weekly set range", r.rows.some(x=> /Sets a week/.test(x)), JSON.stringify(r.rows));
-  ck("in whole sets, because that is what you count out",
-     !r.rows.some(x=> /Sets a week.*\d\.\d/.test(x)), JSON.stringify(r.rows));
+  /* THREE NUMBERS, NAMED, INSTEAD OF A RANGE WITH NO EXPLANATION.
+
+     This asked for one "Sets a week 4\u201312" row. The bar above it was labelled 4 MIN and
+     13.9 MAX at the same time, so the sheet showed two different pairs of numbers for the
+     same muscle and explained neither gap. The table and the bar now use the same three
+     figures in the same words: minimum, target, ceiling. */
+  ck("it names the minimum", r.rows.some(x=> /Minimum/i.test(x)), JSON.stringify(r.rows));
+  ck("the target", r.rows.some(x=> /Target/i.test(x)), JSON.stringify(r.rows));
+  ck("and the ceiling", r.rows.some(x=> /Ceiling/i.test(x)), JSON.stringify(r.rows));
+  ck("and the bar overhead is labelled with the same three",
+     /MIN/.test(r.text) && /TARGET/.test(r.text) && /CEILING/.test(r.text), r.text.slice(0,140));
   ck("it says to spread them over two days or more",
      r.rows.some(x=> /Spread over/.test(x) && /2/.test(x)), JSON.stringify(r.rows));
   ck("it gives a rep range", r.rows.some(x=> /Reps/.test(x) && /6/.test(x)), JSON.stringify(r.rows));

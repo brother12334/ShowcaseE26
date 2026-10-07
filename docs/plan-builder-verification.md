@@ -1643,3 +1643,90 @@ Frequency is protected through the first three fit phases and surrendered only i
 last-resort pass where the budget is the only rule standing — with one exception that
 outlives it, the hamstrings, because they are the muscle a time-boxed plan loses first
 and a leg curl is the cheapest thing on the day in sets.
+
+---
+
+# THE COMPOUND-FED CORRECTION, AND WHAT THE SWEEP DID AFTERWARDS (54.0)
+
+## What was wrong
+
+Reported from the Program tab: glutes 16.8 sets a week against a ceiling of 13.9, with
+the top fix offering to take two sets off a Smith machine squat on a plan that also had
+three sets of hip thrusts in it.
+
+The glutes were being counted generously and capped harshly at the same time.
+
+1. **The count includes partial credit.** A Smith squat pays the glutes 0.8 of a set, a
+   Romanian deadlift 0.8, a Bulgarian split squat 0.9. A perfectly ordinary leg day can
+   therefore book 16 glute sets without one movement whose job is the glutes.
+2. **The ceiling was written for direct work.** `GROUPS.glutes.mrv` of 16 comes from a
+   table that assumed a muscle's sets are mostly its own.
+3. **And then step 4 of `adjustedLandmarks` lowered it again.** Any muscle taking more
+   than 60% of its sets from compounds had its MRV multiplied by 0.9 — which for the
+   glutes is not a property of the programme, it is a property of the glutes. Ceiling 16
+   became 13.9, measured against a count inflated by the same fact.
+
+## What changed
+
+`INDIRECT_BASIS_CORRECTION` is no longer 1.0 across the board. Five groups whose volume
+is chiefly collected rather than trained get a wider band: **glutes 1.5, front delts 1.5,
+traps 1.4, lower back 1.4, adductors 1.4.** The figure is the ratio between what this app
+counts for them and what the published tables assumed. Evidence grade: **inferred** — it
+is a correction for a counting mismatch this app created, not a claim about physiology,
+and the per-user calibration still learns the real number.
+
+The same five skip the compound-share penalty, because their volume being compound is the
+very thing the basis correction already allows for.
+
+Two table faults fell out of the same investigation:
+
+- `"Smith Machine Hip Thrust"` had no table entry and fell through to the keyword list,
+  which pays the hamstrings 0.4 and no adductors — so the same movement scored differently
+  depending on which piece of kit was in its name. It and `"machine hip thrust"` are now
+  table entries matching the rest of the family.
+- `"Glute Kickback"` was being classified as **triceps work**. `/kickback/` sits in the
+  triceps keyword row, which is reached before the glute row, so every glute kickback in
+  the library was missing from the muscle it trains and inflating one it does not. There
+  are now table entries for it, and the glute keyword row asks before the triceps one.
+
+## The sweep afterwards
+
+Days 2–6 × four gear tiers × three levels × goal {muscle, lean} × budget {45, 60, 75},
+360 combinations, re-run after the change.
+
+| | before | after |
+|---|---|---|
+| Combinations built | 360 | **360** |
+| Priority muscle put on maintenance | 0 | **0** |
+| Priority muscle short of its floor, and said so | 0 | **3** |
+| Sessions past 24 working sets | 0 | **0** |
+| Illegal supersets | 0 | **0** |
+| Weeks with hamstrings on fewer than 2 days | 0 | **0** |
+
+**The one changed row, in full.** Correcting the five groups raised three floors — glutes,
+traps and lower back — and three of the 360 combinations no longer fit an advanced
+lifter's side-delt floor into the budget: two full-gear days at 45 minutes (8.4 against a
+floor of 9.6) and at 75 (9.4), and two dumbbell days at 75 (9.4). All three are **two
+training days a week**, which is ninety minutes of gym; the floor was always marginal
+there and the extra demand elsewhere tipped it.
+
+None of the three is the builder sacrificing a priority muscle. In every case it is listed
+in `report.fit.priority` and named on the choice screen before anything is saved, which is
+the app telling the person the clock cannot buy what they asked for. `tests/specs/budget.mjs`
+previously folded both outcomes into one assertion, because the second had never happened;
+it now distinguishes **sacrificed** (on maintenance, or trimmed to save minutes — still
+never allowed) from **never reached, and declared**.
+
+One genuine hole was found and closed on the way. `fitFloorFor()` has always exempted a
+priority muscle in every mode, but the last-resort pass sets `needRoom` to `-Infinity`,
+which waved every floor through including that one. The trim pass now prefers cuts that
+leave priority floors intact and only comes back for them when there is nothing else left
+to take.
+
+## Tests
+
+`tests/specs/volfix.mjs` — 12 sections. The reported case is section 1: the top button
+cuts the hip thrust, the squat ranks last and names the quads it would cost. The rest hold
+the spread, the cut size, the shared vocabulary, the recalibration, the two table faults,
+the acknowledgement and its expiry, amber versus red, and the card and the sheet asking
+the same question.
