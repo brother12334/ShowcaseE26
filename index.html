@@ -5180,38 +5180,6 @@ body.cele-open{overflow:hidden}
 .nb-metric-b.on{
   background:var(--card2);color:var(--text);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
 }
-/* D — ONE ROW PER LIFT. The name and what it has done on the left, the reading and the
-   shape of it on the right. No axes, no gridlines, no legend: the number IS the axis. */
-.lf-list{display:block;margin-top:2px}
-.lf-row{
-  display:grid;grid-template-columns:1fr 108px;gap:14px;align-items:center;width:100%;
-  padding:14px 2px;text-align:left;background:none;border:0;border-bottom:1px solid rgba(255,255,255,.05);
-  border-radius:0;cursor:pointer;
-}
-.lf-row:active{background:rgba(255,255,255,.02)}
-.lf-m{min-width:0}
-.lf-n{display:block;font-size:var(--fs-5);font-weight:500;color:var(--text);margin-bottom:5px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lf-d{display:block;font:var(--fs-2) var(--mono);color:var(--faint);letter-spacing:.04em}
-.lf-d b{color:var(--ok);font-weight:400}
-.lf-d i{color:var(--warn);font-style:normal}
-.lf-r{position:relative;height:38px}
-.lf-now{position:absolute;right:0;top:-4px;font:var(--fs-4) var(--mono);color:var(--text)}
-.lf-spark{width:100%;height:100%;overflow:visible}
-.lf-area{fill:var(--acc);opacity:.11}
-.lf-line{fill:none;stroke:var(--acc);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
-.lf-dot{fill:var(--acc)}
-/* NAVIGATE: the line draws itself on arrival, once. A line you watch being drawn is a
-   line you read; a line that fades in is a picture. */
-#app.view-in .lf-line{
-  stroke-dasharray:240;animation:lfDraw .42s var(--ease-nav) both;animation-delay:var(--t-nav)
-}
-@keyframes lfDraw{from{stroke-dashoffset:240}to{stroke-dashoffset:0}}
-#app.view-in .lf-dot{animation:lfDot .2s var(--ease-out) both;animation-delay:.52s}
-@keyframes lfDot{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
-@media (prefers-reduced-motion: reduce){
-  #app.view-in .lf-line,#app.view-in .lf-dot{animation:none;stroke-dasharray:none}
-}
 .bm-figs{display:flex;gap:4px;justify-content:center;align-items:flex-start}
 /* 190px each was half a 390px screen for the one asset nobody else has. The cap goes up
    to what the gutter allows, which on a phone is the whole width and on a wide screen
@@ -6862,7 +6830,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "53.5";
+const APP_VERSION = "53.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -40912,95 +40880,6 @@ function histHeatHTML(ctx){
    "Top set" is the heaviest set that actually happened, falling back to the most reps
    where there is no load — so a pull-up has a line too, and it is a line about reps,
    which is the honest reading for a movement with no weight on it. */
-function liftHistory(){
-  const by = {};
-  (S.sessions || []).forEach(sess=>{
-    (sess.entries || []).forEach(e=>{
-      if(!e || !e.name) return;
-      let bw = 0, br = 0;
-      (e.sets || []).forEach(st=>{
-        if(!st || !st.done) return;
-        if(setIsWarmup(e, (e.sets || []).indexOf(st))) return;
-        const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
-        if(!(r > 0)) return;
-        if(w > bw || (w === bw && r > br)){ bw = w; br = r; }
-      });
-      if(!(br > 0)) return;
-      const k = nrm(e.name);
-      const o = by[k] || (by[k] = {name: e.name, pts: []});
-      o.pts.push({at: sess.startedAt || 0, w: bw, r: br});
-    });
-  });
-  const out = [];
-  Object.keys(by).forEach(k=>{
-    const o = by[k];
-    o.pts.sort((a, b)=> a.at - b.at);
-    if(o.pts.length < 2) return;                 // one point is not a line
-    const loaded = o.pts.some(x=> x.w > 0);
-    const v = o.pts.map(x=> loaded ? x.w : x.r);
-    out.push({name: o.name, loaded, v,
-      now: v[v.length - 1], first: v[0], n: o.pts.length,
-      at: o.pts[o.pts.length - 1].at});
-  });
-  /* The lifts you actually run, most-trained first, recency breaking the ties. A list
-     sorted by load puts a leg press at the top of a page about your bench. */
-  out.sort((a, b)=> b.n - a.n || b.at - a.at);
-  return out;
-}
-/* A LINE THAT IS ONLY A LINE. No axes, no gridlines, no legend: the number beside it is
-   the reading, and the shape is the story. 16 points at most, because a 40px-wide
-   sparkline with thirty points in it is a texture. */
-function sparkHTML(v){
-  const pts = v.slice(-16);
-  if(pts.length < 2) return "";
-  const lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts);
-  const rng = (hi - lo) || 1;
-  const xy = pts.map((y, i)=> [(i / (pts.length - 1)) * 100, 30 - ((y - lo) / rng) * 24]);
-  const d = xy.map((pt, i)=> (i ? "L" : "M") + pt[0].toFixed(1) + " " + pt[1].toFixed(1)).join(" ");
-  const last = xy[xy.length - 1];
-  return `<svg class="lf-spark" viewBox="0 0 100 34" preserveAspectRatio="none" aria-hidden="true">
-    <path class="lf-area" d="${d} L100 34 L0 34 Z"></path>
-    <path class="lf-line" d="${d}"></path>
-    <circle class="lf-dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.2"></circle>
-  </svg>`;
-}
-function histSegHTML(){
-  const seg = (id, label)=> `<button class="nb-metric-b${HIST_VIEW === id ? " on" : ""}"
-    data-histview="${id}" aria-selected="${HIST_VIEW === id}">${label}</button>`;
-  return `<div class="nb-metric" role="tablist" style="margin-bottom:14px">
-    ${seg("lifts", "Lifts")}${seg("sessions", "Sessions")}${seg("records", "Records")}</div>`;
-}
-/* THE LIFTS VIEW. One row per movement: what it is doing, how far it has come, and the
-   shape of the climb. Seven rows answer what twenty screens of session cards did not. */
-function histLiftsHTML(){
-  const lifts = liftHistory();
-  if(!lifts.length){
-    return `<div class="nb-none">Two sessions on the same movement and its line starts
-      here. Everything you log feeds it — there is nothing to set up.</div>`;
-  }
-  const unit = unitWord();
-  return `<div class="lf-list">${lifts.slice(0, 14).map(l=>{
-    const up = Math.round((l.now - l.first) * 10) / 10;
-    const what = l.loaded ? unit : "reps";
-    /* The record book keys on the canonical name, not the display one, so this hands
-       over the key it will be looked up by — a display name finds nothing and the page
-       silently falls back to the whole list. */
-    return `<button class="lf-row" data-liftrow="${esc(nrm(l.name))}">
-      <span class="lf-m">
-        <span class="lf-n">${esc(l.name)}</span>
-        <span class="lf-d">${up > 0
-          ? `<b>+${esc(String(up))} ${esc(what)}</b> over ${l.n} sessions`
-          : up < 0
-            ? `<i>${esc(String(up))} ${esc(what)}</i> over ${l.n} sessions`
-            : `level over ${l.n} sessions`}</span>
-      </span>
-      <span class="lf-r">
-        <span class="lf-now num">${esc(String(Math.round(l.now)))}</span>
-        ${sparkHTML(l.v)}
-      </span>
-    </button>`;
-  }).join("")}</div>`;
-}
 function viewHistory(){
   let h = `<div class="hdr"><h1>History</h1>${hdrRight(`<span class="date num">${S.sessions.length} sessions</span>`)}</div>`;
   h += liveStripHTML();
@@ -41010,18 +40889,9 @@ function viewHistory(){
       <p class="nb-empty-w">That history is what lets Element 26 tell you when to add weight.</p>
       <button class="btn" data-goto="today">Start your first workout</button>
     </div>`;
-  h += histSegHTML();
-  if(HIST_VIEW === "lifts"){
-    h += histLiftsHTML();
-    return h;
-  }
-  if(HIST_VIEW === "records"){
-    h += recordTeaserHTML();
-    return h;
-  }
-  /* "Am I turning up" belongs with the sessions, which is what it counts. The lifts
-     view answers a different question and a 600px explanation of what a week on target
-     means is in the way of it. */
+  h += recordTeaserHTML();
+  /* D5 — the twelve-week strip, above the heat map. Both are "how has it been going",
+     and the week is the coarser and more useful of the two readings. */
   try{ h += streakStripHTML(); }catch(e){}
   const HCTX = histContext();
   h += histHeatHTML(HCTX);
@@ -41462,7 +41332,6 @@ let HIST_Q = "";                     // what History is filtered by, if anything
    answers it was a card you had to know to enter.
 
    Three views, and the one that answers the question opens first. */
-let HIST_VIEW = "lifts";             // lifts | sessions | records
 let HIST_SHOW = 20;                  // how many session cards are drawn so far
 /* The catch-up list is a list of nights that still WANT something, so a night that has
    been settled leaves it. This is the way back in when one was settled wrongly. */
@@ -44383,30 +44252,11 @@ function bind(){
   const wdL = $("#weighDue");
   if(wdL) wdL.onclick = ()=>{ BODYLOG_T = null; openBodyLog(); };
   const rbOpen = $("#recordsBtn");
-  document.querySelectorAll("[data-histview]").forEach(b=> b.onclick = ()=>{
-    const v = b.dataset.histview;
-    if(v === HIST_VIEW) return;
-    if(v === "records"){ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; }
-    HIST_VIEW = v;
-    HIST_SHOW = 20;
-    render(); window.scrollTo(0, 0);
-  });
   const hm = $("#histMore");
   if(hm) hm.onclick = ()=>{ HIST_SHOW += 20; render(); };
-  /* A lift's row opens its own record, which is where the rest of its story already
-     lives — every set of it, every session, and the bests. */
-  document.querySelectorAll("[data-liftrow]").forEach(b=> b.onclick = ()=>{
-    RECORDS_OPEN = true; RB_EX = b.dataset.liftrow; RECORDS_Q = "";
-    HIST_VIEW = "records";
-    render(); window.scrollTo(0, 0);
-  });
-  if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; HIST_VIEW = "records"; render(); window.scrollTo(0,0); };
+  if(rbOpen) rbOpen.onclick = ()=>{ RECORDS_OPEN = true; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
   const rbBack = $("#rbBack");
-  /* Back out of the record book lands on the segment the book BELONGS to, not on the
-     one the tab happens to open with. The book is a page inside Records; leaving it
-     should put you where you were, and dropping somebody into Lifts instead is the
-     app choosing for them. */
-  if(rbBack) rbBack.onclick = ()=>{ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; HIST_VIEW = "records"; render(); window.scrollTo(0,0); };
+  if(rbBack) rbBack.onclick = ()=>{ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; render(); window.scrollTo(0,0); };
   /* A movement's own page is a state of the record book, not a modal: the same tab, the
      same back button one step further in. */
   document.querySelectorAll("[data-rbex]").forEach(b=> b.onclick = ()=>{

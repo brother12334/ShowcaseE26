@@ -22,7 +22,7 @@ const DIR = process.env.E26_SPEC_DIR || path.join(__dirname, "specs");
    something that happens by accident and goes unnoticed. */
 const REQUIRED = [
   "selftest", "phase2", "phase3", "phase4", "phase5", "phase6", "phase7", "phase9",
-  "streak", "share", "budget", "science", "news", "weekword", "progtidy", "volrows", "polish", "motion", "logger", "rest2", "bodymap", "histlift", "sheets", "navstick",
+  "streak", "share", "budget", "science", "news", "weekword", "progtidy", "volrows", "polish", "motion", "logger", "rest2", "bodymap", "history", "sheets", "navstick",
   "restdays", "daypick", "bwsay", "bwoffer", "planlook", "gradeup",
   "level", "caps", "eating"
 ];

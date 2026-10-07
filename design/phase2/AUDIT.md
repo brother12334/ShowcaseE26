@@ -815,3 +815,33 @@ disabled on a finished exercise, which was a real fix and is kept.
 
 `polish.mjs` and `hurt.mjs` drive the strip instead of the sheet; the dead overflow
 handler is removed rather than left to look live.
+
+# PART 10 — THE HISTORY TABS ARE GONE (v53.6)
+
+Proposal D put a `Lifts | Sessions | Records` switcher at the top of History and opened
+on Lifts. It is removed. History is one page again: the record book, the weeks-on-target
+strip, the heat map, search, and the sessions — in that order, as it was.
+
+## Two collisions went out with it, and neither was deliberate
+
+**A second `sparkHTML`.** The Lifts view declared `function sparkHTML(v)` — one argument
+— in the same scope as the record book's `function sparkHTML(vals, w, h, col)`. Function
+declarations hoist and the later one wins, so *every* call asking for a width, a height
+and a colour had been getting the one-argument version with its own fixed class and
+viewBox. The record book's sparklines have been drawing at the wrong size and colour
+since Proposal D shipped.
+
+**A second `.lf-*` block.** It redefined `.lf-list`, `.lf-row`, `.lf-n`, `.lf-d` and
+`.lf-r`, all of which the record book's chart list and the bodyweight retro-fix sheet
+already used, and it came last in the file so it won there too.
+
+Both are the kind of thing a 58,000-line single file makes easy: a name that looks free
+because nothing nearby uses it. Removing the Lifts view repairs both, and
+`tests/specs/history.mjs` (renamed from `histlift`) now holds the repair — `sparkHTML`
+takes four arguments, honours the size it is handed, and draws `rb-spark` rather than
+`lf-spark`.
+
+**What the removal costs.** The per-lift rows with their sparklines are gone, not hidden.
+The same information lives in the record book, which is one tap from the top of the tab
+and keyed per movement. The lazy session list stays — twenty at a time with the rest one
+tap away — so the tab does not go back to twenty screens of cards.
