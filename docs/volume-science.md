@@ -11,12 +11,27 @@ feed is not written yet.
 
 ## 0. Where this is up to
 
-The network policy now reaches the literature. The keystone paper is **read and extracted**
-(§1). The two measurements that needed no literature are done (§2, §4), and a third that
-needed the paper's method is done (§3).
+The keystone paper is **read in full and extracted**, including its fitted curve from the
+supplementary materials (§1). Three measurements of this app are finished and reproducible
+(§2, §3, §4). The landmarks are **derived** (§5A) and stand beside the table that ships
+today.
 
-The model itself (brief §3.1–3.2) is **not yet written into the app**, and §5 says what the
-findings already imply for it.
+**Nothing is applied to the app yet.** The derived table moves every landmark for every
+user, and brief Part 6 exists to carry that safely; it ships once, with the bounded
+multiplier chain, the per-user learning, the simulation and the 360 re-measurement.
+
+Brief §3.1 and §3.2 are now answerable from evidence rather than preference:
+
+| Question | Answer | Where |
+|---|---|---|
+| What is the curve's functional form? | square root, selected by Bayes Factor from seven candidates | §1.2 |
+| What are its parameters? | the published marginal-effects table, 0–45 sets, stored verbatim | §1.5 |
+| How should an indirect set count? | 0.5, binary — and fractional counting beat both alternatives | §1.1 |
+| What is MEV? | 4 fractional sets, re-derived from the curve and matching the paper | §1.3, §1.5 |
+| What is the target? | the efficiency knee at 10, useful middle to 18 | §1.3 |
+| What is the diminishing-returns limit? | 29 for real-but-expensive returns; no evidence past 43 | §1.3 |
+| Does frequency raise the target? | no — the interval contains the null | §1.4 |
+| Do muscles need different curves? | no evidence; only the counting basis differs, and it is measured | §3, §5A |
 
 **Sources read in full so far**
 
@@ -129,6 +144,46 @@ frequency 1 → 2 moves the estimate from 12.72% [10.57, 15.05] to 17.32% [14.34
 bonus to MAV on the grounds that frequency does not raise growth at equal weekly volume.
 It also says the remaining frequency logic belongs to recovery and to strength, not to the
 hypertrophy target, which is exactly where the brief puts it (§3.4).
+
+### 1.5 The curve itself, set by set
+
+The supplementary materials (https://osf.io/6z3xu, *Primary Meta-Regressions / Weekly
+Volume / Hypertrophy / hypertrophy.sets.week.fractional.table.png*) publish the fitted
+model's **control-adjusted marginal effects at every integer set count from 0 to 45**,
+with 95% credible and prediction intervals. That table *is* the dose-response curve, and
+it is stored verbatim at `docs/data/pelland-hypertrophy-volume.json`.
+
+Using the published table directly, rather than refitting an equation to it, means every
+number the app derives traces to a published figure instead of to a curve I fitted myself.
+
+| Weekly fractional sets | % change in muscle size | 95% CrI |
+|---|---|---|
+| 1 | 0.74 | 0.44 – 1.01 |
+| **4** | **2.21** | 1.32 – 3.06 |
+| 5 | 2.60 | 1.55 – 3.59 |
+| **10** | **4.18** | 2.49 – 5.81 |
+| 15 | 5.45 | 3.23 – 7.58 |
+| **18** | **6.12** | 3.63 – 8.53 |
+| 20 | 6.54 | 3.87 – 9.12 |
+| 25 | 7.52 | 4.44 – 10.50 |
+| **29** | **8.24** | 4.86 – 11.52 |
+| 30 | 8.41 | 4.96 – 11.77 |
+| 40 | 10.03 | 5.90 – 14.07 |
+| 45 | 10.77 | 6.32 – 15.13 |
+
+**Transcription verified three ways.** Re-deriving the minimum effective dose from the
+table — the first volume whose estimate clears the 2.05% SDES — gives **exactly 4**, the
+paper's own figure. Re-deriving the tier edges the same way gives 4, 11, 20, 32 against
+the paper's 4, 10, 18, 29: within one set, the difference being integer stepping against
+their continuous reading. And the curve is monotonic throughout, with first differences
+falling smoothly from 0.74 at one set to 0.15 at forty-five. The only breaks in concavity
+are two +0.01 wobbles at 40 and 44 sets, which is rounding in a table published to two
+decimal places, not shape.
+
+Note what the credible intervals do: at 4 sets the estimate is 2.21% [1.32, 3.06] and at
+29 it is 8.24% [4.86, 11.52]. **The intervals are wide and they overlap heavily.** The
+curve is a central estimate across 1,032 people, not a promise to any one of them — which
+is the whole argument for the per-user dose-finding in brief §3.5.
 
 ---
 
@@ -346,6 +401,61 @@ Three things follow, and none of them is a small adjustment.
 the Part 6 migration exists to carry safely, and it should ship once — with the migration,
 the bounded multiplier chain, the simulation and the re-measurement — rather than in
 pieces.
+
+---
+
+## 5A. THE DERIVED TABLE — what the landmarks become
+
+Combining §1.5's curve with §3's per-muscle basis ratios gives the landmarks in **Element
+26's own counting units**, with no hand-set numbers anywhere in the chain.
+`tools/science/derived-landmarks.mjs` produces this and re-derives the tier edges from the
+stored curve rather than copying them out of the paper's prose.
+
+| Muscle | Basis ratio | Floor | Efficiency knee | Useful top | Expensive top | Ships today (mev/mav/mrv) |
+|---|---|---|---|---|---|---|
+| Glutes | 1.353 | 5.4 | 13.5 | 24.4 | 39.2 | 4 / 12 / 16 |
+| Lats | 1.150 | 4.6 | 11.5 | 20.7 | 33.3 | 10 / 18 / 22 |
+| Side Delts | 1.029 | 4.1 | 10.3 | 18.5 | 29.8 | 8 / 20 / 26 |
+| Chest | 1.000 | 4.0 | 10.0 | 18.0 | 29.0 | 10 / 20 / 22 |
+| Mid Back | 1.000 | 4.0 | 10.0 | 18.0 | 29.0 | 10 / 20 / 25 |
+| Quads | 1.000 | 4.0 | 10.0 | 18.0 | 29.0 | 8 / 16 / 20 |
+| Triceps | 0.950 | 3.8 | 9.5 | 17.1 | 27.5 | 6 / 14 / 18 |
+| Front Delts \* | 0.938 | 3.8 | 9.4 | 16.9 | 27.2 | 0 / 12 / 16 |
+| Calves | 0.914 | 3.7 | 9.1 | 16.5 | 26.5 | 8 / 14 / 20 |
+| Biceps | 0.912 | 3.6 | 9.1 | 16.4 | 26.4 | 8 / 18 / 24 |
+| Abs | 0.909 | 3.6 | 9.1 | 16.4 | 26.4 | 6 / 18 / 24 |
+| Hamstrings | 0.900 | 3.6 | 9.0 | 16.2 | 26.1 | 6 / 14 / 20 |
+| Lower Back | 0.871 | 3.5 | 8.7 | 15.7 | 25.3 | 4 / 8 / 12 |
+| Rear Delts | 0.862 | 3.4 | 8.6 | 15.5 | 25.0 | 6 / 18 / 24 |
+| Obliques | 0.800 | 3.2 | 8.0 | 14.4 | 23.2 | 4 / 10 / 16 |
+| Traps | 0.749 | 3.0 | 7.5 | 13.5 | 21.7 | 4 / 16 / 24 |
+| Forearms | 0.720 | 2.9 | 7.2 | 13.0 | 20.9 | 2 / 8 / 12 |
+| Adductors \* | 0.700 | 2.8 | 7.0 | 12.6 | 20.3 | 0 / 6 / 12 |
+
+\* optional group, not measured by the plan check.
+
+**Three things this says, none of them small.**
+
+1. **The floors fall, by a lot.** Chest, mid back and lats ship an MEV of 10 and derive to
+   4.0–4.6. Side delts, biceps, calves and quads ship 8. An app telling somebody doing six
+   hard chest sets a week that they are below the minimum to grow at all is contradicting
+   the best current estimate of that minimum by more than a factor of two.
+
+2. **The ceilings rise, by more.** Today's MRVs of 12–26 become 21–39 at the edge of the
+   tier where returns are real but expensive. The lower back ships 12 and derives to 25.3.
+   The glutes ship 16 — against a count inflated 1.353× — which is the reported bug stated
+   in one line.
+
+3. **The per-muscle spread almost vanishes, and what is left is measured.** Today MEV
+   ranges 0–10 and MRV 12–26 across muscles on the authority of a coaching table. Derived,
+   every muscle sits on **one curve**, and the only thing separating them is the basis
+   ratio — which is measured from this app's own 360 plans. Traps are the single muscle
+   whose ceiling *falls* (24 → 21.7), because the app under-counts them.
+
+**One muscle to decide by hand: the traps.** Every other change moves in a direction the
+evidence supports. The traps' ceiling drops because of a counting correction, not because
+of anything about traps, and they are the clearest case for asking whether a per-muscle
+recovery cost (brief §3.4b) exists at all.
 
 ## 6. Still to do
 
