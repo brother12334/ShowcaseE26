@@ -5394,6 +5394,10 @@ body.news-open{overflow:hidden}
 .pv-f{position:absolute;left:0;top:0;bottom:0;border-radius:var(--r-xs);
   transition:width var(--t-slow) var(--ease-out)}
 .pv-k{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--faint)}
+/* The target mark, which often carries no word of its own because there is no room for
+   one beside the ceiling's. Drawn in the accent so it reads as the thing to aim at
+   rather than as another boundary. */
+.pv-k.is-aim{background:var(--acc);opacity:.75}
 .pv-v{font:var(--fs-2) var(--mono);color:var(--faint);flex-shrink:0;text-align:right;white-space:nowrap}
 .pv-v b{color:var(--text);font-weight:600}
 .pv-r.is-under{border-color:rgba(209,88,79,.34)}
@@ -5426,8 +5430,19 @@ body.news-open{overflow:hidden}
 /* The fix sheet's own reading, the same bar at a size you can actually look at. */
 .pf-big{display:block;height:9px;border-radius:var(--r-sm);background:rgba(255,255,255,.055);
   margin:12px 0 7px;position:relative;overflow:hidden}
-.pf-scale{display:flex;justify-content:space-between;font:var(--fs-1) var(--mono);color:var(--faint);
-  letter-spacing:.06em}
+/* A LABEL THAT DOES NOT POINT AT ITS OWN MARK IS WORSE THAN NO LABEL.
+
+   This was a flex row with space-between, so the four readings were spread evenly across
+   the width while the ticks they name sat at their real positions on the bar. On a glute
+   row of 6 / 18 / 23 the word TARGET was printed at 52% of the bar and its tick was at
+   78%: the sheet was pointing at the wrong part of its own picture. Each label is placed
+   at its own value now, and the two at the ends are pinned inside the edges rather than
+   centred on them and half cut off. */
+.pf-scale{position:relative;height:13px;font:var(--fs-1) var(--mono);color:var(--faint);
+  letter-spacing:.06em;margin-bottom:2px}
+.pf-scale span{position:absolute;top:0;white-space:nowrap;transform:translateX(-50%)}
+.pf-scale span.at-start{left:0;transform:none}
+.pf-scale span.at-end{left:auto;right:0;transform:none}
 /* The part of the bar past the ceiling. Drawn in the warning colour and hatched, so
    "over" is legible as over rather than as a bar that happens to be full. */
 .pf-over{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(
@@ -5436,10 +5451,15 @@ body.news-open{overflow:hidden}
 .vf-sci{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 .vf-sci-k{font:var(--fs-1) var(--mono);letter-spacing:.14em;text-transform:uppercase;
   color:var(--faint);margin-bottom:8px}
-.vf-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+/* A LONG VALUE DROPS TO ITS OWN LINE rather than squeezing the label into a column two
+   words wide. "How close to failure" against "3 reps left, down to 1 by the end of the
+   block" was rendering as a four-line tangle of two ragged columns. */
+.vf-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;
   padding:5px 0;border-bottom:1px solid var(--line);font-size:var(--fs-3);color:var(--dim)}
 .vf-row:last-of-type{border-bottom:0}
-.vf-row b{color:var(--text);font-weight:600;text-align:right;font-family:var(--mono);font-size:var(--fs-3)}
+.vf-row b{color:var(--text);font-weight:600;text-align:right;font-family:var(--mono);font-size:var(--fs-3);
+  margin-left:auto}
+.vf-row > span{flex:1 1 auto;min-width:0}
 .vf-sci-p{font-size:var(--fs-3);line-height:1.55;color:var(--faint);margin-top:9px}
 
 /* The bodyweight-trend card on the Body tab. Built from the same tokens as everything
@@ -6845,7 +6865,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "54.0";
+const APP_VERSION = "54.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -29796,6 +29816,18 @@ function volOverSignal(g){
     return hit ? (hit.why || "overreached") : "";
   }catch(e){ return ""; }
 }
+/* A LANDMARK IS AN ESTIMATE AND IS SHOWN AS ONE.
+
+   "23.2 CEILING" is a published table figure scaled by an inferred training age, an
+   inferred goal and a recovery reading \u2014 printing a tenth of a set of it claims a
+   precision none of those inputs have, and the paragraph at the foot of the volume sheet
+   says exactly that in words. The arithmetic behind a cut keeps the exact number; only
+   the reading of it rounds.
+
+   YOUR OWN VOLUME DOES NOT ROUND. 16.8 sets a week is arithmetic on the plan in front of
+   you, not an estimate of anything, and the tenth is the part that tells you a third of
+   those sets arrived as partial credit from compound lifts. */
+function lm(v){ return String(Math.round(v)); }
 function planCheckOpts(){
   const ans = (S.builtPlan && S.builtPlan.answers) || {};
   return {budget: ans.minutes || 0,
@@ -29946,7 +29978,7 @@ function volChoicesHTML(x, g, best, fat, canCut, canAdd, toFloor, addBy, opts){
       rows.push(volChoiceHTML("cutdeep",
         `Go further, to the middle of your range`,
         `${o.canCutDeep} set${o.canCutDeep === 1 ? "" : "s"} off ${esc(fat.e.name)} instead, `
-        + `down to about ${r1(x.top)} \u2014 where each further set still pays for itself.`));
+        + `down to about ${lm(x.top)} \u2014 where each further set still pays for itself.`));
     if(spread > 1 && canCut > 0)
       rows.push(volChoiceHTML("spread", "Spread the cut across every movement",
         `A set at a time, off whatever costs the least elsewhere, until it is under the ceiling.`));
@@ -30137,6 +30169,22 @@ function openVolFix(g){
      its own colour, so being over looks like being over. */
   const span = Math.max(x.mrv, x.v, 1);
   const pctOf = n=> Math.max(0, Math.min(100, (n / span) * 100));
+  /* WHETHER THE TARGET'S WORD FITS, measured in characters rather than guessed.
+
+     A label is mono at --fs-1, so a character is about 6.6px, and the bar is the screen
+     less its gutters \u2014 about 334px on a 390px phone. One character is therefore close to
+     2% of the bar. "24 CEILING" is ten of them and sits pinned to the right edge, so it
+     occupies the last 20%; "18 TARGET" is nine, so it needs its own half-width of 9% as
+     well. On the reported glute row the target lands at 75% and the two ran into each
+     other and printed "18 TARGET24 CEILING".
+
+     So the word is shown only where it comfortably fits, and where it does not the TICK
+     still marks the spot: the mark is the reading, the word is only the convenience, and
+     the table below names all three in full either way. */
+  const CH_PCT = 2;
+  const roomFor = (text, at)=> at > pctOf(x.mev) + ("Minimum".length + 3) * CH_PCT
+                            && at < 100 - ("Ceiling".length + 3) * CH_PCT - (text.length / 2) * CH_PCT;
+  const showAim = x.top > 0 && x.top < span && roomFor("18 TARGET", pctOf(x.top));
   const col = x.state === "under" ? "var(--bad)" : x.state === "over" ? "var(--warn)" : "var(--acc)";
   const overPart = Math.max(0, x.v - x.mrv);
 
@@ -30185,16 +30233,16 @@ function openVolFix(g){
   const kept = volAckActive(x);
   const say = x.state === "under"
     ? `<b>Add ${toFloor} set${toFloor === 1 ? "" : "s"} a week</b> to clear the minimum of `
-      + `${r1(x.mev)}.` + (aim > x.mev + 0.05
-          ? ` Work up to <b>${r1(aim)}</b> over the block and it is doing as much as it usefully can.`
+      + `${lm(x.mev)}.` + (aim > x.mev + 0.05
+          ? ` Work up to <b>${lm(aim)}</b> over the block and it is doing as much as it usefully can.`
           : "")
     : x.state === "over"
       ? (signal
           ? `<b>Cut ${cutBy} set${cutBy === 1 ? "" : "s"} a week</b>, to about ${r1(x.v - cutBy)}, `
-            + `back under the ceiling of ${r1(x.mrv)}. Your last cycle says `
+            + `back under the ceiling of ${lm(x.mrv)}. Your last cycle says `
             + `<b>${esc(signal)}</b>, which is the body saying this volume is costing more `
             + `than it returns.`
-          : `<b>High \u2014 watch how it recovers.</b> Past about ${r1(x.mrv)} sets a week, extra `
+          : `<b>High \u2014 watch how it recovers.</b> Past about ${lm(x.mrv)} sets a week, extra `
             + `sets usually cost more recovery than they return. This ceiling is an estimate `
             + `for your training age \u2014 your own recovery decides the real one. Nothing in your `
             + `last cycle says this volume is hurting you, so this is worth watching rather `
@@ -30207,19 +30255,19 @@ function openVolFix(g){
   const level = (()=>{ try{ return inferExperience(); }catch(e){ return "intermediate"; } })();
   const science = `<div class="vf-sci">
     <div class="vf-sci-k">What to aim for</div>
-    <div class="vf-row"><span>Minimum, to grow at all</span><b>${r1(x.mev)}</b></div>
-    <div class="vf-row"><span>Target, the useful middle</span><b>${r1(x.top)}</b></div>
-    <div class="vf-row"><span>Ceiling, past which it costs more than it returns</span><b>${r1(x.mrv)}</b></div>
+    <div class="vf-row"><span>Minimum, to grow at all</span><b>${lm(x.mev)}</b></div>
+    <div class="vf-row"><span>Target, the useful middle</span><b>${lm(x.top)}</b></div>
+    <div class="vf-row"><span>Ceiling, past which it costs more than it returns</span><b>${lm(x.mrv)}</b></div>
     <div class="vf-row"><span>Spread over</span><b>2 or more days</b></div>
     <div class="vf-row"><span>Reps</span><b>5\u201330, most in 6\u201312</b></div>
     <div class="vf-row"><span>How close to failure</span><b>${MESO_RIR[0]} reps left, down to ${
       MESO_RIR[MESO_RIR.length - 1]} by the end of the block</b></div>
     <div class="vf-sci-p">More sets grow more muscle, but the gain per set shrinks as you
       climb, and past <span class="term" data-term="mrv" role="button" tabindex="0">MRV</span>
-      the extra sets usually cost more recovery than they return \u2014 about ${r1(x.mrv)} for
+      the extra sets usually cost more recovery than they return \u2014 about ${lm(x.mrv)} for
       ${esc(x.name.toLowerCase())} at your training age. That figure is an estimate scaled
       off published tables, not a measurement of you: your own recovery decides the real
-      one, and this app watches your cycles for it. Start a block near ${r1(x.mev)} and let
+      one, and this app watches your cycles for it. Start a block near ${lm(x.mev)} and let
       it climb a set a week; the useful work is in the middle, not at the top.</div>
   </div>`;
 
@@ -30233,9 +30281,18 @@ function openVolFix(g){
       ${x.top > 0 && x.top < span ? `<span class="pv-k is-aim" style="left:${pctOf(x.top)}%"></span>` : ""}
       ${x.mrv > 0 && x.mrv < span ? `<span class="pv-k" style="left:${pctOf(x.mrv)}%"></span>` : ""}
     </div>
-    <div class="pf-scale"><span>0</span><span>${r1(x.mev)} MIN</span><span>${r1(x.top)} TARGET</span><span>${
-      r1(x.mrv)} CEILING</span>${
-      overPart > 0 ? `<span style="color:var(--warn)">${r1(x.v)} NOW</span>` : ""}</div>
+    <div class="pf-scale">
+      <span class="at-start">0</span>
+      <span style="left:${pctOf(x.mev)}%">${lm(x.mev)} MINIMUM</span>
+      ${showAim ? `<span style="left:${pctOf(x.top)}%">${lm(x.top)} TARGET</span>` : ""}
+      <span class="${x.v > x.mrv ? "" : "at-end"}"${
+        x.v > x.mrv ? ` style="left:${pctOf(x.mrv)}%"` : ""}>${lm(x.mrv)}${
+        /* Once you are past it the ceiling is no longer the right-hand end of the bar, so
+           its word has to clear the NOW reading that now owns that corner. Same arithmetic
+           as the target's, and the tick carries it when the word cannot. */
+        (overPart <= 0 || roomFor("24 CEILING", pctOf(x.mrv))) ? " CEILING" : ""}</span>
+      ${overPart > 0 ? `<span class="at-end" style="color:var(--warn)">${r1(x.v)} NOW</span>` : ""}
+    </div>
     <div class="sub" style="margin:12px 0 0;text-transform:none;letter-spacing:0">
       Your plan gives ${esc(x.name.toLowerCase())} <b>${r1(x.v)} sets a week</b>. ${say}</div>
     ${kept ? `<div class="vf-kept">${kept === "priority"
@@ -30420,14 +30477,14 @@ function planVolHTML(vol){
     const kept = volAckActive(x);
     return `<button type="button" class="pv-r is-${kept ? "kept" : x.state}" data-vol="${esc(x.g)}"${
         kept ? ` data-volkept="${esc(kept)}"` : ""}
-        aria-label="${esc(x.name)}, ${r1(x.v)} sets a week of at least ${r1(x.mev)}${
+        aria-label="${esc(x.name)}, ${r1(x.v)} sets a week of at least ${lm(x.mev)}${
           kept ? ", kept on purpose" : ""}">
       <span class="pv-sq">${esc(groupSym(x.g))}</span>
       <span class="pv-m"><span class="pv-n">${esc(x.name)}</span>
         <span class="pv-t"><span class="pv-f" style="width:${pct}%"></span>${
           x.mev > 0 ? `<span class="pv-k" style="left:${mark}%"></span>` : ""}</span>
       </span>
-      <span class="pv-v"><b>${r1(x.v)}</b>${x.mev > 0 ? "/" + r1(x.mev) : ""}</span>
+      <span class="pv-v"><b>${r1(x.v)}</b>${x.mev > 0 ? "/" + lm(x.mev) : ""}</span>
     </button>`;
   }).join("");
   return `<div class="pv">${rows}</div>

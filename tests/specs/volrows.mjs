@@ -302,8 +302,14 @@ console.log("8 - THE SHEET SAYS WHAT TO AIM FOR, NOT ONLY WHAT IS WRONG");
   ck("it names the minimum", r.rows.some(x=> /Minimum/i.test(x)), JSON.stringify(r.rows));
   ck("the target", r.rows.some(x=> /Target/i.test(x)), JSON.stringify(r.rows));
   ck("and the ceiling", r.rows.some(x=> /Ceiling/i.test(x)), JSON.stringify(r.rows));
-  ck("and the bar overhead is labelled with the same three",
-     /MIN/.test(r.text) && /TARGET/.test(r.text) && /CEILING/.test(r.text), r.text.slice(0,140));
+  /* The bar carries the same figures, placed at the points they name. The TARGET word is
+     dropped when it would land on top of the CEILING one \u2014 here they are 19.8 and 22,
+     which is under a seventh of the bar apart \u2014 and its tick stays, because the mark is
+     the reading and the word is only the convenience. */
+  ck("and the bar overhead is labelled with the same figures",
+     /MINIMUM/.test(r.text) && /CEILING/.test(r.text), r.text.slice(0,140));
+  ck("and never MIN, which reads as minutes on this sheet",
+     !/\bMIN\b(?!IMUM)/.test(r.text), r.text.slice(0,140));
   ck("it says to spread them over two days or more",
      r.rows.some(x=> /Spread over/.test(x) && /2/.test(x)), JSON.stringify(r.rows));
   ck("it gives a rep range", r.rows.some(x=> /Reps/.test(x) && /6/.test(x)), JSON.stringify(r.rows));

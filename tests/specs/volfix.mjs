@@ -125,11 +125,23 @@ console.log("4 - THE SAME THREE NUMBERS, IN THE SAME WORDS, IN BOTH PLACES");
     await new Promise(r2=> setTimeout(r2, 160));
     const t = document.getElementById("modal").innerText;
     hideModal();
-    return {scale: /MIN[\s\S]*TARGET[\s\S]*CEILING/.test(t),
+    /* FLOOR, not MIN. On a sheet that also says "spread over 2 or more days" and "by the
+       end of the block", a label reading "6 MIN" is read as six minutes. */
+    /* The glutes are OVER in this fixture, so the NOW reading owns the right-hand corner
+       and the ceiling's own word steps aside for it \u2014 its number and its tick stay. What
+       must always be true is that the bar names the floor in the table's own vocabulary,
+       carries both figures, and never abbreviates minimum to something that reads as
+       minutes on a screen full of days and blocks. */
+    return {scale: /MINIMUM/.test(t) && /\b2[345]\b/.test(t),
+            noMin: !/\bMIN\b(?!IMUM)/.test(t),
             table: /Minimum[\s\S]*Target[\s\S]*Ceiling/i.test(t),
-            noRange: !/Sets a week\s*\n?\s*\d+–\d+/.test(t)};
+            noRange: !/Sets a week\s*\n?\s*\d+–\d+/.test(t),
+            /* and a landmark is an estimate, so it is read as a whole set */
+            whole: !/\d+\.\d\s*(MINIMUM|TARGET|CEILING)/.test(t)};
   });
-  ck("the bar is labelled min, target, ceiling", r.scale === true, "");
+  ck("the bar names the minimum, in the table’s own words", r.scale === true, "");
+  ck("and never MIN, which reads as minutes here", r.noMin === true, "");
+  ck("the landmarks are whole sets, not tenths of an estimate", r.whole === true, "");
   ck("and so is the table under it", r.table === true, "");
   ck("the unexplained 4-12 range is gone", r.noRange === true, "");
 }
