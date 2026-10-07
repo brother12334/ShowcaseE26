@@ -6862,7 +6862,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "53.3";
+const APP_VERSION = "53.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -29559,14 +29559,20 @@ function planQualityCardHTML(){
       {budget: (S.builtPlan && S.builtPlan.answers && S.builtPlan.answers.minutes) || 0,
        priority: (S.builtPlan && S.builtPlan.answers && S.builtPlan.answers.priority) || [],
        gear: (S.setup || {}).gear});
-  }catch(e){ return ""; }
+  }catch(e){
+    /* IT USED TO RETURN "" HERE, which is the worst of the three things it could do: the
+       card did not appear, nothing said why, and the plan looked unexamined rather than
+       unexaminable. If the check cannot read a plan that is worth saying out loud. */
+    return `<div class="card">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
+        <span class="dot" style="background:var(--warn)"></span><h3>A look at your plan</h3>
+      </div>
+      <div class="sub" style="margin:4px 0 0">The check could not read this plan \u2014 ${
+        esc((e && e.message) || "it stopped partway")}. Your plan itself is below and is
+        untouched; nothing has been changed because of this.</div>
+    </div>`;
+  }
   const n = q.fail.length, w = q.warn.length;
-  if(!n && !w) return `<div class="card">
-    <div style="display:flex;align-items:center;gap:9px"><span class="dot" style="background:var(--good,#6a9)"></span>
-      <h3>Your plan checks out</h3></div>
-    <div class="sub" style="margin:4px 0 0">Every muscle inside its range, every session
-      inside the caps, nothing unbalanced. Checked against the same targets the Body tab uses.</div>
-  </div>`;
   const row = (label, msg, cls)=> `<div class="st-row ${cls}"><b>${esc(label)}</b><span>${msg}</span></div>`;
 
   /* THE SAME SENTENCE, TWELVE TIMES, IS NOT TWELVE FINDINGS.
@@ -29611,16 +29617,31 @@ function planQualityCardHTML(){
   const vol = Array.isArray(q.volume) ? q.volume : [];
   const nUnder = vol.filter(x=> x.state === "under").length;
   const nOver  = vol.filter(x=> x.state === "over").length;
+  /* A PLAN WITH NOTHING WRONG WITH IT IS STILL A PLAN YOU HAVE NOT SEEN.
+
+     This used to return early on a clean check: a two-line "Your plan checks out" and no
+     bars at all. Which is exactly backwards for the person most likely to get it \u2014
+     somebody who has just built a plan or switched to a new one, since the builder is
+     gated on this same check passing. The first thing they ask of a plan they have not
+     run yet is what it actually asks of them, week by week and muscle by muscle, and
+     that is the one view they were refused. Nobody has to complete a cycle to be allowed
+     to look at the thing they are about to do.
+
+     So the card is the same card in all three cases, and clean is a reading it can
+     report rather than a reason to say less. */
+  const clean = !n && !w;
   const lead = nUnder
     ? (nUnder === 1 ? "One muscle is" : nUnder + " muscles are")
       + " getting less each week than they need to grow."
     : nOver
       ? (nOver === 1 ? "One muscle is" : nOver + " muscles are")
         + " getting more than you can recover from."
-      : "Every muscle is inside its range.";
+      : clean
+        ? "Every muscle is inside its range, every session inside the caps, nothing unbalanced."
+        : "Every muscle is inside its range.";
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
-      <span class="dot" style="background:var(--acc)"></span><h3>A look at your plan</h3>
+      <span class="dot" style="background:${clean ? "var(--ok)" : "var(--acc)"}"></span><h3>A look at your plan</h3>
     </div>
     <div class="sub" style="margin:4px 0 0">${esc(lead)} Each bar is a week's sets; the mark
       on it is the least that muscle needs. Tap one to see what to do about it.</div>

@@ -62,7 +62,12 @@ console.log("3 - THE DAY YOU STEPPED OVER IS STILL NEXT, NOT SPENT");
     const skipped = ROTATION[0], did = ROTATION[2];
     /* finish the chosen day for real, the way the app does it */
     S.sessions.push({id:"s1", date: todayStr(), workoutId: did,
-      startedAt: Date.now()-3600e3, finishedAt: Date.now(),
+      /* INSIDE THE CYCLE, WHATEVER TIME OF DAY THIS RUNS AT. recomputeCycle counts only
+         sessions at or after S.cycleStart, and with no history inferCycleStart() returns
+         MIDNIGHT TODAY \u2014 so a flat "an hour ago" lands in yesterday's cycle between
+         00:00 and 01:00 and the session is not counted. This spec passed all day and
+         failed at 00:27. Anchored to the cycle instead of to the clock. */
+      startedAt: Math.max(S.cycleStart + 1000, Date.now()-3600e3), finishedAt: Date.now(),
       entries:[{name:"Barbell Bench Press", sets:[{weight:"100", reps:"8", rpe:"8", done:true}]}]});
     S.override = null;                          // finishWorkout() clears it
     recomputeCycle(false); save();

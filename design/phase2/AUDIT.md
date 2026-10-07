@@ -752,3 +752,27 @@ and the collapsed set-row chrome; the per-set rail on the session bar.
 
 A lesson worth keeping: a redesign measured only in pixels saved will keep proposing to
 hide things, because hiding things is what makes that number go down.
+
+# PART 8 — THE PLAN CHECK, FOR PEOPLE WHO HAVE NOT RUN THE PLAN YET (v53.4)
+
+"A look at your plan" draws a bar per muscle for the week the plan asks for. It is pure
+arithmetic on `S.program` — it needs no logged sessions, no completed cycle and no
+history at all — and it is the first thing somebody wants from a plan they have just
+built, imported or switched to.
+
+It had two ways to disappear, and both of them hit exactly that person.
+
+**A clean check returned a stub.** `if(!n && !w)` returned a two-line "Your plan checks
+out" with no bars. The builder is *gated on this same check passing*, so a freshly built
+plan was the likeliest thing in the app to produce it: the person with the least idea
+what their plan contains got the least information about it. Clean is now a reading the
+card reports — a green dot and "every muscle inside its range, every session inside the
+caps, nothing unbalanced" — above the same bars everybody else gets.
+
+**Any throw returned `""`.** The card vanished, nothing said why, and the plan looked
+unexamined rather than unexaminable. It now says the check could not read the plan and
+names the reason, and says plainly that nothing was changed because of it.
+
+`tests/specs/planlook.mjs` holds all three readings — findings, clean, broken — to one
+rule: the heading is there and the bars are there. Plus a fourth: switching plans redraws
+it against the new plan.
