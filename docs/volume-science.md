@@ -236,89 +236,114 @@ correction really are the ones that collect their volume rather than training it
 3. **Front delts are 66.9%, not the near-100% their 1.5 implies** — the same figure as the
    glutes, which measure 100%.
 
-**What it does not give on its own.** A share is not a correction. Turning "67% of this
-muscle's volume is collected" into "widen its band by X" needs the exchange rate between
-an indirect set and a direct one — which §1.1 now supplies (0.5, binary). §3 does that
-conversion and the answer is not the one these shares suggest.
+**What it does not give on its own, and what replaced it.** A share is not a correction.
+§3 counts the paper's way directly instead, and the answer is **not** the one these shares
+suggest: the traps are 100% indirect here and still come out at parity once the cut-off and
+the grip rule are applied. This table stands as a description of where each muscle's volume
+comes from; it is **not** the basis for any correction, and the per-muscle ratios derived
+from it are withdrawn.
 
 ---
 
 ---
 
-## 3. FINDING — the app's counting basis against the one the tiers are stated in
+## 3. COUNTING THE PAPER'S WAY, DIRECTLY
 
-§1.3's tiers are in **fractional** sets: 1.0 if the muscle is the exercise's primary force
-generator, **0.5** if it is involved but not. Element 26 does not count that way. It counts
-on a *continuum* — `muscleFrac()` pays a Smith squat's glutes 0.8, a lunge's hamstrings
-0.3, a row's biceps 0.5 — so "16.8 sets a week" in this app and "19–29 is the
-lower-efficiency tier" in the paper are **not the same quantity**, and the tiers cannot be
-dropped in without an exchange rate.
+The curve is stated in the paper's units and this app does not count in them. An earlier
+pass bridged the two with a per-muscle average ratio. **That is withdrawn.** A ratio is an
+average over 360 plans and is wrong for any particular person's plan, and — as below — it
+produced a conclusion that does not survive counting properly.
 
-`tools/science/basis-bridge.mjs` measures it. Across all 360 builder plans, for every
-muscle, it counts each plan both ways and reports the ratio.
+Each user's volume is counted the paper's way directly, so the number compared against the
+curve is in the curve's units by construction.
 
-**How many Element 26 sets equal one paper set**
+### 3.1 The rule, and where the cut-off comes from
 
-| Muscle | Median | p10 | p90 | | Muscle | Median | p10 | p90 |
-|---|---|---|---|---|---|---|---|---|
-| Glutes | **1.353** | 1.178 | 1.491 | | Hamstrings | 0.900 | 0.816 | 0.982 |
-| Lats | 1.150 | 1.109 | 1.233 | | Lower Back | **0.871** | 0.833 | 0.920 |
-| Side Delts | 1.029 | 1.018 | 1.050 | | Rear Delts | 0.862 | 0.723 | 0.911 |
-| Chest | 1.000 | 1.000 | 1.022 | | Obliques | 0.800 | 0.700 | 0.887 |
-| Mid Back | 1.000 | 0.938 | 1.067 | | Traps | **0.749** | 0.672 | 0.853 |
-| Quads | 1.000 | 1.000 | 1.000 | | Forearms | 0.720 | 0.657 | 0.760 |
-| Triceps | 0.950 | 0.904 | 0.971 | | Adductors | **0.700** | 0.614 | 0.760 |
-| Front Delts | 0.938 | 0.900 | 1.018 | | Biceps | 0.912 | 0.819 | 0.945 |
-| Calves | 0.914 | 0.862 | 1.000 | | Abs | 0.909 | 0.775 | 1.000 |
+The paper's definition, verbatim (§2.4):
 
-Across muscles the median is **0.914**, the range **0.700 to 1.353**. Most of the app sits
-within about 15% of the paper's basis. The two ends do not.
+> "For hypertrophy, **direct** sets were those in which the measured muscle(s) was likely
+> to be the **primary force generator** in the exercise. **Indirect** sets were those in
+> which the measured muscle(s) was likely to be **meaningfully trained but not the primary
+> force generator** of the exercise (i.e., synergist)."
 
-### 3.1 This explains the reported glute bug properly
+Their worked example: measuring biceps, five sets of curls plus five sets of rows gives
+'total' 10, 'fractional' 7.5, 'direct' 5 — a row pays the biceps half a set.
 
-The glutes are counted **35% higher** in Element 26 than in the units the tiers are stated
-in, because the app pays 0.8–0.9 for squats, lunges and RDLs where the paper pays 0.5.
+**The cut-off is set from their own decisions, not chosen.** Table 1A lists every exercise
+they classified. Checked against this app's shares:
 
-The reported reading of **16.8 app sets is 12.4 paper sets** — squarely inside Table 2A's
-*intermediate efficiency* band of 11–18, the useful middle. It was never over anything.
-The user was right, and the mechanism is now measured rather than argued.
+| Paper's verdict | Pairs checked | Element 26 pays |
+|---|---|---|
+| Direct | 17 of 17 | exactly **1.00**, every one |
+| Indirect | 15 | **0.30 – 0.60** |
 
-### 3.2 And it says one of the corrections I shipped in 54.0 is BACKWARDS
+The separation is clean, and the lowest share they are willing to call a meaningful
+synergist is **0.30** — the trapezius in a lat pulldown. So:
 
-v54.0 widened five muscles' bands on the argument that compound-fed muscles accumulate
-volume the published tables did not expect. For the glutes the measurement agrees: 1.5 was
-shipped, 1.353 is measured — the right direction, about 11% too strong.
+```
+f >= 1.0         ->  1 set      prime mover
+0.3 <= f < 1.0   ->  0.5 sets   meaningfully trained synergist
+f < 0.3          ->  0 sets     stabiliser
+```
 
-**For three of the others it disagrees on the direction.** Traps measure **0.749**, lower
-back **0.871**, adductors **0.700** — the app counts these muscles *lower* than the paper's
-basis, not higher, because it pays them small shares (0.2–0.4) where the paper pays a flat
-0.5. Their bands should be **narrowed**, and v54.0 widened them by 1.4.
+**And grip and bracing are not training.** A numeric cut-off alone cannot express this:
+this app pays the forearms 0.35 for a barbell row — the same range as real synergy — when
+what the forearms are doing is holding the bar. The paper's wording is "meaningfully
+*trained*", and a muscle contracting isometrically to stop something moving is not being
+trained through a range. So three muscles whose involvement in a compound is grip or
+bracing — **forearms, abs, obliques** — count only when the movement is actually for them.
 
-| Muscle | v54.0 shipped | Measured ratio | Verdict |
-|---|---|---|---|
-| Glutes | 1.5 | 1.353 | right direction, ~11% too strong |
-| Front delts | 1.5 | 0.938 | **wrong**: no correction warranted |
-| Traps | 1.4 | 0.749 | **backwards** |
-| Lower back | 1.4 | 0.871 | **backwards** |
-| Adductors | 1.4 | 0.700 | **backwards** |
+Nothing else is excluded. The trapezius keeps its half set in a row, because the paper
+explicitly classified it that way and it works through a range there.
 
-This is why §2's indirect-share table is not by itself the answer, and why the brief asked
-for the correction to be derived from the share *and* the meta-regression's weighting
-rather than from the share alone. A muscle can be fed almost entirely by compounds (traps,
-100% indirect in §2) and still be counted *below* the paper's basis, because what matters
-is not whether the credit is indirect but how big each slice is against a flat 0.5.
+`tools/science/paper-basis.mjs` implements this and is the basis for everything below.
 
-The hand-set list was reasoning from the right observation to the wrong quantity. These
-ratios replace it, and they are measured, reproducible and per-muscle.
+### 3.2 Does "backwards" still hold? Mostly no — and that correction is mine
 
-### 3.3 The correction this implies
+The previous pass claimed three of the five corrections shipped in v54.0 were backwards.
+Counted properly, **that claim was itself largely an artifact of the ratio method**, which
+treated every sub-1.0 share as half a set — including 0.2 shares the paper would count as
+zero, which inflated the paper-side total and made ratios look low.
 
-The honest form is not a hand-tuned widening but a stated conversion: the tier boundaries
-from Table 2A, multiplied into each muscle's own units. For the glutes, MEV 4 → 5.4 app
-sets, the efficiency knee 10 → 13.5, the useful middle's top 18 → 24.4, lower efficiency's
-top 29 → 39.2. For the traps the same boundaries become 3.0, 7.5, 13.5 and 21.7.
+Median weekly volume for the same 360 plans, counted both ways:
 
-Writing that into the app is task M and has not been done.
+| Muscle | App sets | Paper sets | app/paper | Old fixed ratio | Does "backwards" hold? |
+|---|---|---|---|---|---|
+| Traps | 10.5 | 11.0 | **0.955** | 0.749 | **No** — near parity, no correction needed |
+| Lower back | 5.7 | 6.5 | **0.877** | 0.871 | **Yes** — genuinely under-counted |
+| Adductors \* | 2.3 | 3.0 | **0.750** | 0.700 | **Yes** — genuinely under-counted |
+| Front delts \* | 6.7 | 6.0 | **1.108** | 0.938 | **No** — over-counted, not under |
+| Glutes | 9.6 | 7.0 | **1.371** | 1.353 | n/a — over-counted, as shipped |
+| Hamstrings | 8.8 | 7.0 | **1.250** | 0.900 | changed sign |
+| Obliques | 4.8 | 3.0 | **1.600** | 0.800 | changed sign |
+| Rear delts | 8.1 | 7.5 | 1.080 | 0.862 | changed sign |
+| Forearms | 4.7 | **0.0** | n/a | 0.720 | see below |
+| Chest, quads | 10.0, 9.0 | 10.0, 9.0 | 1.000 | 1.000 | unchanged |
+
+\* optional group.
+
+**So the corrected verdict on v54.0:** the glutes were right in direction (1.5 shipped
+against 1.371 measured, about 9% too strong). The traps and front delts were *too strong*
+but not backwards. Only the **lower back and adductors** are genuinely the wrong way
+round, and the adductors are an optional group the plan check does not measure. My
+previous summary over-claimed, and counting the paper's way rather than averaging ratios
+is what caught it.
+
+**Four muscles changed sign entirely** between the two methods — hamstrings 0.900 → 1.250,
+obliques 0.800 → 1.600, rear delts 0.862 → 1.080, traps 0.749 → 0.955. That spread is the
+argument against shipping ratios at all: the two methods disagree about direction, not
+just magnitude.
+
+### 3.3 The forearms are not in the volume model
+
+Under the paper's rule the forearms score **zero** sets in **every one of the 360 builder
+plans**. Not "mostly indirect" — zero. No builder plan trains them directly, and every
+other involvement is grip.
+
+That answers §7's open question. A muscle with no volume cannot have a volume target, and
+the honest thing is to stop giving it one rather than to measure it against a floor it can
+never clear. Wrist work and loaded carries would give it real sets; nothing the builder
+writes does.
 
 ## 4. FINDING — the adjustment chain has no bound on its product
 
@@ -404,58 +429,56 @@ pieces.
 
 ---
 
-## 5A. THE DERIVED TABLE — what the landmarks become
+## 5A. THE BANDS, AND WHAT THEY MEAN
 
-Combining §1.5's curve with §3's per-muscle basis ratios gives the landmarks in **Element
-26's own counting units**, with no hand-set numbers anywhere in the chain.
-`tools/science/derived-landmarks.mjs` produces this and re-derives the tier edges from the
-stored curve rather than copying them out of the paper's prose.
+The paper's tiers are about **efficiency** — how many more sets buy one more detectable
+increment. They are not targets and they are not recovery limits, and the model must not
+present them as either.
 
-| Muscle | Basis ratio | Floor | Efficiency knee | Useful top | Expensive top | Ships today (mev/mav/mrv) |
-|---|---|---|---|---|---|---|
-| Glutes | 1.353 | 5.4 | 13.5 | 24.4 | 39.2 | 4 / 12 / 16 |
-| Lats | 1.150 | 4.6 | 11.5 | 20.7 | 33.3 | 10 / 18 / 22 |
-| Side Delts | 1.029 | 4.1 | 10.3 | 18.5 | 29.8 | 8 / 20 / 26 |
-| Chest | 1.000 | 4.0 | 10.0 | 18.0 | 29.0 | 10 / 20 / 22 |
-| Mid Back | 1.000 | 4.0 | 10.0 | 18.0 | 29.0 | 10 / 20 / 25 |
-| Quads | 1.000 | 4.0 | 10.0 | 18.0 | 29.0 | 8 / 16 / 20 |
-| Triceps | 0.950 | 3.8 | 9.5 | 17.1 | 27.5 | 6 / 14 / 18 |
-| Front Delts \* | 0.938 | 3.8 | 9.4 | 16.9 | 27.2 | 0 / 12 / 16 |
-| Calves | 0.914 | 3.7 | 9.1 | 16.5 | 26.5 | 8 / 14 / 20 |
-| Biceps | 0.912 | 3.6 | 9.1 | 16.4 | 26.4 | 8 / 18 / 24 |
-| Abs | 0.909 | 3.6 | 9.1 | 16.4 | 26.4 | 6 / 18 / 24 |
-| Hamstrings | 0.900 | 3.6 | 9.0 | 16.2 | 26.1 | 6 / 14 / 20 |
-| Lower Back | 0.871 | 3.5 | 8.7 | 15.7 | 25.3 | 4 / 8 / 12 |
-| Rear Delts | 0.862 | 3.4 | 8.6 | 15.5 | 25.0 | 6 / 18 / 24 |
-| Obliques | 0.800 | 3.2 | 8.0 | 14.4 | 23.2 | 4 / 10 / 16 |
-| Traps | 0.749 | 3.0 | 7.5 | 13.5 | 21.7 | 4 / 16 / 24 |
-| Forearms | 0.720 | 2.9 | 7.2 | 13.0 | 20.9 | 2 / 8 / 12 |
-| Adductors \* | 0.700 | 2.8 | 7.0 | 12.6 | 20.3 | 0 / 6 / 12 |
+| Band (paper sets) | What it is | What the app does |
+|---|---|---|
+| below 4 | under the minimum effective dose | "below the minimum to grow" |
+| **4** | floor | the floor, for every muscle |
+| 4 – 10 | higher efficiency | climbing toward the target |
+| **11 – 18** | intermediate efficiency | **the starting target**, placed by training level, available time and the user's current volume |
+| 19 – 29 | lower efficiency; real but expensive | entered **only while that user keeps progressing** |
+| 30 – 42 | lowest efficiency | "a little extra gain" note |
+| **43+** | unclear — insufficient data, or possibly less | "no evidence past here" |
 
-\* optional group, not measured by the plan check.
+The **personal limit is learned per user** and is not any of these numbers. The bands say
+what volume buys on average across 1,032 people; what it costs *this* person is what the
+per-user dose finding is for.
 
-**Three things this says, none of them small.**
+One consequence worth stating plainly: because every muscle now sits on one curve and is
+counted in the curve's own units, **the bands are the same for every muscle**. The old
+table's per-muscle spread — MEV 2 to 10, MRV 12 to 26 — does not survive. What differs
+between muscles is how many sets a given plan actually delivers them, which the counting
+rule handles directly.
 
-1. **The floors fall, by a lot.** Chest, mid back and lats ship an MEV of 10 and derive to
-   4.0–4.6. Side delts, biceps, calves and quads ship 8. An app telling somebody doing six
-   hard chest sets a week that they are below the minimum to grow at all is contradicting
-   the best current estimate of that minimum by more than a factor of two.
+### 5A.1 Is there a trained-only curve to use? No.
 
-2. **The ceilings rise, by more.** Today's MRVs of 12–26 become 21–39 at the edge of the
-   tier where returns are real but expensive. The lower back ships 12 and derives to 25.3.
-   The glutes ship 16 — against a count inflated 1.353× — which is the reported bug stated
-   in one line.
+Instruction: look for one in the supplementary files and use it for intermediate and
+advanced users. I looked. **There is not one that can responsibly be used.**
 
-3. **The per-muscle spread almost vanishes, and what is left is measured.** Today MEV
-   ranges 0–10 and MRV 12–26 across muscles on the authority of a coaching table. Derived,
-   every muscle sits on **one curve**, and the only thing separating them is the basis
-   ratio — which is measured from this app's own 360 plans. Traps are the single muscle
-   whose ceiling *falls* (24 → 21.7), because the app under-counts them.
+- Training status is a **fixed effect in the primary model**, and the published marginal
+  effects are "proportionally marginalized across the categorical fixed effect (i.e.,
+  training status)". The curve in §1.5 already accounts for it.
+- There *is* a trained-vs-untrained interaction, in *Moderator Analyses /
+  hypertrophy.sets.week.fractional.interaction.plots.pdf*, page 12. It is published as a
+  **figure only** — no estimate table anywhere in the supplementary materials.
+- The authors are explicit about its status: the moderator models "included a linear main
+  effect and interaction term... **primarily for future hypothesis generation**", they
+  "should be interpreted with caution, as the number of observations that contribute to
+  the effects are substantially reduced", "there were often no direct examinations of
+  these interactions", and "we view the role of these exploratory moderators **primarily
+  to generate future hypotheses**".
+- Those models also **dropped the non-training control groups and the frequency-study
+  effects**, so they are not even on the same footing as the model that produced the curve.
 
-**One muscle to decide by hand: the traps.** Every other change moves in a direction the
-evidence supports. The traps' ceiling drops because of a counting correction, not because
-of anything about traps, and they are the clearest case for asking whether a per-muscle
-recovery cost (brief §3.4b) exists at all.
+Digitising a figure the authors warn against, to split the production curve in two, would
+be inventing precision. So training status enters where the evidence supports it and where
+the band table above already puts it: **the starting point within 11–18**, not a different
+curve.
 
 ## 6. Still to do
 
@@ -471,11 +494,16 @@ All of it waits on §0.
 - **~~The exchange rate between an indirect set and a direct one.~~** Answered: 0.5, and
   binary rather than graded (§1.1). §3 converts it into this app's units.
 - **Whether Element 26's continuum is better or worse than the paper's binary 0.5.** The
-  app's graded shares are more detailed, but the tiers were fitted on the binary scheme, so
-  the detail is currently a source of mismatch rather than accuracy. Worth testing whether
-  the continuum predicts this app's own logged outcomes better than a flat 0.5 would.
-- **Whether the forearms belong in the volume model at all**, given that no builder plan in
-  360 combinations trains them directly.
+  app's graded shares are more detailed, but the tiers were fitted on the binary scheme. The
+  app now keeps both: the continuum for everything it already does, and the paper's count
+  for comparison against the curve. Worth testing later whether the continuum predicts this
+  app's own logged outcomes better than a flat 0.5 would.
+- **Where the cut-off sits for muscles the paper never measured.** Table 1A covers eight
+  muscles; the 0.3 line and the grip/brace rule are extrapolations from their decisions to
+  the rest, and are the most arguable judgement in §3.
+- **~~Whether the forearms belong in the volume model at all.~~** Answered: counted the
+  paper's way they score zero sets in all 360 builder plans (§3.3). They should not carry a
+  volume target unless the plan contains wrist work or loaded carries.
 - **Whether a per-muscle recovery cost is defensible at all**, or whether muscle differences
   should be confined to the counting basis. The paper fits one curve for every muscle.
 - **Where the hypertrophy curve's intercept sits.** The marginal slope (0.24%/set) and the
