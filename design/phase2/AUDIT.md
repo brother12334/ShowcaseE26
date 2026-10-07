@@ -776,3 +776,42 @@ names the reason, and says plainly that nothing was changed because of it.
 `tests/specs/planlook.mjs` holds all three readings — findings, clean, broken — to one
 rule: the heading is there and the bars are there. Plus a fourth: switching plans redraws
 it against the new plan.
+
+# PART 9 — TWO MORE THINGS THAT WENT BACK (v53.5)
+
+## The score counts itself up again
+
+The finish card's grade used to climb to its number while you watched —
+`<span data-countup>${q.total}</span>/${q.max}`. Version 23.1 replaced that single total
+with the four-tile row, and the helper that draws the tiles did not carry the attribute
+over. Nothing decided that; it was lost in a refactor, and nothing in the suite noticed
+because nothing was watching for it.
+
+Only the score climbs. Four tiles counting at once is a slot machine, and the point of
+the climb is that the grade is the thing being announced — the set count and the pounds
+moved are facts you can read at your leisure. It uses the `"slow"` variant, the one with
+the hold in it, because it is the same number the finish screen announces.
+
+`tests/specs/gradeup.mjs` now holds it: the score tile asks for the count and is the only
+tile that does, it is genuinely below the grade partway through and lands exactly on it,
+and with motion off it is simply the number.
+
+## The exercise controls are back on the card
+
+C3 folded ↑ ↓ ✎ ⊕ ⇄ ✕ into one `⋯` overflow, on the argument that unlabelled 32px glyphs
+are not guessable on a phone. The argument is sound and the trade was still wrong: these
+are the things you reach for mid-session with a bar racked, and putting a tap and a sheet
+in front of "move this up" or "that hurt" costs more, every session, than the one time
+somebody has to work out what ⇄ means.
+
+It was also making the app disagree with itself — the strip was still drawn in gym mode
+and on superset cards, so the same six actions had two different shapes depending on
+which session screen you were looking at.
+
+Nothing is lost by it coming back. The sheet carried exactly these six actions and no
+others, they run the same handlers, and the strip reports its own state natively: a note
+fills the note mark in, a flagged movement turns the pain icon red. The arrows stay
+disabled on a finished exercise, which was a real fix and is kept.
+
+`polish.mjs` and `hurt.mjs` drive the strip instead of the sheet; the dead overflow
+handler is removed rather than left to look live.

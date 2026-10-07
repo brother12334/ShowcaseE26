@@ -335,25 +335,35 @@ console.log("7 - WHAT THE CHIP STRIP IS ALLOWED TO HIDE");
     try{PF=null}catch(e){}
     S.active.entries[0].warm = "ramp";
     render();
+    /* THE CONTROLS ARE A STRIP ON THE CARD AGAIN, not an overflow. The rule this
+       section defends is unchanged and is the one that matters: a flagged movement says
+       so on the card, without anybody having to open anything to find out. */
     const plain = {
-      more: !!document.querySelector(".ex-more"),
-      lit: !!document.querySelector(".ex-more.hu-on"),
-      dot: !!document.querySelector(".ex-more.has-note"),
+      strip: !!document.querySelector(".ex-ctl [data-exup]"),
+      /* one card's strip, not every card's */
+      moves: (()=>{ const c = document.querySelector(".ex-ctl");
+        return c ? c.querySelectorAll("[data-exup], [data-exdown]").length : 0; })(),
+      note: !!document.querySelector(".ex-ctl [data-exnote]"),
+      skip: !!document.querySelector(".ex-ctl [data-exskip]"),
+      overflow: !!document.querySelector(".ex-more"),
+      lit: !!document.querySelector(".ex-ctl [data-exhurt].hu-on"),
       warm: !!document.querySelector(".warm")};
     hurtAdd(S.active.entries[0].name, "shoulder", "sore", "");
     render();
-    const flagged = {lit: !!document.querySelector(".ex-more.hu-on"),
-                     label: (document.querySelector(".ex-more")||{}).ariaLabel || ""};
+    const flagged = {lit: !!document.querySelector(".ex-ctl [data-exhurt].hu-on"),
+                     label: (document.querySelector(".ex-ctl [data-exhurt]")||{}).ariaLabel || ""};
     S.hurts = []; save(); render();
     return {plain, flagged};
   });
-  ck("the card carries one overflow, not six glyphs", r.plain.more === true, "");
+  ck("the card carries the control strip", r.plain.strip === true, "");
+  ck("both arrows are on it", r.plain.moves === 2, String(r.plain.moves));
+  ck("so are the note and the skip", r.plain.note && r.plain.skip, JSON.stringify(r.plain));
+  ck("and nothing is hidden behind an overflow", r.plain.overflow === false, "");
   ck("the warm-up is on the card", r.plain.warm === true, "");
-  ck("a clean movement's overflow is quiet",
-     r.plain.lit === false && r.plain.dot === false, JSON.stringify(r.plain));
-  ck("A FLAGGED MOVEMENT SHOWS IT WITHOUT OPENING THE SHEET", r.flagged.lit === true,
+  ck("a clean movement's strip is quiet", r.plain.lit === false, JSON.stringify(r.plain));
+  ck("A FLAGGED MOVEMENT SHOWS IT WITHOUT OPENING ANYTHING", r.flagged.lit === true,
      JSON.stringify(r.flagged));
-  ck("and says so in words too", /flag/i.test(r.flagged.label), r.flagged.label);
+  ck("and says so in words too", /hurt/i.test(r.flagged.label), r.flagged.label);
 }
 
 console.log("8 - UNDER REDUCED MOTION, NONE OF IT MOVES");

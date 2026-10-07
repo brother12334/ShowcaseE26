@@ -6862,7 +6862,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "53.4";
+const APP_VERSION = "53.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -33173,26 +33173,39 @@ function viewActiveSession(){
         <span class="ex-target">${en.sets.length}×${esc(en.reps||"")}${en.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(en.rpe))+'</span>':""}${easeTagHTML(en)}</span>
         <span class="icon-btns ex-ctl">
           ${(()=>{
-            /* C3 — ONE OVERFLOW INSTEAD OF SIX GLYPHS.
+            /* THE CONTROLS ARE ON THE CARD, NOT BEHIND A ⋯.
 
-               ↑ ↓ ✎ ⊕ ⇄ ✕ sat above the sets with no labels, at 32×32, and a phone has
-               no hover to reveal an aria-label. ⇄ and ⊕ are not guessable and ✕ destroys
-               an exercise at the same size and weight as everything else. They are all
-               still here, in a sheet, with names. */
+               C3 folded these six into one overflow, on the argument that unlabelled
+               32px glyphs are not guessable on a phone. The argument is sound and the
+               trade was still wrong: these are the things you reach for mid-session with
+               a bar racked, and putting a tap and a sheet in front of "move this up" or
+               "that hurt" costs more, every session, than the one time somebody has to
+               work out what ⇄ means. They are also still drawn as a strip in gym mode
+               and on superset cards, so the overflow made the app disagree with itself
+               about its own session screen.
+
+               Nothing is lost by coming back: the sheet carried exactly these six
+               actions and no others, they run the same handlers, and the strip reports
+               its own state natively — a note fills the note mark in, a flagged
+               movement turns the pain icon red. */
+
+            /* AN EXERCISE YOU HAVE FINISHED DOES NOT MOVE. Reordering is for saying what
+               you are about to do next; once every set is logged the order it ran in is
+               a fact, not a plan. Leaving the arrows live meant a stray tap on a finished
+               card swapped it with its neighbour — and the rest clock is held by INDEX,
+               so the swap handed a running timer to the exercise you had not started,
+               which is the phantom rest timer. Both halves are fixed: these are disabled,
+               and the handler moves the timer with the entry. */
             const doneEx = en.sets.length && en.sets.every(x=>x.done);
-            /* AND IT SAYS WHEN SOMETHING IS IN IT. The six glyphs carried their own
-               state — the pain icon went red, the note icon filled in — and an
-               overflow that looks identical whether or not this movement is flagged
-               loses both. A flagged movement turns the button red; a note puts a dot
-               on it. The label says which, for anyone not reading colour. */
-            const hurt = !!hurtFor(en.name);
-            const noted = hasAnyNote(en);
-            const says = hurt ? "flagged, and has more"
-                       : noted ? "has a note, and more" : "More";
-            return `<button class="ex-more${hurt ? " hu-on" : ""}${noted ? " has-note" : ""}"
-              data-exmore="${ei}" aria-label="${esc(says)} for ${esc(en.name)}"${
-              doneEx ? ' data-exdone="1"' : ''}>\u22ef</button>`;
-          })()}        </span>
+            const off = doneEx ? ` disabled aria-disabled="true" title="Already done — the order it ran in is fixed"` : "";
+            return `<button data-exup="${ei}" aria-label="Move earlier"${off}>\u2191</button>
+          <button data-exdown="${ei}" aria-label="Move later"${off}>\u2193</button>`;
+          })()}
+          <button data-exnote="${ei}" aria-label="Add a note about ${esc(en.name)}">${exNoteMark(en)}</button>
+          <button data-exhurt="${ei}" class="${hurtFor(en.name)?"hu-on":""}" aria-label="Something hurt on ${esc(en.name)}">${ICON.pain}</button>
+          ${canSwapEntry(en)?`<button data-exswap="${ei}" aria-label="Switch ${esc(en.name)} for something else">\u21c4</button>`:""}
+          <button data-exskip="${ei}" aria-label="Skip today">\u2715</button>
+        </span>
       </div>`;
     /* C1 — THE SETS COME FIRST.
 
@@ -43709,41 +43722,6 @@ function bind(){
     harvestActive();
     render();
   });
-  /* C3 — the overflow sheet. Every action the icon strip had, with a name on it. */
-  document.querySelectorAll("[data-exmore]").forEach(b=> b.onclick = ()=>{
-    const i = parseInt(b.dataset.exmore, 10);
-    const en = (S.active && S.active.entries || [])[i];
-    if(!en) return;
-    harvestActive();
-    const doneEx = en.sets.length && en.sets.every(x=> x.done);
-    const row = (act, title, sub, cls)=> `<button type="button" class="spec-opt${cls ? " " + cls : ""}"
-      data-exact="${act}"><span class="spec-opt-t"><b>${title}</b>${
-      sub ? `<span>${sub}</span>` : ""}</span><span class="spec-opt-go">\u203a</span></button>`;
-    showModal(`<h3>${esc(en.name)}</h3>
-      <div class="spec-opts" style="margin-top:12px">
-        ${doneEx ? "" : row("up", "Move earlier", "Do it sooner in this session")}
-        ${doneEx ? "" : row("down", "Move later", "Push it further down the session")}
-        ${row("note", "Add a note", "How it felt, a tweak, anything worth keeping")}
-        ${row("hurt", hurtFor(en.name) ? "Clear the pain flag" : "Something hurt",
-              hurtFor(en.name) ? "You flagged this one" : "Flags it and eases the load")}
-        ${canSwapEntry(en) ? row("swap", "Swap exercise", "Station busy, or no kit for it") : ""}
-        ${row("skip", "Remove from today", "It will not appear in this session's log", "exact-dng")}
-      </div>
-      <div class="btn-row" style="margin-top:12px">
-        <button class="btn ghost small" id="closeModal" style="flex:1">Cancel</button></div>`);
-    const m = $("#modal");
-    if(!m) return;
-    m.querySelectorAll("[data-exact]").forEach(x=> x.onclick = ()=>{
-      const act = x.dataset.exact;
-      hideModal();
-      if(act === "up")   return moveEntry(i, -1);
-      if(act === "down") return moveEntry(i, 1);
-      if(act === "note"){ NOTE_ORIGIN = b; return openExNote(i); }
-      if(act === "swap") return openSwapModal(i);
-      if(act === "hurt") return openHurt(en.name);
-      if(act === "skip") return exSkipConfirm(i);
-    });
-  });
   document.querySelectorAll("[data-exup]").forEach(b=> b.onclick=()=>{
     moveEntry(parseInt(b.dataset.exup, 10), -1);
   });
@@ -49379,8 +49357,21 @@ function scoreCardHTML(q, sess){
     : q.pct >= .75 ? "Solid, with a bit left on the table."
     : q.pct >= .6  ? "The work got done. Some of it was worth more than you got out of it."
     : "A rough one. Worth knowing why.";
-  const tile = (v, k, tone)=> `<div class="sc-tile${tone ? " is-" + tone : ""}">
-    <b class="num">${esc(String(v))}</b><span>${esc(k)}</span></div>`;
+  /* THE SCORE STILL COUNTS ITSELF UP.
+
+     It used to: the card had `<span data-countup>${q.total}</span>/${q.max}` and the
+     number climbed to the grade while you watched. 23.1 replaced that single total with
+     this four-tile row and the helper that drew the tiles did not carry the attribute
+     over, so the one number on the card worth waiting for started arriving already
+     finished. Nothing decided that; it was lost in a refactor.
+
+     Only the score gets it. Four tiles all counting at once is a slot machine, and the
+     point of the climb is that the grade is the thing being announced \u2014 the set count
+     and the pounds moved are facts you can read at your leisure. "slow" is the variant
+     with the hold in it, which is the one the finish screen uses, because this is the
+     same number arriving in a different place. */
+  const tile = (v, k, tone, countUp)=> `<div class="sc-tile${tone ? " is-" + tone : ""}">
+    <b class="num"${countUp ? ' data-countup="slow"' : ""}>${esc(String(v))}</b><span>${esc(k)}</span></div>`;
   let p1 = `<div class="scf-kicker">${esc(m.name)} \u00b7 ${esc(fmtDate((sess&&sess.date)||todayStr()))}</div>
   <div class="sc-verdict" style="--scc:${col}">
     <div class="sc-lead">${esc(head ? head.title : lead)}</div>
@@ -49389,7 +49380,7 @@ function scoreCardHTML(q, sess){
       : (weakest ? "The part that went least well was <b>" + esc(weakest.label.toLowerCase()) + "</b>." : "")}</div>
   </div>
   <div class="sc-tiles">
-    ${tile(q.total, "out of " + q.max, q.pct >= .85 ? "good" : q.pct < .6 ? "bad" : "")}
+    ${tile(q.total, "out of " + q.max, q.pct >= .85 ? "good" : q.pct < .6 ? "bad" : "", true)}
     ${tile(r1(setsN), setsN === 1 ? "set" : "sets", "")}
     ${tile(vol > 0 ? Math.round(vol).toLocaleString() : "\u2014", vol > 0 ? unitWord() + " moved" : "bodyweight", "")}
     ${tile(nPR, nPR === 1 ? "record" : "records", nPR ? "good" : "")}

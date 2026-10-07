@@ -23,12 +23,10 @@ await p.evaluate(()=>{
   save(); TAB="workout"; render();
 });
 await p.waitForTimeout(500);
-/* C3 moved the six glyphs into one labelled overflow sheet, so "something hurt" is two
-   taps now: the ⋯ on the exercise, then the named row. */
-console.log('overflow buttons on cards:', await p.evaluate(()=>document.querySelectorAll('[data-exmore]').length));
-await p.evaluate(()=>document.querySelector('[data-exmore]').onclick());
-await p.waitForTimeout(200);
-await p.evaluate(()=>document.querySelector('[data-exact="hurt"]').onclick());
+/* The control strip is back on the card, so "something hurt" is one tap on the pain
+   icon rather than an overflow and then a named row. */
+console.log('pain buttons on cards:', await p.evaluate(()=>document.querySelectorAll('[data-exhurt]').length));
+await p.evaluate(()=>document.querySelector('[data-exhurt]').onclick());
 await p.waitForTimeout(350);
 console.log('--- sheet ---'); console.log(await p.evaluate(()=>document.getElementById('modal').innerText));
 await p.screenshot({path:D+'hu1.png'});
@@ -44,7 +42,7 @@ await p.waitForTimeout(400);
 console.log('logged:', JSON.stringify(await p.evaluate(()=>S.hurts)));
 console.log('hurtFor(bench):', await p.evaluate(()=>!!hurtFor("Barbell Bench Press")),
             '· hurtFor(row):', await p.evaluate(()=>!!hurtFor("Barbell Row")));
-console.log('button marked:', await p.evaluate(()=>!!document.querySelector('[data-exmore].hu-on')));
+console.log('button marked:', await p.evaluate(()=>!!document.querySelector('[data-exhurt].hu-on')));
 
 console.log('\n=== THE PROGRESSION HOLD ===');
 console.log(JSON.stringify(await p.evaluate(()=>{
