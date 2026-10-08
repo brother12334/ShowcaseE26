@@ -31,18 +31,28 @@ await p.route(/^https?:/, r=>{
     return r.fulfill({status:200, contentType:"application/json", body: JSON.stringify(FIX)});
   return r.abort();
 });
-/* SEEDED ONCE, NOT ON EVERY LOAD. addInitScript runs again after reload(), so clearing
-   storage here would wipe the very thing section 4 reloads in order to check. */
-await p.addInitScript(()=>{
-  if(localStorage.getItem('e26.seeded')) return;
+/* NOTHING DESTRUCTIVE RUNS IN AN INIT SCRIPT, AND THAT IS THE WHOLE POINT.
+
+   This spec reloads the page in section 4 to prove a bookmark survives. An init script
+   runs again on every navigation, so a clear-and-seed in one would wipe the very thing the
+   reload is checking. Guarding it with a marker key looked like the fix and was not: the
+   guard reads the same storage it is protecting, and on roughly one run in ten that read
+   came back empty before the origin's storage was attached — the guard passed, clear()
+   ran, and the saved paper and the cached feed both vanished. It presented as "the app
+   lost a bookmark across a reload", which is a frightening and completely false reading.
+
+   So the seed is written ONCE, from the page, after the first load, and the reload that
+   follows boots the app against it. There is no init script left to fire a second time. */
+await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
+await p.evaluate(()=>{
   localStorage.clear();
-  localStorage.setItem('e26.seeded', '1');
   localStorage.setItem('e26.account', JSON.stringify({id:'E26-X',key:'k'.repeat(32),name:'Fer',createdAt:1,cloud:false,ns:''}));
   localStorage.setItem('e26.ns0','E26-X');
   localStorage.setItem('ironlog.v1', JSON.stringify({
     setup:{name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()-400*86400e3},
-    tourDone:true, geo:'off', splitId:'ppl6', sessions:[] })); });
-await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
+    tourDone:true, geo:'off', splitId:'ppl6', sessions:[] }));
+});
+await p.reload({waitUntil:'domcontentloaded'});
 await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
 await p.evaluate(()=>{ S.seenNews = NEWS_FOR; saveQuiet(); });
 const ev = (fn,a)=> p.evaluate(fn,a);

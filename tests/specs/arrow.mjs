@@ -2,10 +2,17 @@ import { chromium, APP_URL, shot, appFile, fileUrl } from './_e26.mjs';
 const b = await chromium.launch();
 const p = await b.newPage({viewport:{width:390,height:1100}, deviceScaleFactor:2});
 const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('dialog',d=>d.accept());
-// clear ONCE: addInitScript runs on every navigation, and a reload that wipes the
-// disk copy would be testing a fresh install rather than an upgrade.
-await p.addInitScript(()=>{ if(localStorage.getItem('__seeded')) return; localStorage.clear();
-  localStorage.setItem('__seeded','1');
+// NOTHING IS CLEARED HERE, BECAUSE THERE IS NOTHING TO CLEAR AND CLEARING IT WAS A TRAP.
+// A freshly launched browser's page starts with empty storage, so the clear() that used to
+// be here was defensive and redundant. It was also actively harmful: addInitScript runs
+// again on the reload below, and the __seeded guard reads the same storage it is meant to
+// protect -- on a minority of runs that read comes back empty before the origin's storage
+// is attached, the guard passes, and clear() wipes the planLog this spec wrote through
+// page.evaluate specifically in order to reload onto it. The symptom is a backfill test
+// failing as though the app had lost the log, which it had not.
+// Setting the two account keys unconditionally is safe: they are identical every time.
+// (Found while chasing the same intermittent failure in research.mjs.)
+await p.addInitScript(()=>{
   localStorage.setItem('e26.account', JSON.stringify({id:'E26-X',key:'k'.repeat(32),name:'Fer',createdAt:1,cloud:false,ns:''}));
   localStorage.setItem('e26.ns0','E26-X'); });
 await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
