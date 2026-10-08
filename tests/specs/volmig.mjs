@@ -227,16 +227,33 @@ console.log("9 - THE CARD IS SHOWN ONCE, AND ONLY WHEN SOMETHING CHANGED");
     const shown = volMigrationCardHTML();
     S.volMigrated.seen = Date.now();
     const after = volMigrationCardHTML();
+    /* NOTHING MOVED AND NOTHING TO SAY ABOUT THE CLIMB EITHER. Both halves have to be
+       quiet now: 56.0 made a change to how fast volume climbs reportable in its own right,
+       so an empty `moved` is no longer sufficient for silence. volclimb.mjs 1C owns the
+       other direction — that the climb change alone DOES earn a card. */
     S.volMigrated = {at: Date.now(), moved: [], withdrawn: 0};
+    const keepP = JSON.stringify(S.prefs || {});
+    const keepF = S.volClimbFrom;
+    if(!S.prefs) S.prefs = {};
+    S.prefs.volClimb = "off";
+    delete S.volClimbFrom;
     const quiet = volMigrationCardHTML();
+    /* And with the climb news back, the same empty migration is worth a card. */
+    S.prefs.volClimb = "peak";
+    const climbOnly = volMigrationCardHTML();
+    S.prefs = JSON.parse(keepP);
+    if(keepF === undefined) delete S.volClimbFrom; else S.volClimbFrom = keepF;
     delete S.volMigrated;
-    return {shown, after, quiet};
+    return {shown, after, quiet, climbOnly};
   });
   ck("it names the muscle and both numbers",
      /Chest/.test(r.shown) && /22/.test(r.shown) && /19/.test(r.shown), r.shown.slice(0,160));
   ck("it says the withdrawn warning no longer applies", /no longer appl/.test(r.shown), "");
   ck("ONCE DISMISSED IT IS GONE", r.after === "", r.after.slice(0,80));
-  ck("and it never appears for somebody whose numbers did not move", r.quiet === "", "");
+  ck("AND IT IS SILENT WHEN NOTHING MOVED AND THE CLIMB DID NOT CHANGE EITHER",
+     r.quiet === "", r.quiet.slice(0, 120));
+  ck("but a change to how fast volume climbs earns a card on its own",
+     /Increases/.test(r.climbOnly), r.climbOnly.slice(0, 120));
 }
 
 console.log("10 - NOTHING THREW");
