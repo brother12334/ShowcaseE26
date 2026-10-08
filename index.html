@@ -6865,7 +6865,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "55.2";
+const APP_VERSION = "55.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -20139,6 +20139,165 @@ function trendThresholds(g, opts){
    cycles of real soreness, or joint pain on the muscle's own lifts, is enough on its
    own. Waiting for performance to drop before believing somebody is doing too much is
    waiting for the damage. */
+/* THE CLIMB THAT SPEEDS UP, AND THE PULL-BACK THAT AIMS.
+
+   WHY THIS EXISTS. The ladder added one set per responding cycle, and the simulation
+   showed what that costs somebody whose own best is high: a lifter who can productively
+   handle 32 sets a week, starting from a population target of about 14, needs eighteen
+   cycles to get there -- a year and a half of being told to do less than they could.
+   Only about 55% of them got within 10% of their best inside two years. One set per cycle
+   is the right step near the top of the climb and far too timid at the bottom of it.
+
+   The fix is not a bigger fixed step. It is a step that earns its size from evidence it
+   is working, and collapses the moment that evidence stops.
+
+   EVIDENCE GRADES, so the next person can tell which of these numbers to argue with.
+
+     A -- directly measured in a trial on this question.
+     B -- derived from a fitted dose-response curve across trials.
+     C -- a coaching decision written down, consistent with the evidence but not measured.
+
+   THE 20% CAP IS THE ONE WITH A TRIAL BEHIND IT [A]. Scarpelli 2022 raised each leg's
+   volume to 20% above that person's OWN previous volume and beat moving everybody onto a
+   fixed "optimal" 22 sets. A relative increase is the thing that was tested, so a relative
+   increase is the cap: no step may exceed a fifth of what the muscle is already doing.
+
+   THE THREE-SET CAP IS THE OTHER HALF OF THE SAME BOUND [B/C]. Enes 2024 added 4 to 6 sets
+   every two weeks under supervision, which is roughly 2 to 3 per four-week cycle at the
+   gentler end, and that was a specialisation block with everything else cut. Three per
+   cycle is therefore the most this app will add to a muscle that is merely progressing,
+   and the smaller of the two caps always wins.
+
+   THE LADDER ITSELF IS A COACHING DECISION [C]. Nothing measures how fast confidence
+   should accumulate. +1, then +2, then +3 is chosen because the first step is a
+   hypothesis, the second is a hypothesis that survived, and the third is a pattern -- and
+   because a single flat cycle resets it to +1, so the cost of being wrong is one cycle at
+   one extra set rather than a run-up nobody asked for.
+
+   AND COMING DOWN AIMS RATHER THAN RETREATS [C]. Cutting a flat 2 or 3 sets on an
+   overreach throws away the information the climb just bought. The last volume that was
+   still producing a response is a measured lower bound on the answer, and the current
+   volume is a measured upper bound, so the midpoint between them is the best next guess --
+   then the climb resumes in single sets, because the bracket is now narrow and a big step
+   would overshoot it again. With no responding volume on record there is no bracket, and
+   it falls back to the same relative 20% [A] in the other direction. */
+const VOL_STEP_LADDER   = [1, 2, 3];  // [C] consecutive responding cycles -> step size
+const VOL_CAPS          = {steps: 3,  // [B/C] never more than this many sets in one cycle
+                           frac: 0.20};// [A] Scarpelli 2022, relative to the muscle's own
+const VOL_BACKOFF_FRAC  = 0.20;       // [A] the same relative figure, read downwards
+/* [C] Remmert 2025 finds very little data above about six hard sets for one muscle in one
+   session, which is what SESSION_SETS_INFO says and why it is advisory. This is the
+   separate question of where the app refuses: ten is a hard stop, and volume past a day's
+   share goes on ANOTHER DAY rather than being stacked into one session. The gap between
+   six and ten is deliberate -- six is where the evidence thins, ten is where the app
+   stops, and pretending they are the same number would be claiming the evidence reaches
+   further than it does. */
+const VOL_SESSION_HARD_MAX = 10;
+
+/* WHICH CLIMB IS IN FORCE. "off" is the shipped behaviour: one set per responding cycle,
+   a flat cut when overreached. Nothing below is live.
+
+   THE LADDER IS IMPLEMENTED AND NOT ENABLED, AND THE SIMULATION IS WHY. Run against a
+   world model where a lifter's best volume and their recovery limit are SEPARATE numbers
+   -- which they are, and which the first version of that model wrongly conflated -- the
+   accelerating ladder was worse than what ships today in four of five populations:
+   typical 62.1% of oracle against 82.7%, steady 50.7% against 79.3%. It gets people to a
+   high volume faster and then parks them 46% above their own best, because the signal it
+   climbs until is BREAKDOWN, and breakdown sits far above the volume where growth stops
+   rising. Speed into the wrong target is worse than no speed.
+
+   "peak" is the candidate that came out of that: the same ladder, with a stop signal that
+   asks whether adding sets is still IMPROVING the response rather than whether the lifter
+   has started falling apart. It clears twelve of the fifteen gates and wins big for the
+   two populations served worst today (low-ceiling 32.4% -> 70.7% of oracle, high-ceiling
+   76.1% -> 91.5%), but steady lifters lose growth under it and it necessarily raises time
+   spent near the limit. That is a judgement call about who to favour, so it is a switch
+   somebody turns on deliberately and not a default that arrived in a release.
+
+   docs/volume-science.md 5G has the full table and the reasoning. */
+const VOL_CLIMB_MODE = "off";
+function volClimbMode(){
+  const m = trainPrefs().volClimb;
+  return (m === "ladder" || m === "peak") ? m : VOL_CLIMB_MODE;
+}
+
+/* HAS THIS MUSCLE GONE PAST THE TOP OF ITS OWN CURVE?
+
+   Not "is it breaking down" -- that is what the overreach check asks, and it answers a
+   different question. This asks whether the LAST increase bought anything: more volume
+   than last cycle, and a response that came back materially worse for it.
+
+   THE MARGIN IS THE DETECTION BAR OR A QUARTER OF THE RESPONSE, WHICHEVER IS BIGGER --
+   AND IT ONLY BINDS ON A BIG RESPONSE. A quarter of a +3% cycle is 0.75%, which IS the
+   bar's floor, so for ordinary readings the relative term does nothing at all. It only
+   takes over when the response is large (above about +4% for somebody steady, where a
+   quarter is 1% or more), and there it stops a drop from +8% to +6.5% being read as "past
+   the peak" when the lifter is still gaining faster than most people ever do.
+
+   IT WAS ADDED TO FIX STEADY LIFTERS AND IT DID NOT FIX THEM. The simulation measured
+   exactly the same 75.5% of oracle with and without it. The reason steady lifters do worse
+   under this test is not the margin -- it is that `flatV` is never withdrawn, so an early
+   false peak pins them, and they trigger false peaks most because their bar sits on its
+   floor while the real per-set gain near the bottom of the curve is still small. Making it
+   revisable was also measured, and was worse again for everyone else. That trade is
+   unresolved and is why this mode is off. Recorded here rather than left as a confident
+   comment over an inert line.
+
+   ONE CYCLE IS ENOUGH, UNLIKE THE DECLINE CHECK, AND THE ASYMMETRY IS THE POINT. The
+   decline check waits for two consecutive blocks because it is a damage signal: acting on
+   noise there cuts somebody's training for no reason. This is not a damage signal, and the
+   cost of being slow is a whole cycle spent above the optimum buying nothing -- every
+   cycle, until it fires. Requiring two strikes was measured and handed back the entire
+   benefit (typical 85.1% -> 67.2% of oracle). Being wrong here costs one cycle at one
+   lower volume and the climb resumes as soon as the response picks up. Cheap mistakes are
+   made quickly. */
+function volPastPeak(V, trendPct, prevV, prevTrend, thr){
+  if(!(prevV > 0) || !(V > prevV) || prevTrend == null || trendPct == null) return false;
+  const bar = (thr && thr.up > 0) ? thr.up : RESPOND_TREND_PCT;
+  const margin = Math.max(bar, 0.25 * Math.max(0, prevTrend));
+  return trendPct < prevTrend - margin;
+}
+
+/* How many sets this muscle may gain this cycle, given how many responding cycles it has
+   strung together. Pure, so the simulation can run it on a thousand made-up lifters. */
+function volStepFor(v, streak){
+  if(!(v > 0)) return 1;
+  const n = Math.max(1, Math.min(VOL_STEP_LADDER.length, Math.round(streak) || 1));
+  const rung = VOL_STEP_LADDER[n - 1];
+  /* The relative cap, floored at one set: a muscle doing 5 would otherwise be allowed
+     nothing, and refusing to let a small muscle grow at all is not what Scarpelli
+     measured. */
+  const byFrac = Math.max(1, Math.floor(v * VOL_CAPS.frac));
+  return Math.max(1, Math.min(rung, VOL_CAPS.steps, byFrac));
+}
+/* Where to come back to when a decline or an overreach is confirmed. */
+function volBackoffTo(v, lastRespondV){
+  if(!(v > 0)) return VOL_BANDS.floor;
+  const bracketed = lastRespondV > 0 && lastRespondV < v;
+  const to = bracketed ? (lastRespondV + v) / 2 : v * (1 - VOL_BACKOFF_FRAC);
+  return Math.max(VOL_BANDS.floor, Math.round(to * 10) / 10);
+}
+/* The per-muscle climb state, read and written around decideForMuscle. Kept out of the
+   decision itself so the decision stays pure. */
+function volClimbOf(g){
+  const c = (S.volClimb && S.volClimb[g]) || null;
+  return {streak: (c && c.streak > 0) ? c.streak : 0,
+          lastRespondV: (c && c.lastRespondV > 0) ? c.lastRespondV : 0,
+          /* The learned estimate of where this muscle's own curve flattens, and the
+             previous cycle's reading the peak test compares against. `flatV` is NOT
+             withdrawn once set: letting a later responding cycle clear it was measured and
+             came out worse for four of five populations, because the trend near the top of
+             the curve is flat enough that "responding" up there is often noise. */
+          flatV: (c && c.flatV > 0) ? c.flatV : 0,
+          prevV: (c && c.prevV > 0) ? c.prevV : 0,
+          prevTrend: (c && typeof c.prevTrend === "number") ? c.prevTrend : null};
+}
+function volClimbSet(g, patch){
+  if(!S.volClimb || typeof S.volClimb !== "object") S.volClimb = {};
+  const cur = S.volClimb[g] || {};
+  S.volClimb[g] = Object.assign({}, cur, patch, {at: Date.now()});
+}
+
 const RESPOND_TREND_PCT  = 1.0;    // e1RM trend at or above this is responding
 const DECLINE_TREND_PCT  = -2.0;   // at or below this, for two cycles, is overreached
 const SORE_OK            = 1;      // average sorenessBefore at or under this is fine
@@ -20255,7 +20414,7 @@ function jointMaxOver(g, fromMs, toMs){
 function decideForMuscle(g, cycle){
   /* cycle: {V, trendPct, sore, joint, prev} — assembled by cycleReview() so this stays
      a pure decision and can be tested on made-up numbers. */
-  const {V, trendPct, sore, joint, prev, soreBy} = cycle;
+  const {V, trendPct, sore, joint, prev, soreBy, climb} = cycle;
   /* THE BAR IS THIS PERSON'S OWN NOISE WHERE THERE IS ENOUGH LOG TO MEASURE IT, and the
      population figures otherwise. Passed in on the cycle rather than read from S, so the
      decision stays pure and the same ladder can be run on made-up lifters. */
@@ -20277,14 +20436,34 @@ function decideForMuscle(g, cycle){
          next session, and somebody reading this deserves to know which. */
       : soreBy === SORE_BY_PEAK ? "still sore when the recovery window was up, two cycles running"
       : "real soreness two cycles running";
+    /* COMING DOWN AIMS AT THE BRACKET THE CLIMB BOUGHT, rather than removing a flat 2 or
+       3 sets and discarding it. `backTo` is advisory beside `cut`, which is kept so no
+       existing caller changes behaviour until it opts in. */
+    const backTo = climb ? volBackoffTo(V, climb.lastRespondV) : null;
     return {k:"over", V, why, thr,
             observe:{mrv:V},
-            cut: CUT_SETS_OVER,
+            cut: CUT_SETS_OVER, backTo,
+            logSay: backTo == null ? null
+              : ((climb.lastRespondV > 0 && climb.lastRespondV < V)
+                  ? "over the limit at " + r1(V) + " sets — back to " + r1(backTo)
+                    + ", halfway to the " + r1(climb.lastRespondV)
+                    + " that was still working"
+                  : "over the limit at " + r1(V) + " sets — back to " + r1(backTo)
+                    + ", a fifth less, with no earlier working volume to aim at"),
             say:"Overreached — " + why + " at about " + r1(V) + " sets a week"};
   }
   if(trendPct != null && trendPct >= UP && soreOk && !jointBad){
+    /* THE STEP GROWS WITH THE RUN OF RESPONDING CYCLES. `climb` is passed in rather than
+       read from S, so this stays pure; with nothing passed the step is the old flat one
+       and every existing caller behaves exactly as it did. */
+    const streak = (climb && climb.streak > 0 ? climb.streak : 0) + 1;
+    const step = climb ? volStepFor(V, streak) : ADD_SETS_PER_CYCLE;
     return {k:"up", V, why:"the lift is still climbing at this volume", thr,
-            add: ADD_SETS_PER_CYCLE, max: ADD_SETS_MAX,
+            add: step, max: ADD_SETS_MAX, streak,
+            /* The sentence that goes in the plan history, in the person's own numbers. */
+            logSay: "still progressing at " + r1(V) + " sets — adding " + step
+                    + (step === 1 ? " set" : " sets")
+                    + (streak > 1 ? " (" + streak + " responding cycles in a row)" : ""),
             say:"Responding — up " + r1(trendPct) + "% at about " + r1(V) + " sets a week"};
   }
   if(trendPct != null && trendPct > DOWN && trendPct < UP && soreOk){
@@ -20294,7 +20473,10 @@ function decideForMuscle(g, cycle){
        answer is no. */
     const held = (prev && prev.k === "hold" ? (prev.heldFor || 1) : 0) + 1;
     const probe = held >= HOLD_CYCLES_BEFORE_PROBE;
-    return {k:"hold", V, heldFor: held, probe, thr,
+    return {k:"hold", V, heldFor: held, probe, thr, streak: 0,
+            logSay: probe ? "flat for two cycles at " + r1(V)
+                            + " sets \u2014 one more set to find out"
+                          : null,
             why: probe ? "flat for two cycles, so worth one more set to find out"
                        : "flat, and not costing you anything",
             add: probe ? ADD_SETS_PER_CYCLE : 0,

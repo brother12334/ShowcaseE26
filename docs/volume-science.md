@@ -854,12 +854,161 @@ sets each; no model can make it. The honest response is for the builder to say s
 what the plan check already does, rather than for the floor to be lowered until the plan
 passes.
 
+## 5F. THE OVERREACH NUMBER WAS MEASURING THE WRONG THING
+
+§5D reported that typical lifters spend 50% of blocks "overreached" and low-ceiling
+lifters 75%. Those figures were challenged before any further work was built on them, and
+the challenge was right.
+
+**`vstar` was one number doing two jobs.** The simulation gave each lifter a single value
+that served as both the volume where their growth curve flattens *and* the volume past
+which a fatigue penalty starts. "Overreached" was then defined as 10% past it. In the app
+those are two different landmarks — MAV and MRV — and the gap between them is precisely
+where "still gaining, costing more" lives. Collapsing them meant the headline figure
+measured **time spent past the point extra sets stop buying much**, which is somewhere a
+climb-until-signal ladder is *designed* to visit, not time spent past what anybody can
+recover from.
+
+The audit (`tools/` scratch run, reproduced in `tests/sim/volume-sim.mjs`):
+
+| scenario | "overreached" | depth above `vstar` (mean / median / max) | consecutive blocks (mean / median / max) |
+|---|---|---|---|
+| typical | 50.4% | +21.2% / +19.9% / +67.9% | 7.1 / 6 / **24** |
+| low-ceiling | 75.1% | +32.8% / +26.5% / **+149.9%** | 6.2 / 5 / **24** |
+| high-ceiling | 2.7% | +15.6% / +14.8% / +33.5% | 3.5 / 3 / 10 |
+
+Against a *notional* recovery limit 25% above best, the same blocks read 14.5% / 41.2% /
+0.1%, with runs of ~3.3 instead of ~7. And blocks that actually lost ground: **0%**
+typical, **1.9%** low-ceiling, **0%** high-ceiling.
+
+**Two of the three things the number hid were real defects.**
+
+1. **A maximum run of 24 blocks is a bug, not a statistic.** Some lifters sat 20%+ above
+   their best for the entire two years and nothing ever pulled them back — because the
+   penalty slope was so mild (0.55) that being over never produced a detectable decline.
+   **A limit the app cannot feel is a limit it can never learn.**
+2. **Low-ceiling lifters at 41% past even a generous limit, +150% deep at worst, is not an
+   artifact.** That one was understated by nothing and is now the clearest result in §5G.
+
+### What changed in the model
+
+A lifter now has **`vbest`** (growth flattens; the oracle trains here; "within ±10%" is
+measured against it) and **`vlimit`** (recovery stops; higher than `vbest` by a per-lifter
+slack of 10–45%). "Overreached" means `v > vlimit`, with no fudge factor, because
+`vlimit` already *is* the limit. Soreness and joint signals are driven by distance past
+`vlimit`, not past `vbest` — between the two a lifter is wasting effort, not breaking down,
+and should not report as if they were.
+
+The penalty is recalibrated to be **detectable**, stated as a falsifiable claim rather
+than a slope: 10% past the limit halves the gain, 20% past buys nothing, 25% past loses
+ground (`OVER_PEN = 5.0`). That is the clinical picture of overreaching. **It is the one
+invented number in the file, every "overreached" figure below moves with it, and it is the
+first thing to challenge.**
+
+Correcting this re-scored the *existing* policy much harder: low-ceiling lifters fell from
+76.6% of oracle to **32.4%**. The old model was flattering what ships today.
+
+## 5G. THE ADAPTIVE CLIMB: WHAT WAS SPECIFIED, WHAT WAS MEASURED, AND WHY IT IS OFF
+
+The brief specified an accelerating ladder (+1, +2, +3 on consecutive responding blocks,
+capped at the smaller of 3 sets and 20%), an aimed pull-back (halfway back to the last
+responding volume), and a start point taken from the lifter's own recent volume. All three
+are implemented, tested and **not enabled**.
+
+Five policies, same lifters, same seeds, n=1,000, 24 cycles:
+
+| scenario | policy | % oracle | overreach | depth | alarms | to ±10% | reached | end/best |
+|---|---|---|---|---|---|---|---|
+| typical | mdc *(live)* | 82.7% | 35.5% | +7.3% | 0.62% | 6.0 | 87.3% | 134% |
+| typical | own-start | 80.2% | 50.0% | +7.7% | 0.60% | 3.2 | 73.9% | 138% |
+| typical | ladder | 62.1% | 68.7% | +11.1% | 0.31% | 2.3 | 71.8% | 146% |
+| typical | **peak** | **85.1%** | **29.3%** | +7.3% | 0.72% | 3.9 | 76.1% | **116%** |
+| noisy | mdc | 84.7% | 27.9% | +7.0% | 1.99% | 7.0 | 86.8% | 127% |
+| noisy | ladder | 67.8% | 60.4% | +10.3% | 1.03% | 2.9 | 72.8% | 144% |
+| noisy | **peak** | **88.1%** | **17.2%** | +6.4% | 2.27% | 4.7 | 77.4% | **103%** |
+| steady | mdc | 79.3% | 43.9% | +7.9% | 0.44% | 5.1 | 87.0% | 138% |
+| steady | ladder | 50.7% | 79.3% | +13.1% | 0.17% | 1.9 | 71.4% | 148% |
+| steady | peak | 74.0% | 51.7% | +9.3% | 0.41% | 2.8 | 77.6% | 130% |
+| low-ceiling | mdc | 32.4% | 74.7% | +17.4% | 0.94% | 9.6 | 67.5% | 127% |
+| low-ceiling | ladder | 44.0% | 78.7% | +14.7% | 0.40% | 2.1 | 76.2% | 139% |
+| low-ceiling | **peak** | **70.7%** | **48.2%** | +10.8% | 0.98% | 3.4 | 85.8% | 119% |
+| high-ceiling | mdc | 76.1% | 0.3% | +2.4% | 0.58% | 17.3 | 54.2% | 96% |
+| high-ceiling | own-start | 92.4% | 17.9% | +4.6% | 0.50% | 4.9 | 94.2% | 125% |
+| high-ceiling | ladder | 86.6% | 31.0% | +7.4% | 0.41% | 3.2 | 94.1% | 127% |
+| high-ceiling | **peak** | **91.5%** | 8.9% | +4.9% | 0.53% | 4.8 | 87.8% | **103%** |
+
+### Verdict on what was specified: DO NOT SHIP
+
+**The accelerating ladder is worse than what ships today in four of five populations** —
+typical 62.1% against 82.7%, steady 50.7% against 79.3%. It fails eight of the fifteen
+gates. **The own-history start, on its own, also fails** (typical 80.2% against 82.7%,
+overreach 50% against 35.5%), which was a surprise: at n=300 it looked like the clean win.
+
+### Why, and it is not the step size
+
+The `end/best` column is the whole explanation. **Every climb-until-signal policy parks the
+lifter 25–50% above their own best**, because the signal it climbs until is *breakdown*,
+and breakdown sits far above the volume where growth stops rising. Making the climb faster
+just arrives at the wrong target sooner and overshoots further. **The objective was wrong,
+not the speed.**
+
+### The candidate that came out of it
+
+**`peak`** is the same ladder and the same start point with a different stop signal: it asks
+whether adding sets is still *improving* the response, rather than whether the lifter has
+started falling apart (`volPastPeak`). It clears **twelve of the fifteen gates** and the
+wins are large where they matter most — low-ceiling lifters go from 32.4% to **70.7%** of
+oracle with overreach down from 74.7% to 48.2%, and high-ceiling from 76.1% to **91.5%**
+with 87.8% reaching ±10% against 54.2%. It is the only arm that ends *near* the best
+(103–130% rather than 134–148%).
+
+**Three gates it fails, on both seeds (26 and 991):**
+
+1. **Steady lifters lose growth**: 74.0% against 79.3%. Cause diagnosed: `flatV` is never
+   withdrawn, so one early false peak pins them — and steady lifters trigger false peaks
+   most, because their detection bar sits on its floor while the real per-set gain near the
+   bottom of the curve is still small.
+2. **Steady lifters overreach more**: 51.7% against 43.9%.
+3. **High-ceiling lifters overreach more**: 8.9% against 0.3%. **This gate is
+   unsatisfiable jointly with the reach gate.** The 0.3% is an artifact of never arriving:
+   today's policy leaves them at 96% of their best after two years having never approached
+   their limit. Reaching a high volume at all means operating near it.
+
+### Two intuitions that were tested and were wrong
+
+- **"An estimate that cannot be revised is indefensible."** Letting a later responding
+  cycle withdraw the peak call measured **worse** for four of five populations (typical
+  85.7% → 82.6%, steady 75.5% → 70%, low-ceiling 71.7% → 66%). Withdrawing it lets the
+  climb go back past the top, where "responding" is often noise. The irreversible version
+  acts as a learned ceiling.
+- **"The peak test should need two blocks, like the decline check."** It handed back the
+  entire benefit (typical 85.1% → 67.2%). The asymmetry is the point: the decline check is
+  a *damage* signal where a false positive cuts somebody's training for nothing, so
+  patience is cheap. The peak test's false *negative* costs a wasted cycle every cycle
+  until it fires. Cheap mistakes get made quickly.
+
+A third correction belongs here too: the relative margin in `volPastPeak` was added to fix
+steady lifters and **did not fix them** — identical 75.5% with and without. A quarter of a
++3% response is 0.75%, which is the bar's own floor, so the term is inert at ordinary
+response sizes. It is kept because it binds on large responses, and the comment above it
+now says so instead of claiming a fix it never delivered.
+
+### The caps held everywhere
+
+No step over 3 sets, at any volume, under any policy. No step over 20% at 5 sets or more.
+Below 5 sets one whole set is 25% and there is no smaller move — sets are integers — so
+that is counted and named as integer granularity rather than waved away, and it applies
+equally to the policy that ships today.
+
 ## 6. Still to do
 
-1. **The climb rate for high-ceiling lifters** (§5D). Measured, specified, not implemented.
-   The only item from Parts 1–7 of the brief that is deliberately left undone, and §5D says
-   why: it is a change to progression, not to the volume model, and it deserves its own
-   design and its own simulation rather than being slipped in under a threshold change.
+1. **A decision on `peak`** (§5G). It is implemented, tested and switched off. Turning it on
+   means accepting that steady lifters lose about 5 points of oracle growth so that
+   low-ceiling lifters gain 38 and high-ceiling lifters gain 15. That is a judgement about
+   who to favour, not a measurement, so it is not a default that should arrive in a release.
+2. **The steady-lifter regression**, if `peak` is wanted without it. The diagnosis is in
+   §5G; the fix is a better-conditioned peak estimate, and both obvious versions have
+   already been measured and rejected.
 
 The plain-English version of all of this, for deciding whether to ship it, is
 `docs/volume-model-summary.md`.
@@ -867,7 +1016,8 @@ The plain-English version of all of this, for deciding whether to ship it, is
 Done: the curve and the landmarks derived from it (§1, §5A), the measured counting basis
 and the paper’s own counting rule (§2, §3), the bounded adjustment chain (§4), the
 existing-user migration (§5B), per-user dose finding with measured noise thresholds
-(§5C), the simulation study (§5D), and the 360-combination re-measurement (§5E).
+(§5C), the simulation study (§5D), the 360-combination re-measurement (§5E), the
+overreach audit and the corrected world model (§5F), and the adaptive climb (§5G).
 
 ## 7. Open questions
 
