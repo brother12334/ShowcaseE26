@@ -1,0 +1,51 @@
+# Cloudflare Workers build config for the RESEARCH service — a THIRD, separate Worker from
+# the plan-reader proxy (wrangler.toml) and the account service (wrangler.accounts.toml).
+#
+# WHY IT IS SEPARATE, which is the same shape of reason the account service is separate but
+# pointing the other way. The account Worker holds recovery keys and synced training data,
+# so it may never mark a response cacheable. This one holds public bibliographic records
+# and serves every reader the same bytes, so caching them hard at the edge is most of why
+# it is cheap to run. Those two rules cannot live in one Worker.
+#
+# It also means a bug in a research route cannot read a byte of anybody's training data,
+# and that "no training data ever leaves the device" is provable from a network log rather
+# than asserted in a comment: the only origin this feature talks to has no user records.
+#
+# Deploy, from the repo root:
+#   wrangler kv namespace create RESEARCH --config wrangler.research.toml
+# That prints an id — paste it below in place of REPLACE_WITH_KV_NAMESPACE_ID, then:
+#   wrangler deploy --config wrangler.research.toml
+#
+# THE KEYS DO NOT GO IN THIS FILE, or in any file in this repo. All three are encrypted
+# secrets on Cloudflare:
+#   wrangler secret put NCBI_API_KEY  --config wrangler.research.toml
+#   wrangler secret put GEMINI_API_KEY --config wrangler.research.toml
+#   wrangler secret put ADMIN_TOKEN    --config wrangler.research.toml
+#
+# See docs/research-lab.md §10 for the full walkthrough, including the 20-paper check that
+# gates the launch and how to wire the resulting URL into index.html's RESEARCH_API.
+
+name = "element26-research"
+main = "proxy/research-worker.js"
+compatibility_date = "2024-11-01"
+
+[[kv_namespaces]]
+binding = "RESEARCH"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# THE CRON IS THE WHOLE PIPELINE. Without it the read routes still serve whatever is in KV
+# and nothing is ever added, so the feed would be frozen at whatever the last manual
+# /research/run produced.
+#
+# Once a day, at 04:17 UTC. The minute is deliberately not 0: Cloudflare's schedulers are
+# busiest on the hour, and nothing here is time-critical enough to compete for that slot.
+# One run costs roughly 15 PubMed searches, a few dozen efetch and Crossref lookups, and
+# two Gemini calls per accepted paper — see docs/research-lab.md §8 for the cost working.
+[triggers]
+crons = ["17 4 * * *"]
+
+# NOT SET HERE ON PURPOSE: LAUNCH_APPROVED. The launch gate lives in KV
+# (setting:launchApproved), flipped by hand through /research/launch?token=…&approved=true
+# once the 20-paper check has passed. Putting it in this file would mean it could ride
+# along in a deploy somebody did for an unrelated reason, which is exactly the accident the
+# gate exists to prevent. The Worker treats a missing value as NOT launched.

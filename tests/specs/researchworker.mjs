@@ -9,7 +9,7 @@
    test that hard-codes a DOI is a test that goes stale and starts lying. */
 import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
-       verify, needsApproval, servable} = __test;
+       verify, needsApproval, launchApproved, servable} = __test;
 
 let bad = 0;
 const ck = (n, c, extra)=>{ console.log((c?"  ok  ":"  BROKEN  ")+n+(c?"":" :: "+(extra||""))); if(!c) bad++; };
@@ -193,14 +193,39 @@ console.log("8 - THE RELEVANCE SCREEN KEEPS CLINICAL POPULATIONS OUT");
      app.applyTo === "failure", String(app.applyTo));
 }
 
-console.log("9 - THE STRONGEST CLAIMS WAIT FOR A HUMAN");
+console.log("9 - BEFORE LAUNCH, EVERYTHING WAITS FOR A HUMAN");
+{
+  /* The golden set has to cover the kinds of paper the feed will mostly contain, not just
+     the kinds that are scary. So while the launch gate is closed, nothing publishes on its
+     own — whatever its type. */
+  const kinds = ["meta", "systematic", "rct", "controlled", "observational", "review", "mechanistic"];
+  const unlaunched = kinds.filter(t=> needsApproval({type:t, applyTo:null}, false) !== true);
+  ck("EVERY KIND OF PAPER NEEDS APPROVAL BEFORE LAUNCH", unlaunched.length === 0,
+     "these did not: " + unlaunched.join(", "));
+  ck("including an ordinary trial, which is most of the feed",
+     needsApproval({type:"rct", applyTo:null}, false) === true, "");
+  ck("and an observational study", needsApproval({type:"observational"}, false) === true, "");
+  /* A missing or malformed setting reads as NOT launched: the cautious reading of an
+     absent gate is the closed one. */
+  const noKv = {RESEARCH: {get: async ()=> null}};
+  ck("AN ABSENT SETTING MEANS NOT LAUNCHED", (await launchApproved(noKv)) === false, "");
+  ck("and so does anything other than the exact string true",
+     (await launchApproved({RESEARCH: {get: async ()=> "yes"}})) === false, "");
+  ck("a KV read that throws fails closed",
+     (await launchApproved({RESEARCH: {get: async ()=>{ throw new Error("kv down"); }}})) === false, "");
+  ck("the setting does open it", (await launchApproved({RESEARCH: {get: async ()=> "true"}})) === true, "");
+  ck("and an env var is honoured too",
+     (await launchApproved({LAUNCH_APPROVED: "true", RESEARCH: {get: async ()=> null}})) === true, "");
+}
+
+console.log("9B - AFTER LAUNCH, ONLY THE STRONGEST CLAIMS DO");
 {
   ck("A META-ANALYSIS NEEDS APPROVAL, because it reads as settled",
-     needsApproval({type:"meta"}) === true, "");
-  ck("so does a systematic review", needsApproval({type:"systematic"}) === true, "");
+     needsApproval({type:"meta"}, true) === true, "");
+  ck("so does a systematic review", needsApproval({type:"systematic"}, true) === true, "");
   ck("AND SO DOES ANYTHING THAT POWERS APPLY TO MY TRAINING",
-     needsApproval({type:"rct", applyTo:"volume"}) === true, "");
-  ck("an ordinary trial does not", needsApproval({type:"rct", applyTo:null}) === false, "");
+     needsApproval({type:"rct", applyTo:"volume"}, true) === true, "");
+  ck("an ordinary trial does not", needsApproval({type:"rct", applyTo:null}, true) === false, "");
   /* And the gate is on the way out, in one place, so no query path can forget it. */
   const rows = [{id:"a", approved:true}, {id:"b", approved:false}, {id:"c"}];
   ck("unapproved papers are filtered out when served",

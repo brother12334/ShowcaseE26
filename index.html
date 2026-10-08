@@ -7018,7 +7018,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "57.1";
+const APP_VERSION = "57.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -42651,7 +42651,24 @@ function planMarkHTML(e){
    and never renders a field the Worker did not send. Where a summary is missing the card
    says so and still links to the paper. An empty feed is an empty feed.
    ===================================================================== */
-const RESEARCH_API = "https://element26-research.ferbyablon.workers.dev";
+/* EMPTY ON PURPOSE, AND IT IS A SAFETY CATCH RATHER THAN AN OVERSIGHT.
+
+   While this is "", the app never calls the research service at all: the feed stays on its
+   "No papers yet" state, which is the honest reading of a store whose contents nobody has
+   checked yet. Pointing it at a live Worker is the LAST step of the launch, after the
+   20-paper golden-set check has passed — see docs/research-lab.md 10. Deploying the Worker
+   and filling this in at the same time would put summaries in front of readers before
+   anybody had read them against their papers, which is the one failure this whole feature
+   is built to avoid.
+
+   To launch: "https://element26-research.<subdomain>.workers.dev" */
+const RESEARCH_API = "";
+/* READ THROUGH A FUNCTION rather than closing over the constant, so there is one place
+   that decides where the feed comes from and one place that decides whether to ask at
+   all. It also means the launch state is evaluated at call time, which is what lets the
+   tests drive the configured and unconfigured paths without editing the shipped value. */
+function researchBase(){ return RESEARCH_API; }
+function researchConfigured(){ return !!researchBase(); }
 
 /* HOW LONG A CACHED FEED IS STILL WORTH SHOWING. The Worker's cron runs about once a day,
    so anything fresher than that is certainly current; past a week it is still readable but
@@ -42785,12 +42802,18 @@ let RESEARCH_SCROLL = 0;         // the feed's scroll position, restored on Back
    are better than a spinner that never stops. */
 async function researchFetchFeed(opts){
   if(RESEARCH_LOADING) return;
+  /* WITHOUT A CONFIGURED SERVICE THERE IS NOTHING TO ASK. Guarded here rather than at the
+     call sites so there is exactly one place that can be wrong: an empty base would
+     otherwise make this request "/research/feed", which is a 404 on the real site and a
+     file:// failure in the tests, and either would show as an error state when the truth
+     is simply that no service has been pointed at yet. */
+  if(!researchConfigured()){ RESEARCH_ERROR = ""; return; }
   RESEARCH_LOADING = true; RESEARCH_ERROR = "";
   const o = opts || {};
   try{
     const qs = new URLSearchParams();
     if(o.since) qs.set("since", o.since);
-    const res = await fetch(RESEARCH_API + "/research/feed?" + qs.toString(),
+    const res = await fetch(researchBase() + "/research/feed?" + qs.toString(),
                             {headers: {"accept": "application/json"}});
     if(!res.ok) throw new Error("the research service answered " + res.status);
     const data = await res.json();
@@ -43334,6 +43357,20 @@ function researchShare(id){
 /* ---------- bindings ---------- */
 function bindResearch(){
   if(TAB !== "research") return;
+  /* THE FEED FETCHES ITSELF WHEN THE TAB IS OPENED, which it did not until now: the only
+     caller was the retry button, so a deployed Worker would have sat there serving a tab
+     that never asked it anything.
+
+     ONCE PER FRESHNESS WINDOW, NOT ONCE PER RENDER. bindResearch() runs after every
+     render, and this screen re-renders on every keystroke in the search box and every
+     filter tap. The cron publishes about once a day, so anything fresher than
+     RESEARCH_FRESH_MS is certainly current and asking again would be pure cost. An empty
+     cache always asks. */
+  if(researchConfigured() && !RESEARCH_LOADING && !RESEARCH_ERROR){
+    const c = researchCacheRead();
+    const stale = !c || !c.papers.length || (Date.now() - (c.at || 0)) > RESEARCH_FRESH_MS;
+    if(stale) researchFetchFeed();
+  }
   /* THE SEARCH BOX IS NEVER RE-RENDERED WHILE SOMEBODY IS TYPING IN IT. Debounced, and the
      render is triggered from the timer rather than from the keystroke, so the caret and the
      soft keyboard both stay where they were. */
@@ -55896,7 +55933,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "57.1";
+const NEWS_FOR = "57.2";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */

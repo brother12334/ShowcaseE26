@@ -29,6 +29,17 @@ The Worker is written and tested but **has not been deployed**, so the app curre
 its "No papers yet" state. That is the honest state for a feed with no verified papers in
 it, and it is what the specs assert against.
 
+**Two independent gates hold it there, and neither can be opened by deploying.**
+
+| gate | while closed | opened by |
+|---|---|---|
+| `RESEARCH_API` in `index.html` is `""` | the app never calls the service at all | editing and shipping the app |
+| `setting:launchApproved` is absent from KV | **every** paper needs approval, whatever its type | `/research/launch?token=…&approved=true` |
+
+Deploying the Worker and putting summaries in front of readers are deliberately two
+separate decisions, and the second requires having read them. §10 has the order; §12 has
+the checklist for judging each sentence.
+
 ---
 
 ## 2. Why a separate Worker
@@ -171,9 +182,15 @@ unsupported → **the summary is rejected and the paper is published with metada
 only.** The verification record is stored with the paper.
 
 ### Human review
-**Meta-analyses, systematic reviews and anything that powers "Apply to My Training" are
-stored `approved: false` and are not served until the owner approves them** via
-`/research/approve?token=…`. Those are the two cases where a wrong summary does most
+**Before launch, every paper needs approval, whatever its type.** While
+`setting:launchApproved` is absent or not `"true"`, `needsApproval()` returns true for
+everything — so the 20-paper check in §10 covers trials, observational studies and reviews
+as well as meta-analyses. A golden set that only ever saw meta-analyses would say nothing
+about how the pipeline handles the small trial that most of the feed will actually be.
+
+**After launch, meta-analyses, systematic reviews and anything that powers "Apply to My
+Training" are stored `approved: false` and are not served until the owner approves them**
+via `/research/approve?token=…`. Those are the two cases where a wrong summary does most
 damage: a meta-analysis reads as settled, and an apply-able paper is one step from somebody
 changing their training. The approval gate is applied in one place on the way out
 (`servable()`), not scattered through the query paths where a branch could forget it.
@@ -225,34 +242,78 @@ are below; the gate is not optional.
 
 ## 10. Deploying
 
+Three Workers now, three configs. **Every command below passes
+`--config wrangler.research.toml`** — without it wrangler picks up `wrangler.toml`, which
+is the Gemini plan-reader proxy, and you would deploy this file over that Worker.
+
+### Once
+
 ```bash
-# KV
-wrangler kv:namespace create RESEARCH
+wrangler kv namespace create RESEARCH --config wrangler.research.toml
+# paste the printed id into wrangler.research.toml, replacing REPLACE_WITH_KV_NAMESPACE_ID
 
-# wrangler.toml
-# [[kv_namespaces]]  binding = "RESEARCH"  id = "<id>"
-# [triggers]         crons = ["17 4 * * *"]
+wrangler secret put NCBI_API_KEY   --config wrangler.research.toml   # ncbi.nlm.nih.gov/account
+wrangler secret put GEMINI_API_KEY --config wrangler.research.toml
+wrangler secret put ADMIN_TOKEN    --config wrangler.research.toml   # long random string
 
-wrangler secret put NCBI_API_KEY      # ncbi.nlm.nih.gov/account
-wrangler secret put GEMINI_API_KEY
-wrangler secret put ADMIN_TOKEN       # long random string
-wrangler deploy proxy/research-worker.js
+wrangler deploy --config wrangler.research.toml
 ```
 
-Then, **in this order**:
+### Two gates, both closed by default
 
-1. `GET /research/run?token=…&n=6` — one small batch by hand.
-2. `GET /research/stats?token=…` — read the drop reasons. A high drop rate is the screen
-   working, not failing.
-3. `GET /research/queue?token=…` — read every queued summary **against its paper**. This is
-   the golden-set check. Approve or reject each one.
-4. Only once 20 papers have passed at 100% supported sentences: let the cron run, and point
-   `RESEARCH_API` in `index.html` at the deployed Worker.
+| gate | state while closed | closed by |
+|---|---|---|
+| `RESEARCH_API` in `index.html` | `""` — the app never calls the service and shows "No papers yet" | being empty |
+| `setting:launchApproved` in KV | **every** paper needs approval, whatever its type | being absent |
 
-Admin routes are `GET` with `?token=`, which is fine for a hand-run review from one owner's
-browser and would not be fine for anything multi-user.
+Neither can be opened by a deploy. That is the point: deploying the Worker and putting
+summaries in front of readers are two separate decisions, and the second one requires
+having read them.
 
----
+### Then, in this order
+
+1. **One small batch by hand.**
+   `GET /research/run?token=…&n=6`
+   The response includes `launched: false`. If it says `true` before you have run the
+   check, stop and fix that first.
+
+2. **Read the drop reasons.**
+   `GET /research/stats?token=…`
+   A high drop rate is the screen working, not failing. `reasons` tells you which check
+   did it.
+
+3. **The 20-paper check.** `GET /research/queue?token=…`
+   While the launch gate is closed this queue contains **everything** — trials,
+   observational studies and reviews as well as meta-analyses — which is the point: a
+   golden set that only saw meta-analyses would say nothing about how the pipeline handles
+   the small trial that most of the feed will actually be.
+   Read every summary **against its paper**, using the checklist in §12. Approve or reject:
+   `GET /research/approve?token=…&id=pm12345678`
+   `GET /research/approve?token=…&id=pm12345678&reject=1`
+   Repeat steps 1–3 until **20 papers have passed with 100% supported sentences**. One
+   unsupported sentence means the batch has not passed; fix the prompt or the checks and
+   start the count again.
+
+4. **Open the launch gate.**
+   `GET /research/launch?token=…&approved=true`
+   From here the steady-state rule applies: meta-analyses, systematic reviews and
+   Apply-linked papers still queue for approval; ordinary trials and observational studies
+   publish once they pass both automated checks.
+
+5. **Let the cron run** — it is already scheduled by the config, nothing to enable.
+
+6. **Point the app at it.** Set `RESEARCH_API` in `index.html` to the deployed URL, bump
+   `APP_VERSION` and `sw.js` `VERSION`, and ship.
+
+### Rolling back
+
+`GET /research/launch?token=…&approved=false` stops anything new publishing without
+approval. It does **not** retract papers already approved — use
+`/research/approve?…&reject=1` per paper for that. Setting `RESEARCH_API` back to `""` and
+shipping takes the whole feature off the app without touching the store.
+
+Admin routes are `GET` with `?token=`, which is fine for a hand-run review from one
+owner's browser and would not be fine for anything multi-user.
 
 ## 11. Tests
 
@@ -264,3 +325,32 @@ browser and would not be fine for anything multi-user.
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
 stale and starts lying.
+
+## 12. Judging a summary sentence
+
+Read the summary **next to the abstract**, one sentence at a time. For each sentence, one
+of four verdicts. **Anything that is not the first verdict fails the paper.**
+
+| verdict | what it means | what to do |
+|---|---|---|
+| **Supported by the abstract** | Everything the sentence asserts is stated in the abstract, or follows directly from it with no added step. | Keep. |
+| **Not supported** | It adds something the abstract does not contain: a mechanism, a population, a comparison, a recommendation. True-in-general still counts as not supported — the rule is "from this source", not "correct". | Reject. |
+| **Number wrong** | A figure does not match the abstract: a sample size, a duration, a percentage, an effect size, a p-value, a confidence interval. Includes a number that is *right* but attached to the wrong thing. | Reject. |
+| **Overstated** | The claim is bigger than the design carries. An association written as a cause. One trial written as settled. A hedge dropped — "may" become "does", "in these participants" become "in lifters". A recommendation where the paper reports a finding. | Reject. |
+
+Four things worth checking explicitly, because they are the ones the automated passes are
+least able to catch:
+
+- **Does `forLifters` name who was studied?** A line that reads as advice to anybody, when
+  the participants were untrained 20-year-olds, is overstated even if every word is in the
+  abstract.
+- **Are the limitations this paper's, or generic?** "More research is needed" is not a
+  limitation. "Thickness was measured at one site by ultrasound" is.
+- **Does the evidence label match the methods you just read?** If the abstract describes a
+  narrative discussion and the label says META-ANALYSIS, the demotion rule in §6 has
+  missed one — that is a bug to fix, not a paper to approve.
+- **Is anything medical?** Dosing beyond what the paper used, or anything that reads as
+  health advice, is a reject regardless of faithfulness.
+
+Keep a tally while you work: *papers read / papers with every sentence supported*. The
+launch gate opens at 20/20, not at 20 read.

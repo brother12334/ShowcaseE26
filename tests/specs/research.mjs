@@ -47,6 +47,39 @@ await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000
 await p.evaluate(()=>{ S.seenNews = NEWS_FOR; saveQuiet(); });
 const ev = (fn,a)=> p.evaluate(fn,a);
 
+console.log("0 - AN UNCONFIGURED SERVICE IS NEVER CALLED");
+{
+  /* RESEARCH_API SHIPS EMPTY AND THAT IS A SAFETY CATCH, not an oversight: while it is
+     blank the app must not reach for the network at all, so a deploy of the Worker cannot
+     put unreviewed summaries in front of anybody. The rest of this spec then overrides it
+     to exercise the feed, which is why this check comes first. */
+  const r = await ev(async ()=>{
+    const before = (window.__fetchCount || 0);
+    const conf = researchConfigured();
+    const api = RESEARCH_API;
+    await researchFetchFeed();
+    return {conf, api, err: RESEARCH_ERROR, loading: RESEARCH_LOADING};
+  });
+  ck("RESEARCH_API SHIPS EMPTY", r.api === "", JSON.stringify(r.api));
+  ck("so the app reports itself unconfigured", r.conf === false, String(r.conf));
+  ck("A FETCH WITH NO SERVICE DOES NOTHING AND IS NOT AN ERROR",
+     r.err === "" && r.loading === false, JSON.stringify(r));
+  const reqs = seen.filter(x=> /\/research\//.test(x.url)).length;
+  ck("and no research request was made at all", reqs === 0, String(reqs));
+  /* The screen says the honest thing rather than showing an error. */
+  const note = await ev(()=>{
+    goTab("research");
+    return (document.querySelector('.rs-note h3')||{}).textContent;
+  });
+  ck("the tab shows \"No papers yet\"", /No papers yet/.test(note || ""), note);
+}
+
+/* FROM HERE ON the service is pointed at a stub, so the feed itself can be exercised.
+   Done by overriding the constant rather than by editing the file, so the shipped value
+   stays the empty one section 0 just asserted. */
+await p.evaluate(()=>{
+  researchBase = ()=> "https://element26-research.test.workers.dev";
+});
 await ev(async ()=>{ await researchFetchFeed(); goTab("research"); });
 
 console.log("1 - THE FEED RENDERS FROM WHAT THE WORKER SENT");

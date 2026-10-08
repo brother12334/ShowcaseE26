@@ -602,10 +602,38 @@ function cardOf(p) {
    settled, and an apply-able paper is one step from somebody changing their training. They
    are stored with approved:false and are not served until the owner approves them through
    the admin route. Everything else is served once it has passed both checks. */
-function needsApproval(p) {
+/* BEFORE LAUNCH, EVERYTHING WAITS FOR A HUMAN.
+
+   The steady-state rule below is that meta-analyses, systematic reviews and anything
+   powering "Apply to My Training" need approval, because those are where a wrong summary
+   does the most damage. That rule is right once the pipeline has been shown to work — and
+   it is the wrong rule for the twenty papers that are meant to DEMONSTRATE that it works.
+   A golden set that only ever saw meta-analyses would say nothing about how the pipeline
+   handles a small trial, a cross-sectional survey or a narrative review, which are most of
+   what the feed will actually contain.
+
+   So until the launch is approved, needsApproval() is true for every paper regardless of
+   type, and the golden set covers trials, observational studies and reviews as well.
+
+   READ FROM KV, NOT FROM A BUILD-TIME CONSTANT, so flipping it is a deliberate act the
+   owner performs against the live store after reading the queue — not something that
+   rides along in a deploy somebody did for an unrelated reason. An env var is honoured
+   too, for anybody who would rather pin it in config. Absent, or anything other than
+   "true", means NOT launched: the safe reading of a missing setting is the cautious one. */
+const K_LAUNCH = "setting:launchApproved";
+async function launchApproved(env) {
+  if (env && env.LAUNCH_APPROVED === "true") return true;
+  try {
+    const v = await env.RESEARCH.get(K_LAUNCH);
+    return v === "true";
+  } catch (e) { return false; }
+}
+function needsApproval(p, launched) {
+  if (!launched) return true;
   return p.type === "meta" || p.type === "systematic" || !!p.applyTo;
 }
 async function runPipeline(env, limit) {
+  const launched = await launchApproved(env);
   const seen = await readIndex(env);
   const have = new Set(seen.map(x => x.id));
   const queue = [];
@@ -660,7 +688,7 @@ async function runPipeline(env, limit) {
         paper.summaryFailed = s.why;
         stats.nosum++;
       }
-      paper.approved = !needsApproval(paper) && !!paper.summary;
+      paper.approved = !needsApproval(paper, launched) && !!paper.summary;
       if (!paper.approved) { queue.push(paper.id); stats.pending++; } else { stats.kept++; }
       await env.RESEARCH.put(K_PAPER(paper.id), JSON.stringify(paper));
       seen.push(cardOf(paper));
@@ -673,8 +701,8 @@ async function runPipeline(env, limit) {
     await env.RESEARCH.put(K_QUEUE, JSON.stringify(old.concat(queue).slice(-200)));
   }
   await env.RESEARCH.put("stats:last", JSON.stringify(
-    Object.assign({at: Date.now()}, stats)));
-  return stats;
+    Object.assign({at: Date.now(), launched}, stats)));
+  return Object.assign({launched}, stats);
 }
 async function sha256(s) {
   const b = new TextEncoder().encode(String(s || ""));
@@ -786,13 +814,14 @@ export default {
     }
 
     if (url.pathname === "/research/queue" && isAdmin) {
+      const launched = await launchApproved(env);
       const ids = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
       const out = [];
       for (const id of ids.slice(-40)) {
         const raw = await env.RESEARCH.get(K_PAPER(id));
         if (raw) out.push(JSON.parse(raw));
       }
-      return json({queue: out}, origin, 0);
+      return json({launchApproved: launched, queue: out}, origin, 0);
     }
     if (url.pathname === "/research/approve" && isAdmin) {
       const id = url.searchParams.get("id");
@@ -807,6 +836,15 @@ export default {
       if (i > -1) rows[i] = Object.assign(cardOf(p), {approved: p.approved});
       await writeIndex(env, rows);
       return json({ok: true, id, approved: p.approved}, origin, 0);
+    }
+    /* FLIPPING THE LAUNCH GATE IS ITS OWN DELIBERATE CALL, and it reports what it did so
+       there is no doubt afterwards about which mode the store is in. */
+    if (url.pathname === "/research/launch" && isAdmin) {
+      const want = url.searchParams.get("approved");
+      if (want === "true" || want === "false") await env.RESEARCH.put(K_LAUNCH, want);
+      return json({launchApproved: await launchApproved(env),
+                   note: want ? "set to " + want : "unchanged \u2014 pass ?approved=true|false"},
+                  origin, 0);
     }
     if (url.pathname === "/research/run" && isAdmin) {
       return json(await runPipeline(env, Number(url.searchParams.get("n") || 6)), origin, 0);
@@ -824,5 +862,6 @@ export default {
    fixtures without a network, a key or a KV namespace. */
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
-  verify, needsApproval, cardOf, servable, CAUSAL, BLOCKED_TYPES
+  verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
+  K_LAUNCH
 };
