@@ -283,22 +283,56 @@ const NEVER = [
   "chemotherapy", "cirrhosis", "copd", "heart failure", "stroke rehabilitation",
   "spinal cord injury", "cerebral palsy", "multiple sclerosis", "parkinson",
   "alzheimer", "dementia", "intensive care", "critically ill", "bed rest study",
-  "pregnan", "paediatric", "pediatric", "children", "adolescent"
+  "pregnan", "paediatric", "pediatric", "children", "adolescent",
+  /* ADDED AFTER THE FIRST LIVE RUN, which surfaced "High-load resistance training and
+     FSHD: harmful mixture or a silver bullet combination?" in Journal of Neurology.
+     Facioscapulohumeral dystrophy is a progressive neuromuscular disease, and whether
+     heavy lifting is safe for that population is a question whose answer must not be read
+     by somebody browsing a feed for lifters. The list had cancer cachexia and MS but no
+     dystrophies or myopathies at all. */
+  "dystroph", "myopath", "myositis", "neuromuscular disease", "muscle wasting disease",
+  "amyotrophic", "fibromyalgia", "rheumatoid", "haemophilia", "hemophilia",
+  "transplant", "hiv", "chronic kidney"
 ];
 /* COULD A LIFTER DO SOMETHING WITH IT? This flag drives the feed's first ranking key and
    whether "Apply to my training" appears at all, so it is deliberately conservative:
    a paper qualifies only if it studied a variable the app can actually measure for
    somebody. Mechanistic work about signalling pathways is real science and is not
    actionable, and saying so is more useful than pretending. */
+/* MATCHED ON THE TITLE, NOT THE ABSTRACT, AND THE FIRST LIVE RUN IS WHY.
+
+   This searched the whole abstract for phrases including the bare word "load", which
+   appears in very nearly every resistance-training abstract ever written. The result on
+   real data was that all fourteen papers came back actionable:true, and the decisions were
+   nonsense: a palm-cooling study was tagged "failure", an ashwagandha meta-analysis and a
+   paper on statistical methods for scaling strength to muscle size were both tagged
+   "reps", and a volleyball warm-up study was tagged "volume". Two consequences, both bad:
+   "Apply to my training" would have offered to act on a palm-cooling study, and with the
+   flag true for everything the feed's first ranking key stopped discriminating at all.
+
+   A TITLE IS A CLAIM ABOUT WHAT THE PAPER IS FOR; an abstract merely mentions things. A
+   study of rest intervals says so in its title. So the match is on the title only, and
+   the phrases are specific enough that a passing mention cannot trigger them. The cost is
+   that some genuinely actionable papers will be missed, and that is the right side to
+   err on: a missing Apply button is a small loss, and one offered against a study that
+   cannot support it is the kind of thing that makes the whole feature untrustworthy. */
 const APPLY_MAP = [
-  ["volume",    ["training volume", "weekly sets", "number of sets", "set volume", "dose-response"]],
-  ["failure",   ["proximity to failure", "repetitions in reserve", "to failure", "momentary failure"]],
-  ["frequency", ["training frequency", "sessions per week", "weekly frequency"]],
-  ["rest",      ["rest interval", "inter-set rest", "rest period"]],
-  ["reps",      ["repetition range", "rep range", "load", "intensity of load", "%1rm"]],
-  ["exercise",  ["exercise selection", "exercise variation", "free weight", "machine"]],
-  ["rom",       ["range of motion", "lengthened partial", "partial repetition", "full range"]],
-  ["protein",   ["protein intake", "protein supplementation", "protein dose"]],
+  ["volume",    ["training volume", "weekly set", "number of sets", "set volume",
+                 "dose-response", "volume-equated", "higher volume", "low-volume"]],
+  ["failure",   ["proximity to failure", "repetitions in reserve", "set failure",
+                 "momentary failure", "training to failure", "non-failure"]],
+  ["frequency", ["training frequency", "sessions per week", "weekly frequency",
+                 "frequency of resistance"]],
+  ["rest",      ["rest interval", "inter-set rest", "rest period", "interset rest"]],
+  ["reps",      ["repetition range", "rep range", "repetition tempo", "load intensity",
+                 "intensities of resistance", "load intensities", "heavy versus light",
+                 "high-load", "low-load"]],
+  ["exercise",  ["exercise selection", "exercise variation", "exercise order",
+                 "free weight", "machine versus"]],
+  ["rom",       ["range of motion", "lengthened partial", "partial repetition",
+                 "full range", "partial range"]],
+  ["protein",   ["protein intake", "protein supplementation", "protein dose",
+                 "protein-carbohydrate", "protein ingestion"]],
   ["deload",    ["deload", "detraining", "training cessation", "taper"]]
 ];
 function screen(rec, queryTopic) {
@@ -325,17 +359,43 @@ function screen(rec, queryTopic) {
   if (/periodization|programme|program design|frequency|deload/.test(mt)) topics.add("programming");
   if (/exercise selection|exercise variation|range of motion/.test(mt)) topics.add("exercise");
 
+  /* The title alone, lowercased. See the note on APPLY_MAP. */
+  const titleHay = String(rec.title || "").toLowerCase();
   let applyTo = null;
   for (const [k, words] of APPLY_MAP) {
-    if (words.some(w => hay.indexOf(w) > -1)) { applyTo = k; break; }
+    if (words.some(w => titleHay.indexOf(w) > -1)) { applyTo = k; break; }
   }
   /* TRAINED OR UNTRAINED IS THE SINGLE MOST DECISION-RELEVANT FACT about a participant
      group for this audience, so it is extracted explicitly and shown rather than buried.
      Unknown stays unknown. */
-  const population = /resistance-trained|trained men|trained women|trained participants|training experience of/.test(hay)
-    ? "trained"
-    : /untrained|novice|no resistance training experience|recreationally active/.test(hay)
-      ? "untrained" : null;
+  /* WHO WAS STUDIED, AND IT HAS TO FIRE MORE OFTEN THAN IT DID. On the first live run 12
+     of 14 came back null, including four papers explicitly about older men or older
+     women. Older adults are legitimate training research and are NOT excluded — but a
+     lifter reading a card needs to see who it was done on, and a card that says nothing
+     reads as though it were done on people like them.
+
+     "older" is checked first and wins, because for this audience it is the most
+     decision-relevant thing about a participant group: an 8-week study in 70-year-olds
+     tells a 25-year-old lifter something, and it tells them something different from what
+     the same study in trained 25-year-olds would. */
+  const population =
+    /older (men|women|adult|particip)|elderly|postmenopausal|aged \d\d|mean age of (6|7|8)\d/.test(hay)
+      ? "older"
+    /* UNTRAINED IS TESTED BEFORE TRAINED, because "untrained" CONTAINS "trained". The
+       earlier order matched `trained participants` inside `Untrained participants` and
+       labelled a novice study as trained — which is the single most misleading label this
+       field can carry, since the whole reason a lifter reads it is to know whether the
+       finding came from people like them. The lookbehind on the trained patterns is the
+       belt to that braces: either one alone fixes it, and this field is worth both.
+
+       A paper comparing trained AND untrained groups comes out "untrained", which is the
+       cautious reading: it tells the reader not to assume the result transfers. */
+    : /untrained|novice|no resistance training experience|recreationally active|previously inactive|sedentary/.test(hay)
+      ? "untrained"
+    : /resistance-(?<!un)trained|(?<!un)trained men|(?<!un)trained women|(?<!un)trained participants|(?<!un)trained individuals|training experience of|years of (resistance )?training experience|well-trained/.test(hay)
+      ? "trained"
+    : /highly trained|elite|collegiate|professional (player|athlete)|athletes/.test(hay)
+      ? "athletes" : null;
   return {ok: true, topics: Array.from(topics).filter(Boolean), applyTo, population, reasons};
 }
 
@@ -662,7 +722,19 @@ function cardOf(p) {
     quickTakeaway: p.summary ? p.summary.quickTakeaway : null,
     whatTheyStudied: p.summary ? p.summary.whatTheyStudied : null,
     whatTheyFound: p.summary ? p.summary.whatTheyFound : null,
-    forLifters: p.summary ? p.summary.forLifters : null
+    forLifters: p.summary ? p.summary.forLifters : null,
+    /* THE APPROVAL FLAG TRAVELS WITH THE CARD, AND IT IS A HARD TRUE.
+
+       This was missing, and missing it was a gate that failed OPEN: the paper record
+       carried approved:false, the index card carried nothing, and servable() kept
+       anything that was not exactly false. Every unapproved paper would have been served
+       in the feed, which is the one outcome this entire feature is built to prevent. It
+       went unnoticed because KV's eventual consistency made the index look empty for the
+       first minute after a run, so the leak was hidden behind a second, harmless effect.
+
+       `=== true` rather than copying the value, so an undefined, a null, a missing field
+       or a future refactor that forgets this line all come out false. */
+    approved: p.approved === true
   };
 }
 
@@ -822,8 +894,14 @@ async function rateOk(env, ip) {
   return n <= RATE_PER_MIN;
 }
 /* ONLY APPROVED PAPERS ARE EVER SERVED. The gate is here, in one place, on the way out —
-   not scattered through the query paths where one branch could forget it. */
-const servable = rows => rows.filter(r => r && r.approved !== false);
+   not scattered through the query paths where one branch could forget it.
+
+   AND IT REQUIRES A TRUE, NOT MERELY THE ABSENCE OF A FALSE. It used to read
+   `approved !== false`, which sounds equivalent and is the opposite: a row that had never
+   been given the field at all sailed through. Paired with cardOf() forgetting to copy the
+   flag, that served every unapproved paper in the feed. Written this way the gate fails
+   CLOSED — anything that is not explicitly approved is not served, whatever the reason. */
+const servable = rows => rows.filter(r => r && r.approved === true);
 
 export default {
   async scheduled(event, env, ctx) {

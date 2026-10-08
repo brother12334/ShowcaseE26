@@ -9,7 +9,7 @@
    test that hard-codes a DOI is a test that goes stale and starts lying. */
 import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
-       verify, needsApproval, launchApproved, servable, scoreModel} = __test;
+       verify, needsApproval, launchApproved, servable, scoreModel, cardOf} = __test;
 
 let bad = 0;
 const ck = (n, c, extra)=>{ console.log((c?"  ok  ":"  BROKEN  ")+n+(c?"":" :: "+(extra||""))); if(!c) bad++; };
@@ -193,6 +193,66 @@ console.log("8 - THE RELEVANCE SCREEN KEEPS CLINICAL POPULATIONS OUT");
      app.applyTo === "failure", String(app.applyTo));
 }
 
+console.log("8B - THE FIRST LIVE RUN'S OWN TITLES, WHICH IS WHERE THREE BUGS CAME FROM");
+{
+  /* These are the real titles the first deployed run surfaced. They are kept verbatim as
+     a regression set because every one of them exposed something the fixtures did not:
+     the whole point of a fixture is that it is what I imagined, and these are what PubMed
+     actually sent. Only titles and the fact of their journals are used — no summary, no
+     finding, nothing that could become a claim about a paper. */
+  const mk = (title, abstract)=> ({title, abstract: abstract || title, mesh: []});
+  const sc = (title, abstract)=> screen(mk(title, abstract), "hypertrophy");
+
+  /* 1. applyTo matched the bare word "load" anywhere in the abstract, so all fourteen
+        papers came back actionable with nonsense reasons. */
+  const noise = [
+    "Analytical approaches to account for muscle size when evaluating strength.",
+    "Adjunctive Ashwagandha (Withania somnifera) Supplementation and Resistance-Training Adaptations in Healthy Adults: A Systematic Review and Random-Effects Meta-Analysis of Muscular Strength, Chest Circumference, and Body Composition.",
+    "Cool in theory, not in practice: Effects of interset palm cooling on resistance exercise performance and psychophysiology responses.",
+    "Acute Performance, Mechanical and Thermal Effects of Isometric Conditioning Versus Standardized Volleyball Pre-Training Activation in Highly Trained Male Players.",
+    "Ribosome Biogenesis as a Putative Bottleneck to Skeletal Muscle Hypertrophy: Mechanisms, Human Evidence, and Practical Modulators."
+  ];
+  const stillActionable = noise
+    .map(t=> ({t, r: sc(t, t + " Participants performed resistance training at a given load to failure.")}))
+    .filter(x=> x.r.ok && x.r.applyTo);
+  ck("NONE OF THE FIVE MISMATCHED PAPERS IS ACTIONABLE ANY MORE",
+     stillActionable.length === 0,
+     stillActionable.map(x=> x.r.applyTo + " <- " + x.t.slice(0, 50)).join(" | "));
+
+  /* And a paper that genuinely IS about an actionable variable still is. */
+  const real = [
+    ["How Slow Should You Go? A Systematic Review With Meta-Analysis of the Effect of Resistance Training Repetition Tempo on Muscle Hypertrophy.", "reps"],
+    ["Effect of Intra-Workout Protein-Carbohydrate Co-Ingestion Versus Isocaloric Carbohydrate During Resistance Training on Muscle Fibre Hypertrophy.", "protein"],
+    ["Responsiveness of muscle mass gain to different load intensities of resistance training in older women: A randomized crossover study.", "reps"],
+    ["Effects of high-intensity and blood-flow-restricted resistance training on tendon adaptations in older men.", null]
+  ];
+  const wrong = real.filter(([t, want])=> (sc(t).applyTo || null) !== want);
+  ck("and the ones that really are about a variable still say so",
+     wrong.length === 0,
+     wrong.map(([t, w])=> "wanted " + w + " got " + sc(t).applyTo + " <- " + t.slice(0, 40)).join(" | "));
+
+  /* 2. A progressive neuromuscular disease reached the feed. */
+  const fshd = sc("High-load resistance training and FSHD: harmful mixture or a silver bullet combination?",
+    "Facioscapulohumeral dystrophy patients undertook high-load resistance training.");
+  ck("A MUSCULAR DYSTROPHY PAPER IS EXCLUDED", fshd.ok === false, fshd.why);
+  ck("and so is a myopathy", sc("Resistance training in inflammatory myopathy",
+     "Patients with myopathy performed resistance training.").ok === false, "");
+
+  /* 3. Twelve of fourteen had no population at all, four of them explicitly about older
+        men or women. Older adults are not excluded — they are LABELLED. */
+  const older = sc("Responsiveness of muscle mass gain to different load intensities of resistance training in older women.",
+    "Older women performed resistance training for 12 weeks.");
+  ck("AN OLDER-ADULT STUDY IS KEPT, NOT DROPPED", older.ok === true, older.why || "");
+  ck("and it is labelled as such rather than left blank", older.population === "older",
+     String(older.population));
+  ck("trained is still detected",
+     sc("Carbohydrate supplementation in trained men",
+        "Resistance-trained men completed a crossover trial.").population === "trained", "");
+  ck("so is untrained",
+     sc("Activating additional muscle mass in novices",
+        "Untrained participants performed resistance training.").population === "untrained", "");
+}
+
 console.log("9 - BEFORE LAUNCH, EVERYTHING WAITS FOR A HUMAN");
 {
   /* The golden set has to cover the kinds of paper the feed will mostly contain, not just
@@ -227,9 +287,29 @@ console.log("9B - AFTER LAUNCH, ONLY THE STRONGEST CLAIMS DO");
      needsApproval({type:"rct", applyTo:"volume"}, true) === true, "");
   ck("an ordinary trial does not", needsApproval({type:"rct", applyTo:null}, true) === false, "");
   /* And the gate is on the way out, in one place, so no query path can forget it. */
-  const rows = [{id:"a", approved:true}, {id:"b", approved:false}, {id:"c"}];
-  ck("unapproved papers are filtered out when served",
-     servable(rows).map(r=> r.id).join(",") === "a,c", servable(rows).map(r=> r.id).join(","));
+  const rows = [{id:"a", approved:true}, {id:"b", approved:false}, {id:"c"},
+                {id:"d", approved:undefined}, {id:"e", approved:null},
+                {id:"f", approved:"true"}, {id:"g", approved:1}];
+  const out = servable(rows).map(r=> r.id).join(",");
+  ck("AN APPROVED PAPER IS SERVED", out.indexOf("a") > -1, out);
+  ck("an explicitly rejected one is not", out.indexOf("b") < 0, out);
+  /* THE GATE FAILS CLOSED. It used to read `approved !== false`, which sounds equivalent
+     and is the opposite: a row that never had the field sailed through. Paired with
+     cardOf() not copying the flag, that served every unapproved paper in the feed. */
+  ck("AND A ROW WITH NO FLAG AT ALL IS NOT SERVED", out.indexOf("c") < 0, out);
+  ck("nor undefined, nor null", out.indexOf("d") < 0 && out.indexOf("e") < 0, out);
+  ck("nor a truthy value that is not actually true",
+     out.indexOf("f") < 0 && out.indexOf("g") < 0, out);
+  ck("so only the one approved row survives", out === "a", out);
+  /* And the card the index stores must carry the flag, or the gate above has nothing to
+     read. This is the half that was missing. */
+  ck("THE INDEX CARD CARRIES THE APPROVAL FLAG",
+     cardOf({id:"x", approved:true}).approved === true, "");
+  ck("and a paper with no flag becomes an explicit false, not a gap",
+     cardOf({id:"x"}).approved === false, String(cardOf({id:"x"}).approved));
+  ck("an unapproved paper's card is false", cardOf({id:"x", approved:false}).approved === false, "");
+  ck("AND A CARD STRAIGHT FROM INGEST IS NOT SERVABLE",
+     servable([cardOf({id:"x", approved:false})]).length === 0, "");
 }
 
 console.log("9C - THE MODEL IS ASKED FOR, NOT ASSUMED");
