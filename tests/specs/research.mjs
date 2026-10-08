@@ -136,12 +136,52 @@ console.log("4 - SAVE, READ AND SHARE PERSIST THROUGH A RELOAD");
   ck("a save is recorded", before.saved.join(",") === "fx1", before.saved.join(","));
   ck("so is a read", before.read.join(",") === "fx3", before.read.join(","));
   ck("AND IT TRAVELS IN A BACKUP AND THEREFORE IN SYNC", before.inBackup === true, "");
+  /* THE WRITE IS CONFIRMED BEFORE THE RELOAD, so a failure here says which half broke.
+     A full-quota localStorage makes persist() return false and swallow the write, and the
+     first version of this check reported that as "the save did not survive the reload" —
+     the same message a genuine load bug would produce, which is the least useful thing a
+     test can say. */
+  const onDisk = await ev(()=>{
+    try{
+      const d = JSON.parse(localStorage.getItem(dataKey()) || "{}");
+      return {ok: true, saved: Object.keys((d.research || {}).saved || {})};
+    }catch(e){ return {ok: false, why: String(e.message)}; }
+  });
+  ck("the save reached the disk copy", onDisk.ok && onDisk.saved.join(",") === "fx1",
+     JSON.stringify(onDisk));
   await p.reload({waitUntil:"domcontentloaded"});
   await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
   const after = await ev(()=> ({saved: Object.keys((S.research||{}).saved||{}),
                                 read: Object.keys((S.research||{}).read||{})}));
   ck("the save survived the reload", after.saved.join(",") === "fx1", after.saved.join(","));
   ck("and so did the read", after.read.join(",") === "fx3", after.read.join(","));
+}
+
+console.log("4B - TWO DEVICES' BOOKMARKS UNION RATHER THAN CLOBBER");
+{
+  /* S.research goes into BACKUP_FIELDS and into the merge, which the brief asked for in
+     one breath and which is easy to half-do. Without a merge rule, saving a paper on a
+     phone and another on a laptop leaves whichever synced last holding one of them. */
+  const r = await ev(()=>{
+    /* PUT BACK WHAT THIS CHECK BORROWS. Section 9 reads the real saved and read lists, and
+       the first version of this left its synthetic ids in place and broke it. */
+    const keep = JSON.stringify(S.research);
+    S.research.saved = {phoneOnly: 1000, both: 5000};
+    S.research.read = {};
+    const keepAt = S.savedAt;
+    S.savedAt = 2000;
+    const disk = {savedAt: 1000, research: {saved: {laptopOnly: 2000, both: 3000}, read: {r1: 7}}};
+    mergeDiskInto(disk);
+    const out = {saved: S.research.saved, read: Object.keys(S.research.read)};
+    S.research = JSON.parse(keep);
+    S.savedAt = keepAt;
+    saveQuiet();
+    return out;
+  });
+  ck("the phone's save is kept", r.saved.phoneOnly === 1000, JSON.stringify(r.saved));
+  ck("AND SO IS THE LAPTOP'S", r.saved.laptopOnly === 2000, JSON.stringify(r.saved));
+  ck("one saved on both keeps the earlier moment", r.saved.both === 3000, String(r.saved.both));
+  ck("and the read list unions too", r.read.join(",") === "r1", r.read.join(","));
 }
 
 console.log("5 - THE CACHED FEED IS READABLE OFFLINE");

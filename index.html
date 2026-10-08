@@ -7018,7 +7018,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "57.0";
+const APP_VERSION = "57.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14001,6 +14001,28 @@ function mergeDiskInto(disk){
   }
   if(Array.isArray(disk.planLog)) S.planLog = mergePlanLog(S.planLog, disk.planLog);
   if(disk.checkins && typeof disk.checkins === "object") S.checkins = Object.assign({}, disk.checkins, S.checkins||{});
+  /* RESEARCH BOOKMARKS UNION RATHER THAN CLOBBER, which they would otherwise do. saved,
+     read and seen are append-only maps of paper id to the moment it happened, so two
+     devices can be merged without choosing between them: the union is what both people
+     actually did, and taking the earlier timestamp keeps "when did I first save this"
+     true. Without this, saving a paper on a phone and another on a laptop would leave
+     whichever synced last holding one of them. The filters are a single preference rather
+     than a set, so the newer edit wins, in line with how prefs are handled above. */
+  if(disk.research && typeof disk.research === "object"){
+    if(!S.research || typeof S.research !== "object") S.research = {};
+    ["saved", "read", "seen"].forEach(k=>{
+      const mine = S.research[k] || {}, theirs = disk.research[k] || {};
+      const out = Object.assign({}, theirs);
+      Object.keys(mine).forEach(id=>{
+        out[id] = out[id] ? Math.min(out[id], mine[id]) : mine[id];
+      });
+      S.research[k] = out;
+    });
+    if((Number(disk.savedAt)||0) > (Number(S.savedAt)||0) && disk.research.filters)
+      S.research.filters = disk.research.filters;
+    else if(!S.research.filters && disk.research.filters)
+      S.research.filters = disk.research.filters;
+  }
   if(disk.exAliases && typeof disk.exAliases === "object") S.exAliases = Object.assign({}, disk.exAliases, S.exAliases||{});
   if(disk.stalls && typeof disk.stalls === "object") S.stalls = mergeStalls(S.stalls, disk.stalls);
   /* The PLAN is one document, not a set, so it cannot be unioned — the newer edit wins.
@@ -55874,7 +55896,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "57.0";
+const NEWS_FOR = "57.1";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
