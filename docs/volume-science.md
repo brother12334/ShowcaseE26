@@ -877,18 +877,55 @@ The audit (`tools/` scratch run, reproduced in `tests/sim/volume-sim.mjs`):
 | low-ceiling | 75.1% | +32.8% / +26.5% / **+149.9%** | 6.2 / 5 / **24** |
 | high-ceiling | 2.7% | +15.6% / +14.8% / +33.5% | 3.5 / 3 / 10 |
 
-Against a *notional* recovery limit 25% above best, the same blocks read 14.5% / 41.2% /
-0.1%, with runs of ~3.3 instead of ~7. And blocks that actually lost ground: **0%**
-typical, **1.9%** low-ceiling, **0%** high-ceiling.
+Blocks that actually lost ground, on the same runs: **0%** typical, **1.9%** low-ceiling,
+**0%** high-ceiling.
 
-**Two of the three things the number hid were real defects.**
+### Three measures, and only one of them counts
 
-1. **A maximum run of 24 blocks is a bug, not a statistic.** Some lifters sat 20%+ above
-   their best for the entire two years and nothing ever pulled them back — because the
-   penalty slope was so mild (0.55) that being over never produced a detectable decline.
-   **A limit the app cannot feel is a limit it can never learn.**
-2. **Low-ceiling lifters at 41% past even a generous limit, +150% deep at worst, is not an
-   artifact.** That one was understated by nothing and is now the clearest result in §5G.
+The audit also reported 14.5% / 41.2% / 0.1% against a *notional* recovery limit 25% above
+best. **That figure has been retired, and the reconciliation matters enough to spell out,
+because it is easy to read the three numbers as though they were comparable and they are
+not.**
+
+| scenario | **(a)** old headline | **(b)** notional indicator *(retired)* | **(c)** corrected |
+|---|---|---|---|
+| typical | 50.4% | 14.5% | **35.5%** |
+| low-ceiling | 75.1% | 41.2% | **74.7%** |
+| high-ceiling | 2.7% | 0.1% | **0.3%** |
+
+- **(a)** `v > vbest × 1.1`, old world model, mild penalty. Counts blocks past the point
+  *growth flattens*, which is not a limit at all.
+- **(b)** `v > vbest × 1.25`, **old** world model, mild penalty. A back-of-envelope
+  indicator computed on the old trajectories to show roughly how much of (a) was an
+  artifact. It is wrong in two ways at once: it hands every lifter the same 25% slack when
+  the populations actually carry 10–45% (and low-ceiling only 10–30%), and it scores
+  trajectories produced by the mild penalty, under which nothing ever pulled anybody back.
+- **(c)** `v > vlimit`, **corrected** world model, calibrated penalty, per-lifter slack.
+  Same lifters, same seeds, like for like against every other arm. **This is the measure
+  used in §5G and the only one that should be quoted.**
+
+**And (c) overturns part of what I concluded from (b).** I wrote that the headline was
+"mostly an artifact". For typical lifters that holds — 50.4% was really about 35.5%, an
+overstatement of some 15 points. **For low-ceiling lifters it does not hold at all:**
+74.7% against the original 75.1%. The alarming number was approximately right, by
+coincidence and for the wrong reason, and the notional 41.2% was the figure that misled.
+Low-ceiling lifters genuinely spend three-quarters of their blocks past what they can
+recover from under the policy that ships today.
+
+The audit covered only typical, low-ceiling and high-ceiling. The corrected figures for
+noisy (27.9%) and steady (43.9%) have no (a) or (b) counterpart and come straight from the
+§5G table.
+
+**Two real defects, which (c) confirms rather than softens.**
+
+1. **A maximum run of 24 blocks is a bug, not a statistic.** Some lifters sat above their
+   limit for the entire two years and nothing ever pulled them back — because the penalty
+   slope was so mild (0.55) that being over never produced a detectable decline. **A limit
+   the app cannot feel is a limit it can never learn.**
+2. **Low-ceiling lifters are a recovery-safety problem, not a growth-efficiency one.**
+   74.7% of blocks past the limit, +17.4% deep on average, and the policy that ships today
+   is the one doing it. This is now the clearest result in §5G and the main reason the
+   stop-when-it-stops-improving rule is being switched on.
 
 ### What changed in the model
 
@@ -1000,15 +1037,70 @@ Below 5 sets one whole set is 25% and there is no smaller move — sets are inte
 that is counted and named as integer granularity rather than waved away, and it applies
 equally to the policy that ships today.
 
+## 5H. THE PERIODIC RE-CHECK PROBE: MET ITS OWN GATE, FAILED THE OTHERS
+
+`peak` ships with one known regression: steady, low-noise lifters lose about five points of
+oracle growth, because the peak estimate is never withdrawn and those lifters trigger false
+peaks most. The proposed fix was a **deliberate re-check**: after four blocks sitting on the
+estimate, spend one block above it, and move the estimate only if the response beats that
+lifter's own minimum detectable change.
+
+Built as the `probe` arm, same lifters, same seeds, n=400, judged against `peak`:
+
+| scenario | `peak` | `probe` | change |
+|---|---|---|---|
+| **steady** | 74.1% | **83.9%** | **+9.8** |
+| typical | 85.4% | 85.1% | −0.3 |
+| noisy | 88.1% | 84.2% | −3.9 |
+| low-ceiling | 71.4% | 39.7% | **−31.7** |
+| high-ceiling | 91.6% | 67.9% | **−23.7** |
+
+**Verdict: do not ship.** It clears the gate it was designed for — steady lifters recover to
+83.9%, comfortably past the 79% asked — and it fails "no other population losing more than
+one point" by margins that are not arguable.
+
+### Why, and it is structural
+
+**A re-check is a mechanism for a settled lifter, and the lifters who need the climb most
+are never settled inside two years.** High-ceiling lifters end at 64% of their own best and
+only 14.5% ever reach it, with *zero* blocks past their limit — they are being held far
+below, not pushed too hard. Every block spent re-checking is a block not spent climbing, and
+they have a long way to climb.
+
+**And a failed probe is a stronger clamp than a hold.** Under `peak`, a flat block at the
+estimate still allows the ordinary two-holds-then-one-set probe to nudge upward. Under
+`probe`, those blocks are intercepted and the failed re-check returns the lifter to exactly
+where they were — so the ladder's natural upward drift is removed. The machinery meant to
+*raise* a stuck estimate is what pins it.
+
+Two fixes were measured. Firing only on a genuine hold rather than merely on being at the
+estimate recovered typical (83.7% → 85.1%) and steady (82.3% → 83.9%) and did nothing for
+high-ceiling. Not reverting after a failed probe would fix it — and would also stop it being
+a controlled re-check at all, which is the point of the design.
+
+### One concrete defect it did expose
+
+**"+2 sets" as a minimum probe step breaks the 20% cap.** Two sets is 50% of a muscle doing
+four, and it broke the cap on **8.5% of low-ceiling jumps** — a cap the brief said must never
+be broken. Fixed in the arm: two sets is the preference, the relative cap still wins, and
+the figure is now 0%. Worth carrying into any future version of this.
+
+`VOL_RECHECK_BLOCKS` and `VOL_RECHECK_FRAC` are in the source, read only by the simulation,
+and marked as not shipped.
+
 ## 6. Still to do
 
-1. **A decision on `peak`** (§5G). It is implemented, tested and switched off. Turning it on
-   means accepting that steady lifters lose about 5 points of oracle growth so that
-   low-ceiling lifters gain 38 and high-ceiling lifters gain 15. That is a judgement about
-   who to favour, not a measurement, so it is not a default that should arrive in a release.
-2. **The steady-lifter regression**, if `peak` is wanted without it. The diagnosis is in
-   §5G; the fix is a better-conditioned peak estimate, and both obvious versions have
-   already been measured and rejected.
+1. **The steady-lifter regression under `peak`**, which is now the only known cost of what
+   ships. Three attempts are measured and rejected: making the estimate revisable (§5G),
+   requiring two strikes (§5G), and the periodic re-check probe (§5H). What they have in
+   common is that each tries to loosen the estimate, and loosening it costs the populations
+   the estimate is protecting. The next attempt should instead make the estimate **better
+   conditioned when it is first set** — for example by refusing to set it at all until the
+   muscle has enough readings for its own detection bar to be meaningful, which is the
+   condition steady lifters fail.
+2. **A probe for settled lifters only**, if the re-check idea is revived: it needs a way to
+   tell "settled because this is my best" from "settled because the estimate is wrong", and
+   §5H is the evidence that volume alone cannot tell them apart.
 
 The plain-English version of all of this, for deciding whether to ship it, is
 `docs/volume-model-summary.md`.

@@ -22,25 +22,78 @@ await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
 await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
 const ev = (fn,a)=> p.evaluate(fn,a);
 
-console.log("1 - NOTHING IS ENABLED, SO NOTHING CHANGED");
+console.log("1 - IT IS ON BY DEFAULT, AND THE OFF SWITCH REALLY TURNS IT OFF");
 {
   const r = await ev(()=>{
     const d = (extra)=> decideForMuscle("chest",
       Object.assign({V: 18, trendPct: 3, sore: 0, joint: null, prev: null}, extra || {}));
-    return {mode: VOL_CLIMB_MODE, live: volClimbMode(),
+    const keep = JSON.stringify(S.prefs || {});
+    if(!S.prefs) S.prefs = {};
+    delete S.volClimbFrom;
+    const dflt = volClimbMode();
+    S.prefs.volClimb = "off";   const off = volClimbMode();
+    S.prefs.volClimb = "peak";  const on  = volClimbMode();
+    /* Anything unrecognised must fall back to the default, not to silence. */
+    S.prefs.volClimb = "banana"; const junk = volClimbMode();
+    S.prefs = JSON.parse(keep);
+    return {shipped: VOL_CLIMB_MODE, dflt, off, on, junk,
             noClimb: d().add, withClimb: d({climb: {streak: 5, lastRespondV: 12}}).add,
             flat: ADD_SETS_PER_CYCLE,
             overNoClimb: decideForMuscle("chest", {V: 30, trendPct: -5, sore: 2,
               joint: 3, prev: {trendPct: -5, sore: 2}}).backTo};
   });
-  ck("the shipped mode is off", r.mode === "off", r.mode);
-  ck("and that is what is live", r.live === "off", r.live);
-  ck("A CALLER THAT PASSES NO CLIMB STATE GETS THE OLD FLAT STEP",
+  ck("THE SHIPPED DEFAULT IS THE PEAK LADDER", r.shipped === "peak", r.shipped);
+  ck("and a profile that has said nothing gets it", r.dflt === "peak", r.dflt);
+  ck("TURNING IT OFF TURNS IT OFF, rather than falling through to the default",
+     r.off === "off", r.off);
+  ck("and turning it back on works", r.on === "peak", r.on);
+  ck("an unrecognised value falls back to the default", r.junk === "peak", r.junk);
+  /* The pure decision is still pure: no climb state in, no climb behaviour out. That is
+     what lets the simulation and every older caller run unchanged. */
+  ck("the pure decision with no climb state still gives the flat step",
      r.noClimb === r.flat, r.noClimb + " vs " + r.flat);
-  ck("and no back-off target, so the old cut still applies",
-     r.overNoClimb === null, String(r.overNoClimb));
-  ck("the bigger step only appears when climb state is passed in",
+  ck("and no back-off target", r.overNoClimb === null, String(r.overNoClimb));
+  ck("the bigger step appears only when climb state is passed in",
      r.withClimb > r.flat, String(r.withClimb));
+}
+
+console.log("1B - AN EXISTING USER WAITS FOR THEIR NEXT BLOCK BOUNDARY");
+{
+  const r = await ev(()=>{
+    const keepB = S.blockStart, keepF = S.volClimbFrom;
+    S.blockStart = 1000; S.volClimbFrom = 1000;
+    const during = volClimbMode();
+    S.blockStart = 2000;                      // the next block starts
+    const after = volClimbMode();
+    S.blockStart = keepB;
+    if(keepF === undefined) delete S.volClimbFrom; else S.volClimbFrom = keepF;
+    return {during, after, fields: BACKUP_FIELDS.indexOf("volClimbFrom") > -1
+                                  && BACKUP_FIELDS.indexOf("volClimb") > -1};
+  });
+  ck("THE BLOCK THAT WAS RUNNING FINISHES ON THE OLD RULES", r.during === "off", r.during);
+  ck("and the next one gets the new ones", r.after === "peak", r.after);
+  ck("both fields travel in a backup", r.fields === true, "");
+}
+
+console.log("1C - AND THE CHANGE IS SAID ONCE, ON THE PROGRAM TAB");
+{
+  const r = await ev(()=>{
+    const keep = S.volMigrated;
+    /* Nothing moved and nothing was withdrawn: the climb alone must still be worth a card,
+       because it changes what the app DOES. */
+    S.volMigrated = {at: Date.now(), moved: [], withdrawn: 0};
+    const quiet = volMigrationCardHTML();
+    S.volMigrated.seen = Date.now();
+    const seen = volMigrationCardHTML();
+    if(keep === undefined) delete S.volMigrated; else S.volMigrated = keep;
+    return {quiet, seen};
+  });
+  ck("the card appears for the climb change on its own",
+     /Increases/.test(r.quiet), r.quiet.slice(0, 140));
+  ck("it says sets are added faster and eased off sooner",
+     /added faster/.test(r.quiet) && /eased\s+off sooner/.test(r.quiet.replace(/\s+/g," ")), "");
+  ck("and it points at the off switch", /turn this off in Settings/.test(r.quiet), "");
+  ck("ONCE DISMISSED IT IS GONE", r.seen === "", r.seen.slice(0, 80));
 }
 
 console.log("2 - THE LADDER IS +1, +2, +3 AND RESETS");

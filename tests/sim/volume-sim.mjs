@@ -69,7 +69,7 @@ const SCENARIOS = [
    vbest:[24, 40], slack:[0.15, 0.45], sigma:[0.8, 3.0], resp:[0.7, 1.4]}
 ];
 
-const POLICIES = ["oracle", "fixed", "mdc", "mdc-own", "adaptive", "peak"];
+const POLICIES = ["oracle", "fixed", "mdc", "mdc-own", "adaptive", "peak", "probe"];
 
 const out = await p.evaluate(async (cfg)=>{
   const {N, CYCLES, SEED, SCENARIOS, POLICIES} = cfg;
@@ -131,7 +131,14 @@ const out = await p.evaluate(async (cfg)=>{
        stops rising -- so every climb-until-signal policy ends 25-50% past the best. This
        one stops when ADDING SETS STOPS IMPROVING THE RESPONSE, which is the definition of
        the best, and comes back to the last volume that was better. See 5G. */
-    const peak = policy === "peak";
+    const peak = policy === "peak" || policy === "probe";
+    /* "probe" is peak plus a periodic re-check of the learned ceiling. The peak estimate is
+       deliberately never withdrawn by ordinary evidence (5G), which is what keeps most
+       lifters near their best -- and is also what pins the minority whose first peak call
+       was wrong. A DELIBERATE probe is different from withdrawing it on a noisy reading:
+       it spends one block asking the question properly, and only moves the estimate if the
+       answer beats that lifter's own minimum detectable change. */
+    const reprobe = policy === "probe";
     const ownStart = adaptive || policy === "mdc-own";
     let v = policy === "oracle" ? u.vbest
           : ownStart ? volStartTarget({own: u.ownV})
@@ -144,6 +151,9 @@ const out = await p.evaluate(async (cfg)=>{
     /* The climb state the adaptive policy carries, which is exactly what S.volClimb[g]
        holds in the app. */
     let streak = 0, lastRespondV = 0, flatV = 0, prevV = 0, prevTrend = null;
+    /* How many blocks have been spent sitting on the estimate, whether a probe is in
+       flight, and where to come back to if it fails. */
+    let heldAt = 0, probing = false, preProbeV = 0, probes = 0, revised = 0;
 
     for(let c = 0; c < CYCLES; c++){
       const g = trueGain(v, u, c);
@@ -173,6 +183,60 @@ const out = await p.evaluate(async (cfg)=>{
       if(d.k === "over" && v <= u.vlimit) falseAlarm++;
 
       const was = v;
+
+      /* THE PERIODIC RE-CHECK. Judged before anything else, because a block that was a
+         probe is not an ordinary block and must not be read as one. */
+      if(reprobe && probing){
+        probes++;
+        /* Compared against the block immediately before it, which was at the estimate --
+           the same comparison the peak test makes, read in the other direction. Using the
+           previous block rather than an average of earlier ones matters: training age
+           decays the response about 3% a cycle, so an average of older blocks is biased
+           towards "the probe failed". */
+        if(prevTrend != null && trendPct > prevTrend + thr.up){
+          flatV = was;                  // the estimate was too low; this is the new one
+          revised++;
+          streak = 1;                   // and the climb may carry on from here
+          lastRespondV = was;
+        } else {
+          v = Math.max(VOL_BANDS.floor, preProbeV);
+        }
+        probing = false; heldAt = 0;
+        prevV = was; prevTrend = trendPct;
+        prev = {trendPct, sore, k: "hold", heldFor: 1};
+        continue;
+      }
+      /* THE PROBE SUPPLEMENTS THE CLIMB, IT DOES NOT REPLACE IT. The first version fired
+         whenever the lifter was at the estimate, which consumed roughly one block in five
+         from lifters who still had a long way to climb -- high-ceiling fell from 91.6% to
+         69.9% of oracle and only 21% ever reached their best. So it only fires when the
+         ladder itself has nothing to say: a HOLD at the estimate, meaning the response has
+         genuinely gone flat there. A muscle that is still responding is left alone. */
+      if(reprobe && flatV > 0 && was >= flatV - 0.05 && d.k === "hold"){
+        heldAt++;
+        if(heldAt >= VOL_RECHECK_BLOCKS){
+          /* ONE DELIBERATE BLOCK, at a step big enough to be detectable and small enough
+             to stay inside the caps that govern every other increase. */
+          probing = true; preProbeV = was;
+          /* AND THE PROBE OBEYS THE SAME RELATIVE CAP AS EVERY OTHER INCREASE. A flat
+             "+2 sets minimum" is 50% of a muscle doing four, which broke the 20% cap on
+             8.5% of low-ceiling jumps -- a cap the brief said must never be broken. Two
+             sets is the preference, not the floor. */
+          const step = Math.max(1, Math.min(VOL_CAPS.steps,
+                        Math.max(1, Math.floor(was * VOL_CAPS.frac)),
+                        Math.max(2, Math.round(was * VOL_RECHECK_FRAC))));
+          v = Math.min(VOL_BANDS.thin, was + step);
+          const jj = v - was;
+          if(jj > 0){ jumps++; if(jj > maxJump) maxJump = jj;
+                      const fr = jj / was; if(fr > maxJumpFrac) maxJumpFrac = fr;
+                      if(jj > VOL_CAPS.steps + 1e-9) bigJump++;
+                      if(fr > VOL_CAPS.frac + 1e-9){ if(was >= 5) bigFrac++; else smallFrac++; } }
+          prevV = was; prevTrend = trendPct;
+          prev = {trendPct, sore, k: "hold", heldFor: 1};
+          continue;
+        }
+      }
+
       /* THE PEAK TEST. If the last cycle added volume and the response got materially
          WORSE for it -- by more than the detection bar, so it is not noise -- then the
          best is behind us, at the volume we came from. */
@@ -262,6 +326,7 @@ const out = await p.evaluate(async (cfg)=>{
     return {growth, over, belowFloor, falseAlarm, hit10, endV: v,
             endOfBest: v / u.vbest, endOfLimit: v / u.vlimit,
             maxJump, maxJumpFrac, bigJump, bigFrac, smallFrac, jumps, overRunMax,
+            probes, revised,
             overDepth: over ? overDepth / over : 0};
   };
 
@@ -292,6 +357,7 @@ const out = await p.evaluate(async (cfg)=>{
         a.alarm += o.falseAlarm; a.endErr += Math.abs(o.endV - u.vbest) / u.vbest;
         a.bigJump += o.bigJump; a.bigFrac += o.bigFrac; a.jumps += o.jumps;
         a.smallFrac = (a.smallFrac || 0) + o.smallFrac;
+        a.probes = (a.probes || 0) + o.probes; a.revised = (a.revised || 0) + o.revised;
         if(o.maxJump > a.maxJump) a.maxJump = o.maxJump;
         if(o.maxJumpFrac > a.maxFrac) a.maxFrac = o.maxJumpFrac;
         if(o.overRunMax > a.runMax) a.runMax = o.overRunMax;
@@ -321,12 +387,14 @@ const out = await p.evaluate(async (cfg)=>{
         overRunMax: a.runMax,
         overDepthPct: a.depthN ? +(a.depth / a.depthN * 100).toFixed(1) : 0,
         endOfBest: +((a.ofBest || 0) / N * 100).toFixed(0),
-        endOfLimit: +((a.ofLimit || 0) / N * 100).toFixed(0)
+        endOfLimit: +((a.ofLimit || 0) / N * 100).toFixed(0),
+        probesPer: +((a.probes || 0) / N).toFixed(2),
+        revisedPct: a.probes ? +((a.revised || 0) / a.probes * 100).toFixed(0) : 0
       };
     });
     res.push(row);
   });
-  return {res, errs: [], caps: {steps: VOL_CAPS.steps, frac: VOL_CAPS.frac}};
+  return {res, errs: [], recheck: {blocks: VOL_RECHECK_BLOCKS, frac: VOL_RECHECK_FRAC}, caps: {steps: VOL_CAPS.steps, frac: VOL_CAPS.frac}};
 }, {N, CYCLES, SEED, SCENARIOS, POLICIES});
 
 const R = out.res, CAPS = out.caps;
@@ -343,7 +411,8 @@ else {
       + padl("depth", 8) + padl("run max", 9) + padl("alarms", 8)
       + padl("to ±10%", 9) + padl("reached", 9) + padl("max jump", 10)
       + padl("max %", 8) + padl(">3 sets", 9) + padl(">20%", 7)
-      + padl("end/best", 10) + padl("end/limit", 11));
+      + padl("end/best", 10) + padl("end/limit", 11)
+      + padl("probes", 8) + padl("revised", 9));
     POLICIES.forEach(k=>{
       const x = r[k];
       console.log("  " + pad(k, 10) + padl(x.ofOracle + "%", 10) + padl(x.overPct + "%", 11)
@@ -353,7 +422,8 @@ else {
         + padl(x.reached10Pct + "%", 9) + padl(x.maxJump, 10)
         + padl(x.maxFracPct + "%", 8) + padl(x.bigJumpPct + "%", 9)
         + padl(x.bigFracPct + "%", 7)
-        + padl(x.endOfBest + "%", 10) + padl(x.endOfLimit + "%", 11));
+        + padl(x.endOfBest + "%", 10) + padl(x.endOfLimit + "%", 11)
+        + padl(x.probesPer, 8) + padl(x.revisedPct + "%", 9));
     });
     console.log("");
   });

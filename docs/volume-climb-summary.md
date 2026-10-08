@@ -1,4 +1,4 @@
-# What a high-volume lifter would notice — and why it is switched off
+# What a high-volume lifter will notice — now switched on
 
 *Element 26. The measurements are in `docs/volume-science.md` §5F and §5G. This is the
 version for deciding whether to turn it on.*
@@ -32,7 +32,7 @@ Three things, all implemented and tested:
    from what you have actually been doing plus up to 20%, rather than from a population
    target. The population target is for people with no history.
 
-## And it is switched off, because the simulation rejected it
+## It is on by default — and what that decision cost
 
 1,000 synthetic lifters per population, two years each, each with a true best volume and a
 true recovery limit the app cannot see. Same lifters, same luck, different policies.
@@ -64,9 +64,19 @@ it is the actual definition of your best volume.
 | Noisy readings | 85% | **88%**, blocks past the limit nearly halved |
 | **Careful, steady lifters** | **79%** | **74%** — worse |
 
-**So the decision is a trade, not an upgrade.** Turning it on means steady lifters give up
-about 5 points of growth so that low-ceiling lifters gain 38 and high-ceiling lifters gain
-15. I am not making that call on your behalf, which is why it is a switch and not a default.
+**This is a trade, not a free upgrade, and it has been taken deliberately.** Steady lifters
+give up about 5 points of growth so that low-ceiling lifters gain 38 and high-ceiling
+lifters gain 15. The low-ceiling group is also the recovery-safety case — three-quarters of
+their blocks were past what they could recover from — which is what settles it.
+
+**Anyone paying that price can opt out.** Settings → *How fast the number of sets climbs* →
+"One set at a time" restores the old behaviour exactly, and the setting says what the trade
+is rather than hiding it.
+
+**Existing users switch at their next block boundary**, not mid-block, so a block already
+under way finishes on the rules it was planned against. One line on the "What changed" card
+on the Program tab says sets are now added faster and eased off sooner, and points at the
+off switch.
 
 Two smaller honesty notes on the same table: the "blocks past the limit" figure for
 high-ceiling lifters goes from 0.3% to 8.9%, and that gate cannot be met — 0.3% is what
@@ -88,11 +98,35 @@ measured and both made things worse elsewhere.
 - **Under the "ask" setting it is offered, not applied.** Every step-up is written to the
   plan history with its reason either way.
 
-## What would have to be true before I would turn it on
+## The attempt to fix the steady-lifter cost, which did not work
 
-Either you accept the steady-lifter trade above, or the peak estimate gets better
-conditioned so it stops pinning careful lifters low. The second is real work and is item 2
-in `docs/volume-science.md` §6.
+The plan was a **periodic re-check**: after four blocks sitting on the learned best, spend
+one block deliberately above it, and move the estimate only if the response beats your own
+measurement noise.
+
+**It fixed the thing it was built for and broke two others.** Steady lifters recovered from
+74% to **84%** of available growth — past the 79% target. But lifters who can take a lot fell
+from 92% to **68%**, with only 14.5% ever reaching their best, and lifters who can take
+little fell from 71% to **40%**. So it is not shipped.
+
+The reason is worth knowing, because it rules out a whole family of fixes: **a re-check is
+something you do when you are settled, and the people who most need the climb are never
+settled inside two years.** Every block spent re-checking is a block not spent climbing. And
+a failed re-check puts you back exactly where you were, which removes the slow upward drift
+that was quietly helping. The machinery meant to raise a stuck estimate is what pins it.
+
+It did expose one real defect that is now fixed: a flat "+2 sets" probe is 50% of a muscle
+doing four sets, and it broke the 20% cap on 8.5% of low-ceiling increases. The relative cap
+now wins.
+
+## What is still open
+
+The steady-lifter cost is the one known price of what now ships. Three fixes have been
+measured and rejected, and they fail for the same reason: each tries to *loosen* the learned
+estimate, and loosening it costs the people the estimate is protecting. The next attempt
+should make the estimate **better conditioned when it is first set** — most likely by
+refusing to set it at all until a muscle has enough readings for your own noise figure to
+mean anything, which is exactly the condition steady lifters fail. That is `§6` item 1.
 
 ## One thing the audit found that is already worth knowing
 

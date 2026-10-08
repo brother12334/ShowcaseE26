@@ -6865,7 +6865,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "55.3";
+const APP_VERSION = "56.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8547,6 +8547,16 @@ const PREF_DEFAULTS = {
      switched over silently — see the migration, which pins "ask" for anybody who has
      already trained, and the card that offers the change once. */
   progression: "auto",    // auto | ask | hold — what happens when a load is ready to go up
+  /* HOW FAST VOLUME CLIMBS, and the one setting in this list that was decided by a
+     simulation rather than by argument. "peak" is the shipped behaviour: the step grows
+     while the muscle keeps responding, and it stops when adding sets stops IMPROVING the
+     response rather than waiting for the lifter to fall apart. "off" is the old one-set
+     ladder, kept because somebody may simply want it and because the measured trade is
+     not free — docs/volume-science.md 5G: low-ceiling lifters go from 32.4% to 70.7% of
+     the growth available to them and high-ceiling from 76.1% to 91.5%, while steady,
+     low-noise lifters give up about five points. That cost is accepted deliberately, and
+     the people paying it can opt out. */
+  volClimb: "peak",       // peak | ladder | off
   restDefault: null,      // seconds; null = judge each set on its own (restTargetFor)
   /* Which way the rest clock runs. "up" is a stopwatch from zero, which is what this has
      always been and stays the default. "down" counts the set's own rest target down to
@@ -20193,6 +20203,32 @@ const VOL_BACKOFF_FRAC  = 0.20;       // [A] the same relative figure, read down
    stops, and pretending they are the same number would be claiming the evidence reaches
    further than it does. */
 const VOL_SESSION_HARD_MAX = 10;
+/* HOW OFTEN THE LEARNED BEST IS RE-CHECKED, AND HOW.
+
+   The peak estimate is deliberately not withdrawn by ordinary evidence — 5G measured that,
+   and withdrawing it was worse for four of five populations, because the response near the
+   top of the curve is flat enough that "responding" up there is often noise. That is what
+   keeps most people near their best. It is also what pins the minority whose first peak
+   call was wrong, which is the steady-lifter regression.
+
+   A DELIBERATE PROBE IS NOT THE SAME AS WITHDRAWING THE ESTIMATE ON A NOISY READING. After
+   four blocks sitting on the number, one block goes deliberately above it, and the estimate
+   moves only if the response beats that lifter's OWN minimum detectable change. Asking the
+   question properly once every five blocks is cheap; believing every flicker is not.
+
+   FOUR BLOCKS [C]: long enough that the cost is one block in five (about four months at
+   four-week blocks), short enough that somebody pinned too low is not stuck there for a
+   year. 12% [A/C]: inside the 20% relative cap that governs every other increase
+   (Scarpelli 2022) and at least two sets, because one set is inside most people's noise. */
+/* MEASURED AND NOT SHIPPED. tests/sim/volume-sim.mjs reads these two to run its "probe"
+   arm; no app code does. It met the gate it was built for — steady lifters recovered from
+   74.1% of oracle to 83.9%, past the 79% asked of it — and failed the condition that no
+   other population lose more than a point: high-ceiling lifters fell from 91.6% to 67.9%
+   and only 14.5% ever reached their best. The reason is structural rather than a tuning
+   problem, and 5H has it. Left in place because the next attempt should start from the
+   measurement rather than from the idea. */
+const VOL_RECHECK_BLOCKS = 4;
+const VOL_RECHECK_FRAC   = 0.12;
 
 /* WHICH CLIMB IS IN FORCE. "off" is the shipped behaviour: one set per responding cycle,
    a flat cut when overreached. Nothing below is live.
@@ -20215,10 +20251,21 @@ const VOL_SESSION_HARD_MAX = 10;
    somebody turns on deliberately and not a default that arrived in a release.
 
    docs/volume-science.md 5G has the full table and the reasoning. */
-const VOL_CLIMB_MODE = "off";
+const VOL_CLIMB_MODE = "peak";
 function volClimbMode(){
   const m = trainPrefs().volClimb;
-  return (m === "ladder" || m === "peak") ? m : VOL_CLIMB_MODE;
+  /* AN EXPLICIT "off" WINS. The first version of this fell through to the default for
+     anything that was not "ladder" or "peak", which silently ignored somebody who had
+     turned it off — the exact bug the setting exists to prevent. */
+  const want = (m === "ladder" || m === "peak" || m === "off") ? m : VOL_CLIMB_MODE;
+  if(want === "off") return "off";
+  /* AND AN EXISTING USER WAITS FOR THEIR NEXT BLOCK BOUNDARY. Changing how fast volume
+     climbs in the middle of a block would move the target somebody is already three weeks
+     into chasing, which is the same promise the volume-model migration makes about
+     landmarks. volClimbFrom is stamped by the migration with the block that was running
+     when it ran; the new behaviour starts once that block is behind them. */
+  if(S && S.volClimbFrom && S.blockStart === S.volClimbFrom) return "off";
+  return want;
 }
 
 /* HAS THIS MUSCLE GONE PAST THE TOP OF ITS OWN CURVE?
@@ -20771,6 +20818,56 @@ function openPriorTrainingAsk(){
   };
 }
 
+/* THE DECISION, WITH THE CLIMB WRAPPED AROUND IT.
+
+   decideForMuscle stays pure and knows nothing about S. This reads the muscle's climb
+   state, hands it in, and then applies the one thing the pure decision cannot: the peak
+   test, which needs the PREVIOUS cycle's volume and reading to say anything at all.
+
+   Returns the decision and the state that should be stored once the cycle is closed. It
+   does NOT store it — cycleReview() runs from render paths and must not write. */
+function volClimbDecide(g, cycle){
+  const mode = volClimbMode();
+  const st = volClimbOf(g);
+  const climb = mode === "off" ? null : st;
+  const d = decideForMuscle(g, Object.assign({}, cycle, {climb}));
+  const V = cycle.V, t = cycle.trendPct;
+  const next = {prevV: V, prevTrend: (typeof t === "number") ? t : null,
+                streak: (typeof d.streak === "number") ? d.streak : st.streak,
+                lastRespondV: d.k === "up" ? V : st.lastRespondV,
+                flatV: st.flatV};
+  if(mode !== "peak") return {d, next};
+
+  /* PAST THE TOP OF THE CURVE. Not a damage reading — the overreach check owns that, and
+     an overreach already decided to come down, so there is nothing for this to add. */
+  if(d.k !== "over" && volPastPeak(V, t, st.prevV, st.prevTrend, d.thr)){
+    const est = st.flatV > 0 ? Math.min(st.flatV, st.prevV) : st.prevV;
+    next.flatV = est;
+    next.streak = 0;
+    next.lastRespondV = st.lastRespondV;
+    return {d: {k:"back", V, thr: d.thr,
+                why:"more volume stopped making the lift go up faster",
+                backTo: Math.max(VOL_BANDS.floor, est),
+                logSay: "adding sets stopped helping at " + r1(V) + " sets — back to "
+                        + r1(Math.max(VOL_BANDS.floor, est))
+                        + ", which was still improving",
+                say:"Past its best — " + r1(V) + " sets a week is not beating "
+                    + r1(est) + " any more"},
+            next};
+  }
+  /* AND A VOLUME AT OR ABOVE THE LEARNED CEILING IS NOT CLIMBED PAST AGAIN. The estimate
+     is deliberately not withdrawn once made — measured, and withdrawing it was worse for
+     four of five populations (5G). */
+  if(d.k === "up" && st.flatV > 0 && V >= st.flatV - 0.05){
+    next.streak = 0;
+    return {d: {k:"hold", V, thr: d.thr, heldFor: 1, probe: false, streak: 0,
+                why:"this is as much as has ever paid off for this muscle",
+                logSay: null,
+                say:"Holding at about " + r1(V) + " sets a week"}, next};
+  }
+  return {d, next};
+}
+
 /* B4 APPLIED. One pass over every muscle, returning suggestions. Nothing here writes to
    the programme: the whole point is that a volume change is proposed and accepted, never
    applied behind you. */
@@ -20782,10 +20879,10 @@ function cycleReview(){
     if(cycles.length < 2) return;
     const cur = cycles[cycles.length - 1];
     const prev = cycles[cycles.length - 2];
-    const d = decideForMuscle(g, {V: cur.V, trendPct: cur.trendPct, sore: cur.sore,
-                                  joint: cur.joint, thr: trendThresholds(g),
-                                  prev: {trendPct: prev.trendPct,
-                                  sore: prev.sore, k: (prev.decision || {}).k}});
+    const d = volClimbDecide(g, {V: cur.V, trendPct: cur.trendPct, sore: cur.sore,
+                                 joint: cur.joint, thr: trendThresholds(g),
+                                 prev: {trendPct: prev.trendPct,
+                                 sore: prev.sore, k: (prev.decision || {}).k}}).d;
     if(d.k === "unclear") return;
     out.push(Object.assign({g, name: gName(g)}, d));
   });
@@ -23074,6 +23171,15 @@ function runCycleCalibration(endMs){
     const prev = cycles[cycles.length - 2];
     if(!cur || !(cur.V > 0)) return;
     n += observeFromDecision(g, d, cur.V, prev ? prev.V : null, chain);
+    /* ONCE PER CLOSED CYCLE, which is the only place in the app allowed to move the climb
+       state on. cycleReview() reads it from every render and must never write it. */
+    try{
+      const w = volClimbDecide(g, {V: cur.V, trendPct: cur.trendPct, sore: cur.sore,
+                                   joint: cur.joint, thr: trendThresholds(g),
+                                   prev: prev ? {trendPct: prev.trendPct, sore: prev.sore,
+                                                 k: (prev.decision || {}).k} : null});
+      if(w && w.next) volClimbSet(g, w.next);
+    }catch(e){}
   });
   S.lmCalRun = {at: Date.now(), cycleEnd: stamp, n, deload: !!rev.deload};
   return {done:true, n, deload: rev.deload};
@@ -23349,6 +23455,13 @@ function volMigrate(){
       if(a && a.state === "over"){ a.withdrawn = "targets update v" + VOL_MODEL_VERSION; withdrawn++; }
     });
   }
+
+  /* THE FASTER CLIMB STARTS AT THE NEXT BLOCK BOUNDARY, NOT NOW. Same promise the
+     landmarks make a few lines up: a block already under way finishes on the rules it was
+     planned against. Stamped with the block that is running, and volClimbMode() reads
+     "off" until S.blockStart moves past it. A profile with no block running has nothing to
+     wait for and gets it immediately. */
+  if(S.blockStart > 0) S.volClimbFrom = S.blockStart;
 
   S.volModelVersion = VOL_MODEL_VERSION;
   try{
@@ -29332,6 +29445,8 @@ function aiReviewHTML(){
   const push = (qid, k, v)=> mine.push({qid, k, v});
   if(ans.goal) push("goal", "Training goal", (GOALS[ans.goal]||{}).name || ans.goal);
   if(p.progression) push("progression", "Progression", {auto:"Element 26 adds the weight", ask:"Suggested, you approve", hold:"You manage loads"}[p.progression]);
+  if(p.volClimb) push("volClimb", "Volume climb", p.volClimb === "off"
+    ? "One set a block" : "Faster while it keeps working");
   if(ans.rpeTrack) push("rpeTrack", "RPE tracking", p.rpe === false ? "Off, weight and reps only" : "On, rated every set");
   if(ans.effort) push("effort", "Effort target", {reserve:"A couple of reps in reserve", close:"Close to failure", failure:"To failure", auto:"Judged per movement"}[ans.effort]);
   if(ans.rest) push("rest", "Rest between sets", ans.rest === "fixed" ? aiRestWord(p.restDefault) + " after every set"
@@ -30378,7 +30493,10 @@ function volMigrationCardHTML(){
   const m = S.volMigrated;
   if(!m || m.seen) return "";
   const moved = Array.isArray(m.moved) ? m.moved : [];
-  if(!moved.length && !(m.withdrawn > 0)) return "";
+  /* The climb change counts as something to report even when no landmark moved — it is a
+     change to what the app will DO, which is the kind of thing a card is for. */
+  const climbNews = volClimbMode() !== "off" || !!S.volClimbFrom;
+  if(!moved.length && !(m.withdrawn > 0) && !climbNews) return "";
   const name = g => (GROUPS[g] && GROUPS[g].name) || g;
   /* Three at most, by how far they moved \u2014 the rest are on the Body tab, where a
      number per muscle belongs. */
@@ -30389,6 +30507,14 @@ function volMigrationCardHTML(){
     lm(x.now)} sets a week now, where it read ${lm(x.was)}</span></div>`);
   if(moved.length > top.length) lines += `<div class="sub" style="margin:6px 2px 0;font-size:var(--fs-3);color:var(--faint)">and ${
     moved.length - top.length} more, on the Body tab.</div>`;
+  /* ONE LINE ABOUT THE CLIMB, because the number moving is only half of what changed:
+     how fast it moves from here is the other half, and somebody who reads "your limit is
+     19 now" and then sees three sets added in one go deserves to have been told. */
+  if(volClimbMode() !== "off" || S.volClimbFrom)
+    lines += `<div class="st-row st-ok"><b>Increases</b><span>while a muscle keeps
+      progressing, sets are now added faster \u2014 up to 3 a block instead of 1 \u2014 and eased
+      off sooner when it stops${S.volClimbFrom
+        ? ", starting from your next block" : ""}. You can turn this off in Settings.</span></div>`;
   if(m.withdrawn > 0) lines += `<div class="st-row st-ok"><b>Warnings</b><span>${
     m.withdrawn === 1 ? "one \u201ctoo much\u201d warning no longer applies" :
     m.withdrawn + " \u201ctoo much\u201d warnings no longer apply"} under the new numbers</span></div>`;
@@ -31740,6 +31866,19 @@ function prefsSessionHTML(){
       {v:"ask",  t:"Ask me",      d:"Offers it on the grade card with a one-tap Apply."},
       {v:"hold", t:"I'll manage", d:"Says nothing. You change the loads yourself."}
     ], "data-prefprog", p.progression);
+  /* THE TRADE IS STATED IN THE SETTING, because it is a real one and the people most
+     likely to come looking for this switch are the ones it costs. docs/volume-science.md
+     5G has the measurements. */
+  h += setChoice("How fast the number of sets climbs", [
+      {v:"peak", t:"Speed up while it works",
+       d:"Adds up to 3 sets a block while a muscle keeps improving, and eases off as soon "
+         + "as it stops. Best for most people, and much better if you can handle a lot of "
+         + "volume or very little."},
+      {v:"off",  t:"One set at a time",
+       d:"The steadier climb: one set per block, whatever happens. Slower to find your "
+         + "number, and slightly better if your lifts are very consistent week to week."}
+    ], "data-prefclimb", p.volClimb === "off" ? "off" : "peak",
+    "Either way, extra sets go on another day rather than into one session.");
   h += setChoice("Deload weeks", [
       {v:"auto",     t:"Suggest one",    d:"Offered every " + DELOAD_EVERY_WEEKS + " weeks, or earlier if your RPE and check-ins say so."},
       {v:"planOnly", t:"Leave it to me", d:"Stays quiet. For a programme that schedules its own."}
@@ -44992,6 +45131,10 @@ function bind(){
     b.dataset.prefdeload === "auto" ? "Deloads suggested when due" : "Deloads left to you"));
   document.querySelectorAll("[data-prefrpe]").forEach(b=> b.onclick=()=> setPref("rpe", b.dataset.prefrpe === "on",
     b.dataset.prefrpe === "on" ? "Rating every set again" : "RPE off — weight and reps only"));
+  document.querySelectorAll("[data-prefclimb]").forEach(b=> b.onclick=()=>
+    setPref("volClimb", b.dataset.prefclimb,
+      b.dataset.prefclimb === "off" ? "One set a block, whatever happens"
+                                    : "Faster increases while a muscle keeps improving"));
   document.querySelectorAll("[data-prefprog]").forEach(b=> b.onclick=()=> setPref("progression", b.dataset.prefprog,
     b.dataset.prefprog === "auto" ? "Increases applied for you"
       : b.dataset.prefprog === "ask" ? "You'll be asked before anything changes" : "Loads are yours to manage"));
@@ -53372,8 +53515,19 @@ function mesoVolumeDue(){
   if(rev.deload || deloadActive()) return [];
   const weekly = programWeeklySets(S.program, DAYS);
   return rev.list.filter(x=> x.k === "up" || (x.k === "hold" && x.probe))
-    .filter(x=> (weekly[x.g] || 0) + ADD_SETS_PER_WEEK <= mesoVolumeCeiling(x.g) + 0.05)
-    .map(x=> ({g: x.g, name: x.name, k: x.k, why: x.why || ""}));
+    .map(x=>{
+      /* HOW MANY SETS, CLAMPED BY THE CEILING RATHER THAN DROPPED AT IT. The old filter
+         threw the muscle out entirely if one more set would not fit, which is right for a
+         one-set step and wrong for a three-set one: two of the three may fit perfectly
+         well. So the step is trimmed to the room available and only dropped when there is
+         no room at all. */
+      const want = (x.k === "up" && x.add > 0) ? x.add : ADD_SETS_PER_WEEK;
+      const room = mesoVolumeCeiling(x.g) + 0.05 - (weekly[x.g] || 0);
+      const add = Math.min(want, Math.floor(room));
+      return {g: x.g, name: x.name, k: x.k, why: x.why || "", add,
+              logSay: x.logSay || null, wanted: want};
+    })
+    .filter(x=> x.add >= 1);
 }
 function mesoVolumeStep(){
   const mz = mesoWeekNow();
@@ -53391,27 +53545,51 @@ function mesoVolumeStep(){
   const undo = [];
   const lines = [];
   due.forEach(x=>{
-    /* The day with the least of that muscle, so a weekly step spreads rather than
-       stacking — and never past the per-session band or the per-movement cap. */
-    const days = DAYS.slice().sort((a2, b2)=>
-      buildDaySets(S.program[a2], x.g) - buildDaySets(S.program[b2], x.g));
-    for(const wid of days){
-      if(buildDaySets(S.program[wid], x.g) + 1 > SESSION_SETS_INFO + 0.5) continue;
-      const cands = buildCandidates(S.program[wid] || [], x.g);
-      const hit = cands.find(c=> (parseInt(c.e.sets, 10) || 0) < MAX_SETS_PER_EXERCISE_GEN);
-      if(!hit) continue;
+    /* ONE SET AT A TIME, EACH ONTO THE DAY THAT HAS THE LEAST OF THAT MUSCLE. A
+       three-set step is three separate placements, re-sorting between each, so it spreads
+       across the week instead of landing in one session. That is the guardrail stated as
+       an algorithm rather than as a check afterwards: there is no code path here that
+       CAN stack a step into one day.
+
+       THE PER-SESSION BAND IS TRIED FIRST, THEN THE HARD STOP. Six sets for one muscle in
+       one session is where the evidence thins (Remmert 2025, SESSION_SETS_INFO), so the
+       first pass refuses to cross it. If every day is already at the band and there are
+       still sets to place, a second pass will go as far as ten — and no further, ever.
+       Without the second pass a muscle trained twice a week could never pass twelve sets,
+       which would quietly cap the whole climb well under what the curve supports. */
+    for(let placed = 0; placed < x.add; placed++){
+      let hit = null, wid = null;
+      for(const cap of [SESSION_SETS_INFO + 0.5, VOL_SESSION_HARD_MAX + 0.5]){
+        const days = DAYS.slice().sort((a2, b2)=>
+          buildDaySets(S.program[a2], x.g) - buildDaySets(S.program[b2], x.g));
+        for(const d of days){
+          if(buildDaySets(S.program[d], x.g) + 1 > cap) continue;
+          const cands = buildCandidates(S.program[d] || [], x.g);
+          const h = cands.find(c=> (parseInt(c.e.sets, 10) || 0) < MAX_SETS_PER_EXERCISE_GEN);
+          if(h){ hit = h; wid = d; break; }
+        }
+        if(hit) break;
+      }
+      if(!hit) break;                      // no room anywhere; keep what was placed
       undo.push(planSnapOne(wid, hit.e));
-      hit.e.sets = (parseInt(hit.e.sets, 10) || 0) + ADD_SETS_PER_WEEK;
+      hit.e.sets = (parseInt(hit.e.sets, 10) || 0) + 1;
       if(Array.isArray(hit.e.rpes)) hit.e.rpes.push(hit.e.rpes[hit.e.rpes.length - 1]);
-      lines.push(hit.e.name + " +" + ADD_SETS_PER_WEEK + " set for the "
-        + x.name.toLowerCase() + ", on " + dayName(wid));
+      lines.push(hit.e.name + " +1 set for the " + x.name.toLowerCase()
+        + ", on " + dayName(wid));
       n++;
-      break;
     }
+    /* THE REASON, IN THE PERSON'S OWN NUMBERS, beside the movement-by-movement list. */
+    if(x.logSay) lines.push(x.name + ": " + x.logSay
+      + (x.add < x.wanted ? " (" + x.add + " of " + x.wanted
+                            + " fitted under its ceiling)" : ""));
   });
   if(n){
     logPlanChange("programme", null, "Week " + mz.week + " of the block", lines,
-      {note: "Your block adds a set a week to whatever is still responding. "
+      {note: (volClimbMode() === "off"
+            ? "Your block adds a set a week to whatever is still responding. "
+            : "Your block adds sets to whatever is still responding, and adds them faster "
+              + "the longer it keeps responding \u2014 up to three a week. One flat week puts "
+              + "it back to one. ")
            + due.map(x=> x.name).join(", ") + " "
            + (due.length === 1 ? "was" : "were") + " still going up, so "
            + (n === 1 ? "one movement" : n + " movements") + " carry another set from here.",
@@ -58303,7 +58481,7 @@ const BACKUP_FIELDS = [
      one-shot markers above: re-running the migration against already-migrated
      calibrations would re-base them a second time, so the stamp has to travel with
      the data it describes. */
-  "volModelVersion","volMigrated","volHold","manualDisagreement"
+  "volModelVersion","volMigrated","volHold","manualDisagreement","volClimb","volClimbFrom"
 ];
 /* Trimmed on the way out, because these three are append-only logs that would otherwise
    grow a backup without bound. History is not trimmed, ever. */
