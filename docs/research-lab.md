@@ -208,6 +208,17 @@ the source *basis* ("abstract") and a SHA-256 prefix of the text, so a later run
 whether the text a summary was written from has changed. The app shows metadata, Element
 26's own summary, and a link.
 
+**The model is resolved at run time, never hardcoded.** Google retires model names on its
+own schedule and does it per key, so a pinned name is a scheduled outage. The Worker asks
+the key which models it can actually call, scores them (flash over pro, an alias over a
+pinned name, never a preview, newer wins ties) and retries once on a different model if it
+gets a 404 or a 429. The scoring is shared with `proxy/gemini-worker.js` so the next
+retirement is one fix rather than two.
+
+*This was learned the expensive way: the first deploy hardcoded `gemini-2.0-flash` and
+failed 7 live papers out of 7 with `gemini 404` — a name `gemini-worker.js` already
+documented in a comment as retired for this very key.*
+
 **Cost.** Two Gemini calls per accepted paper, once ever, on the server — never per user,
 never per request. At 20 candidates a day with roughly half surviving the screen, that is
 **~20 calls/day**, comfortably inside the free tier. KV: one index read per feed request,

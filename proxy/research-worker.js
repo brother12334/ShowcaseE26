@@ -502,8 +502,61 @@ function verifyPrompt(sum, rec) {
   };
 }
 
-const GEMINI = "https://generativelanguage.googleapis.com/v1beta/models";
-const MODEL = "gemini-2.0-flash";
+/* THE MODEL IS ASKED FOR, NOT ASSUMED, AND THE FIRST DEPLOY IS WHY.
+
+   This shipped with MODEL = "gemini-2.0-flash" hardcoded, and the first live run failed
+   7 papers out of 7 with "gemini 404". Not auth, not quota — that name is retired for
+   this key. The galling part is that proxy/gemini-worker.js already SAYS SO, in a comment
+   naming gemini-2.0-flash specifically as one of three names found dead for this account,
+   and it already carries the machinery to deal with it. I hardcoded a name the repository
+   had documented as gone.
+
+   Google retires names on its own schedule and does it per key, so a hardcoded name is a
+   scheduled outage with the fuse already lit. The only authority on what this key can
+   call is the key itself, so that is what gets asked. Ported from gemini-worker.js
+   deliberately rather than reinvented: one scoring rule for both Workers means the next
+   retirement is one fix, not two. */
+const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
+const GEMINI = GEMINI_API + "/models";
+/* Cached per isolate so the lookup happens about once per pipeline run rather than twice
+   per paper. An hour means a change on Google's side takes effect the same hour instead of
+   needing a redeploy. */
+let RESOLVED = null;
+const RESOLVE_TTL_MS = 60 * 60 * 1000;
+
+async function availableModels(key) {
+  let r;
+  try {
+    r = await fetch(GEMINI_API + "/models?pageSize=200", {headers: {"x-goog-api-key": key}});
+  } catch (e) { return []; }
+  if (!r.ok) return [];
+  const j = await r.json().catch(()=> ({}));
+  return (j.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map(m => String(m.name || "").replace(/^models\//, ""))
+    .filter(Boolean);
+}
+/* The same scoring as gemini-worker.js, and for the same reasons: flash is the whole job,
+   an alias survives the next retirement, and a preview is never something to pin. */
+function scoreModel(name) {
+  let s = 0;
+  if (/flash/.test(name)) s += 100;
+  if (/-latest$/.test(name)) s += 50;
+  if (/lite/.test(name)) s -= 15;
+  if (/preview|-exp|experimental/.test(name)) s -= 40;
+  const v = parseFloat((name.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  s += v * 5;
+  return s;
+}
+async function resolveModel(env, avoid) {
+  if (RESOLVED && Date.now() - RESOLVED.at < RESOLVE_TTL_MS && RESOLVED.name !== avoid)
+    return RESOLVED.name;
+  const list = (await availableModels(env.GEMINI_API_KEY)).filter(m => m !== avoid);
+  if (!list.length) return null;
+  const best = list.sort((a, b)=> scoreModel(b) - scoreModel(a))[0];
+  RESOLVED = {name: best, at: Date.now()};
+  return best;
+}
 async function gemini(prompt, env, schema) {
   const body = {
     contents: [{role: "user", parts: [{text: prompt}]}],
@@ -513,13 +566,31 @@ async function gemini(prompt, env, schema) {
       {temperature: 0, maxOutputTokens: 1400},
       schema ? {responseMimeType: "application/json", responseSchema: schema} : {})
   };
-  const r = await fetch(GEMINI + "/" + MODEL + ":generateContent?key=" + env.GEMINI_API_KEY, {
-    method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)
-  });
-  if (!r.ok) throw new Error("gemini " + r.status);
-  const j = await r.json();
-  const txt = (((j.candidates || [])[0] || {}).content || {}).parts;
-  return txt && txt[0] ? txt[0].text : "";
+  /* TWO ATTEMPTS, AND THE SECOND ONE AVOIDS WHATEVER THE FIRST LANDED ON. A 404 means
+     that name is gone and a 429 means its free allowance is spent; both are answered by
+     asking for a different model rather than by failing the paper. Anything else is a
+     real error and is reported as one. */
+  let tried = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const model = await resolveModel(env, tried);
+    if (!model) throw new Error("no usable Gemini model for this key");
+    tried = model;
+    const r = await fetch(GEMINI + "/" + model + ":generateContent", {
+      method: "POST",
+      headers: {"content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY},
+      body: JSON.stringify(body)
+    });
+    if (r.ok) {
+      const j = await r.json();
+      const txt = (((j.candidates || [])[0] || {}).content || {}).parts;
+      return txt && txt[0] ? txt[0].text : "";
+    }
+    if (r.status !== 404 && r.status !== 429)
+      throw new Error("gemini " + r.status + " on " + model);
+    /* Drop the cache so the next resolve genuinely re-reads the list. */
+    RESOLVED = null;
+  }
+  throw new Error("gemini refused every model this key offers (last tried " + tried + ")");
 }
 
 /* ONE SUMMARY PER PAPER, EVER. It is generated on the server, stored, and served to
@@ -557,7 +628,7 @@ async function summarise(rec, type, population, env) {
       verification: {checked: vp.sentences.length, unsupported: unsupported.map(v => v.i)}};
   }
   return {ok: true, sum, verification: {checked: vp.sentences.length, unsupported: [],
-          at: Date.now(), model: MODEL}};
+          at: Date.now(), model: (RESOLVED && RESOLVED.name) || "unknown"}};
 }
 
 /* ------------------------------------------------------- storage */
@@ -863,5 +934,5 @@ export default {
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
-  K_LAUNCH
+  K_LAUNCH, scoreModel
 };

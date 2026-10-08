@@ -9,7 +9,7 @@
    test that hard-codes a DOI is a test that goes stale and starts lying. */
 import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
-       verify, needsApproval, launchApproved, servable} = __test;
+       verify, needsApproval, launchApproved, servable, scoreModel} = __test;
 
 let bad = 0;
 const ck = (n, c, extra)=>{ console.log((c?"  ok  ":"  BROKEN  ")+n+(c?"":" :: "+(extra||""))); if(!c) bad++; };
@@ -230,6 +230,27 @@ console.log("9B - AFTER LAUNCH, ONLY THE STRONGEST CLAIMS DO");
   const rows = [{id:"a", approved:true}, {id:"b", approved:false}, {id:"c"}];
   ck("unapproved papers are filtered out when served",
      servable(rows).map(r=> r.id).join(",") === "a,c", servable(rows).map(r=> r.id).join(","));
+}
+
+console.log("9C - THE MODEL IS ASKED FOR, NOT ASSUMED");
+{
+  /* This shipped with gemini-2.0-flash hardcoded and failed 7 live papers out of 7 with
+     "gemini 404" — that name is retired for this key, which proxy/gemini-worker.js
+     already said in a comment. The scoring is now shared with that Worker so the next
+     retirement is one fix rather than two, and these checks pin the preferences it
+     encodes. */
+  const better = (a, b)=> scoreModel(a) > scoreModel(b);
+  ck("flash beats pro, because fast and cheap is the whole job",
+     better("gemini-3.6-flash", "gemini-3.6-pro"), "");
+  ck("AN ALIAS BEATS A PINNED NAME, because it survives the next retirement",
+     better("gemini-flash-latest", "gemini-3.6-flash"), "");
+  ck("a preview is never preferred", better("gemini-3.6-flash", "gemini-3.6-flash-preview"), "");
+  ck("nor is an experimental build", better("gemini-3.6-flash", "gemini-3.6-flash-exp"), "");
+  ck("capable beats cheapest", better("gemini-3.6-flash", "gemini-3.6-flash-lite"), "");
+  ck("and a newer generation wins a tie", better("gemini-3.6-flash", "gemini-2.5-flash"), "");
+  /* The dead name must not be something the scorer would choose over a live one. */
+  ck("THE RETIRED NAME DOES NOT OUTSCORE A LIVE ONE",
+     better("gemini-flash-latest", "gemini-2.0-flash"), "");
 }
 
 console.log("10 - DATES");
