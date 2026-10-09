@@ -743,7 +743,12 @@ async function gemini(prompt, env, schema) {
      DIFFERENT model, because the cache is dropped between attempts and resolveModel is
      told to avoid the one that just failed. Only a 4xx that is none of those is a real
      error worth failing on — a malformed request will not fix itself. */
-  const RETRYABLE = [404, 429, 500, 502, 503, 504];
+  /* 408 AND 524 JOINED THE LIST FROM A LIVE RUN. Two papers failed on "gemini 524", which
+     is Cloudflare's own "a timeout occurred" — the request left, the far end took too long,
+     and nothing about the paper caused it. 408 is the same thing said by the origin. Both
+     belong with 503 rather than with a malformed request, and leaving them out cost two
+     papers their summaries for a reason that resolves itself on a retry. */
+  const RETRYABLE = [404, 408, 429, 500, 502, 503, 504, 524];
   let tried = null, lastStatus = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
     const model = await resolveModel(env, tried);

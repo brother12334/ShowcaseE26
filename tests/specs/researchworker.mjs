@@ -531,6 +531,10 @@ console.log("10E - A SUMMARY WRITTEN UNDER A RULE THAT HAS SINCE CHANGED");
      /too many subrequests/i.test(src) && /budgetWasWrong/.test(src), "");
   ck("and it says to lower the setting rather than leaving a bare number",
      /lower SUBREQ_MAX/.test(src), "");
+  /* Two papers in a live run failed on "gemini 524" — Cloudflare's own gateway timeout,
+     which says nothing about the paper and resolves itself on a retry. */
+  ck("A GATEWAY TIMEOUT IS RETRIED, not treated as a bad request",
+     /RETRYABLE = \[404, 408, 429, 500, 502, 503, 504, 524\]/.test(src), "");
   ck("stale dropping is opt-in, so an ordinary reset is unchanged",
      /url\.searchParams\.get\("stale"\) === "yes"/.test(src), "");
   ck("AND AN APPROVED PAPER IS NEVER DROPPED AS STALE, whatever a rule says about it",

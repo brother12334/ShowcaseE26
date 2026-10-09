@@ -375,6 +375,7 @@ Each of these was invisible to the fixtures and only appeared against the real A
 | `forLifters does not name the population` on lines that named it | the check's word list held nine nouns and none of the generic ones; a review has no participants of its own | the generic nouns are accepted, and a pooled design may name the studies |
 | an identical `found 12, dropped 6` every run | only accepted papers entered the index, so excluded ones were re-fetched and re-screened daily | `reject:v1`, cleared by a reset |
 | every review rejected, 4 of 4, while 14 experiments passed | the prompt assumed the paper had participants, so a narrative review had to invent a population or name none | the participant rules are written twice, once for a design that ran an experiment and once for one that pooled others |
+| `gemini 524` on two papers | 524 is Cloudflare's own gateway timeout and was not in the retry set | `408` and `524` added beside `503` |
 | no way to tell whether the rejection memory worked | neither the run nor the store reported a count, so a claim about it could not be checked | `rejectsKnown` and `rejectsAdded` per run, `rejectsRemembered` in `/research/stats` |
 | every run ending on `stoppedOnBudget` after four or five papers | the free-plan subrequest ceiling was hardcoded, and the paid limit is twenty times higher | `SUBREQ_MAX` is a var; the cautious value stays the default |
 | limitations reading `Small sample / Short duration / Untrained participants` | rule 7 listed those exact phrases as things to "draw on", and the check only counted length | the menu is gone, each limitation must carry the paper's own value, and generic phrases no longer count towards the two |
@@ -423,7 +424,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (165) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (166) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
@@ -457,6 +458,16 @@ population rule — and drops what fails. It cannot re-apply the rest of `checkF
 because the abstract is deliberately not stored, so a number or a causal verb cannot be
 re-judged without re-fetching. An approved paper is never dropped as stale: that one is a
 human's call, not a rule's.
+
+### A deploy does not take effect instantly
+
+A `stale=yes` dry run called seconds after `wrangler deploy` answered from the *previous*
+version: it returned the old reset's fields and found only the records with no summary at
+all. The same call a few minutes later returned `staleSummaries` with the expected five.
+
+Nothing was wrong with either the code or the store. The signal to watch for is a field you
+expect being **absent** from the response — not zero, absent. If that happens, wait and call
+again rather than debugging the Worker.
 
 ### SUBREQ_MAX set too high is worse than not setting it
 
