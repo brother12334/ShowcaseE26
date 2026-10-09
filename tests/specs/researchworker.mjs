@@ -535,6 +535,10 @@ console.log("10E - A SUMMARY WRITTEN UNDER A RULE THAT HAS SINCE CHANGED");
      which says nothing about the paper and resolves itself on a retry. */
   ck("A GATEWAY TIMEOUT IS RETRIED, not treated as a bad request",
      /RETRYABLE = \[404, 408, 429, 500, 502, 503, 504, 524\]/.test(src), "");
+  /* Flipping the launch gate and then reading /research/stats reported launched:false
+     while the feed was already serving, because stats:last is a snapshot from the last run. */
+  ck("STATS REPORTS THE LIVE GATE, not the one the last run happened to see",
+     /launched: await launchApproved\(env\)/.test(src) && /launchedAtLastRun/.test(src), "");
   ck("stale dropping is opt-in, so an ordinary reset is unchanged",
      /url\.searchParams\.get\("stale"\) === "yes"/.test(src), "");
   ck("AND AN APPROVED PAPER IS NEVER DROPPED AS STALE, whatever a rule says about it",

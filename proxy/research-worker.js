@@ -1341,6 +1341,12 @@ export default {
       const rej = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
       const idx = await readIndex(env);
       return json(Object.assign(last, {
+        /* THE LIVE GATE, NOT THE ONE THE LAST RUN SAW. stats:last is a snapshot written at
+           the end of a run, so its `launched` is whatever was true then. Flipping the gate
+           and then reading stats reported launched:false with the feed already serving,
+           which is the single most misleading thing this endpoint could say. */
+        launched: await launchApproved(env),
+        launchedAtLastRun: last.launched === true,
         inIndex: idx.length,
         withSummary: idx.filter(r => !!r.quickTakeaway).length,
         approved: idx.filter(r => r.approved === true).length,
