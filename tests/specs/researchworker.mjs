@@ -11,7 +11,7 @@ import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
        verify, needsApproval, launchApproved, servable, scoreModel, cardOf,
        parseModelJson, summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
-       resetSubreq, K_REJECT, summaryPrompt, subreqMax} = __test;
+       resetSubreq, K_REJECT, summaryPrompt, subreqMax, BOILERPLATE} = __test;
 import { readFileSync } from 'node:fs';
 
 let bad = 0;
@@ -438,6 +438,54 @@ console.log("10C - A REVIEW HAS NO PARTICIPANTS OF ITS OWN");
   }, rec, "review").filter(x => /name the population/.test(x));
   ck("the sentence the prompt suggests passes the check it exists for", out.length === 0,
      JSON.stringify(out));
+}
+
+console.log("10D - A LIMITATION THAT FITS ANY PAPER IS NOT A LIMITATION");
+{
+  /* Rule 7 listed its own answers: "draw on: small sample, short duration, untrained
+     participants, ...". Across eighteen live summaries the model drew on them literally, in
+     those exact words, and the check only counted length, so four copied menu phrases
+     passed as four specific limitations. One meta-analysis of fourteen studies was given
+     "Untrained participants" and "Small sample", which is not true of it. */
+  const rec = {title: "Resistance training and hypertrophy.",
+    abstract: "Seventeen trained men trained for 6 weeks and muscle thickness increased 0.14 cm."};
+  const base = {
+    quickTakeaway: "In this study, training was associated with more growth.",
+    whatTheyStudied: "The study looked at muscle thickness after training.",
+    participants: "Seventeen trained men took part over 6 weeks.",
+    whatTheyFound: "Muscle thickness increased 0.14 cm.",
+    forLifters: "In these trained men, the gain was small."
+  };
+  const limProblems = l => checkFaithful(Object.assign({}, base, {limitations: l}), rec, "rct")
+    .filter(x => /limitations/.test(x));
+
+  ck("the menu phrases are recognised as generic",
+     BOILERPLATE.test("Small sample") && BOILERPLATE.test("Short duration")
+     && BOILERPLATE.test("Untrained participants") && BOILERPLATE.test("A narrow population"),
+     "");
+  ck("a trailing stop does not smuggle one through", BOILERPLATE.test("Short duration."), "");
+  ck("BUT THE SAME SUBJECT WITH THIS PAPER'S DETAIL IS NOT GENERIC",
+     !BOILERPLATE.test("Short duration of 6 weeks, with no follow-up")
+     && !BOILERPLATE.test("Only 17 participants completed the trial"), "");
+
+  ck("FOUR COPIED MENU PHRASES NO LONGER PASS AS FOUR LIMITATIONS",
+     limProblems(["Small sample", "Short duration", "Untrained participants",
+                  "A narrow population"]).length === 1,
+     JSON.stringify(limProblems(["Small sample", "Short duration", "Untrained participants", "A narrow population"])));
+  ck("and the complaint names them, so the retry has something to act on",
+     /generic phrases that would fit any paper/.test(
+       limProblems(["Small sample", "Short duration", "A narrow population"])[0] || ""), "");
+  ck("\"Not reported in the abstract\" is a gap in the abstract, not a limitation",
+     limProblems(["Not reported in the abstract", "One study is not a body of evidence"]).length === 1, "");
+  ck("TWO LIMITATIONS CARRYING THE PAPER'S OWN DETAIL PASS",
+     limProblems(["Only 17 participants completed the trial.",
+                  "Six weeks, with no long-term follow-up."]).length === 0,
+     JSON.stringify(limProblems(["Only 17 participants completed the trial.", "Six weeks, with no long-term follow-up."])));
+  ck("and the honest generic one may still ride along as an extra",
+     limProblems(["Only 17 participants completed the trial.",
+                  "Six weeks, with no long-term follow-up.",
+                  "One study is not a body of evidence."]).length === 0, "");
+  ck("an empty list still fails", limProblems([]).length === 1, "");
 }
 
 console.log("11 - AN OPERATION IS NOT A TRAINING STUDY");

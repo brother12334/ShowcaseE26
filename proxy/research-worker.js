@@ -506,7 +506,15 @@ function summaryPrompt(rec, type, population) {
       ? "5. THIS PAPER HAS NO PARTICIPANTS OF ITS OWN. In participants, describe the studies it draws on \u2014 how many, in whom, over how long \u2014 exactly as the abstract reports them, and write \"Not reported in the abstract\" for anything it does not. In forLifters, say WHOSE EVIDENCE this is in the sentence: \"Across these studies, in trained men...\", or \"Across these studies, whose participants are not reported...\" if the abstract does not say. Never invent a population to fill the slot. Use may, suggests, adds evidence that. Never proves, never \"you should\"."
       : "5. In forLifters, NAME THE POPULATION in the sentence, e.g. \"In untrained young men over 8 weeks...\". Use may, suggests, adds evidence that. Never proves, never \"you should\".",
     "6. One study is never general advice. No medical advice, no dosing beyond what the paper used, nothing extreme.",
-    "7. limitations must be specific to THIS paper and non-empty. Draw on: small sample, short duration, untrained participants, a narrow population, limited exercise selection, self-reported measures, indirect measures, no long-term follow-up, stated conflicts of interest, and that one study is not a body of evidence.",
+    /* RULE 7 USED TO LIST ITS OWN ANSWERS. It said limitations must be specific to this
+       paper and then offered "small sample, short duration, untrained participants, a
+       narrow population, ..." as things to draw on — and the model drew on them literally.
+       Across eighteen live summaries "small sample", "short duration" and "untrained
+       participants" came back as those exact words, and one meta-analysis of fourteen
+       studies was given "Untrained participants" and "Small sample" as its limitations,
+       which is not even true of it. A menu in a prompt is a menu the model will order from,
+       so the menu is gone and each limitation now has to carry the paper's own detail. */
+    "7. limitations must be specific to THIS paper, non-empty, and must NOT be generic phrases. Each one must name the feature AND its value from the source: not \"small sample\" but \"only 17 participants completed the trial\"; not \"short duration\" but \"6 weeks, with no follow-up\". Consider the sample, the duration, who was studied, how the outcome was measured, what was not measured, the exercises used, and anything the authors themselves flag. Do not write \"Not reported in the abstract\" as a limitation \u2014 that is a gap in the abstract, not a limitation of the study.",
     "",
     "LENGTHS. quickTakeaway 2-3 sentences. The others 1-3 sentences each. limitations 2-5 items.",
     "",
@@ -533,6 +541,21 @@ const CAUSAL = [
   /\bmakes? you\b/i, /\bwill increase\b/i, /\bwill improve\b/i, /\byou should\b/i
 ];
 const CAUSAL_OK_TYPES = ["rct", "controlled", "meta", "systematic"];
+/* A LIMITATION THAT WOULD FIT ANY PAPER IN THE FEED. These are matched whole, after
+   trimming a trailing stop, so "Short duration" is rejected while "Short duration of 6
+   weeks, with no follow-up" is kept: the test is whether the sentence carries this paper's
+   own detail, not whether it mentions duration. "One study is not a body of evidence" is
+   true and worth saying, so it is allowed to appear — it just does not count towards the
+   two a summary must have. */
+const BOILERPLATE = new RegExp("^(?:" + [
+  "small samples?(?: size)?", "short duration", "untrained participants",
+  "a narrow population", "narrow population", "limited exercise selection",
+  "self-reported measures", "indirect measures", "no long-term follow-?up",
+  "stated conflicts of interest", "(?:this )?one study is not a body of evidence",
+  "not reported(?: in the abstract)?", "variability in responses",
+  "small sample size", "generalizability", "further research is (?:needed|warranted)",
+  "more (?:high-powered )?research is needed"
+].join("|") + ")\.?$", "i");
 /* NUMBERS ARE COMPARED AGAINST THE SOURCE, every one of them. A figure in a summary that
    is not in the abstract has been invented or mis-transcribed, and either way it must not
    ship. Years are exempt because a date legitimately appears in a sentence without being
@@ -574,8 +597,18 @@ function checkFaithful(sum, rec, type) {
   fields.forEach(f => {
     if (/\byou should\b/i.test(String(sum[f] || ""))) problems.push("prescriptive wording in " + f);
   });
+  /* AND THE CHECK ONLY COUNTED LENGTH, so four copied menu phrases passed as four specific
+     limitations, and "Not reported in the abstract" passed as one of two. A limitation that
+     could be pasted onto any paper in the feed is not a limitation of this paper. */
   const lim = Array.isArray(sum.limitations) ? sum.limitations.filter(x => x && x.length > 8) : [];
-  if (lim.length < 2) problems.push("fewer than two specific limitations");
+  const generic = lim.filter(x => BOILERPLATE.test(String(x).trim()));
+  const specific = lim.filter(x => !BOILERPLATE.test(String(x).trim()));
+  if (specific.length < 2) {
+    problems.push(generic.length
+      ? "fewer than two specific limitations \u2014 " + generic.length
+        + " are generic phrases that would fit any paper: " + generic.join("; ")
+      : "fewer than two specific limitations");
+  }
   /* THE POPULATION HAS TO BE NAMED IN forLifters, which is the line most likely to be read
      on its own and quoted out of context.
 
@@ -1276,7 +1309,7 @@ export default {
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
-  K_LAUNCH, K_REJECT, scoreModel, parseModelJson, summaryPrompt, subreqMax,
+  K_LAUNCH, K_REJECT, scoreModel, parseModelJson, summaryPrompt, subreqMax, BOILERPLATE,
   summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
   resetSubreq: () => { SUBREQ = 0; RESOLVED = null; }
 };

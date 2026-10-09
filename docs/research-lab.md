@@ -377,6 +377,7 @@ Each of these was invisible to the fixtures and only appeared against the real A
 | every review rejected, 4 of 4, while 14 experiments passed | the prompt assumed the paper had participants, so a narrative review had to invent a population or name none | the participant rules are written twice, once for a design that ran an experiment and once for one that pooled others |
 | no way to tell whether the rejection memory worked | neither the run nor the store reported a count, so a claim about it could not be checked | `rejectsKnown` and `rejectsAdded` per run, `rejectsRemembered` in `/research/stats` |
 | every run ending on `stoppedOnBudget` after four or five papers | the free-plan subrequest ceiling was hardcoded, and the paid limit is twenty times higher | `SUBREQ_MAX` is a var; the cautious value stays the default |
+| limitations reading `Small sample / Short duration / Untrained participants` | rule 7 listed those exact phrases as things to "draw on", and the check only counted length | the menu is gone, each limitation must carry the paper's own value, and generic phrases no longer count towards the two |
 
 The counters settled the rejection question: a run reported `rejectsKnown: 5` with
 `rejectsAdded: 9`, and the store then reported `rejectsRemembered: 14`. The list persists
@@ -422,11 +423,28 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (147) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (156) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
 stale and starts lying.
+
+### Read the limitations as closely as the findings
+
+The first eighteen live summaries were checked by hand, and the limitations were the
+weakest field by a distance — four of sixteen had nothing but generic phrases, and a
+meta-analysis of fourteen studies was given "Untrained participants" and "Small sample",
+which is not true of it. The cause was in the prompt rather than the model: rule 7 asked
+for limitations specific to the paper and then offered a list of generic ones to draw on.
+
+A menu in a prompt is a menu the model will order from. Rule 7 now demands the feature *and
+its value from the source* — not "small sample" but "only 17 participants completed the
+trial" — and `BOILERPLATE` in the Worker rejects the bare phrases, naming them in the
+failure so the retry has something to act on. "One study is not a body of evidence" is true
+and may still appear; it just does not count towards the two a summary must have.
+
+Any summary already stored was written under the old rule. A reset re-runs the ones that
+would now fail.
 
 ## 12. Judging a summary sentence
 
