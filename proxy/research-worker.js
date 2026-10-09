@@ -553,8 +553,21 @@ function checkFaithful(sum, rec, type) {
   const lim = Array.isArray(sum.limitations) ? sum.limitations.filter(x => x && x.length > 8) : [];
   if (lim.length < 2) problems.push("fewer than two specific limitations");
   /* THE POPULATION HAS TO BE NAMED IN forLifters, which is the line most likely to be read
-     on its own and quoted out of context. */
-  if (!/trained|untrained|novice|men|women|participants|adults|lifters|athletes|not reported/i.test(String(sum.forLifters || "")))
+     on its own and quoted out of context.
+
+     THE WORD LIST WAS TOO NARROW AND WAS FAILING HONEST SENTENCES. Two papers in the fifth
+     live run were rejected on this check with a population plainly named: a review of
+     cyclists, and one that said "in these individuals". The check is right in substance and
+     was wrong about English, so the generic nouns a careful writer actually reaches for are
+     accepted too.
+
+     AND A REVIEW HAS NO PARTICIPANTS OF ITS OWN. Naming the population of a meta-analysis or
+     a review means describing the studies it pooled, so on those designs that counts. */
+  const whoRe = /trained|untrained|novice|beginner|men|women|male|female|participants|subjects|individuals|people|adults|older|lifters|trainees|athletes|cyclists|runners|not reported|unclear/i;
+  const poolRe = /\bstudies\b|\btrials\b|\bliterature\b/i;
+  const pooled = ["meta", "systematic", "review"].indexOf(type) > -1;
+  const who = String(sum.forLifters || "");
+  if (!whoRe.test(who) && !(pooled && poolRe.test(who)))
     problems.push("forLifters does not name the population");
   return problems;
 }
@@ -852,6 +865,15 @@ async function secondPass(vp, rec, env) {
 const K_INDEX = "index:v1";
 const K_PAPER = id => "paper:" + id;
 const K_QUEUE = "queue:v1";
+/* THE REJECTED IDS, KEPT BECAUSE A REJECTION IS A RESULT. Only accepted papers went into
+   the index, so every run re-fetched and re-screened the same excluded ones: the fourth and
+   fifth live runs reported an identical "found 12, dropped 6" with identical reasons, which
+   was six wasted PubMed fetches and six wasted screenings out of a bounded budget, every
+   day, for ever. Screening and verification are deterministic, so the verdict is worth
+   remembering. It is a plain id list rather than records — the papers themselves are not
+   stored, which is the point of dropping them. */
+const K_REJECT = "reject:v1";
+const REJECT_MAX = 4000;
 const INDEX_MAX = 400;
 
 async function readIndex(env) {
@@ -934,7 +956,9 @@ async function runPipeline(env, limit) {
   SUBREQ = 0;
   const launched = await launchApproved(env);
   const seen = await readIndex(env);
-  const have = new Set(seen.map(x => x.id));
+  const rejected = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
+  const have = new Set(seen.map(x => x.id).concat(rejected));
+  const newRejects = [];
   const queue = [];
   const stats = {found: 0, dropped: 0, kept: 0, pending: 0, nosum: 0, reasons: {}};
   const drop = why => { stats.dropped++; stats.reasons[why] = (stats.reasons[why] || 0) + 1; };
@@ -953,9 +977,9 @@ async function runPipeline(env, limit) {
       if (subreqLeft() < PER_PAPER_SUBREQ) { stats.stoppedOnBudget = true; break; }
       stats.found++;
       const v = await verify(rec);
-      if (!v.ok) { drop(v.fail[0] || "verification"); continue; }
+      if (!v.ok) { drop(v.fail[0] || "verification"); newRejects.push("pm" + rec.pmid); continue; }
       const sc = screen(rec, spec.topic);
-      if (!sc.ok) { drop(sc.why); continue; }
+      if (!sc.ok) { drop(sc.why); newRejects.push("pm" + rec.pmid); continue; }
       const type = evidenceType(rec);
       const mn = monthNum(rec.month);
       const paper = {
@@ -997,6 +1021,10 @@ async function runPipeline(env, limit) {
     }
   }
   await writeIndex(env, seen);
+  if (newRejects.length) {
+    await env.RESEARCH.put(K_REJECT,
+      JSON.stringify(rejected.concat(newRejects).slice(-REJECT_MAX)));
+  }
   if (queue.length) {
     const old = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
     await env.RESEARCH.put(K_QUEUE, JSON.stringify(old.concat(queue).slice(-200)));
@@ -1181,7 +1209,13 @@ export default {
       await writeIndex(env, rows.filter(r => !gone.has(r.id)));
       const q = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
       await env.RESEARCH.put(K_QUEUE, JSON.stringify(q.filter(id => !gone.has(id))));
-      return json({dropped: ids.length, ids, remaining: rows.length - ids.length}, origin, 0);
+      /* AND THE REJECTION MEMORY GOES WITH THEM. It exists so a settled verdict is not paid
+         for twice, but after a screening fix the whole point is to screen again, and a reset
+         is the one moment that is unambiguously being asked for. */
+      const rej = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
+      await env.RESEARCH.delete(K_REJECT);
+      return json({dropped: ids.length, ids, remaining: rows.length - ids.length,
+                   rejectionsForgotten: rej.length}, origin, 0);
     }
     if (url.pathname === "/research/stats" && isAdmin) {
       return json(JSON.parse((await env.RESEARCH.get("stats:last")) || "{}"), origin, 0);
@@ -1197,7 +1231,7 @@ export default {
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
-  K_LAUNCH, scoreModel, parseModelJson,
+  K_LAUNCH, K_REJECT, scoreModel, parseModelJson,
   summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
   resetSubreq: () => { SUBREQ = 0; RESOLVED = null; }
 };

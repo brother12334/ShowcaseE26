@@ -11,7 +11,8 @@ import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
        verify, needsApproval, launchApproved, servable, scoreModel, cardOf,
        parseModelJson, summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
-       resetSubreq} = __test;
+       resetSubreq, K_REJECT} = __test;
+import { readFileSync } from 'node:fs';
 
 let bad = 0;
 const ck = (n, c, extra)=>{ console.log((c?"  ok  ":"  BROKEN  ")+n+(c?"":" :: "+(extra||""))); if(!c) bad++; };
@@ -373,6 +374,36 @@ console.log("10 - DATES");
   ck("and a missing month is null", monthNum(null) === null, String(monthNum(null)));
 }
 
+console.log("10B - NAMING THE POPULATION, IN ACTUAL ENGLISH");
+{
+  /* Two papers in the fifth live run failed "forLifters does not name the population" with
+     the population plainly named. The check was right in substance and wrong about English:
+     its word list held nine nouns and none of the generic ones a careful writer reaches for. */
+  const rec = {title: "Resistance training and hypertrophy.",
+    abstract: "Twenty people trained for 8 weeks and muscle thickness increased 0.14 cm."};
+  const base = {
+    quickTakeaway: "In this study, training was associated with more growth.",
+    whatTheyStudied: "The study looked at muscle thickness after training.",
+    participants: "Twenty people took part over 8 weeks.",
+    whatTheyFound: "Muscle thickness increased 0.14 cm.",
+    limitations: ["Only one measure of size was used.", "The group was small at twenty."]
+  };
+  const popProblems = (line, type) => checkFaithful(Object.assign({}, base, {forLifters: line}),
+    rec, type || "rct").filter(x => /name the population/.test(x));
+  ck("'in these individuals' names the population", popProblems("In these individuals, the gain was small.").length === 0, "");
+  ck("so does 'in these people'", popProblems("In these people, the gain was small.").length === 0, "");
+  ck("so does naming the sport", popProblems("In these cyclists, the gain was small.").length === 0, "");
+  ck("and the old vocabulary still passes", popProblems("In these trained men, the gain was small.").length === 0, "");
+  ck("A LINE THAT NAMES NOBODY STILL FAILS",
+     popProblems("The gain was small and may not be worth the time.").length === 1, "");
+
+  /* A review has no participants of its own; its population is the studies it pooled. */
+  ck("a review may name the studies it pooled",
+     popProblems("Across these studies, the gain was small.", "review").length === 0, "");
+  ck("BUT AN RCT MAY NOT HIDE BEHIND 'studies'",
+     popProblems("Across these studies, the gain was small.", "rct").length === 1, "");
+}
+
 console.log("11 - AN OPERATION IS NOT A TRAINING STUDY");
 {
   /* The third live run put "The effectiveness of resistance training for patients with
@@ -406,6 +437,26 @@ console.log("12 - THE SUBREQUEST BUDGET");
      PER_PAPER_SUBREQ >= 4 && PER_PAPER_SUBREQ < SUBREQ_MAX, String(PER_PAPER_SUBREQ));
   resetSubreq();
   ck("a reset run starts with its full allowance", subreqLeft() === SUBREQ_MAX, String(subreqLeft()));
+}
+
+console.log("12B - A REJECTION IS A RESULT AND IS REMEMBERED");
+{
+  /* The fourth and fifth live runs reported an identical "found 12, dropped 6" with
+     identical reasons, because only accepted papers went into the index: the same six
+     excluded papers were re-fetched and re-screened every run, out of a bounded budget,
+     every day. Screening and verification are deterministic, so the verdict keeps. */
+  ck("the rejection list has its own key", typeof K_REJECT === "string" && K_REJECT.length > 0,
+     String(K_REJECT));
+  ck("and it is not the index or the queue", K_REJECT !== "index:v1" && K_REJECT !== "queue:v1", "");
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  ck("a screening rejection is recorded", /drop\(sc\.why\); newRejects\.push/.test(src), "");
+  ck("and so is a verification failure",
+     /drop\(v\.fail\[0\] \|\| "verification"\); newRejects\.push/.test(src), "");
+  ck("REJECTED IDS ARE SKIPPED BEFORE ANY FETCH, which is the whole saving",
+     /new Set\(seen\.map\(x => x\.id\)\.concat\(rejected\)\)/.test(src), "");
+  ck("and a reset forgets them, so a screening fix can be applied",
+     /RESEARCH\.delete\(K_REJECT\)/.test(src) && /rejectionsForgotten/.test(src), "");
+  ck("the list is bounded", /REJECT_MAX/.test(src) && /slice\(-REJECT_MAX\)/.test(src), "");
 }
 
 console.log("13 - ONE DRIFTING SENTENCE DOES NOT COST A PAPER ITS SUMMARY");
