@@ -622,16 +622,34 @@ async function gemini(prompt, env, schema) {
     contents: [{role: "user", parts: [{text: prompt}]}],
     generationConfig: Object.assign(
       /* TEMPERATURE ZERO. Nothing about this task benefits from variety, and a summary that
-         changes between runs is a summary nobody can review. */
-      {temperature: 0, maxOutputTokens: 1400},
+         changes between runs is a summary nobody can review.
+
+         AND A FAR LARGER OUTPUT BUDGET THAN THE TEXT NEEDS. It was 1400, which is ample
+         for six short fields — and three papers in the first working run still came back
+         as "summary was not valid JSON". The models the resolver now lands on reason
+         before they answer, and that reasoning is billed against the SAME output budget,
+         so a 1400-token ceiling was being spent on thinking and the JSON arrived cut off
+         mid-object. 8192 costs nothing when the answer is short, because only what is
+         generated is charged. */
+      {temperature: 0, maxOutputTokens: 8192},
       schema ? {responseMimeType: "application/json", responseSchema: schema} : {})
   };
-  /* TWO ATTEMPTS, AND THE SECOND ONE AVOIDS WHATEVER THE FIRST LANDED ON. A 404 means
-     that name is gone and a 429 means its free allowance is spent; both are answered by
-     asking for a different model rather than by failing the paper. Anything else is a
-     real error and is reported as one. */
-  let tried = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  /* THREE ATTEMPTS, AND WHAT COUNTS AS WORTH RETRYING IS WIDER THAN I FIRST THOUGHT.
+
+     The first working run failed five papers on "gemini 503 on gemini-flash-latest". 503
+     is Service Unavailable — "the model is overloaded, try again" — and it is the single
+     most common transient error this API returns. Retrying only on 404 and 429 meant a
+     momentary overload permanently cost a paper its summary, which is a daft thing to let
+     happen to work that is already paid for.
+
+     So: 404 means the name is gone, 429 means its allowance is spent, and 5xx means the
+     far end is briefly unwell. All three are answered by waiting a moment and asking a
+     DIFFERENT model, because the cache is dropped between attempts and resolveModel is
+     told to avoid the one that just failed. Only a 4xx that is none of those is a real
+     error worth failing on — a malformed request will not fix itself. */
+  const RETRYABLE = [404, 429, 500, 502, 503, 504];
+  let tried = null, lastStatus = 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
     const model = await resolveModel(env, tried);
     if (!model) throw new Error("no usable Gemini model for this key");
     tried = model;
@@ -643,14 +661,57 @@ async function gemini(prompt, env, schema) {
     if (r.ok) {
       const j = await r.json();
       const txt = (((j.candidates || [])[0] || {}).content || {}).parts;
-      return txt && txt[0] ? txt[0].text : "";
+      const out = txt && txt[0] ? txt[0].text : "";
+      /* AN EMPTY ANSWER IS A FAILURE, NOT AN ANSWER. A response whose candidate carries
+         no text at all — a safety stop, or a budget spent entirely on reasoning — would
+         otherwise come back as "" and be reported downstream as invalid JSON, which sends
+         the next person looking at the parser instead of at the call. */
+      if (out) return out;
+      lastStatus = 204;
+      RESOLVED = null;
+      continue;
     }
-    if (r.status !== 404 && r.status !== 429)
+    lastStatus = r.status;
+    if (RETRYABLE.indexOf(r.status) < 0)
       throw new Error("gemini " + r.status + " on " + model);
-    /* Drop the cache so the next resolve genuinely re-reads the list. */
-    RESOLVED = null;
+    /* A moment, because an overloaded model answers a second later and a busy one does
+       not care how fast it is asked again. Short enough that a cron run does not stall. */
+    if (r.status >= 500) await new Promise(res => setTimeout(res, 1200));
+    RESOLVED = null;                 // so the next resolve genuinely re-reads the list
   }
-  throw new Error("gemini refused every model this key offers (last tried " + tried + ")");
+  throw new Error("gemini kept refusing (last " + lastStatus + " on " + tried + ")");
+}
+
+/* JSON FROM A LANGUAGE MODEL, PARSED THE WAY IT ACTUALLY ARRIVES.
+
+   responseMimeType is set to application/json and responseSchema is supplied, so in
+   principle the answer is clean. In practice three papers in the first working run came
+   back as "summary was not valid JSON", and that message told whoever read it nothing
+   whatsoever about why — which is the real defect. A failure that does not say what it
+   saw is a failure somebody has to reproduce before they can fix it.
+
+   So: fenced code blocks are stripped, leading and trailing prose is trimmed to the
+   outermost braces, and WHEN IT STILL WILL NOT PARSE THE REASON CARRIES WHAT CAME BACK.
+   The snippet is the model's own description of a public abstract, so there is nothing
+   sensitive in it, and 180 characters is enough to tell truncation from a fence from an
+   apology. */
+function parseModelJson(raw) {
+  const txt = String(raw || "").trim();
+  if (!txt) return {ok: false, why: "the model returned nothing at all"};
+  let body = txt;
+  /* ```json ... ``` or ``` ... ``` */
+  const fence = body.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  if (fence) body = fence[1].trim();
+  try { return {ok: true, value: JSON.parse(body)}; } catch (e) {}
+  /* Outermost object, for an answer wrapped in a sentence. */
+  const a = body.indexOf("{"), b = body.lastIndexOf("}");
+  if (a > -1 && b > a) {
+    try { return {ok: true, value: JSON.parse(body.slice(a, b + 1))}; } catch (e) {}
+  }
+  const looksCut = a > -1 && b <= a;
+  return {ok: false,
+    why: (looksCut ? "the summary was cut off before it finished" : "the summary was not valid JSON")
+       + " (" + txt.length + " chars, began: " + JSON.stringify(txt.slice(0, 180)) + ")"};
 }
 
 /* ONE SUMMARY PER PAPER, EVER. It is generated on the server, stored, and served to
@@ -663,7 +724,9 @@ async function summarise(rec, type, population, env) {
     let raw;
     try { raw = await gemini(summaryPrompt(rec, type, population), env, SUMMARY_SCHEMA); }
     catch (e) { return {ok: false, why: "summary call failed: " + e.message}; }
-    try { sum = JSON.parse(raw); } catch (e) { problems = ["summary was not valid JSON"]; continue; }
+    const parsed = parseModelJson(raw);
+    if (!parsed.ok) { problems = [parsed.why]; continue; }
+    sum = parsed.value;
     problems = checkFaithful(sum, rec, type);
     if (!problems.length) break;
   }
@@ -1012,5 +1075,5 @@ export default {
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
-  K_LAUNCH, scoreModel
+  K_LAUNCH, scoreModel, parseModelJson
 };

@@ -18,7 +18,16 @@ await p.addInitScript(()=>{ localStorage.clear();
   localStorage.setItem('e26.ns0','E26-X');
   localStorage.setItem('ironlog.v1', JSON.stringify({
     setup:{name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()-400*86400e3},
-    tourDone:true, geo:'off', splitId:'ppl6', sessions:[] })); });
+    tourDone:true, geo:'off', splitId:'ppl6', sessions:[],
+    /* THE SLEEP PROMPT IS SILENCED, AND LEAVING IT OUT COST AN HOUR. The app opens a
+       sleep sheet of its own accord during the hours somebody nominated as their night,
+       and a modal over the screen makes every click in this spec time out with
+       "intercepts pointer events". So this spec passed all day and would have failed
+       every night, which is the worst shape a test failure can have. Same two fields the
+       rest of the suite uses. */
+    sleepAsked: new Date().toLocaleDateString("en-CA"),
+    prefs: {sleepPrompt: false},
+    _pad:0 })); });
 await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
 await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
 await p.evaluate(()=>{ S.seenNews = NEWS_FOR; saveQuiet(); render(); });

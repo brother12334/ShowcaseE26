@@ -9,7 +9,8 @@
    test that hard-codes a DOI is a test that goes stale and starts lying. */
 import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
-       verify, needsApproval, launchApproved, servable, scoreModel, cardOf} = __test;
+       verify, needsApproval, launchApproved, servable, scoreModel, cardOf,
+       parseModelJson} = __test;
 
 let bad = 0;
 const ck = (n, c, extra)=>{ console.log((c?"  ok  ":"  BROKEN  ")+n+(c?"":" :: "+(extra||""))); if(!c) bad++; };
@@ -331,6 +332,36 @@ console.log("9C - THE MODEL IS ASKED FOR, NOT ASSUMED");
   /* The dead name must not be something the scorer would choose over a live one. */
   ck("THE RETIRED NAME DOES NOT OUTSCORE A LIVE ONE",
      better("gemini-flash-latest", "gemini-2.0-flash"), "");
+}
+
+console.log("9D - THE MODEL'S JSON, PARSED THE WAY IT ACTUALLY ARRIVES");
+{
+  /* Three papers in the first working run failed on "summary was not valid JSON", a
+     message that told whoever read it nothing about why. That opacity was the real bug. */
+  const good = parseModelJson('{"quickTakeaway":"x"}');
+  ck("clean JSON parses", good.ok === true && good.value.quickTakeaway === "x", "");
+  const fenced = parseModelJson('```json\n{"a":1}\n```');
+  ck("A FENCED CODE BLOCK IS STRIPPED", fenced.ok === true && fenced.value.a === 1,
+     JSON.stringify(fenced));
+  const bare = parseModelJson('```\n{"a":1}\n```');
+  ck("including an unlabelled fence", bare.ok === true && bare.value.a === 1, "");
+  const wrapped = parseModelJson('Here is the summary: {"a":1} Hope that helps.');
+  ck("and an answer wrapped in a sentence is recovered",
+     wrapped.ok === true && wrapped.value.a === 1, JSON.stringify(wrapped));
+
+  /* THE FAILURE HAS TO SAY WHAT IT SAW. Truncation, a refusal and an empty response are
+     three different problems and used to produce one identical message. */
+  const cut = parseModelJson('{"quickTakeaway":"the study found that parti');
+  ck("TRUNCATION IS NAMED AS TRUNCATION", cut.ok === false && /cut off/.test(cut.why), cut.why);
+  ck("and the reason carries the length and the opening text",
+     /chars, began:/.test(cut.why), cut.why);
+  const empty = parseModelJson("");
+  ck("an empty answer says so rather than blaming the parser",
+     empty.ok === false && /nothing at all/.test(empty.why), empty.why);
+  ck("and whitespace counts as empty", parseModelJson("   \n ").ok === false, "");
+  const prose = parseModelJson("I cannot summarise this paper.");
+  ck("a refusal is reported with its own words", prose.ok === false
+     && /not valid JSON/.test(prose.why) && /cannot summarise/.test(prose.why), prose.why);
 }
 
 console.log("10 - DATES");

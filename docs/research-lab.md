@@ -219,6 +219,24 @@ retirement is one fix rather than two.
 failed 7 live papers out of 7 with `gemini 404` — a name `gemini-worker.js` already
 documented in a comment as retired for this very key.*
 
+**Transient failures are retried, and the list of what counts is wider than it looks.**
+404 (name gone), 429 (allowance spent) and 5xx (far end briefly unwell) all get a
+different model, up to three attempts, with a 1.2s pause on a 5xx. The second live run
+lost five papers to `503` — *"the model is overloaded"*, the commonest transient error this
+API returns — because the retry covered only 404 and 429. A momentary overload should
+never permanently cost a paper its summary.
+
+**The output budget is 8192 tokens, not because the text is long but because the models
+think first.** Reasoning is billed against the same output budget, so the original 1400
+was being spent on thinking and the JSON arrived cut off mid-object. Only what is
+generated is charged, so a high ceiling costs nothing when the answer is short.
+
+**And a parse failure says what it saw.** Fenced blocks are stripped and an answer wrapped
+in prose is recovered; when it still will not parse, the reason carries the length and the
+first 180 characters, so truncation, a refusal and an empty response are distinguishable.
+"Summary was not valid JSON" on its own sent me looking at the parser instead of at the
+call.
+
 **Cost.** Two Gemini calls per accepted paper, once ever, on the server — never per user,
 never per request. At 20 candidates a day with roughly half surviving the screen, that is
 **~20 calls/day**, comfortably inside the free tier. KV: one index read per feed request,
