@@ -375,13 +375,31 @@ Each of these was invisible to the fixtures and only appeared against the real A
 | `forLifters does not name the population` on lines that named it | the check's word list held nine nouns and none of the generic ones; a review has no participants of its own | the generic nouns are accepted, and a pooled design may name the studies |
 | an identical `found 12, dropped 6` every run | only accepted papers entered the index, so excluded ones were re-fetched and re-screened daily | `reject:v1`, cleared by a reset |
 | every review rejected, 4 of 4, while 14 experiments passed | the prompt assumed the paper had participants, so a narrative review had to invent a population or name none | the participant rules are written twice, once for a design that ran an experiment and once for one that pooled others |
+| no way to tell whether the rejection memory worked | neither the run nor the store reported a count, so a claim about it could not be checked | `rejectsKnown` and `rejectsAdded` per run, `rejectsRemembered` in `/research/stats` |
+
+### What a strict check costs, and why it stays strict
+
+Two rejections are the checks working rather than failing, and both leave the paper
+published with its metadata and link:
+
+- **`causal wording in quickTakeaway on a review design: causing`.** The source abstract of
+  that paper contains no causal wording anywhere — the model introduced it. This is the
+  single most common way science reporting goes wrong and the check caught it.
+- **`second pass rejected N of M sentences after 2 passes`, concentrated on reviews.** A
+  narrative review's abstract is itself a summary of other work, so sentence-level support
+  is a genuinely harder bar to clear there than for a trial reporting its own numbers. Those
+  papers are being correctly held back.
+
+Note also that abstracts sometimes use `proven` and similar in their own voice. A summary
+that quotes it faithfully is still rejected, and that is deliberate: the app does not relay
+"proven" from a narrative review, even accurately.
 
 ## 11. Tests
 
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (139) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (142) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes

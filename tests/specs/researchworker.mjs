@@ -493,6 +493,16 @@ console.log("12B - A REJECTION IS A RESULT AND IS REMEMBERED");
   ck("and a reset forgets them, so a screening fix can be applied",
      /RESEARCH\.delete\(K_REJECT\)/.test(src) && /rejectionsForgotten/.test(src), "");
   ck("the list is bounded", /REJECT_MAX/.test(src) && /slice\(-REJECT_MAX\)/.test(src), "");
+  /* AND IT HAS TO BE COUNTABLE. I asserted this list was working on evidence that could
+     not show it: the run after it shipped had different drop reasons, which an empty list
+     cannot explain, and a later reset found nothing to forget. Neither the run output nor
+     the store reported a number, so there was nothing to check the claim against. */
+  ck("A RUN REPORTS WHAT IT KNEW AND WHAT IT ADDED",
+     /rejectsKnown: rejected\.length/.test(src) && /stats\.rejectsAdded = newRejects\.length/.test(src), "");
+  ck("and the store reports the standing total",
+     /rejectsRemembered: rej\.length/.test(src), "");
+  ck("so does the dry run, which changes nothing",
+     /wouldForgetRejections/.test(src), "");
 }
 
 console.log("13 - ONE DRIFTING SENTENCE DOES NOT COST A PAPER ITS SUMMARY");

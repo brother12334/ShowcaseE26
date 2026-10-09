@@ -972,7 +972,15 @@ async function runPipeline(env, limit) {
   const have = new Set(seen.map(x => x.id).concat(rejected));
   const newRejects = [];
   const queue = [];
-  const stats = {found: 0, dropped: 0, kept: 0, pending: 0, nosum: 0, reasons: {}};
+  /* rejectsKnown IS REPORTED BECAUSE I ASSERTED THIS LIST WAS WORKING ON EVIDENCE THAT DID
+     NOT SHOW IT. The run after it shipped came back with completely different drop reasons
+     and I called that the memory working — but the list is empty on its first run by
+     definition, so it cannot have been the cause; the new reasons came from the exclusion
+     terms added the commit before. A later reset then reported nothing to forget, which is
+     the opposite. Neither the run nor the store said how many ids were remembered, so there
+     was nothing to check the claim against. Now there is. */
+  const stats = {found: 0, dropped: 0, kept: 0, pending: 0, nosum: 0, reasons: {},
+                 rejectsKnown: rejected.length, rejectsAdded: 0};
   const drop = why => { stats.dropped++; stats.reasons[why] = (stats.reasons[why] || 0) + 1; };
 
   for (const spec of QUERIES) {
@@ -1036,6 +1044,7 @@ async function runPipeline(env, limit) {
   if (newRejects.length) {
     await env.RESEARCH.put(K_REJECT,
       JSON.stringify(rejected.concat(newRejects).slice(-REJECT_MAX)));
+    stats.rejectsAdded = newRejects.length;
   }
   if (queue.length) {
     const old = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
@@ -1213,7 +1222,9 @@ export default {
         if (!p || (!p.summary && p.approved !== true)) ids.push(r.id);
       }
       if (url.searchParams.get("confirm") !== "yes") {
+        const rejNow = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
         return json({wouldDrop: ids.length, ids: ids.slice(0, 50),
+                     wouldForgetRejections: rejNow.length,
                      note: "nothing changed \u2014 pass ?confirm=yes to drop these"}, origin, 0);
       }
       const gone = new Set(ids);
@@ -1230,7 +1241,15 @@ export default {
                    rejectionsForgotten: rej.length}, origin, 0);
     }
     if (url.pathname === "/research/stats" && isAdmin) {
-      return json(JSON.parse((await env.RESEARCH.get("stats:last")) || "{}"), origin, 0);
+      const last = JSON.parse((await env.RESEARCH.get("stats:last")) || "{}");
+      const rej = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
+      const idx = await readIndex(env);
+      return json(Object.assign(last, {
+        inIndex: idx.length,
+        withSummary: idx.filter(r => !!r.quickTakeaway).length,
+        approved: idx.filter(r => r.approved === true).length,
+        rejectsRemembered: rej.length
+      }), origin, 0);
     }
 
     return new Response("not found", {status: 404, headers: cors(origin)});
