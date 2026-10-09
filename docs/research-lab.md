@@ -374,13 +374,14 @@ Each of these was invisible to the fixtures and only appeared against the real A
 | `causal wording in forLifters on a review design` | the check loop's retry re-sent an identical prompt, so at temperature 0 it failed identically | the check's own reasons are quoted back into the rewrite |
 | `forLifters does not name the population` on lines that named it | the check's word list held nine nouns and none of the generic ones; a review has no participants of its own | the generic nouns are accepted, and a pooled design may name the studies |
 | an identical `found 12, dropped 6` every run | only accepted papers entered the index, so excluded ones were re-fetched and re-screened daily | `reject:v1`, cleared by a reset |
+| every review rejected, 4 of 4, while 14 experiments passed | the prompt assumed the paper had participants, so a narrative review had to invent a population or name none | the participant rules are written twice, once for a design that ran an experiment and once for one that pooled others |
 
 ## 11. Tests
 
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (131) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (139) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes

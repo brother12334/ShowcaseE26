@@ -11,7 +11,7 @@ import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
        verify, needsApproval, launchApproved, servable, scoreModel, cardOf,
        parseModelJson, summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
-       resetSubreq, K_REJECT} = __test;
+       resetSubreq, K_REJECT, summaryPrompt} = __test;
 import { readFileSync } from 'node:fs';
 
 let bad = 0;
@@ -402,6 +402,42 @@ console.log("10B - NAMING THE POPULATION, IN ACTUAL ENGLISH");
      popProblems("Across these studies, the gain was small.", "review").length === 0, "");
   ck("BUT AN RCT MAY NOT HIDE BEHIND 'studies'",
      popProblems("Across these studies, the gain was small.", "rct").length === 1, "");
+}
+
+console.log("10C - A REVIEW HAS NO PARTICIPANTS OF ITS OWN");
+{
+  /* Six live runs: fourteen verified summaries, every one of them an RCT, a meta-analysis
+     or a controlled trial, and four reviews out of four rejected. Three went on forLifters
+     not naming a population, which a narrative review does not have. A prompt that demands
+     one leaves the model inventing a population or naming nobody. */
+  const rec = {title: "Resistance training for cyclists: a review.", journal: "J",
+    abstract: "This review summarises the evidence on resistance training for cyclists."};
+  const rev = summaryPrompt(rec, "review", null);
+  const rct = summaryPrompt(rec, "rct", "trained");
+  ck("a pooled design is told it has no participants of its own",
+     /NO PARTICIPANTS OF ITS OWN/.test(rev), "");
+  ck("and is told to describe the studies instead", /describe the studies it draws on/.test(rev), "");
+  ck("IT IS GIVEN A WAY TO SAY THE POPULATION IS UNKNOWN, rather than having to invent one",
+     /participants are not reported/.test(rev), "");
+  ck("and told not to invent one", /Never invent a population/.test(rev), "");
+  ck("an experiment still gets the original instruction",
+     /NAME THE POPULATION in the sentence/.test(rct) && !/NO PARTICIPANTS OF ITS OWN/.test(rct), "");
+  ck("a meta-analysis counts as pooled",
+     /NO PARTICIPANTS OF ITS OWN/.test(summaryPrompt(rec, "meta", null)), "");
+  ck("and the ban on causal wording is unchanged by any of it",
+     /NOT A RANDOMISED EXPERIMENT/.test(rev), "");
+  /* AND THE ESCAPE HATCH MUST SATISFY THE CHECK IT EXISTS FOR, or the prompt is telling
+     the model to write something that will be rejected. */
+  const out = checkFaithful({
+    quickTakeaway: "This review reports that training was associated with better performance.",
+    whatTheyStudied: "The review summarises resistance training for cyclists.",
+    participants: "Not reported in the abstract.",
+    whatTheyFound: "The review reports an association with better performance.",
+    forLifters: "Across these studies, whose participants are not reported, this may be worth a look.",
+    limitations: ["A narrative review is not a pooled analysis.", "The included studies are not described."]
+  }, rec, "review").filter(x => /name the population/.test(x));
+  ck("the sentence the prompt suggests passes the check it exists for", out.length === 0,
+     JSON.stringify(out));
 }
 
 console.log("11 - AN OPERATION IS NOT A TRAINING STUDY");

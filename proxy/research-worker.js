@@ -468,8 +468,18 @@ const SUMMARY_SCHEMA = {
   required: ["quickTakeaway", "whatTheyStudied", "participants", "whatTheyFound",
              "forLifters", "limitations"]
 };
+/* THE PROMPT HAD ONE SHAPE AND THE LITERATURE HAS TWO. Six live runs produced fourteen
+   verified summaries — ten RCTs, two meta-analyses, two controlled trials — and failed
+   every single review, four for four, three of them on forLifters not naming a population.
+
+   That is not bad luck, it is a prompt that assumes the paper has participants. A narrative
+   review has none of its own: asked to name a population in a sentence, the model either
+   invents one or names nobody, and the check correctly rejects it either way. So the rules
+   about participants are written twice, once for a paper that ran an experiment and once
+   for a paper that read other people's. */
 function summaryPrompt(rec, type, population) {
   const observational = (type === "observational" || type === "review" || type === "mechanistic");
+  const pooled = (type === "review" || type === "meta" || type === "systematic");
   return [
     "You are summarising one scientific paper for experienced weight trainees.",
     "",
@@ -480,7 +490,9 @@ function summaryPrompt(rec, type, population) {
     observational
       ? "4. THIS IS NOT A RANDOMISED EXPERIMENT. Write \"was associated with\" or \"was linked to\". The words cause, causes, caused, leads to, results in, proves and increases-when-used-causally are forbidden."
       : "4. This was a randomised or controlled design, so hedged causal language is allowed, but keep it tied to this study (\"in this study\", \"in these participants\").",
-    "5. In forLifters, NAME THE POPULATION in the sentence, e.g. \"In untrained young men over 8 weeks...\". Use may, suggests, adds evidence that. Never proves, never \"you should\".",
+    pooled
+      ? "5. THIS PAPER HAS NO PARTICIPANTS OF ITS OWN. In participants, describe the studies it draws on \u2014 how many, in whom, over how long \u2014 exactly as the abstract reports them, and write \"Not reported in the abstract\" for anything it does not. In forLifters, say WHOSE EVIDENCE this is in the sentence: \"Across these studies, in trained men...\", or \"Across these studies, whose participants are not reported...\" if the abstract does not say. Never invent a population to fill the slot. Use may, suggests, adds evidence that. Never proves, never \"you should\"."
+      : "5. In forLifters, NAME THE POPULATION in the sentence, e.g. \"In untrained young men over 8 weeks...\". Use may, suggests, adds evidence that. Never proves, never \"you should\".",
     "6. One study is never general advice. No medical advice, no dosing beyond what the paper used, nothing extreme.",
     "7. limitations must be specific to THIS paper and non-empty. Draw on: small sample, short duration, untrained participants, a narrow population, limited exercise selection, self-reported measures, indirect measures, no long-term follow-up, stated conflicts of interest, and that one study is not a body of evidence.",
     "",
@@ -1231,7 +1243,7 @@ export default {
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
-  K_LAUNCH, K_REJECT, scoreModel, parseModelJson,
+  K_LAUNCH, K_REJECT, scoreModel, parseModelJson, summaryPrompt,
   summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
   resetSubreq: () => { SUBREQ = 0; RESOLVED = null; }
 };
