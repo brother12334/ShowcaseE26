@@ -478,6 +478,29 @@ now treats the platform's own error as the end of the run, reports `budgetWasWro
 the counted spend and the configured ceiling, and says to lower the setting. If you see
 that, either delete the secret or set it to 45.
 
+## 11B. Launched
+
+Shipped in **57.5** (`sw.js` 50.5). The order it happened in, which is the order it should
+happen in again if the store is ever rebuilt:
+
+1. Worker deployed with the launch gate shut, so nothing was servable whatever it contained.
+2. Runs until the store had enough papers to judge, fixing what each run exposed.
+3. `reset?stale=yes` to clear every summary written under a rule that had since changed —
+   verified afterwards by re-running the stale check over all of them and getting zero.
+4. Each remaining paper read against its own abstract, then approved individually.
+5. `launch?approved=true`.
+6. `RESEARCH_API` set in `index.html`, versions bumped, specs re-run.
+
+The feed went live with 18 approved papers: 13 RCTs, 3 meta-analyses, 1 controlled trial,
+1 review, 6 of them carrying an apply-to target. Two narrative reviews remain unpublished
+because the second pass rejected a sentence in each; they are in the store with their
+metadata and links and no summary, which is the designed outcome rather than a gap to fill.
+
+From here the gate's own rule governs: a plain trial publishes without review, a
+meta-analysis, a systematic review or anything actionable still waits for a human. The
+rollback is `RESEARCH_API = ""`, which removes the feature from the app without touching
+the store.
+
 ## 12. Judging a summary sentence
 
 Read the summary **next to the abstract**, one sentence at a time. For each sentence, one

@@ -66,36 +66,60 @@ await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000
 await p.evaluate(()=>{ S.seenNews = NEWS_FOR; saveQuiet(); });
 const ev = (fn,a)=> p.evaluate(fn,a);
 
-console.log("0 - AN UNCONFIGURED SERVICE IS NEVER CALLED");
+console.log("0 - THE SHIPPED SERVICE ADDRESS");
 {
-  /* RESEARCH_API SHIPS EMPTY AND THAT IS A SAFETY CATCH, not an oversight: while it is
-     blank the app must not reach for the network at all, so a deploy of the Worker cannot
-     put unreviewed summaries in front of anybody. The rest of this spec then overrides it
-     to exercise the feed, which is why this check comes first. */
-  const r = await ev(async ()=>{
-    const before = (window.__fetchCount || 0);
-    const conf = researchConfigured();
-    const api = RESEARCH_API;
-    await researchFetchFeed();
-    return {conf, api, err: RESEARCH_ERROR, loading: RESEARCH_LOADING};
-  });
-  ck("RESEARCH_API SHIPS EMPTY", r.api === "", JSON.stringify(r.api));
-  ck("so the app reports itself unconfigured", r.conf === false, String(r.conf));
-  ck("A FETCH WITH NO SERVICE DOES NOTHING AND IS NOT AN ERROR",
-     r.err === "" && r.loading === false, JSON.stringify(r));
-  const reqs = seen.filter(x=> /\/research\//.test(x.url)).length;
-  ck("and no research request was made at all", reqs === 0, String(reqs));
-  /* The screen says the honest thing rather than showing an error. */
-  const note = await ev(()=>{
-    goTab("research");
-    return (document.querySelector('.rs-note h3')||{}).textContent;
-  });
-  ck("the tab shows \"No papers yet\"", /No papers yet/.test(note || ""), note);
+  /* THIS USED TO ASSERT RESEARCH_API === "", which was right for exactly as long as the
+     launch gate was shut. The gate is now open: the Worker is deployed, the golden-set
+     review has been done, the papers in the store are approved one by one, and the app is
+     pointed at it. So the assertion that protected the pre-launch state is gone.
+
+     IT IS REPLACED WITH A STRICTLY STRONGER ONE, not deleted. An empty value was easy to
+     check and said nothing about what a non-empty one may be. These rules hold either way,
+     and each of them is a mistake that could otherwise ship unnoticed: a plain-http address
+     would put the feed on a downgradeable connection, a trailing slash or a path would make
+     every built URL wrong by one character, and a query string would mean a secret had been
+     pasted into a value that lives in a public file. */
+  const api = await ev(()=> RESEARCH_API);
+  ck("the address is set", typeof api === "string" && api.length > 0, JSON.stringify(api));
+  ck("IT IS HTTPS, so the feed cannot be read or rewritten in transit",
+     /^https:\/\//.test(api), JSON.stringify(api));
+  ck("it is an origin and nothing more \u2014 no path, no trailing slash",
+     /^https:\/\/[a-z0-9.-]+$/i.test(api), JSON.stringify(api));
+  ck("AND CARRIES NO QUERY OR CREDENTIAL, which a public file must never do",
+     api.indexOf("?") < 0 && api.indexOf("@") < 0 && !/token|key|secret/i.test(api),
+     JSON.stringify(api));
+  ck("so the app reports itself configured", (await ev(()=> researchConfigured())) === true, "");
 }
 
-/* FROM HERE ON the service is pointed at a stub, so the feed itself can be exercised.
-   Done by overriding the constant rather than by editing the file, so the shipped value
-   stays the empty one section 0 just asserted. */
+console.log("0B - AND AN UNCONFIGURED SERVICE IS STILL NEVER CALLED");
+{
+  /* The unconfigured path is not dead code now that the address is set: it is what the app
+     falls back to if the constant is ever cleared, and it is the reason a Worker deploy on
+     its own can never put unreviewed summaries in front of anybody. Driven through
+     researchBase() rather than the constant, which is why that indirection exists. */
+  const r = await ev(async ()=>{
+    const real = researchBase;
+    researchBase = ()=> "";
+    try{
+      RESEARCH_ERROR = "left over from before";
+      await researchFetchFeed();
+      goTab("research");
+      return {conf: researchConfigured(), err: RESEARCH_ERROR, loading: RESEARCH_LOADING,
+              note: (document.querySelector('.rs-note h3')||{}).textContent};
+    } finally { researchBase = real; }
+  });
+  ck("an empty address reports itself unconfigured", r.conf === false, String(r.conf));
+  ck("A FETCH WITH NO SERVICE DOES NOTHING AND IS NOT AN ERROR",
+     r.err === "" && r.loading === false, JSON.stringify(r));
+  ck("and it clears a stale error rather than leaving one on screen", r.err === "", r.err);
+  const reqs = seen.filter(x=> /\/research\//.test(x.url)).length;
+  ck("no research request was made at all", reqs === 0, String(reqs));
+  ck("the tab shows \"No papers yet\"", /No papers yet/.test(r.note || ""), r.note);
+}
+
+/* FROM HERE ON the service is pointed at a stub, so the feed itself can be exercised
+   against fixtures rather than against whatever the live store happens to hold today.
+   Done by overriding researchBase() rather than by editing the file. */
 await p.evaluate(()=>{
   researchBase = ()=> "https://element26-research.test.workers.dev";
 });
