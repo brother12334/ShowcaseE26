@@ -11,7 +11,8 @@ import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
        verify, needsApproval, launchApproved, servable, scoreModel, cardOf,
        parseModelJson, summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
-       resetSubreq, K_REJECT, summaryPrompt, subreqMax, BOILERPLATE} = __test;
+       resetSubreq, K_REJECT, summaryPrompt, subreqMax, BOILERPLATE,
+       summaryStale} = __test;
 import { readFileSync } from 'node:fs';
 
 let bad = 0;
@@ -486,6 +487,54 @@ console.log("10D - A LIMITATION THAT FITS ANY PAPER IS NOT A LIMITATION");
                   "Six weeks, with no long-term follow-up.",
                   "One study is not a body of evidence."]).length === 0, "");
   ck("an empty list still fails", limProblems([]).length === 1, "");
+}
+
+console.log("10E - A SUMMARY WRITTEN UNDER A RULE THAT HAS SINCE CHANGED");
+{
+  /* A reset only dropped records with NO summary, so five stored summaries still carried
+     "Small sample / Short duration / Untrained participants" after the rule changed under
+     them. I had written in the docs that a reset would re-run those. It would not. The
+     abstract is deliberately not kept, so most of checkFaithful cannot be re-run on a
+     stored record — but the limitations rule and the population rule read the summary
+     alone, and those are the two that changed. */
+  const good = {type: "rct", summary: {
+    forLifters: "In these trained men, the gain was small.",
+    limitations: ["Only 17 participants completed the trial.", "Six weeks, with no follow-up."]}};
+  ck("a summary that meets the current rules is not stale", summaryStale(good) === null,
+     String(summaryStale(good)));
+
+  const boiler = {type: "meta", summary: {
+    forLifters: "Across these studies, the effect was small.",
+    limitations: ["Small sample", "Short duration", "Untrained participants",
+                  "A narrow population", "One study is not a body of evidence"]}};
+  ck("THE EXACT FIVE LIMITATIONS THAT SURVIVED A RESET ARE NOW STALE",
+     /fewer than two specific limitations/.test(summaryStale(boiler) || ""),
+     String(summaryStale(boiler)));
+
+  const nopop = {type: "rct", summary: {
+    forLifters: "The gain was small and may not be worth the time.",
+    limitations: ["Only 17 participants completed the trial.", "Six weeks, with no follow-up."]}};
+  ck("so is one whose forLifters names nobody",
+     /name the population/.test(summaryStale(nopop) || ""), String(summaryStale(nopop)));
+  ck("and a pooled design may still name its studies",
+     summaryStale(Object.assign({}, boiler, {summary: Object.assign({}, boiler.summary,
+       {limitations: ["Four RCTs, three poolable (n = 161).", "All three raised concerns on RoB 2."]})})) === null, "");
+
+  ck("a record with no summary at all is not the stale case \u2014 the other rule covers it",
+     summaryStale({type: "rct", summary: null}) === null, "");
+
+  /* AND THE BUDGET THAT WAS SET ON A GUESS. I told the owner to raise SUBREQ_MAX to 400
+     without knowing the plan; the next run hit the platform limit of 50 while the guard
+     reported headroom. A ceiling set too high is worse than none. */
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  ck("THE PLATFORM'S OWN LIMIT ENDS A RUN CLEANLY, whatever the configured ceiling claims",
+     /too many subrequests/i.test(src) && /budgetWasWrong/.test(src), "");
+  ck("and it says to lower the setting rather than leaving a bare number",
+     /lower SUBREQ_MAX/.test(src), "");
+  ck("stale dropping is opt-in, so an ordinary reset is unchanged",
+     /url\.searchParams\.get\("stale"\) === "yes"/.test(src), "");
+  ck("AND AN APPROVED PAPER IS NEVER DROPPED AS STALE, whatever a rule says about it",
+     /if \(alsoStale && p\.approved !== true\)/.test(src), "");
 }
 
 console.log("11 - AN OPERATION IS NOT A TRAINING STUDY");

@@ -1070,6 +1070,18 @@ async function runPipeline(env, limit) {
         summary: null, approved: false
       };
       const s = await summarise(rec, type, sc.population, env);
+      /* THE CONFIGURED CEILING IS A BELIEF ABOUT THE PLAN, AND IT CAN BE WRONG. I told the
+         owner to raise SUBREQ_MAX to 400 without knowing which plan the account was on, and
+         the next run hit "Too many subrequests" at the real limit of 50 with the guard
+         reporting plenty of headroom. A budget set too high is worse than none, because the
+         run believes it is safe. So the platform's own error ends the run cleanly and says
+         so, which is true whatever the number happens to be. */
+      if (!s.ok && /too many subrequests/i.test(s.why || "")) {
+        stats.stoppedOnBudget = true;
+        stats.budgetWasWrong = "hit the platform limit at " + SUBREQ + " counted subrequests"
+          + " with a ceiling of " + SUBREQ_CEIL + " \u2014 lower SUBREQ_MAX";
+        break;
+      }
       if (s.ok) {
         paper.summary = s.sum;
         paper.verification.summary = s.verification;
@@ -1108,6 +1120,29 @@ async function sha256(s) {
 }
 
 /* ------------------------------------------------------- read routes */
+
+/* THE CHECKS THAT NEED ONLY THE SUMMARY, re-runnable on a stored record. The abstract is
+   deliberately not kept (copyright), so most of checkFaithful cannot be re-run later — but
+   the limitations rule and the population rule read the summary alone, and those are exactly
+   the two that have changed since the first summaries were written. Five stored summaries
+   still carry "Small sample / Short duration / Untrained participants" because a reset only
+   dropped records with NO summary, so a summary written under a superseded rule survived it.
+   I wrote in the docs that a reset would re-run those. It would not, and this is what makes
+   that true. */
+function summaryStale(p) {
+  const sum = p && p.summary;
+  if (!sum) return null;
+  const why = [];
+  const lim = Array.isArray(sum.limitations) ? sum.limitations.filter(x => x && x.length > 8) : [];
+  if (lim.filter(x => !BOILERPLATE.test(String(x).trim())).length < 2)
+    why.push("fewer than two specific limitations");
+  const who = String(sum.forLifters || "");
+  const pooled = ["meta", "systematic", "review"].indexOf(p.type) > -1;
+  if (!/trained|untrained|novice|beginner|men|women|male|female|participants|subjects|individuals|people|adults|older|lifters|trainees|athletes|cyclists|runners|not reported|unclear/i.test(who)
+      && !(pooled && /\bstudies\b|\btrials\b|\bliterature\b/i.test(who)))
+    why.push("forLifters does not name the population");
+  return why.length ? why.join("; ") : null;
+}
 
 /* THE ALLOWED ORIGINS, for the same reason gemini-worker.js has them: against a browser
    this is a wall, against a script it is a speed bump, and the rate limit below is what
@@ -1262,16 +1297,24 @@ export default {
        state, so nothing a human has already judged can be lost here. */
     if (url.pathname === "/research/reset" && isAdmin) {
       const rows = await readIndex(env);
-      const ids = [];
+      /* stale=yes ALSO drops summaries that the current checks would reject. Still never a
+         paper a human has approved: that one is their call, not a rule's. */
+      const alsoStale = url.searchParams.get("stale") === "yes";
+      const ids = [], staleWhy = {};
       for (const r of rows) {
         const raw = await env.RESEARCH.get(K_PAPER(r.id));
         const p = raw ? JSON.parse(raw) : null;
-        if (!p || (!p.summary && p.approved !== true)) ids.push(r.id);
+        if (!p || (!p.summary && p.approved !== true)) { ids.push(r.id); continue; }
+        if (alsoStale && p.approved !== true) {
+          const why = summaryStale(p);
+          if (why) { ids.push(r.id); staleWhy[r.id] = why; }
+        }
       }
       if (url.searchParams.get("confirm") !== "yes") {
         const rejNow = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
         return json({wouldDrop: ids.length, ids: ids.slice(0, 50),
                      wouldForgetRejections: rejNow.length,
+                     staleSummaries: alsoStale ? staleWhy : "not checked \u2014 add &stale=yes",
                      note: "nothing changed \u2014 pass ?confirm=yes to drop these"}, origin, 0);
       }
       const gone = new Set(ids);
@@ -1285,7 +1328,8 @@ export default {
       const rej = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
       await env.RESEARCH.delete(K_REJECT);
       return json({dropped: ids.length, ids, remaining: rows.length - ids.length,
-                   rejectionsForgotten: rej.length}, origin, 0);
+                   rejectionsForgotten: rej.length,
+                   staleSummaries: staleWhy}, origin, 0);
     }
     if (url.pathname === "/research/stats" && isAdmin) {
       const last = JSON.parse((await env.RESEARCH.get("stats:last")) || "{}");
@@ -1310,6 +1354,7 @@ export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
   K_LAUNCH, K_REJECT, scoreModel, parseModelJson, summaryPrompt, subreqMax, BOILERPLATE,
+  summaryStale,
   summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
   resetSubreq: () => { SUBREQ = 0; RESOLVED = null; }
 };

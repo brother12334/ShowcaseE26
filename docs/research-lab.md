@@ -423,7 +423,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (156) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (165) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
@@ -443,8 +443,29 @@ trial" — and `BOILERPLATE` in the Worker rejects the bare phrases, naming them
 failure so the retry has something to act on. "One study is not a body of evidence" is true
 and may still appear; it just does not count towards the two a summary must have.
 
-Any summary already stored was written under the old rule. A reset re-runs the ones that
-would now fail.
+Any summary already stored was written under the old rule, and a plain reset does **not**
+re-run those — it only drops records with no summary at all. That is what
+`&stale=yes` is for:
+
+```
+GET /research/reset?token=…&stale=yes                 # dry run, lists each one and why
+GET /research/reset?token=…&stale=yes&confirm=yes
+```
+
+It re-applies the two checks that read the summary alone — the limitations rule and the
+population rule — and drops what fails. It cannot re-apply the rest of `checkFaithful`,
+because the abstract is deliberately not stored, so a number or a causal verb cannot be
+re-judged without re-fetching. An approved paper is never dropped as stale: that one is a
+human's call, not a rule's.
+
+### SUBREQ_MAX set too high is worse than not setting it
+
+Raising the ceiling to 400 on a free-plan account produced
+`Too many subrequests by single Worker invocation` at the real limit of 50 while the guard
+still reported plenty of headroom — a budget the run believes is safe but is not. The run
+now treats the platform's own error as the end of the run, reports `budgetWasWrong` naming
+the counted spend and the configured ceiling, and says to lower the setting. If you see
+that, either delete the secret or set it to 45.
 
 ## 12. Judging a summary sentence
 
