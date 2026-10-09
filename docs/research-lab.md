@@ -371,13 +371,14 @@ Each of these was invisible to the fixtures and only appeared against the real A
 | a post-arthroplasty rehab study summarised | the list covered diseases, not operations | `arthroplasty`, `osteoarthritis`, `postoperative`, … |
 | "second pass rejected 1 of 8 sentences" ×5 | the documented send-back was never written | one retry quoting the rejected sentences back |
 | `Too many subrequests by single Worker invocation` | no budget; the run stopped mid-paper | `SUBREQ_MAX`, and a run only starts a paper it can finish |
+| `causal wording in forLifters on a review design` | the check loop's retry re-sent an identical prompt, so at temperature 0 it failed identically | the check's own reasons are quoted back into the rewrite |
 
 ## 11. Tests
 
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (83) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (88) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes

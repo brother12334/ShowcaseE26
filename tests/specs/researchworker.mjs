@@ -431,7 +431,7 @@ console.log("13 - ONE DRIFTING SENTENCE DOES NOT COST A PAPER ITS SUMMARY");
   const models = {ok: true, status: 200, json: async ()=> ({models: [
     {name: "models/gemini-flash-latest", supportedGenerationMethods: ["generateContent"]}]})};
   const realFetch = globalThis.fetch;
-  const run = async replies => {
+  const run = async (replies, type) => {
     const calls = [];
     globalThis.fetch = async (u, init) => {
       const url = String(u);
@@ -440,7 +440,7 @@ console.log("13 - ONE DRIFTING SENTENCE DOES NOT COST A PAPER ITS SUMMARY");
       return reply(replies.shift());
     };
     resetSubreq();
-    const out = await summarise(rec, "rct", "trained", {GEMINI_API_KEY: "k"});
+    const out = await summarise(rec, type || "rct", "trained", {GEMINI_API_KEY: "k"});
     return {out, calls};
   };
   const allGood = n => JSON.stringify(Array.from({length: n}, (_, i)=> ({i: i+1, verdict: "supported"})));
@@ -460,6 +460,27 @@ console.log("13 - ONE DRIFTING SENTENCE DOES NOT COST A PAPER ITS SUMMARY");
      String(b.calls.length) + " :: " + String(b.calls[2] || "").slice(-400));
   ck("the retry is a fresh summary call, so temperature zero cannot repeat itself",
      b.calls[2] !== b.calls[0], "");
+
+  /* THE SAME DEFECT LIVED IN THE CHECK LOOP. It re-sent the identical prompt, which at
+     temperature 0 returns the identical summary — the retry was spent for nothing, and the
+     fourth live run lost a narrative review to "causal wording in forLifters on a review
+     design" that way. */
+  const causal = Object.assign(sum(), {forLifters:
+    "In these trained men, a higher weekly set count causes slightly more growth."});
+  const d = await run([JSON.stringify(causal), JSON.stringify(sum()), allGood(5)], "review");
+  ck("A FAILED CHECK IS ALSO SENT BACK WITH ITS REASON", d.out.ok === true,
+     JSON.stringify(d.out.why || ""));
+  ck("and the second prompt quotes the check's own words",
+     /rejected by an automated check/.test(d.calls[1] || "")
+     && /causal wording in forLifters/.test(d.calls[1] || ""),
+     String(d.calls[1] || "").slice(-400));
+  ck("so the retry cannot be a verbatim repeat of the first prompt",
+     d.calls[1] !== d.calls[0], "");
+  const e = await run([JSON.stringify(causal), JSON.stringify(causal)], "review");
+  ck("causal wording is allowed on an RCT and rejected on a review",
+     (await run([JSON.stringify(causal), allGood(5)], "rct")).out.ok === true, "");
+  ck("two failed checks still reject", e.out.ok === false && /failed the checks/.test(e.out.why),
+     JSON.stringify(e.out.why || ""));
 
   const c = await run([JSON.stringify(sum()), oneBad(5), JSON.stringify(sum()), oneBad(5)]);
   ck("A SECOND FAILURE STILL REJECTS, so the loop cannot run for ever", c.out.ok === false,

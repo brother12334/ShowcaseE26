@@ -745,11 +745,26 @@ function parseModelJson(raw) {
    everybody from the same record — never per user, never per request. That is both the
    cost control and the reason two people reading the same paper see the same words. */
 async function summarise(rec, type, population, env) {
+  /* TWO ATTEMPTS, AND THE SECOND ONE IS TOLD WHAT WAS WRONG WITH THE FIRST. It used to
+     re-send the identical prompt, which at temperature 0 returns the identical summary and
+     fails the identical check — the attempt was spent for nothing. The fourth live run lost
+     a narrative review to "causal wording in forLifters on a review design" with that
+     wasted retry behind it, the same defect the second pass had. The problems are now
+     quoted back, in the mechanical terms checkFaithful reports them in, so the rewrite has
+     something to act on. */
   let sum = null, problems = [], attempt = 0;
   while (attempt < 2) {
     attempt++;
+    let prompt = summaryPrompt(rec, type, population);
+    if (problems.length) prompt += [
+      "",
+      "Your previous answer was rejected by an automated check for these reasons:",
+      problems.map(x => "- " + x).join("\n"),
+      "",
+      "Write the summary again with each of those corrected. Change nothing else."
+    ].join("\n");
     let raw;
-    try { raw = await gemini(summaryPrompt(rec, type, population), env, SUMMARY_SCHEMA); }
+    try { raw = await gemini(prompt, env, SUMMARY_SCHEMA); }
     catch (e) { return {ok: false, why: "summary call failed: " + e.message}; }
     const parsed = parseModelJson(raw);
     if (!parsed.ok) { problems = [parsed.why]; continue; }
@@ -822,6 +837,9 @@ async function secondPass(vp, rec, env) {
     });
     verdicts = JSON.parse(raw);
   } catch (e) { verdicts = []; }
+  /* AN ANSWER THAT IS NOT A LIST OF VERDICTS IS NOT A VERDICT. Without this, a model that
+     wrapped its array in an object threw inside the pipeline rather than failing one paper. */
+  if (!Array.isArray(verdicts)) verdicts = [];
   return (verdicts || []).filter(v => v && /unsupported/i.test(v.verdict || ""));
 }
 
