@@ -344,12 +344,40 @@ shipping takes the whole feature off the app without touching the store.
 Admin routes are `GET` with `?token=`, which is fine for a hand-run review from one
 owner's browser and would not be fine for anything multi-user.
 
+### Clearing records a fixed bug broke
+
+A paper is summarised once and never revisited, which means a paper whose summary failed
+under a bug has no route back: its id is in the index, so no later run will look at it
+again. `GET /research/reset?token=…` lists the records that have **no summary and are not
+approved**; adding `&confirm=yes` drops exactly those from the store, the index and the
+queue so the next run re-fetches them and puts them through the current code.
+
+A paper that *has* a summary is never touched, whatever its approval state, so nothing a
+human has already judged can be lost this way.
+
+### What the first four live runs found
+
+Each of these was invisible to the fixtures and only appeared against the real API:
+
+| symptom | cause | fix |
+|---|---|---|
+| `gemini 404` on every paper | a hardcoded model name, retired for this key | the resolver ported from `gemini-worker.js` |
+| 14 unapproved papers served | `cardOf()` dropped `approved`; `servable()` tested `!== false` | both now require `=== true` |
+| every paper "actionable" with a nonsense target | `applyTo` matched bare words in the abstract | title-only matching |
+| a muscular dystrophy paper in the feed | the exclusion list had no dystrophies | `dystroph`, `myopath`, and the rest |
+| `population: null` on 12 of 14 | `"untrained"` contains `"trained"` | untrained tested first, plus a lookbehind |
+| `gemini 503` on five papers | retry covered only 404 and 429 | `RETRYABLE = [404,429,500,502,503,504]` |
+| "summary was not valid JSON" ×3 | a 1400-token ceiling spent on reasoning | 8192, and `parseModelJson()` naming what it saw |
+| a post-arthroplasty rehab study summarised | the list covered diseases, not operations | `arthroplasty`, `osteoarthritis`, `postoperative`, … |
+| "second pass rejected 1 of 8 sentences" ×5 | the documented send-back was never written | one retry quoting the rejected sentences back |
+| `Too many subrequests by single Worker invocation` | no budget; the run stopped mid-paper | `SUBREQ_MAX`, and a run only starts a paper it can finish |
+
 ## 11. Tests
 
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (52) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, approval gating |
+| `tests/specs/researchworker.mjs` (83) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes

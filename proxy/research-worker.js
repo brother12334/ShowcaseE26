@@ -100,10 +100,27 @@ const BLOCKED_TYPES = ["Retracted Publication", "Retraction of Publication",
 /* ------------------------------------------------------- 1. discover */
 
 let lastNcbi = 0;
+/* THE SUBREQUEST BUDGET. A Worker invocation may make a bounded number of outbound
+   fetches, and the third live run died on "Too many subrequests by single Worker
+   invocation" with papers still queued — the run had spent its allowance on esearch,
+   efetch, Crossref and two Gemini calls per paper and then simply stopped, mid-paper,
+   with no record of why beyond one paper's summaryFailed.
+
+   The fix is a counter and a floor, not a larger plan. Every outbound fetch increments
+   SUBREQ; runPipeline stops starting new papers once fewer than PER_PAPER_SUBREQ remain
+   below the ceiling, so an invocation always ends on a whole paper and the rest is picked
+   up by the next run. 45 is the free-plan ceiling of 50 with five in hand for the index
+   and queue writes that follow the loop. */
+const SUBREQ_MAX = 45;
+const PER_PAPER_SUBREQ = 8;
+let SUBREQ = 0;
+function subreqLeft(){ return SUBREQ_MAX - SUBREQ; }
+
 async function paced(fn){
   const wait = Math.max(0, NCBI_GAP_MS - (Date.now() - lastNcbi));
   if (wait) await new Promise(r => setTimeout(r, wait));
   lastNcbi = Date.now();
+  SUBREQ++;
   return fn();
 }
 function ncbiUrl(path, params, env) {
@@ -211,6 +228,7 @@ function titleAgrees(a, b) {
 }
 async function crossref(doi) {
   if (!doi) return null;
+  SUBREQ++;
   const r = await fetch(CROSSREF + "/" + encodeURIComponent(doi), {
     headers: {"accept": "application/json", "user-agent": NCBI_TOOL + " (" + NCBI_EMAIL + ")"}
   });
@@ -292,7 +310,14 @@ const NEVER = [
      dystrophies or myopathies at all. */
   "dystroph", "myopath", "myositis", "neuromuscular disease", "muscle wasting disease",
   "amyotrophic", "fibromyalgia", "rheumatoid", "haemophilia", "hemophilia",
-  "transplant", "hiv", "chronic kidney"
+  "transplant", "hiv", "chronic kidney",
+  /* ADDED AFTER THE THIRD LIVE RUN, which surfaced "The effectiveness of resistance
+     training for patients with degenerative arthritis after total joint arthroplasty".
+     Post-surgical rehabilitation is a clinical protocol prescribed by the surgeon who did
+     the operation. It is not training advice, and the only reason it reached the summary
+     stage is that the list covered diseases and not operations. */
+  "arthroplasty", "osteoarthritis", "degenerative arthritis", "joint replacement",
+  "rotator cuff repair", "ligament reconstruction", "postoperative", "post-operative"
 ];
 /* COULD A LIFTER DO SOMETHING WITH IT? This flag drives the feed's first ranking key and
    whether "Apply to my training" appears at all, so it is deliberately conservative:
@@ -587,6 +612,7 @@ const RESOLVE_TTL_MS = 60 * 60 * 1000;
 async function availableModels(key) {
   let r;
   try {
+    SUBREQ++;
     r = await fetch(GEMINI_API + "/models?pageSize=200", {headers: {"x-goog-api-key": key}});
   } catch (e) { return []; }
   if (!r.ok) return [];
@@ -653,6 +679,7 @@ async function gemini(prompt, env, schema) {
     const model = await resolveModel(env, tried);
     if (!model) throw new Error("no usable Gemini model for this key");
     tried = model;
+    SUBREQ++;
     const r = await fetch(GEMINI + "/" + model + ":generateContent", {
       method: "POST",
       headers: {"content-type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY},
@@ -734,8 +761,59 @@ async function summarise(rec, type, population, env) {
 
   /* AND THEN THE INDEPENDENT READ. A single unsupported sentence sends it back once; a
      second failure rejects the summary and the paper is published with its metadata and
-     link only, which is honest and still useful. */
-  const vp = verifyPrompt(sum, rec);
+     link only, which is honest and still useful.
+
+     THAT SENDING-BACK WAS DESCRIBED HERE AND NEVER WRITTEN. The third live run rejected
+     five papers on "second pass rejected 1 of 8 sentences" and similar: the generated
+     summary was fine in seven or nine sentences out of eight or ten, one paraphrase drifted,
+     and the paper lost its summary with no second chance — exactly the behaviour this
+     comment said did not happen.
+
+     A bare retry would also have been useless, because the generator runs at temperature 0
+     and would have returned the same words. So the retry has to carry the verdict: the
+     rejected sentences are quoted back and the model is told to rewrite those claims so
+     each one is stated in the source or drop them. Only if the fresh summary fails the
+     checks or the second pass again is the paper published without one. */
+  let vp = verifyPrompt(sum, rec), pass = 0, unsupported = [];
+  while (pass < 2) {
+    pass++;
+    unsupported = await secondPass(vp, rec, env);
+    if (!unsupported.length) {
+      return {ok: true, sum, verification: {checked: vp.sentences.length, unsupported: [],
+              at: Date.now(), model: (RESOLVED && RESOLVED.name) || "unknown"}};
+    }
+    if (pass === 2) break;
+    const quoted = unsupported
+      .map(v => vp.sentences[(v.i | 0) - 1]).filter(Boolean)
+      .map(x => "- " + x).join("\n");
+    if (!quoted) break;
+    let raw;
+    try {
+      raw = await gemini(summaryPrompt(rec, type, population) + [
+        "",
+        "A reviewer read your previous answer against the source and marked these sentences",
+        "as not supported by it:",
+        quoted,
+        "",
+        "Write the summary again. Each of those claims must either be restated so that the",
+        "source says it, or left out. Do not add anything new to replace it."
+      ].join("\n"), env, SUMMARY_SCHEMA);
+    } catch (e) { break; }
+    const again = parseModelJson(raw);
+    if (!again.ok) break;
+    const probs = checkFaithful(again.value, rec, type);
+    if (probs.length) break;
+    sum = again.value;
+    vp = verifyPrompt(sum, rec);
+  }
+  return {ok: false, why: "second pass rejected " + unsupported.length + " of "
+    + vp.sentences.length + " sentences after " + pass + (pass === 1 ? " pass" : " passes"), sum,
+    verification: {checked: vp.sentences.length, unsupported: unsupported.map(v => v.i)}};
+}
+
+/* ONE QUESTION PER SENTENCE, asked of a model that sees the source and the summary and
+   nothing else. Split out of summarise() so the retry above can ask it twice. */
+async function secondPass(vp, rec, env) {
   let verdicts = [];
   try {
     const raw = await gemini(vp.prompt, env, {
@@ -744,14 +822,7 @@ async function summarise(rec, type, population, env) {
     });
     verdicts = JSON.parse(raw);
   } catch (e) { verdicts = []; }
-  const unsupported = (verdicts || []).filter(v => v && /unsupported/i.test(v.verdict || ""));
-  if (unsupported.length) {
-    return {ok: false, why: "second pass rejected " + unsupported.length + " of "
-      + vp.sentences.length + " sentences", sum,
-      verification: {checked: vp.sentences.length, unsupported: unsupported.map(v => v.i)}};
-  }
-  return {ok: true, sum, verification: {checked: vp.sentences.length, unsupported: [],
-          at: Date.now(), model: (RESOLVED && RESOLVED.name) || "unknown"}};
+  return (verdicts || []).filter(v => v && /unsupported/i.test(v.verdict || ""));
 }
 
 /* ------------------------------------------------------- storage */
@@ -839,6 +910,10 @@ function needsApproval(p, launched) {
   return p.type === "meta" || p.type === "systematic" || !!p.applyTo;
 }
 async function runPipeline(env, limit) {
+  /* RESET PER RUN, because module-level state survives in a warm isolate: a second run in
+     the same isolate would otherwise start with the first run's spend already on the clock
+     and process nothing at all. */
+  SUBREQ = 0;
   const launched = await launchApproved(env);
   const seen = await readIndex(env);
   const have = new Set(seen.map(x => x.id));
@@ -848,6 +923,7 @@ async function runPipeline(env, limit) {
 
   for (const spec of QUERIES) {
     if (stats.kept + stats.pending >= (limit || 20)) break;
+    if (subreqLeft() < PER_PAPER_SUBREQ) { stats.stoppedOnBudget = true; break; }
     let ids = [];
     try { ids = await esearch(spec.q, env); } catch (e) { continue; }
     const fresh = ids.filter(id => !have.has("pm" + id));
@@ -856,6 +932,7 @@ async function runPipeline(env, limit) {
     try { recs = await efetch(fresh.slice(0, 6), env); } catch (e) { continue; }
 
     for (const rec of recs) {
+      if (subreqLeft() < PER_PAPER_SUBREQ) { stats.stoppedOnBudget = true; break; }
       stats.found++;
       const v = await verify(rec);
       if (!v.ok) { drop(v.fail[0] || "verification"); continue; }
@@ -1061,6 +1138,33 @@ export default {
     if (url.pathname === "/research/run" && isAdmin) {
       return json(await runPipeline(env, Number(url.searchParams.get("n") || 6)), origin, 0);
     }
+    /* CLEARING THE FAILED RECORDS, which is a real need rather than a convenience. A paper
+       is written once and never revisited, so a paper whose summary failed under a bug that
+       has since been fixed stays broken for ever: it is in the index, it carries whatever
+       metadata the old code derived, and no later run will touch it because its id is
+       already known. This drops exactly those records — no summary, not approved — from the
+       store, the index and the queue, so the next run re-fetches them and puts them through
+       the current code. A paper that HAS a summary is never touched, whatever its approval
+       state, so nothing a human has already judged can be lost here. */
+    if (url.pathname === "/research/reset" && isAdmin) {
+      const rows = await readIndex(env);
+      const ids = [];
+      for (const r of rows) {
+        const raw = await env.RESEARCH.get(K_PAPER(r.id));
+        const p = raw ? JSON.parse(raw) : null;
+        if (!p || (!p.summary && p.approved !== true)) ids.push(r.id);
+      }
+      if (url.searchParams.get("confirm") !== "yes") {
+        return json({wouldDrop: ids.length, ids: ids.slice(0, 50),
+                     note: "nothing changed \u2014 pass ?confirm=yes to drop these"}, origin, 0);
+      }
+      const gone = new Set(ids);
+      for (const id of ids) await env.RESEARCH.delete(K_PAPER(id));
+      await writeIndex(env, rows.filter(r => !gone.has(r.id)));
+      const q = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
+      await env.RESEARCH.put(K_QUEUE, JSON.stringify(q.filter(id => !gone.has(id))));
+      return json({dropped: ids.length, ids, remaining: rows.length - ids.length}, origin, 0);
+    }
     if (url.pathname === "/research/stats" && isAdmin) {
       return json(JSON.parse((await env.RESEARCH.get("stats:last")) || "{}"), origin, 0);
     }
@@ -1075,5 +1179,7 @@ export default {
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
-  K_LAUNCH, scoreModel, parseModelJson
+  K_LAUNCH, scoreModel, parseModelJson,
+  summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
+  resetSubreq: () => { SUBREQ = 0; RESOLVED = null; }
 };

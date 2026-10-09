@@ -10,7 +10,8 @@
 import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
        verify, needsApproval, launchApproved, servable, scoreModel, cardOf,
-       parseModelJson} = __test;
+       parseModelJson, summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
+       resetSubreq} = __test;
 
 let bad = 0;
 const ck = (n, c, extra)=>{ console.log((c?"  ok  ":"  BROKEN  ")+n+(c?"":" :: "+(extra||""))); if(!c) bad++; };
@@ -370,6 +371,104 @@ console.log("10 - DATES");
   ck("a month number parses", monthNum("3") === 3, String(monthNum("3")));
   ck("nonsense is null rather than a guess", monthNum("Smarch") === null, String(monthNum("Smarch")));
   ck("and a missing month is null", monthNum(null) === null, String(monthNum(null)));
+}
+
+console.log("11 - AN OPERATION IS NOT A TRAINING STUDY");
+{
+  /* The third live run put "The effectiveness of resistance training for patients with
+     degenerative arthritis after total joint arthroplasty" all the way through to the
+     summary stage. The exclusion list covered diseases and not operations. */
+  const surg = {pmid: "1", title: "The effectiveness of resistance training for patients with "
+    + "degenerative arthritis after total joint arthroplasty: a pilot randomized controlled study.",
+    abstract: "Patients underwent resistance training after total joint arthroplasty.",
+    types: ["Randomized Controlled Trial"], journal: "J", authors: ["A"], year: "2026"};
+  const sc = screen(surg, "hypertrophy");
+  ck("A POST-SURGICAL REHABILITATION STUDY IS EXCLUDED", sc.ok === false, JSON.stringify(sc));
+  ck("and the reason names the excluded context", /arthroplasty|arthritis/.test(sc.why || ""), sc.why);
+  const oa = Object.assign({}, surg, {title: "Resistance training in knee osteoarthritis.",
+    abstract: "Adults with knee osteoarthritis performed resistance training."});
+  ck("osteoarthritis too", screen(oa, "hypertrophy").ok === false, "");
+  /* AND THE LIST MUST NOT HAVE BECOME SO WIDE IT EATS ORDINARY TRAINING RESEARCH. */
+  const fine = {pmid: "2", title: "Effects of resistance training volume on hypertrophy in trained men.",
+    abstract: "Trained men performed resistance training at 12 or 24 sets per week for 8 weeks.",
+    types: ["Randomized Controlled Trial"], journal: "J", authors: ["A"], year: "2026"};
+  ck("a normal training study is still kept", screen(fine, "hypertrophy").ok === true,
+     JSON.stringify(screen(fine, "hypertrophy")));
+}
+
+console.log("12 - THE SUBREQUEST BUDGET");
+{
+  /* The third live run ended on "Too many subrequests by single Worker invocation" with
+     papers still queued and no record of why. */
+  ck("the ceiling leaves headroom under the platform limit of 50",
+     SUBREQ_MAX > 0 && SUBREQ_MAX <= 48, String(SUBREQ_MAX));
+  ck("and a whole paper's worth is reserved before one is started",
+     PER_PAPER_SUBREQ >= 4 && PER_PAPER_SUBREQ < SUBREQ_MAX, String(PER_PAPER_SUBREQ));
+  resetSubreq();
+  ck("a reset run starts with its full allowance", subreqLeft() === SUBREQ_MAX, String(subreqLeft()));
+}
+
+console.log("13 - ONE DRIFTING SENTENCE DOES NOT COST A PAPER ITS SUMMARY");
+{
+  /* Five papers in the third live run were rejected on "second pass rejected 1 of 8
+     sentences". The comment above summarise() said a single unsupported sentence was sent
+     back once. It was not: the code rejected on the first verdict. These tests drive
+     summarise() with a stubbed fetch so the retry is exercised rather than described. */
+  const rec = {pmid: "3", title: "Resistance training volume and hypertrophy in trained men.",
+    abstract: "Twenty trained men performed 12 or 24 sets per week for 8 weeks. "
+      + "Muscle thickness increased 0.14 cm in the higher volume group.",
+    journal: "J", authors: ["A"], year: "2026"};
+  const sum = ok => ({
+    quickTakeaway: "In this study, higher weekly set counts were associated with more growth.",
+    whatTheyStudied: "The study compared two weekly set counts for muscle thickness.",
+    participants: "Twenty trained men took part over 8 weeks.",
+    whatTheyFound: "Muscle thickness increased 0.14 cm in the higher volume group.",
+    forLifters: "In these trained men, a higher weekly set count went with slightly more growth.",
+    limitations: ["Only trained men were studied.", "Muscle thickness is one measure of size."]
+  });
+  const reply = text => ({ok: true, status: 200, json: async ()=> ({
+    candidates: [{content: {parts: [{text}]}}]})});
+  const models = {ok: true, status: 200, json: async ()=> ({models: [
+    {name: "models/gemini-flash-latest", supportedGenerationMethods: ["generateContent"]}]})};
+  const realFetch = globalThis.fetch;
+  const run = async replies => {
+    const calls = [];
+    globalThis.fetch = async (u, init) => {
+      const url = String(u);
+      if (url.indexOf("generateContent") < 0) return models;
+      calls.push(JSON.parse(init.body).contents[0].parts[0].text);
+      return reply(replies.shift());
+    };
+    resetSubreq();
+    const out = await summarise(rec, "rct", "trained", {GEMINI_API_KEY: "k"});
+    return {out, calls};
+  };
+  const allGood = n => JSON.stringify(Array.from({length: n}, (_, i)=> ({i: i+1, verdict: "supported"})));
+  const oneBad = n => JSON.stringify(Array.from({length: n},
+    (_, i)=> ({i: i+1, verdict: i === 0 ? "unsupported" : "supported"})));
+
+  const a = await run([JSON.stringify(sum()), allGood(5)]);
+  ck("a summary every sentence of which is supported passes", a.out.ok === true,
+     JSON.stringify(a.out.why || ""));
+
+  const b = await run([JSON.stringify(sum()), oneBad(5), JSON.stringify(sum()), allGood(5)]);
+  ck("ONE UNSUPPORTED SENTENCE IS SENT BACK, NOT REJECTED", b.out.ok === true,
+     JSON.stringify(b.out.why || ""));
+  ck("and the retry quotes the rejected sentence to the model",
+     b.calls.length === 4 && /not supported by it/.test(b.calls[2])
+     && b.calls[2].indexOf("higher weekly set counts were associated") > -1,
+     String(b.calls.length) + " :: " + String(b.calls[2] || "").slice(-400));
+  ck("the retry is a fresh summary call, so temperature zero cannot repeat itself",
+     b.calls[2] !== b.calls[0], "");
+
+  const c = await run([JSON.stringify(sum()), oneBad(5), JSON.stringify(sum()), oneBad(5)]);
+  ck("A SECOND FAILURE STILL REJECTS, so the loop cannot run for ever", c.out.ok === false,
+     JSON.stringify(c.out));
+  ck("and the reason says how many passes were spent", /after 2 passes/.test(c.out.why || ""),
+     c.out.why);
+  ck("the paper keeps its metadata either way", c.out.sum && !!c.out.sum.forLifters, "");
+  ck("every call was counted against the budget", subreqLeft() < SUBREQ_MAX, String(subreqLeft()));
+  globalThis.fetch = realFetch;
 }
 
 console.log(bad ? "BROKEN: " + bad : "all good");
