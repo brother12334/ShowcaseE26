@@ -376,6 +376,29 @@ Each of these was invisible to the fixtures and only appeared against the real A
 | an identical `found 12, dropped 6` every run | only accepted papers entered the index, so excluded ones were re-fetched and re-screened daily | `reject:v1`, cleared by a reset |
 | every review rejected, 4 of 4, while 14 experiments passed | the prompt assumed the paper had participants, so a narrative review had to invent a population or name none | the participant rules are written twice, once for a design that ran an experiment and once for one that pooled others |
 | no way to tell whether the rejection memory worked | neither the run nor the store reported a count, so a claim about it could not be checked | `rejectsKnown` and `rejectsAdded` per run, `rejectsRemembered` in `/research/stats` |
+| every run ending on `stoppedOnBudget` after four or five papers | the free-plan subrequest ceiling was hardcoded, and the paid limit is twenty times higher | `SUBREQ_MAX` is a var; the cautious value stays the default |
+
+The counters settled the rejection question: a run reported `rejectsKnown: 5` with
+`rejectsAdded: 9`, and the store then reported `rejectsRemembered: 14`. The list persists
+across runs and accumulates.
+
+One anomaly is unexplained and worth knowing about: a reset run minutes after a run that
+dropped eight papers reported `rejectionsForgotten: 0`. The most likely cause is KV
+read-after-write staleness rather than a lost write, since the same mechanism demonstrably
+persisted five ids across the next two runs — but it has not been reproduced or confirmed,
+so treat a zero there as "possibly stale" rather than "nothing was stored".
+
+### Raising the subrequest ceiling
+
+Every run ends on `stoppedOnBudget` with the default of 45, which is the free plan's limit.
+On a paid Workers plan the limit is 1000, so the ceiling can be raised without a code change:
+
+```
+wrangler secret put SUBREQ_MAX --config wrangler.research.toml      # then enter e.g. 400
+```
+
+A value below 10, above 900, or unparseable is ignored in favour of the safe default. Each
+run reports the ceiling it used as `subreqCeiling`.
 
 ### What a strict check costs, and why it stays strict
 
@@ -399,7 +422,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (142) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (147) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes

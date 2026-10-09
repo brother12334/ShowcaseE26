@@ -11,7 +11,7 @@ import { __test } from '../../proxy/research-worker.js';
 const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
        verify, needsApproval, launchApproved, servable, scoreModel, cardOf,
        parseModelJson, summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
-       resetSubreq, K_REJECT, summaryPrompt} = __test;
+       resetSubreq, K_REJECT, summaryPrompt, subreqMax} = __test;
 import { readFileSync } from 'node:fs';
 
 let bad = 0;
@@ -473,6 +473,15 @@ console.log("12 - THE SUBREQUEST BUDGET");
      PER_PAPER_SUBREQ >= 4 && PER_PAPER_SUBREQ < SUBREQ_MAX, String(PER_PAPER_SUBREQ));
   resetSubreq();
   ck("a reset run starts with its full allowance", subreqLeft() === SUBREQ_MAX, String(subreqLeft()));
+  /* 45 is the FREE-plan ceiling and the paid one is twenty times higher, so the cautious
+     default must not be the only option — every run was ending on stoppedOnBudget after
+     four or five papers whether it had to or not. */
+  ck("the default holds when nothing is configured", subreqMax({}) === SUBREQ_MAX, String(subreqMax({})));
+  ck("AND IT CAN BE RAISED WITHOUT A CODE CHANGE", subreqMax({SUBREQ_MAX: "400"}) === 400,
+     String(subreqMax({SUBREQ_MAX: "400"})));
+  ck("nonsense falls back to the safe value", subreqMax({SUBREQ_MAX: "banana"}) === SUBREQ_MAX, "");
+  ck("so does an absurdly high value", subreqMax({SUBREQ_MAX: "99999"}) === SUBREQ_MAX, "");
+  ck("and one too low to finish a paper", subreqMax({SUBREQ_MAX: "2"}) === SUBREQ_MAX, "");
 }
 
 console.log("12B - A REJECTION IS A RESULT AND IS REMEMBERED");

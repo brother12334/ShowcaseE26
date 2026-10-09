@@ -112,9 +112,21 @@ let lastNcbi = 0;
    up by the next run. 45 is the free-plan ceiling of 50 with five in hand for the index
    and queue writes that follow the loop. */
 const SUBREQ_MAX = 45;
+/* 45 IS THE FREE-PLAN CEILING, AND I DO NOT KNOW WHICH PLAN THIS ACCOUNT IS ON. The paid
+   limit is twenty times higher, so hardcoding the cautious number means every run ends on
+   stoppedOnBudget after four or five papers whether it had to or not. The safe value stays
+   the default and the ceiling is a plain var, so raising it is one wrangler command and no
+   code change:
+     wrangler secret put SUBREQ_MAX --config wrangler.research.toml   (or a [vars] entry)
+   An unparseable or absurd value is ignored rather than trusted. */
+function subreqMax(env) {
+  const n = Number(env && env.SUBREQ_MAX);
+  return (isFinite(n) && n >= 10 && n <= 900) ? Math.floor(n) : SUBREQ_MAX;
+}
 const PER_PAPER_SUBREQ = 8;
 let SUBREQ = 0;
-function subreqLeft(){ return SUBREQ_MAX - SUBREQ; }
+let SUBREQ_CEIL = SUBREQ_MAX;
+function subreqLeft(){ return SUBREQ_CEIL - SUBREQ; }
 
 async function paced(fn){
   const wait = Math.max(0, NCBI_GAP_MS - (Date.now() - lastNcbi));
@@ -966,6 +978,7 @@ async function runPipeline(env, limit) {
      the same isolate would otherwise start with the first run's spend already on the clock
      and process nothing at all. */
   SUBREQ = 0;
+  SUBREQ_CEIL = subreqMax(env);
   const launched = await launchApproved(env);
   const seen = await readIndex(env);
   const rejected = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
@@ -980,7 +993,8 @@ async function runPipeline(env, limit) {
      the opposite. Neither the run nor the store said how many ids were remembered, so there
      was nothing to check the claim against. Now there is. */
   const stats = {found: 0, dropped: 0, kept: 0, pending: 0, nosum: 0, reasons: {},
-                 rejectsKnown: rejected.length, rejectsAdded: 0};
+                 rejectsKnown: rejected.length, rejectsAdded: 0,
+                 subreqCeiling: SUBREQ_CEIL};
   const drop = why => { stats.dropped++; stats.reasons[why] = (stats.reasons[why] || 0) + 1; };
 
   for (const spec of QUERIES) {
@@ -1262,7 +1276,7 @@ export default {
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
-  K_LAUNCH, K_REJECT, scoreModel, parseModelJson, summaryPrompt,
+  K_LAUNCH, K_REJECT, scoreModel, parseModelJson, summaryPrompt, subreqMax,
   summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
   resetSubreq: () => { SUBREQ = 0; RESOLVED = null; }
 };
