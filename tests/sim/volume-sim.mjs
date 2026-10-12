@@ -69,10 +69,35 @@ const SCENARIOS = [
    vbest:[24, 40], slack:[0.15, 0.45], sigma:[0.8, 3.0], resp:[0.7, 1.4]}
 ];
 
-const POLICIES = ["oracle", "fixed", "mdc", "mdc-own", "adaptive", "peak", "probe", "peakgate"];
+/* THE PRIORITY CHANGED AFTER §5I, AND THE ARMS BELOW ARE BUILT FOR THE NEW ONE.
+
+   Reducing the blocks steady lifters spend ABOVE THEIR OWN RECOVERY LIMIT is now the goal,
+   ahead of closing their growth gap. That reverses the trade every earlier arm was tuned
+   for, and it makes two things worth measuring that were not before.
+
+   "peaknorel" / "peakhalfrel": the 0.25 x prevTrend term in peakMargin, dropped and halved.
+   That term was added in §5G BECAUSE steady lifters needed it — their own bar is about
+   0.8%, so a trivial dip from +3.0% to +2.1% read as "past the peak". But it only binds
+   when the trend is strong, which is exactly when a steady lifter is still climbing, so it
+   is also the thing holding the stop signal back for them. Removing it should cap them
+   earlier and cost some growth. Under the old priority that was a bad trade. Under this one
+   it may be the right one.
+
+   "probegate": the probe arm, fired only where §5H's objection does not apply. probe is the
+   only arm that has ever beaten the live baseline for steady lifters, and it was rejected
+   for what it cost high-ceiling and low-ceiling. So it is now gated on the two conditions
+   that describe a steady lifter and not those populations: the muscle has SETTLED (held at
+   the estimate for VOL_RECHECK_BLOCKS, which the probe already required) and the lifter's
+   own detection bar is tight enough to be worth trusting. Everyone else keeps the climb
+   exactly as it ships. */
+const POLICIES = ["oracle", "fixed", "mdc", "mdc-own", "adaptive", "peak", "probe",
+                  "peakgate", "peaknorel", "peakhalfrel", "probelad", "probegate"];
 
 const out = await p.evaluate(async (cfg)=>{
   const {N, CYCLES, SEED, SCENARIOS, POLICIES} = cfg;
+  /* Declared in here because this whole body runs inside page.evaluate: anything defined in
+     the module scope outside it is simply not there. */
+  const PROBE_MAX_BAR = 1.25;  // %; a personal bar wider than this is not a reliable ruler
 
   const rng = s=>()=>{ s |= 0; s = s + 0x6D2B79F5 | 0;
     let t = Math.imul(s ^ s >>> 15, 1 | s);
@@ -125,20 +150,42 @@ const out = await p.evaluate(async (cfg)=>{
   const FIXED = {up: RESPOND_TREND_PCT, down: DECLINE_TREND_PCT, personal: false};
 
   const run = (u, policy, r)=>{
-    const adaptive = policy === "adaptive" || policy === "peak" || policy === "peakgate";
+    const PEAKY = ["peak", "peakgate", "peaknorel", "peakhalfrel"];
+    /* THE PROBE ARM NEVER HAD THE LADDER, AND §5H DID NOT KNOW IT.
+
+       `adaptive` is what hands decideForMuscle the climb state, and therefore the
+       accelerating +1/+2/+3 ladder. It read `policy === "adaptive" || policy === "peak"`, so
+       the probe arm ran the peak STOP signal with no ladder under it — and §5H compared that
+       against peak WITH the ladder and attributed the whole high-ceiling collapse (91.6% ->
+       67.9%) to blocks being spent re-checking. High-ceiling under probe ended at 64% of
+       their best with ZERO blocks past their limit, which is not what re-checking too often
+       looks like; it is what never climbing looks like, and it is the signature of fixed and
+       mdc too.
+
+       So `probe` is left exactly as §5H measured it, and `probelad` is the same thing with
+       the ladder restored. The difference between those two columns is the size of my
+       earlier mistake. */
+    const adaptive = policy === "adaptive" || PEAKY.indexOf(policy) > -1
+                  || policy === "probelad" || policy === "probegate";
+    /* How much of the response a drop must give up before the peak test fires, on top of
+       the detection bar. 0.25 is what ships; the other two arms are the measurement. */
+    const relFactor = policy === "peaknorel" ? 0
+                    : policy === "peakhalfrel" ? 0.125
+                    : 0.25;
     /* "peak" is the same ladder with a different STOP SIGNAL. The specified ladder climbs
        until the lifter breaks down, and breakdown sits well above the volume where growth
        stops rising -- so every climb-until-signal policy ends 25-50% past the best. This
        one stops when ADDING SETS STOPS IMPROVING THE RESPONSE, which is the definition of
        the best, and comes back to the last volume that was better. See 5G. */
-    const peak = policy === "peak" || policy === "probe" || policy === "peakgate";
+    const peak = PEAKY.indexOf(policy) > -1 || policy === "probe"
+              || policy === "probelad" || policy === "probegate";
     /* "probe" is peak plus a periodic re-check of the learned ceiling. The peak estimate is
        deliberately never withdrawn by ordinary evidence (5G), which is what keeps most
        lifters near their best -- and is also what pins the minority whose first peak call
        was wrong. A DELIBERATE probe is different from withdrawing it on a noisy reading:
        it spends one block asking the question properly, and only moves the estimate if the
        answer beats that lifter's own minimum detectable change. */
-    const reprobe = policy === "probe";
+    const reprobe = policy === "probe" || policy === "probelad" || policy === "probegate";
     const ownStart = adaptive || policy === "mdc-own";
     let v = policy === "oracle" ? u.vbest
           : ownStart ? volStartTarget({own: u.ownV})
@@ -151,6 +198,7 @@ const out = await p.evaluate(async (cfg)=>{
     /* The climb state the adaptive policy carries, which is exactly what S.volClimb[g]
        holds in the app. */
     let streak = 0, lastRespondV = 0, flatV = 0, prevV = 0, prevTrend = null;
+    let relBound = 0, relTests = 0;
     /* How many blocks have been spent sitting on the estimate, whether a probe is in
        flight, and where to come back to if it fails. */
     let heldAt = 0, probing = false, preProbeV = 0, probes = 0, revised = 0;
@@ -212,7 +260,14 @@ const out = await p.evaluate(async (cfg)=>{
          69.9% of oracle and only 21% ever reached their best. So it only fires when the
          ladder itself has nothing to say: a HOLD at the estimate, meaning the response has
          genuinely gone flat there. A muscle that is still responding is left alone. */
-      if(reprobe && flatV > 0 && was >= flatV - 0.05 && d.k === "hold"){
+      /* "probegate" ADDS THE SECOND CONDITION. Settled is necessary and was already
+         required; it is not sufficient, because a high-ceiling lifter holding at a wrong
+         estimate is also settled, and probing them is what cost that population 5 points.
+         What separates the two is whether the lifter's own bar can be trusted to read the
+         probe's answer at all: a personal figure, and a tight one. */
+      const probeAllowed = policy !== "probegate"
+        || (thr.personal === true && thr.up <= PROBE_MAX_BAR);
+      if(reprobe && probeAllowed && flatV > 0 && was >= flatV - 0.05 && d.k === "hold"){
         heldAt++;
         if(heldAt >= VOL_RECHECK_BLOCKS){
           /* ONE DELIBERATE BLOCK, at a step big enough to be detectable and small enough
@@ -248,7 +303,10 @@ const out = await p.evaluate(async (cfg)=>{
          dropped by at least a quarter makes the test about the SIZE of the loss rather
          than only about its detectability. Measured: it is what steady needs, and it
          costs the other populations nothing. */
-      const peakMargin = Math.max(thr.up, 0.25 * Math.max(0, prevTrend || 0));
+      const relTerm = relFactor * Math.max(0, prevTrend || 0);
+      if(relTerm > thr.up) relBound++;
+      relTests++;
+      const peakMargin = Math.max(thr.up, relTerm);
       /* "peakgate": THE SAME TEST, BUT IT MAY NOT SET THE ESTIMATE ON A BORROWED BAR.
 
          Everything measured so far tried to LOOSEN the estimate once made — make it
@@ -347,6 +405,7 @@ const out = await p.evaluate(async (cfg)=>{
             endOfBest: v / u.vbest, endOfLimit: v / u.vlimit,
             maxJump, maxJumpFrac, bigJump, bigFrac, smallFrac, jumps, overRunMax,
             probes, revised,
+            relBound: relTests ? relBound / relTests : 0,
             overDepth: over ? overDepth / over : 0};
   };
 
@@ -382,6 +441,7 @@ const out = await p.evaluate(async (cfg)=>{
         if(o.maxJumpFrac > a.maxFrac) a.maxFrac = o.maxJumpFrac;
         if(o.overRunMax > a.runMax) a.runMax = o.overRunMax;
         if(o.over){ a.depth += o.overDepth; a.depthN++; }
+        a.relBound = (a.relBound || 0) + (o.relBound || 0);
         a.ofBest = (a.ofBest || 0) + o.endOfBest;
         a.ofLimit = (a.ofLimit || 0) + o.endOfLimit;
         if(o.hit10 != null){ a.hit += o.hit10; a.hitN++; }
@@ -409,7 +469,11 @@ const out = await p.evaluate(async (cfg)=>{
         endOfBest: +((a.ofBest || 0) / N * 100).toFixed(0),
         endOfLimit: +((a.ofLimit || 0) / N * 100).toFixed(0),
         probesPer: +((a.probes || 0) / N).toFixed(2),
-        revisedPct: a.probes ? +((a.revised || 0) / a.probes * 100).toFixed(0) : 0
+        revisedPct: a.probes ? +((a.revised || 0) / a.probes * 100).toFixed(0) : 0,
+        /* What share of peak tests had the relative term, not the detection bar, setting the
+           margin. If this is near zero the term cannot be the mechanism holding the stop
+           signal back, whatever the reasoning said. */
+        relBoundPct: +((a.relBound || 0) / N * 100).toFixed(1)
       };
     });
     res.push(row);

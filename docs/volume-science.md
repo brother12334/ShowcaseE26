@@ -1059,6 +1059,15 @@ Built as the `probe` arm, same lifters, same seeds, n=400, judged against `peak`
 83.9%, comfortably past the 79% asked — and it fails "no other population losing more than
 one point" by margins that are not arguable.
 
+> **CORRECTION (§5J).** The two numbers in bold above are not what they appear to be. The
+> `probe` arm never received the accelerating ladder — `adaptive` in the simulation read
+> `policy === "adaptive" || policy === "peak"`, so this table compares `peak` **with** the
+> ladder against `probe` **without** one. Restoring it (`probelad`) puts high-ceiling at
+> 91.4% against `peak`'s 91.3% and low-ceiling at 74.6% against 75.2%: the collapse was the
+> missing ladder, not the cost of re-checking. The reasoning below about blocks spent
+> re-checking is therefore unsupported by this table. The verdict still stands, but for the
+> reason given in §5J, which is the opposite one.
+
 ### Why, and it is structural
 
 **A re-check is a mechanism for a settled lifter, and the lifters who need the climb most
@@ -1129,30 +1138,97 @@ baseline for steady on both seeds (85.6 / 85.9 vs 84.7 / 84.4, with overreach do
 the right-shaped intervention for that population and was rejected for what it costs
 high-ceiling (−5 points) and low-ceiling (−42). That is what §6.2 is about.
 
+## 5J. Attempts five and six, and the mechanism they found
+
+The priority changed before these two: **reducing the blocks steady lifters spend above
+their own recovery limit, ahead of closing their growth gap.** Two attempts were allowed.
+
+### Attempt 5 — the `0.25 × prevTrend` term: a null result, measured
+
+§6 pointed at the relative term in `peakMargin` as what holds the stop signal back for a
+steady lifter. Built as `peaknorel` (term removed) and `peakhalfrel` (halved), and
+instrumented to count how often the term — rather than the detection bar — actually sets the
+margin:
+
+| population | term binds | growth `peak` → `peaknorel` | overreach `peak` → `peaknorel` |
+|---|---|---|---|
+| **steady** | **0.7%** | 78.6 → 78.6 | 44.4 → 44.4 |
+| typical | 4.0% | 86.9 → 87.0 | 23.5 → 23.2 |
+| noisy | 9.7% | 88.7 → 88.7 | 12.8 → 12.8 |
+| low-ceiling | 2.0% | 76.2 → 76.3 | 38.5 → 38.4 |
+| high-ceiling | 7.8% | 91.2 → 91.1 | 4.9 → 4.8 |
+
+**Fails the gate, and the hypothesis is refuted rather than merely unhelpful.** For steady
+lifters the term sets the margin in 0.7% of peak tests, so it cannot be the mechanism
+holding anything back. Removing it entirely changes steady by nothing at all, on either
+seed. Note also where it *does* bind: noisy and high-ceiling, not the population §5G added
+it for. It is close to dead weight — a candidate for deletion on simplicity grounds, worth
+nothing on outcomes, which is why the shipping code is left alone.
+
+### Attempt 6 — a probe gated to settled, low-noise muscles: never fires
+
+Built as `probegate`: the probe arm, with the ladder, firing only where the muscle has
+settled (held at the estimate for `VOL_RECHECK_BLOCKS`, which the probe already required)
+**and** the lifter's own bar is tight enough to read the answer (`thr.personal` and
+`thr.up ≤ 1.25`).
+
+It fires **0.01 to 0.06 times per lifter** and its numbers are `peak`'s to the first decimal
+on both seeds: steady 78.0 / 79.3 growth against `peak`'s 78.1 / 79.3, overreach 45.0 / 41.1
+against 45.0 / 41.1. **Fails the gate.** The binding constraint is not the noise condition —
+steady lifters pass that easily — it is that under the ladder a steady lifter almost never
+sits in a genuine hold for four consecutive blocks. A mechanism for settled lifters cannot
+help a population the ladder keeps unsettled.
+
+### What the two attempts did find
+
+Restoring the ladder to the probe arm exposed the mechanism, and it is not the estimate:
+
+| steady lifters | ladder? | overreached blocks | end / recovery limit |
+|---|---|---|---|
+| `mdc` (live today) | no | 23.4 / 26.8% | 97 / 99% |
+| `probe` | no | **17.8 / 19.6%** | 87 / 87% |
+| `peak` (ships) | **yes** | **45.0 / 41.1%** | 100 / 97% |
+| `probelad` | **yes** | 45.3 / 41.4% | 101 / 100% |
+
+**The accelerating ladder roughly doubles the blocks a steady lifter spends past their own
+recovery limit, and the peak estimate is not what does it.** Every arm with the ladder sits
+at 41–45%; every arm without it sits at 18–27%. That holds on both seeds and across four
+policies that differ in every other respect.
+
+It also explains attempt 6 and the original `probe` result in one line: `probe` helped steady
+lifters because it had no ladder, not because it re-checked. Once the ladder is restored the
+benefit vanishes entirely (85.6 → 77.8).
+
+So the lever for this regression is **how fast the ladder climbs for a lifter whose readings
+are repeatable** — not the estimate, which four attempts have now failed to improve by
+weakening, conditioning, probing or gating. That is a fifth direction and it is recorded
+rather than taken, because two attempts were the budget.
+
 ## 6. Still to do
 
-1. **The steady-lifter regression under `peak`**, still the only known cost of what ships,
-   and now with four measured and rejected attempts behind it: a revisable estimate (§5G),
-   two strikes (§5G), the periodic re-check probe (§5H), and conditioning the estimate on
-   the lifter's own noise bar (§5I).
+1. **~~The steady-lifter regression under `peak`.~~** **CLOSED.** Six attempts measured and
+   rejected: a revisable estimate (§5G), two strikes (§5G), the periodic re-check probe
+   (§5H), conditioning the estimate on the lifter's own noise bar (§5I), removing the
+   relative margin term (§5J), and a probe gated to settled low-noise muscles (§5J). The
+   current rule stands.
 
-   §5I is also the one that killed the lead this section used to offer. Do **not** try to
-   make the peak estimate later, weaker or more revisable again: four arms have now tested
-   that family and every one of them cost the populations the estimate protects. The measured
-   fact is that steady lifters under `peak` finish at 97–100% of their recovery limit with
-   41–45% of blocks overreached, so for them the cap arrives **too late**, not too early.
+   **Do not attack this through the peak estimate again.** Six arms have now tested making it
+   weaker, later, revisable, conditioned, probed or gated, and every one either cost the
+   populations the estimate protects or did nothing measurable at all.
 
-   A fifth attempt should therefore make the stop signal fire *sooner* for a lifter whose
-   readings are repeatable — not later — and the obvious candidate is the `0.25 × prevTrend`
-   term in `peakMargin`, which for a steady lifter with a strong trend is what holds the test
-   back when their own detection bar would already have fired. That term was added because
-   steady lifters needed it (§5G); whether it is now overshooting for the same population is
-   measurable and untested.
-2. **A probe for settled lifters only**, if the re-check idea is revived: it needs a way to
-   tell "settled because this is my best" from "settled because the estimate is wrong", and
-   §5H is the evidence that volume alone cannot tell them apart. §5I adds that `probe` is
-   nonetheless the only arm that has ever beaten the live baseline for steady lifters, which
-   is a reason to keep looking for that discriminator rather than to abandon the idea.
+   **The mechanism is the ladder, not the estimate** (§5J). Steady lifters sit at 41–45% of
+   blocks past their recovery limit under every arm that has the accelerating +1/+2/+3
+   ladder, and 18–27% under every arm that does not, consistently across both seeds. Any
+   seventh attempt should slow the ladder for a lifter whose readings are repeatable and
+   leave the estimate alone. The cost to measure against is high-ceiling lifters, for whom
+   the ladder is worth about 21 points of growth.
+2. **A probe for settled lifters only** — now understood differently, and worth less than it
+   looked. §5H's rejection was confounded by a missing ladder (see the correction there), so
+   re-checking is *not* expensive for high-ceiling lifters as that section claimed: with the
+   ladder restored, `probelad` costs them nothing (91.4% against 91.3%). But §5J also shows
+   the probe never helped steady lifters for the reason assumed — it helped because it had no
+   ladder. With the ladder present the benefit is gone. So the discriminator §5H asked for is
+   no longer the blocker; there is simply much less on the other side of it than believed.
 
 The plain-English version of all of this, for deciding whether to ship it, is
 `docs/volume-model-summary.md`.
