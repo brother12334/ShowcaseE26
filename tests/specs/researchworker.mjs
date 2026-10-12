@@ -12,7 +12,8 @@ const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
        verify, needsApproval, launchApproved, servable, scoreModel, cardOf,
        parseModelJson, summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
        resetSubreq, K_REJECT, summaryPrompt, subreqMax, BOILERPLATE,
-       summaryStale} = __test;
+       summaryStale, newPaper, keepRank, QUERIES, BACKFILL_DAYS, BACKFILL_PER_QUERY,
+       INDEX_MAX, K_CURSOR} = __test;
 import { readFileSync } from 'node:fs';
 
 let bad = 0;
@@ -701,6 +702,105 @@ console.log("13 - ONE DRIFTING SENTENCE DOES NOT COST A PAPER ITS SUMMARY");
   ck("the paper keeps its metadata either way", c.out.sum && !!c.out.sum.forLifters, "");
   ck("every call was counted against the budget", subreqLeft() < SUBREQ_MAX, String(subreqLeft()));
   globalThis.fetch = realFetch;
+}
+
+console.log("14 - ENOUGH GROUND TO FILL A FEED");
+{
+  /* Fifteen queries over a 365-day window held about twenty papers, which was genuinely
+     most of what came out. A reader who wants to browse hundreds needs more ground covered
+     over more years \u2014 not a looser filter. */
+  ck("THE QUERY SET IS BROAD ENOUGH TO BE WORTH BACKFILLING", QUERIES.length >= 40,
+     String(QUERIES.length));
+  ck("every query has a topic and a term", QUERIES.every(q=> q && q.topic && q.q), "");
+  const known = ["hypertrophy","strength","programming","exercise","recovery","fatigue",
+                 "sleep","nutrition","supplements","injury"];
+  const strays = QUERIES.map(q=> q.topic).filter(t=> known.indexOf(t) < 0);
+  ck("and no query files papers under a topic the app has no label for",
+     strays.length === 0, strays.join(","));
+  ck("muscle groups people actually train are covered",
+     ["squat","bench press","deadlift","biceps","calf"].every(w=>
+       QUERIES.some(q=> q.q.indexOf(w) > -1)), "");
+  ck("the backfill window is five years", BACKFILL_DAYS > 1800 && BACKFILL_DAYS < 1900,
+     String(BACKFILL_DAYS));
+  ck("and it is far deeper than the daily window, which is the point",
+     BACKFILL_DAYS > 365 * 4, String(BACKFILL_DAYS));
+  ck("a backfill page is big enough to be worth the round trip",
+     BACKFILL_PER_QUERY >= 20, String(BACKFILL_PER_QUERY));
+  ck("the index holds hundreds", INDEX_MAX >= 500, String(INDEX_MAX));
+  ck("and the cursor has its own key, so paging survives between invocations",
+     typeof K_CURSOR === "string" && K_CURSOR !== "index:v1", String(K_CURSOR));
+
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  ck("esearch can ask for a page other than the first", /retstart: String\(o\.retstart/.test(src), "");
+  ck("AND THE CURSOR ADVANCES BY WHAT CAME BACK, so a run does not re-read page one for ever",
+     /cur\.rs\[qi\] = \(rs \+ ids\.length >= \(got\.total \|\| 0\)\) \? 0 : rs \+ ids\.length/.test(src), "");
+  ck("and wraps to the start once a query is exhausted, rather than stalling",
+     /stats\.exhausted\+\+; cur\.rs\[qi\] = 0/.test(src), "");
+  ck("queries are taken round-robin, so breadth comes before depth",
+     /\(cur\.i \+ step\) % QUERIES\.length/.test(src), "");
+}
+
+console.log("15 - TAKING PAPERS IN IS NOT THE SAME JOB AS SUMMARISING THEM");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* A paper costs one Crossref lookup to verify; a summary costs four model calls. Doing
+     both in one pass rationed the cheap work by the price of the expensive work. */
+  ck("THE INGEST PASS ASKS NO MODEL ANYTHING",
+     /async function runIngest[\s\S]*?\n}/.test(src)
+     && !/async function runIngest[\s\S]*?\n}/.exec(src)[0].includes("summarise("), "");
+  ck("and the summarise pass is separate", /async function runSummarise/.test(src), "");
+  ck("the cron does both, summaries first",
+     /runSummarise\(env, 6\);[\s\S]{0,60}runIngest\(env, 25\)/.test(src), "");
+  ck("each pass is reachable on its own", /"\/research\/ingest"/.test(src)
+     && /"\/research\/summarise"/.test(src), "");
+  ck("a paper already summarised is never picked up twice",
+     /if \(paper\.summary \|\| paper\.summaryFailed\) continue;/.test(src), "");
+  ck("and one whose summary failed is not retried for ever",
+     /!r\.quickTakeaway && r\.summaryFailed !== true/.test(src), "");
+  ck("OLDEST WAITING FIRST, so nothing sits unsummarised indefinitely",
+     /sort\(\(a, b\) => \(a\.addedAt \|\| 0\) - \(b\.addedAt \|\| 0\)\)/.test(src), "");
+
+  /* Both passes must build the same record or they drift by a field nobody notices. */
+  const rec = {pmid:"1", doi:"10.1/x", title:"T", journal:"J", authors:["A"],
+               year:"2025", month:"Mar", abstract:"a"};
+  const sc = {topics:["hypertrophy"], applyTo:"volume", population:"trained", reasons:["r"]};
+  const np = newPaper(rec, sc, {url:"https://doi.org/10.1/x", fail:[], crossref:true}, "hash");
+  ck("the shared record builder fills the fields a card needs",
+     np.id === "pm1" && np.published === "2025-03" && np.type && np.topics.length === 1
+     && np.applyTo === "volume" && np.population === "trained", JSON.stringify(np).slice(0,160));
+  ck("A NEW RECORD IS NEVER BORN APPROVED", np.approved === false, String(np.approved));
+  ck("and never born with a summary", np.summary === null, String(np.summary));
+  ck("the abstract itself is not stored, only where it came from and a hash",
+     np.sourceBasis === "abstract" && np.sourceHash === "hash" && !("abstract" in np), "");
+  ck("the card carries whether a summary was tried and failed, as a flag not a reason",
+     cardOf(Object.assign({}, np, {summaryFailed: "gemini 503"})).summaryFailed === true, "");
+  ck("and false when none was tried", cardOf(np).summaryFailed === false, "");
+}
+
+console.log("16 - TRIMMING THE INDEX MUST NOT THROW AWAY THE REVIEWED WORK");
+{
+  /* The index was cut newest-added first. Harmless at four papers a day; ruinous the moment
+     a backfill adds four hundred, because the approved ones are the OLDEST arrivals. */
+  const approvedSum = {approved: true,  quickTakeaway: "x"};
+  const approvedBare = {approved: true,  quickTakeaway: null};
+  const sumOnly =     {approved: false, quickTakeaway: "x"};
+  const bare =        {approved: false, quickTakeaway: null};
+  ck("AN APPROVED PAPER WITH A SUMMARY IS THE LAST THING DROPPED",
+     keepRank(approvedSum) > keepRank(approvedBare), "");
+  ck("an approved paper outranks an unapproved one that merely has a summary",
+     keepRank(approvedBare) > keepRank(sumOnly), "");
+  ck("and a summary outranks a bare record", keepRank(sumOnly) > keepRank(bare), "");
+  const rows = [
+    {id:"new-bare", addedAt: 9000, approved:false, quickTakeaway:null},
+    {id:"old-approved", addedAt: 1, approved:true, quickTakeaway:"x"}
+  ];
+  const sorted = rows.slice().sort((a,b)=> (keepRank(b)-keepRank(a)) || ((b.addedAt||0)-(a.addedAt||0)));
+  ck("SO A BACKFILL CANNOT EVICT A PAPER A HUMAN APPROVED, however old it is",
+     sorted[0].id === "old-approved", sorted.map(x=>x.id).join(","));
+  const same = [{id:"a", addedAt:1, approved:false, quickTakeaway:null},
+                {id:"b", addedAt:2, approved:false, quickTakeaway:null}]
+    .sort((a,b)=> (keepRank(b)-keepRank(a)) || ((b.addedAt||0)-(a.addedAt||0)));
+  ck("and arrival time still breaks ties between equals", same[0].id === "b", same[0].id);
 }
 
 console.log(bad ? "BROKEN: " + bad : "all good");

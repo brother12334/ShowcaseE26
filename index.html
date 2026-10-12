@@ -7018,7 +7018,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "57.5";
+const APP_VERSION = "57.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -42845,6 +42845,59 @@ async function researchFetchFeed(opts){
 /* THE FEED IS A RANKING, NOT A SCORE. Four keys in the brief's order: can a lifter act on
    it, how strong is the design, how new is it, and does the population look like this
    reader. They are applied as a sort, never shown as a number. */
+/* HOW CLOSE A PAPER IS TO WHAT THIS PERSON ACTUALLY DOES.
+
+   A table of rules rather than a scorer with opaque weights, for the same reason
+   researchPicks() is one: every rule has a sentence attached, and a reader who sees the
+   sentence should recognise it as true of their own training. The number is used to order
+   the list and is NEVER shown — the brief rules out invented figures like "Science Score:
+   94/100", and a relevance number is exactly that with a different name.
+
+   Each rule reads a signal the app already holds about this person and asks whether this
+   paper is about the thing that signal points at. Nothing here leaves the device. */
+function researchRelevance(p, sig){
+  if(!sig) return {w: 0, why: ""};
+  const topics = p.topics || [];
+  const has = t=> topics.indexOf(t) > -1;
+  const hits = [];
+  /* The strongest signals are the ones taken from logged training rather than a setting,
+     because a person can set a goal and then train nothing like it. */
+  if(sig.under && sig.under.length && p.applyTo === "volume")
+    hits.push({w: 5, why: "Your " + joinList(sig.under.map(g=> gName(g).toLowerCase()))
+      + " are under the weekly minimum \u2014 this is about how much it takes."});
+  if(sig.nearFailure != null && sig.nearFailure >= 0.4 && p.applyTo === "failure")
+    hits.push({w: 5, why: "You often take sets to within a rep of failure."});
+  if(sig.spec && sig.spec.length && (p.applyTo === "volume" || has("programming")))
+    hits.push({w: 4, why: "You're running a priority block on "
+      + joinList(sig.spec.map(g=> gName(g).toLowerCase())) + "."});
+  if(sig.muscles && sig.muscles.length){
+    const hay = nrm([p.title, p.quickTakeaway].join(" "));
+    const m = sig.muscles.find(x=> x.words.some(w=> hay.indexOf(w) > -1));
+    if(m) hits.push({w: 4, why: "You train " + m.label.toLowerCase() + " every week."});
+  }
+  if(sig.phase === "cut" && has("nutrition"))
+    hits.push({w: 3, why: "You're eating in a deficit."});
+  if(sig.phase === "gain" && has("nutrition"))
+    hits.push({w: 2, why: "You're eating to gain."});
+  if(sig.goal === "muscle" && has("hypertrophy")) hits.push({w: 2, why: ""});
+  if(sig.goal === "strength" && has("strength")) hits.push({w: 2, why: ""});
+  if(!hits.length) return {w: 0, why: ""};
+  /* Weights add, so a paper that answers two things about this person outranks one that
+     answers either; the sentence shown is the single strongest, because a card with three
+     reasons on it is a card nobody reads. */
+  hits.sort((a, b)=> b.w - a.w);
+  return {w: hits.reduce((n, x)=> n + x.w, 0), why: hits[0].why};
+}
+/* THE MUSCLES SOMEBODY ACTUALLY TRAINS, and the words a paper would use for them. Taken
+   from logged sessions rather than from the programme, because the programme is a plan and
+   the sessions are what happened. */
+const RESEARCH_MUSCLE_WORDS = {
+  chest:["chest","pectoral","bench press"], back:["back","latissimus","lat pulldown","row"],
+  quads:["quadricep","squat","leg press","knee extens"], hams:["hamstring","leg curl","romanian"],
+  glutes:["glute","hip thrust","gluteus"], delts:["deltoid","shoulder press","lateral raise"],
+  biceps:["bicep","elbow flexor","curl"], triceps:["tricep","elbow extensor"],
+  calves:["calf","gastrocnemius","soleus","triceps surae"], abs:["abdominal","core training","trunk"]
+};
 function researchRank(p, ctx){
   const design = researchTypeRank(p.type);
   const ageDays = Math.max(0, (Date.now() - (p.publishedAt || 0)) / 86400000);
@@ -42853,7 +42906,13 @@ function researchRank(p, ctx){
      recorded with a reason at screening time. */
   const act = p.actionable ? 1 : 0;
   const pop = (ctx && ctx.trained && p.population === "trained") ? 1 : 0;
-  return act * 8 + design + fresh * 2 + pop;
+  /* A PAPER WHOSE SUMMARY IS STILL BEING WRITTEN SITS BELOW ONE THAT HAS ITS SUMMARY, and
+     only just: it is a real, verified, linked paper and worth finding, it simply says less
+     on the card today than it will tomorrow. A whole point below design rank, so a
+     meta-analysis awaiting its summary still outranks a trial that has one. */
+  const written = p.quickTakeaway ? 1 : 0;
+  const rel = (ctx && ctx.rel) ? ctx.rel(p).w : 0;
+  return act * 8 + design + fresh * 2 + pop + written + rel;
 }
 function researchFilterList(papers, f){
   const rec = RESEARCH_RECENCY.find(x=> x.k === (f.recency || "latest"));
@@ -42944,7 +43003,15 @@ function viewResearch(){
   const cache = researchCacheRead();
   const papers = cache ? cache.papers : [];
   const f = researchState().filters;
-  const ctx = {trained: (()=>{ try{ return experience() !== "beginner"; }catch(e){ return false; } })()};
+  /* THE SIGNALS ARE READ ONCE PER RENDER, not once per comparison. researchRank() is the
+     sort comparator, so anything expensive inside it runs O(n log n) times — and
+     researchSignals() walks a month of sessions and calls bodyAnalysis(). With twenty papers
+     that was merely wasteful; with five hundred it would have made the tab feel broken.
+     Memoised per paper id for the same reason. */
+  const sig = researchPersonalOn() ? researchSignals() : null;
+  const relMemo = {};
+  const rel = p=> (relMemo[p.id] || (relMemo[p.id] = researchRelevance(p, sig)));
+  const ctx = {rel, trained: (()=>{ try{ return experience() !== "beginner"; }catch(e){ return false; } })()};
 
   let h = `<div class="hdr"><h1>Research Lab</h1>${hdrRight()}</div>
     <div class="rs-sub">New science for better training.</div>
@@ -43000,8 +43067,21 @@ function viewResearch(){
       fresh.forEach((p, i)=> h += researchCardHTML(p, i));
     }
     if(rest.length){
-      h += `<div class="rs-sec">Recent research</div>`;
-      rest.slice(0, RESEARCH_SHOWN).forEach((p, i)=> h += researchCardHTML(p, i));
+      /* THE HEADING HAS TO MATCH THE ORDER, or it is a small lie told every time the tab
+         opens. The list is sorted by how strong the evidence is, whether a lifter could do
+         anything with it, how recent it is, and how close it sits to what this person
+         actually trains — so with signals to go on it is not "recent research", and
+         without them it is. */
+      h += `<div class="rs-sec">${sig ? "Most relevant to you" : "Recent research"}</div>`;
+      rest.slice(0, RESEARCH_SHOWN).forEach((p, i)=>{
+        /* THE REASON IS SHOWN, NEVER THE NUMBER. Only where a rule about this person's own
+           training fired rather than a broad one about their goal, and only near the top:
+           a reason above every card is a page of reasons nobody reads, and it would also
+           make the ordering look more certain than it is. */
+        const r = rel(p);
+        if(i < 6 && r.why && r.w >= 4) h += `<div class="rs-why">${esc(r.why)}</div>`;
+        h += researchCardHTML(p, i);
+      });
       if(rest.length > RESEARCH_SHOWN)
         h += `<button type="button" class="btn ghost" id="rsMore" style="width:100%;margin-top:4px">Show more</button>`;
     }
@@ -43180,6 +43260,23 @@ function researchSignals(){
     if(low.length) sig.under = low.slice(0, 2);
   }catch(e){}
   try{ if(S.eatPhase) sig.phase = S.eatPhase; }catch(e){}
+  /* WHAT THEY ACTUALLY TRAIN, from logged sessions rather than the programme: a plan is an
+     intention and a session is a fact. Any muscle worked in the last month counts, which is
+     deliberately generous — this orders a list, it does not decide anything. */
+  try{
+    const since = Date.now() - 31 * DAY_MS, seen = {};
+    (S.sessions || []).forEach(x=>{
+      if(!x || !x.date || new Date(x.date + "T00:00:00").getTime() < since) return;
+      (x.entries || []).forEach(e=>{
+        const ex = exById(e && e.ex);
+        Object.keys((ex && ex.mus) || {}).forEach(g=>{ if(ex.mus[g] > 0) seen[g] = 1; });
+      });
+    });
+    const ms = Object.keys(seen)
+      .filter(g=> RESEARCH_MUSCLE_WORDS[g])
+      .map(g=> ({key: g, label: gName(g), words: RESEARCH_MUSCLE_WORDS[g]}));
+    if(ms.length) sig.muscles = ms;
+  }catch(e){}
   return sig;
 }
 /* Each rule names the topic it wants and the sentence it would say. Deliberately a small

@@ -424,8 +424,8 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (167) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
-| `tests/specs/research.mjs` (42) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
+| `tests/specs/researchworker.mjs` (198) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/research.mjs` (71) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
 stale and starts lying.
@@ -500,6 +500,68 @@ From here the gate's own rule governs: a plain trial publishes without review, a
 meta-analysis, a systematic review or anything actionable still waits for a human. The
 rollback is `RESEARCH_API = ""`, which removes the feature from the app without touching
 the store.
+
+## 11C. Filling the feed, and ordering it
+
+### Two passes, because they cost different amounts
+
+Verifying and screening a paper costs one Crossref lookup. Writing its summary costs four
+model calls. Running both in one pass meant the cheap work was rationed by the price of the
+expensive work, which is why the store sat at about twenty papers.
+
+- **`/research/ingest?n=40`** — verify, screen, label, link, store with `summary: null`.
+  Roughly 30-40 papers per invocation. Call it repeatedly; it resumes where it stopped.
+- **`/research/summarise?n=6`** — writes summaries for stored papers that have none,
+  oldest-waiting first. Unchanged in how it writes or checks them.
+- The cron does summaries first, then ingest with what budget is left.
+
+A card with no summary already said so and showed the paper. That path now carries most of
+the feed at first, and it is the one state where there is nothing to be unfaithful about:
+there is no AI text on it at all. The ranking puts such a paper just below an identical one
+that has its summary — by less than a design grade, so a meta-analysis awaiting its summary
+still outranks a trial that has one.
+
+### Reaching back five years
+
+`BACKFILL_DAYS = 1826` against 54 queries. PubMed sorts by date, not relevance, so a query
+asked once returns its newest page for ever; `K_CURSOR` remembers the `retstart` per query
+so later runs go deeper, wrapping to the start when a query is exhausted. Queries are taken
+round-robin so breadth arrives before depth.
+
+`INDEX_MAX` is 500, which is a product decision rather than a storage one: the whole index
+goes to the phone, a card is about a kilobyte, so that is ~130 KB gzipped once a day and
+~500 KB in localStorage. Past that, the card has to be slimmed and the rest fetched on open
+via `/research/paper/:id`, which exists and is unused because `researchById()` reads the
+cached feed.
+
+**The trim rule changed with it.** The index was cut newest-added first, which is harmless at
+four papers a day and ruinous when a backfill adds four hundred: the approved papers are the
+*oldest* arrivals. `keepRank()` now cuts by worth — approved-with-summary, approved, has a
+summary, bare — with arrival time only breaking ties. A row dropped from the index still
+exists under its own key.
+
+### What the order means
+
+`researchRank()` combines evidence grade, whether a lifter could act on it, recency,
+population match, whether the summary is written, and `researchRelevance()` — how close the
+paper sits to what this person actually does.
+
+`researchRelevance()` is a table of rules, each with a sentence attached, for the same reason
+`researchPicks()` is: a reader should recognise the reason as true of them. Signals taken
+from logged sessions outweigh ones taken from settings, because a goal can be set and never
+trained — a muscle under its weekly minimum or a habit of training to failure scores above a
+stated goal. Muscles trained in the last month are matched against the paper's own title.
+
+**The number is never shown.** The brief rules out invented figures like "Science Score:
+94/100", and a relevance score is that with a different name. What appears is the single
+strongest reason, on the first few cards, and only where a rule about this person's own
+training fired rather than a broad one about their goal. The section heading says "Most
+relevant to you" when there are signals to go on and "Recent research" when there are not,
+because a heading that does not match the order is a small lie told every time the tab opens.
+
+Signals are read once per render and memoised per paper: `researchRank()` is the sort
+comparator, and `researchSignals()` walks a month of sessions and calls `bodyAnalysis()`.
+At twenty papers that was wasteful; at five hundred it would have made the tab feel broken.
 
 ## 12. Judging a summary sentence
 

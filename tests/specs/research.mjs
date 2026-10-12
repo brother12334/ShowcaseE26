@@ -395,6 +395,77 @@ console.log("9 - SAVED RESEARCH");
 
 console.log("10 - NOTHING THREW");
 ck("no page errors", errs.length === 0, errs.join(" | "));
+console.log("12 - THE ORDER IS RELEVANCE TO THIS PERSON, AND THE REASON IS SHOWN NOT THE SCORE");
+{
+  /* A feed of hundreds is only useful if the right ones float. The order combines how
+     strong the evidence is, whether a lifter can do anything with it, how recent it is, and
+     how close it sits to what this person actually trains \u2014 and the number behind it is
+     never shown, because the brief rules out invented figures like "Science Score: 94/100"
+     and a relevance score is that with a different name. */
+  const r = await ev(()=>{
+    const paper = t=> ({id:"x", topics:t.topics||[], applyTo:t.applyTo||null,
+                        title:t.title||"A paper", quickTakeaway:t.quick||""});
+    const none = researchRelevance(paper({topics:["sleep"]}), {goal:"muscle"});
+    const goal = researchRelevance(paper({topics:["hypertrophy"]}), {goal:"muscle"});
+    const under = researchRelevance(paper({topics:["hypertrophy"], applyTo:"volume"}),
+                                    {goal:"muscle", under:["chest"]});
+    const fail = researchRelevance(paper({topics:["hypertrophy"], applyTo:"failure"}),
+                                   {nearFailure:0.8});
+    const both = researchRelevance(paper({topics:["hypertrophy"], applyTo:"volume"}),
+                                   {goal:"muscle", under:["chest"], spec:["chest"]});
+    const musc = researchRelevance(paper({title:"Effects of the bench press on growth"}),
+                                   {muscles:[{key:"chest", label:"Chest", words:["bench press"]}]});
+    const off = researchRelevance(paper({topics:["hypertrophy"], applyTo:"volume"}), null);
+    return {none, goal, under, fail, both, musc, off};
+  });
+  ck("a paper about nothing you do scores zero", r.none.w === 0, JSON.stringify(r.none));
+  ck("your stated goal counts for something", r.goal.w > 0, JSON.stringify(r.goal));
+  ck("BUT WHAT YOU LOGGED OUTWEIGHS WHAT YOU SET, because a goal can be set and not trained",
+     r.under.w > r.goal.w, r.under.w + " vs " + r.goal.w);
+  ck("training to failure is matched to research on failure",
+     r.fail.w >= 5 && /within a rep of failure/.test(r.fail.why), JSON.stringify(r.fail));
+  ck("A PAPER THAT ANSWERS TWO THINGS ABOUT YOU OUTRANKS ONE THAT ANSWERS EITHER",
+     r.both.w > r.under.w, r.both.w + " vs " + r.under.w);
+  ck("and only the single strongest reason is shown",
+     typeof r.both.why === "string" && r.both.why.indexOf(";") < 0, r.both.why);
+  ck("a muscle you actually train is matched against the paper's own title",
+     r.musc.w > 0 && /you train chest/i.test(r.musc.why), JSON.stringify(r.musc));
+  ck("the reason names the muscle under its own weekly minimum",
+     /under the weekly minimum/.test(r.under.why), r.under.why);
+  ck("WITH PERSONALISATION OFF THERE IS NO SIGNAL AT ALL", r.off.w === 0 && r.off.why === "",
+     JSON.stringify(r.off));
+
+  /* The ordering has to actually use it, and the screen has to say why without saying how much. */
+  const ui = await ev(()=>{
+    goTab("research");
+    const body = document.getElementById("app").textContent;
+    const whys = [...document.querySelectorAll(".rs-why")].map(x=> x.textContent);
+    const secs = [...document.querySelectorAll(".rs-sec")].map(x=> x.textContent);
+    return {body, whys, secs};
+  });
+  ck("NO SCORE IS EVER RENDERED", !/score|\b\d{1,3}\s*\/\s*100\b|relevance:/i.test(ui.body),
+     (ui.body.match(/.{0,40}score.{0,40}/i) || [""])[0]);
+  ck("the reasons that do appear are sentences about the reader",
+     ui.whys.every(w=> /\w/.test(w) && !/\d+\s*\/\s*\d+/.test(w)), ui.whys.join(" | "));
+  ck("and a heading describes the order the list is actually in",
+     ui.secs.some(x=> /Most relevant to you|Recent research/.test(x)), ui.secs.join(" | "));
+
+  /* A paper still waiting for its summary belongs in the feed, below one that has it. */
+  const ord = await ev(()=>{
+    const ctx = {rel: ()=> ({w:0, why:""}), trained:false};
+    const base = {type:"rct", actionable:false, publishedAt: Date.now(), population:null};
+    const withSum = Object.assign({}, base, {id:"a", quickTakeaway:"said"});
+    const without = Object.assign({}, base, {id:"b", quickTakeaway:null});
+    const metaNoSum = Object.assign({}, base, {id:"c", type:"meta", quickTakeaway:null});
+    return {a: researchRank(withSum, ctx), b: researchRank(without, ctx),
+            c: researchRank(metaNoSum, ctx)};
+  });
+  ck("a written summary lifts a paper above an identical one without",
+     ord.a > ord.b, ord.a + " vs " + ord.b);
+  ck("BUT ONLY JUST \u2014 a meta-analysis awaiting its summary still outranks a trial with one",
+     ord.c > ord.a, ord.c + " vs " + ord.a);
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 await b.close();
 process.exit(bad ? 1 : 0);

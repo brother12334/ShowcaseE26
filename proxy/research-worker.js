@@ -67,7 +67,70 @@ const QUERIES = [
   {topic:"nutrition",   q:'(protein intake[tiab] OR protein supplementation[tiab] OR energy balance[tiab] OR energy deficit[tiab]) AND (resistance training[tiab] OR lean mass[tiab])'},
   {topic:"supplements", q:'(creatine[tiab] OR caffeine[tiab] OR beta-alanine[tiab] OR citrulline[tiab]) AND (resistance training[tiab] OR strength[tiab] OR hypertrophy[tiab])'},
   {topic:"injury",      q:'(injury prevention[tiab] OR injury risk[tiab] OR tendinopathy[tiab]) AND (resistance training[tiab] OR strength training[tiab])'},
-  {topic:"programming", q:'(concurrent training[tiab] OR interference effect[tiab]) AND (strength[tiab] OR hypertrophy[tiab])'}
+  {topic:"programming", q:'(concurrent training[tiab] OR interference effect[tiab]) AND (strength[tiab] OR hypertrophy[tiab])'},
+
+  /* THE SECOND HALF OF THIS LIST EXISTS TO FILL A FEED, NOT TO CATCH THIS WEEK'S NEWS.
+
+     Fifteen queries over a 365-day window is the right shape for "what is new", and it is
+     why the store held about twenty papers: that is genuinely most of what came out. A
+     reader who wants to browse needs a different thing, and the way to get it is more ground
+     covered over more years, not a looser filter — every one of these still goes through the
+     same verification, the same screening and the same exclusion list.
+
+     Grouped by what a lifter would actually be looking for. Several deliberately overlap the
+     queries above: PubMed ranks by date rather than relevance, so two phrasings of one
+     question surface different papers, and the id set is deduplicated anyway. */
+
+  // Load, effort, and how a set is run
+  {topic:"hypertrophy", q:'(velocity loss[tiab] OR velocity-based training[tiab]) AND (strength[tiab] OR hypertrophy[tiab])'},
+  {topic:"hypertrophy", q:'(low-load[tiab] OR high-load[tiab] OR light load[tiab] OR heavy load[tiab]) AND (hypertrophy[tiab] OR muscle thickness[tiab])'},
+  {topic:"hypertrophy", q:'(eccentric training[tiab] OR eccentric overload[tiab] OR concentric[tiab]) AND (hypertrophy[tiab] OR strength[tiab])'},
+  {topic:"hypertrophy", q:'(blood flow restriction[tiab] OR occlusion training[tiab]) AND (hypertrophy[tiab] OR strength[tiab])'},
+  {topic:"hypertrophy", q:'(effective reps[tiab] OR stimulating reps[tiab] OR mechanical tension[tiab]) AND hypertrophy[tiab]'},
+  {topic:"programming", q:'(cluster set*[tiab] OR rest-pause[tiab] OR myo-reps[tiab] OR drop set*[tiab]) AND (hypertrophy[tiab] OR strength[tiab])'},
+  {topic:"programming", q:'(autoregulation[tiab] OR autoregulated[tiab] OR flexible programming[tiab]) AND resistance training[tiab]'},
+  {topic:"programming", q:'(training to failure[tiab] OR non-failure[tiab] OR set failure[tiab]) AND (strength[tiab] OR hypertrophy[tiab])'},
+  {topic:"programming", q:'(weekly frequency[tiab] OR training split[tiab] OR full-body[tiab] OR split routine[tiab]) AND resistance training[tiab]'},
+  {topic:"programming", q:'(detraining[tiab] OR training cessation[tiab] OR muscle memory[tiab] OR retraining[tiab]) AND (muscle[tiab] OR strength[tiab])'},
+
+  // Specific lifts and regions, because people train muscles rather than variables
+  {topic:"exercise",    q:'(squat[tiab] OR leg press[tiab] OR lunge[tiab]) AND (hypertrophy[tiab] OR strength[tiab] OR quadriceps[tiab])'},
+  {topic:"exercise",    q:'(bench press[tiab] OR chest press[tiab] OR push-up[tiab]) AND (hypertrophy[tiab] OR strength[tiab] OR pectoral*[tiab])'},
+  {topic:"exercise",    q:'(deadlift[tiab] OR hip thrust[tiab] OR romanian deadlift[tiab]) AND (hamstring*[tiab] OR gluteus[tiab] OR strength[tiab])'},
+  {topic:"exercise",    q:'(row[tiab] OR pull-up[tiab] OR lat pulldown[tiab] OR pulldown[tiab]) AND (hypertrophy[tiab] OR strength[tiab] OR latissimus[tiab])'},
+  {topic:"exercise",    q:'(shoulder press[tiab] OR lateral raise[tiab] OR deltoid[tiab]) AND (hypertrophy[tiab] OR strength[tiab])'},
+  {topic:"exercise",    q:'(biceps[tiab] OR triceps[tiab] OR elbow flexor*[tiab] OR elbow extensor*[tiab]) AND (hypertrophy[tiab] OR muscle thickness[tiab])'},
+  {topic:"exercise",    q:'(calf[tiab] OR triceps surae[tiab] OR gastrocnemius[tiab] OR soleus[tiab]) AND (hypertrophy[tiab] OR training[tiab])'},
+  {topic:"exercise",    q:'(abdominal*[tiab] OR core training[tiab] OR trunk muscle*[tiab]) AND (hypertrophy[tiab] OR strength[tiab])'},
+  {topic:"exercise",    q:'(unilateral[tiab] OR bilateral[tiab] OR cross-education[tiab]) AND resistance training[tiab]'},
+  {topic:"exercise",    q:'(stretch-mediated hypertrophy[tiab] OR muscle length[tiab] OR long-length[tiab]) AND (hypertrophy[tiab] OR training[tiab])'},
+
+  // Who was trained, which is what makes a paper apply to a reader or not
+  {topic:"strength",    q:'(trained men[tiab] OR resistance-trained[tiab] OR well-trained[tiab]) AND (hypertrophy[tiab] OR strength[tiab])'},
+  {topic:"strength",    q:'(women[tiab] OR female*[tiab] OR sex difference*[tiab]) AND resistance training[tiab] AND (hypertrophy[tiab] OR strength[tiab])'},
+  {topic:"strength",    q:'(older adults[tiab] OR sarcopenia[tiab] OR masters athlete*[tiab]) AND resistance training[tiab] AND (strength[tiab] OR muscle mass[tiab])'},
+  {topic:"strength",    q:'(powerlifting[tiab] OR weightlifting[tiab] OR bodybuilding[tiab]) AND (training[tiab] OR performance[tiab])'},
+  {topic:"strength",    q:'(rate of force development[tiab] OR power output[tiab] OR jump performance[tiab]) AND resistance training[tiab]'},
+
+  // Recovery, fatigue and sleep
+  {topic:"recovery",    q:'(deload[tiab] OR taper[tiab] OR reduced training[tiab]) AND (strength[tiab] OR muscle[tiab])'},
+  {topic:"recovery",    q:'(stretching[tiab] OR foam rolling[tiab] OR massage[tiab] OR cold water immersion[tiab]) AND (recovery[tiab] OR adaptation*[tiab])'},
+  {topic:"recovery",    q:'(delayed onset muscle soreness[tiab] OR creatine kinase[tiab] OR repeated bout effect[tiab])'},
+  {topic:"fatigue",     q:'(neuromuscular fatigue[tiab] OR central fatigue[tiab] OR peripheral fatigue[tiab]) AND resistance[tiab]'},
+  {topic:"sleep",       q:'(sleep quality[tiab] OR sleep duration[tiab] OR napping[tiab]) AND (recovery[tiab] OR performance[tiab] OR muscle[tiab])'},
+
+  // Food
+  {topic:"nutrition",   q:'(protein distribution[tiab] OR protein timing[tiab] OR per meal protein[tiab]) AND (muscle protein synthesis[tiab] OR lean mass[tiab])'},
+  {topic:"nutrition",   q:'(caloric surplus[tiab] OR lean bulk*[tiab] OR body recomposition[tiab]) AND resistance training[tiab]'},
+  {topic:"nutrition",   q:'(weight loss[tiab] OR fat loss[tiab] OR calorie restriction[tiab]) AND resistance training[tiab] AND (lean mass[tiab] OR muscle[tiab])'},
+  {topic:"nutrition",   q:'(carbohydrate[tiab] OR low carbohydrate[tiab] OR ketogenic[tiab]) AND resistance training[tiab]'},
+  {topic:"supplements", q:'(whey[tiab] OR casein[tiab] OR plant protein[tiab] OR leucine[tiab]) AND (muscle[tiab] OR strength[tiab])'},
+  {topic:"supplements", q:'(ashwagandha[tiab] OR ecdysterone[tiab] OR HMB[tiab] OR omega-3[tiab] OR vitamin D[tiab]) AND (muscle[tiab] OR strength[tiab])'},
+
+  // Keeping training possible at all
+  {topic:"injury",      q:'(low back pain[tiab] OR shoulder pain[tiab] OR knee pain[tiab]) AND resistance training[tiab]'},
+  {topic:"injury",      q:'(warm-up[tiab] OR warm up[tiab] OR potentiation[tiab]) AND (performance[tiab] OR injury[tiab])'},
+  {topic:"injury",      q:'(technique[tiab] OR lifting technique[tiab] OR spinal load*[tiab]) AND (squat[tiab] OR deadlift[tiab])'}
 ];
 /* Applied to every query. "humans" keeps out the cell and rodent work that would otherwise
    dominate a mechanistic search; the type list is exactly the set the app has labels for,
@@ -77,6 +140,22 @@ const QUERY_FILTER = '(humans[mh]) AND (english[la]) AND ('
   + 'OR "controlled clinical trial"[pt] OR "observational study"[pt] OR "review"[pt])';
 const FEED_WINDOW_DAYS = 365;
 const PER_QUERY = 12;
+
+/* BROWSING AND CATCHING UP ARE TWO DIFFERENT JOBS, so there are two windows.
+
+   The daily cron keeps doing what it did: 365 days, newest first, which is "what is new".
+   A backfill reaches five years, deep enough to hold the meta-analyses and the volume and
+   proximity-to-failure work everything else is now argued against, shallow enough that most
+   of it has not been superseded. Ten years was the alternative and most of the extra is
+   answered by later papers already in the same list.
+
+   PubMed sorts by date and not by relevance, so a query asked once returns its newest page
+   and nothing else, for ever. retstart is how page two is reached, and the position has to
+   be remembered between invocations or every run re-reads the same forty papers and
+   discovers it already has them. That is what K_CURSOR is for. */
+const BACKFILL_DAYS = 1826;
+const BACKFILL_PER_QUERY = 40;
+const K_CURSOR = "cursor:v1";
 
 /* PUBMED'S PUBLICATION TYPES MAPPED TO THE APP'S SEVEN LABELS, strongest first, and the
    first match wins. WHERE A PAPER CARRIES SEVERAL, THE STRONGEST HONEST ONE IS USED — but
@@ -143,16 +222,23 @@ function ncbiUrl(path, params, env) {
   if (env.NCBI_API_KEY) u.searchParams.set("api_key", env.NCBI_API_KEY);
   return u.toString();
 }
-async function esearch(query, env) {
+async function esearch(query, env, opt) {
+  const o = opt || {};
   const url = ncbiUrl("/esearch.fcgi", {
-    db: "pubmed", retmode: "json", retmax: String(PER_QUERY), sort: "date",
+    db: "pubmed", retmode: "json",
+    retmax: String(o.retmax || PER_QUERY),
+    retstart: String(o.retstart || 0),
+    sort: "date",
     term: "(" + query + ") AND " + QUERY_FILTER,
-    reldate: String(FEED_WINDOW_DAYS), datetype: "pdat"
+    reldate: String(o.days || FEED_WINDOW_DAYS), datetype: "pdat"
   }, env);
   const r = await paced(() => fetch(url));
-  if (!r.ok) return [];
+  if (!r.ok) return o.withCount ? {ids: [], total: 0} : [];
   const j = await r.json();
-  return ((j.esearchresult || {}).idlist) || [];
+  const res = j.esearchresult || {};
+  const ids = res.idlist || [];
+  /* count comes back as a string and is what says whether a deeper page exists at all. */
+  return o.withCount ? {ids, total: Number(res.count) || 0} : ids;
 }
 /* efetch RETURNS XML AND THERE IS NO DOM IN A WORKER, so the fields are pulled with
    anchored regular expressions over one record at a time. That is unpleasant and it is
@@ -936,16 +1022,44 @@ const K_QUEUE = "queue:v1";
    stored, which is the point of dropping them. */
 const K_REJECT = "reject:v1";
 const REJECT_MAX = 4000;
-const INDEX_MAX = 400;
+/* THE FEED IS ONE JSON VALUE AND THE WHOLE OF IT GOES TO THE PHONE, which makes this a
+   product decision rather than a storage one. A card with its four summary fields runs to
+   about a kilobyte, so 500 is roughly half a megabyte of JSON — around 130 KB over the wire
+   gzipped, fetched once a day, held in localStorage beside the training log, where persist()
+   already survives a quota failure.
+
+   That is the honest ceiling for the current card. Going much past it means slimming the
+   card to an id and a headline and fetching the rest when a paper is opened, which the
+   /research/paper/:id route already exists to serve and nothing yet calls, because
+   researchById() reads the cached feed. If 500 starts to bite, that is the next move, and
+   it is a bigger one than raising a constant. */
+const INDEX_MAX = 500;
 
 async function readIndex(env) {
   const raw = await env.RESEARCH.get(K_INDEX);
   if (!raw) return [];
   try { const a = JSON.parse(raw); return Array.isArray(a) ? a : []; } catch (e) { return []; }
 }
+/* TRIMMING BY ARRIVAL TIME ALONE WOULD THROW AWAY THE REVIEWED WORK. The index was sorted
+   newest-added first and cut at the limit, which is harmless while a run adds four papers a
+   day and ruinous the moment a backfill adds four hundred: the papers that had been read
+   against their abstracts and approved one at a time are the OLDEST arrivals in the store,
+   so they would have been first out.
+
+   So the cut is by what a row is worth keeping and not by when it turned up. An approved
+   paper with a summary outranks an approved one, which outranks one that merely has a
+   summary, which outranks a bare record; arrival time only breaks ties. A row dropped from
+   the index still exists under its own key — it is out of the feed, not deleted. */
+function keepRank(r) {
+  const sum = !!r.quickTakeaway, ok = r.approved === true;
+  if (ok && sum) return 3;
+  if (ok) return 2;
+  if (sum) return 1;
+  return 0;
+}
 async function writeIndex(env, rows) {
   const trimmed = rows
-    .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
+    .sort((a, b) => (keepRank(b) - keepRank(a)) || ((b.addedAt || 0) - (a.addedAt || 0)))
     .slice(0, INDEX_MAX);
   await env.RESEARCH.put(K_INDEX, JSON.stringify(trimmed));
 }
@@ -955,6 +1069,10 @@ function cardOf(p) {
     publishedAt: p.publishedAt, type: p.type, topics: p.topics,
     actionable: !!p.applyTo, applyTo: p.applyTo || null, population: p.population || null,
     addedAt: p.addedAt, url: p.url, doi: p.doi || null,
+    /* A BOOLEAN, NOT THE REASON. The summarise pass needs to know not to pick a paper up
+       again for ever, and the app needs to know whether to say "in progress" or nothing.
+       The reason itself is diagnostic and stays in the record, where the queue route reads it. */
+    summaryFailed: !!p.summaryFailed,
     quickTakeaway: p.summary ? p.summary.quickTakeaway : null,
     whatTheyStudied: p.summary ? p.summary.whatTheyStudied : null,
     whatTheyFound: p.summary ? p.summary.whatTheyFound : null,
@@ -1011,6 +1129,172 @@ function needsApproval(p, launched) {
   if (!launched) return true;
   return p.type === "meta" || p.type === "systematic" || !!p.applyTo;
 }
+
+/* ONE RECORD BUILDER FOR BOTH PASSES. It was inline in runPipeline, and an ingest pass that
+   assembled its own would be the obvious place for the two to drift apart by a field nobody
+   notices for a month. */
+function newPaper(rec, sc, v, hash) {
+  const mn = monthNum(rec.month);
+  return {
+    id: "pm" + rec.pmid,
+    pmid: rec.pmid, doi: rec.doi || null,
+    title: rec.title, journal: rec.journal,
+    authors: rec.authors,
+    published: rec.year + (mn ? "-" + String(mn).padStart(2, "0") : ""),
+    publishedAt: Date.UTC(Number(rec.year), (mn || 1) - 1, 1),
+    type: evidenceType(rec), topics: sc.topics, applyTo: sc.applyTo, population: sc.population,
+    url: v.url,
+    /* THE SOURCE BASIS IS RECORDED, NOT THE SOURCE: the abstract is not reproduced in the
+       store, only where it came from and a hash, so a later run can tell whether the text a
+       summary was written from has changed. */
+    sourceBasis: "abstract",
+    sourceHash: hash,
+    verification: {checks: v.fail, crossref: !!v.crossref, at: Date.now()},
+    screening: sc.reasons,
+    addedAt: Date.now(),
+    summary: null, approved: false
+  };
+}
+/* INGEST, WITHOUT ASKING A LANGUAGE MODEL ANYTHING.
+
+   A paper costs one Crossref lookup to verify and nothing else to screen, so an invocation
+   can take in thirty-odd of them. The summary is what costs four model calls and caps a run
+   at six. Doing both in one pass meant the cheap work was rationed by the price of the
+   expensive work, which is why reaching hundreds would have taken weeks.
+
+   So they are two passes over one store. A paper arrives verified, screened, labelled and
+   linked, with summary:null; the summarise pass picks it up later. The card already says so
+   and shows the paper — and a paper with no AI text on it is the one state where there is
+   nothing to be unfaithful about. */
+async function runIngest(env, limit) {
+  SUBREQ = 0;
+  SUBREQ_CEIL = subreqMax(env);
+  const launched = await launchApproved(env);
+  const seen = await readIndex(env);
+  const rejected = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
+  const have = new Set(seen.map(x => x.id).concat(rejected));
+  const newRejects = [];
+  const cur = JSON.parse((await env.RESEARCH.get(K_CURSOR)) || '{"i":0,"rs":{}}');
+  const stats = {mode: "ingest", found: 0, dropped: 0, added: 0, queued: 0, reasons: {},
+                 queriesTried: 0, exhausted: 0, subreqCeiling: SUBREQ_CEIL};
+  const drop = why => { stats.dropped++; stats.reasons[why] = (stats.reasons[why] || 0) + 1; };
+  const want = limit || 40;
+
+  /* ROUND-ROBIN FROM WHERE THE LAST RUN STOPPED, so breadth comes before depth: a reader
+     gets something from every topic early rather than four hundred papers about squats. */
+  for (let step = 0; step < QUERIES.length && stats.added < want; step++) {
+    if (subreqLeft() < 4) { stats.stoppedOnBudget = true; break; }
+    const qi = (cur.i + step) % QUERIES.length;
+    const spec = QUERIES[qi];
+    const rs = cur.rs[qi] || 0;
+    stats.queriesTried++;
+    let got;
+    try {
+      got = await esearch(spec.q, env, {retstart: rs, retmax: BACKFILL_PER_QUERY,
+                                        days: BACKFILL_DAYS, withCount: true});
+    } catch (e) { continue; }
+    const ids = (got && got.ids) || [];
+    if (!ids.length) { stats.exhausted++; cur.rs[qi] = 0; continue; }
+    cur.rs[qi] = (rs + ids.length >= (got.total || 0)) ? 0 : rs + ids.length;
+
+    const fresh = ids.filter(id => !have.has("pm" + id));
+    for (let b = 0; b < fresh.length && stats.added < want; b += 6) {
+      if (subreqLeft() < 4) { stats.stoppedOnBudget = true; break; }
+      let recs = [];
+      try { recs = await efetch(fresh.slice(b, b + 6), env); } catch (e) { continue; }
+      for (const rec of recs) {
+        if (subreqLeft() < 2) { stats.stoppedOnBudget = true; break; }
+        stats.found++;
+        const v = await verify(rec);
+        if (!v.ok) { drop(v.fail[0] || "verification"); newRejects.push("pm" + rec.pmid); continue; }
+        const sc = screen(rec, spec.topic);
+        if (!sc.ok) { drop(sc.why); newRejects.push("pm" + rec.pmid); continue; }
+        const paper = newPaper(rec, sc, v, await sha256(rec.abstract));
+        /* A BARE RECORD CARRIES NO WRITTEN CLAIM, so the gate's ordinary rule is enough:
+           a plain trial publishes, while a pooled design or anything actionable still waits
+           for a human — and will be looked at again when its summary arrives. */
+        paper.approved = !needsApproval(paper, launched);
+        if (!paper.approved) stats.queued++;
+        await env.RESEARCH.put(K_PAPER(paper.id), JSON.stringify(paper));
+        seen.push(cardOf(paper));
+        have.add(paper.id);
+        stats.added++;
+      }
+    }
+    cur.i = (qi + 1) % QUERIES.length;
+  }
+  await writeIndex(env, seen);
+  if (newRejects.length) {
+    await env.RESEARCH.put(K_REJECT,
+      JSON.stringify(rejected.concat(newRejects).slice(-REJECT_MAX)));
+  }
+  await env.RESEARCH.put(K_CURSOR, JSON.stringify(cur));
+  stats.inIndex = Math.min(seen.length, INDEX_MAX);
+  await env.RESEARCH.put("stats:ingest", JSON.stringify(Object.assign({at: Date.now()}, stats)));
+  return Object.assign({launched}, stats);
+}
+
+/* THE SUMMARY PASS. Walks the index for papers with no summary and no recorded failure,
+   oldest-added first so nothing waits for ever, and writes as many as the budget allows.
+   How a summary is written and checked is entirely unchanged. */
+async function runSummarise(env, limit) {
+  SUBREQ = 0;
+  SUBREQ_CEIL = subreqMax(env);
+  const launched = await launchApproved(env);
+  const rows = await readIndex(env);
+  const stats = {mode: "summarise", tried: 0, wrote: 0, failed: 0, reasons: {},
+                 subreqCeiling: SUBREQ_CEIL};
+  const want = limit || 6;
+  const pending = rows.filter(r => !r.quickTakeaway && r.summaryFailed !== true)
+                      .sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
+  stats.pending = pending.length;
+
+  for (const row of pending) {
+    if (stats.wrote + stats.failed >= want) break;
+    if (subreqLeft() < PER_PAPER_SUBREQ) { stats.stoppedOnBudget = true; break; }
+    const raw = await env.RESEARCH.get(K_PAPER(row.id));
+    if (!raw) continue;
+    const paper = JSON.parse(raw);
+    if (paper.summary || paper.summaryFailed) continue;
+    /* THE ABSTRACT IS NOT STORED, so it is fetched again here: one efetch per paper rather
+       than per six, which is the price of separating the passes and is still small beside
+       the four model calls it is paying for. */
+    let recs = [];
+    try { recs = await efetch([paper.pmid], env); } catch (e) { continue; }
+    const rec = recs[0];
+    if (!rec || !rec.abstract) continue;
+    stats.tried++;
+    const out = await summarise(rec, paper.type, paper.population, env);
+    if (!out.ok && /too many subrequests/i.test(out.why || "")) {
+      stats.stoppedOnBudget = true;
+      stats.budgetWasWrong = "hit the platform limit at " + SUBREQ
+        + " with a ceiling of " + SUBREQ_CEIL + " \u2014 lower SUBREQ_MAX";
+      break;
+    }
+    if (out.ok) {
+      paper.summary = out.sum;
+      paper.verification.summary = out.verification;
+      delete paper.summaryFailed;
+      stats.wrote++;
+    } else {
+      paper.summaryFailed = out.why;
+      stats.failed++;
+      const k = String(out.why).slice(0, 80);
+      stats.reasons[k] = (stats.reasons[k] || 0) + 1;
+    }
+    /* APPROVAL IS DECIDED AGAIN, because a paper that now HAS a summary may need a human
+       where the bare record did not. It is only ever tightened here, never loosened: a
+       paper a human already approved stays approved. */
+    paper.approved = paper.approved === true || !needsApproval(paper, launched);
+    await env.RESEARCH.put(K_PAPER(paper.id), JSON.stringify(paper));
+    const i = rows.findIndex(r => r.id === paper.id);
+    if (i > -1) rows[i] = cardOf(paper);
+  }
+  await writeIndex(env, rows);
+  await env.RESEARCH.put("stats:summarise", JSON.stringify(Object.assign({at: Date.now()}, stats)));
+  return Object.assign({launched}, stats);
+}
+
 async function runPipeline(env, limit) {
   /* RESET PER RUN, because module-level state survives in a warm isolate: a second run in
      the same isolate would otherwise start with the first run's spend already on the clock
@@ -1198,8 +1482,18 @@ async function rateOk(env, ip) {
 const servable = rows => rows.filter(r => r && r.approved === true);
 
 export default {
+  /* THE CRON DOES BOTH JOBS, in the order that keeps the feed honest if it is interrupted.
+
+     Summaries first, because the papers already in the store have been waiting and a reader
+     looking at a card that says "summary in progress" is owed it before a stranger is added
+     beside them. Ingest second, with whatever budget is left, which on a quiet day is most
+     of it. Each is its own invocation's worth of work and each ends inside the subrequest
+     ceiling on its own. */
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runPipeline(env, 20));
+    ctx.waitUntil((async () => {
+      await runSummarise(env, 6);
+      await runIngest(env, 25);
+    })());
   },
 
   async fetch(request, env) {
@@ -1292,6 +1586,15 @@ export default {
     if (url.pathname === "/research/run" && isAdmin) {
       return json(await runPipeline(env, Number(url.searchParams.get("n") || 6)), origin, 0);
     }
+    /* TAKE PAPERS IN WITHOUT SUMMARISING THEM. Cheap enough to call repeatedly: each call
+       picks up where the cursor left off, so a few dozen of these fill the feed. */
+    if (url.pathname === "/research/ingest" && isAdmin) {
+      return json(await runIngest(env, Number(url.searchParams.get("n") || 40)), origin, 0);
+    }
+    /* AND WRITE SUMMARIES FOR WHAT IS ALREADY IN. Oldest first, as many as the budget allows. */
+    if (url.pathname === "/research/summarise" && isAdmin) {
+      return json(await runSummarise(env, Number(url.searchParams.get("n") || 6)), origin, 0);
+    }
     /* CLEARING THE FAILED RECORDS, which is a real need rather than a convenience. A paper
        is written once and never revisited, so a paper whose summary failed under a bug that
        has since been fixed stays broken for ever: it is in the index, it carries whatever
@@ -1365,7 +1668,8 @@ export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
   K_LAUNCH, K_REJECT, scoreModel, parseModelJson, summaryPrompt, subreqMax, BOILERPLATE,
-  summaryStale,
+  summaryStale, newPaper, keepRank, runIngest, runSummarise, QUERIES,
+  BACKFILL_DAYS, BACKFILL_PER_QUERY, INDEX_MAX, K_CURSOR,
   summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
   resetSubreq: () => { SUBREQ = 0; RESOLVED = null; }
 };
