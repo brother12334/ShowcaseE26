@@ -1290,7 +1290,27 @@ async function runSummarise(env, limit) {
       paper.verification.summary = out.verification;
       delete paper.summaryFailed;
       stats.wrote++;
+    } else if (/^summary call failed/.test(out.why || "")) {
+      /* A PAPER MUST NOT LOSE ITS SUMMARY FOR EVER BECAUSE A QUOTA RAN OUT.
+
+         summaryFailed is a permanent mark: the pass skips any paper carrying one, which is
+         right for a judgement about the content and catastrophic for a transient. Pushing
+         hundreds of summaries through found the hole immediately. One pass wrote six of six,
+         the next wrote one of six and the next none of six, all on "gemini kept refusing
+         (last 429)" — Gemini's own rate limit. Had that been recorded, a few minutes of
+         exhausted quota would have permanently denied a summary to every paper unlucky
+         enough to be next in the queue, and nothing would ever have revisited them.
+
+         So a call that never produced an answer leaves the paper exactly as it was, pending,
+         for a later run to pick up. And the pass STOPS: if the far end is refusing, the next
+         five papers will be refused too, and the only thing continuing achieves is burning
+         the rest of the budget to learn that again. */
+      stats.deferred = (stats.deferred || 0) + 1;
+      stats.stoppedOnTransient = out.why;
+      break;
     } else {
+      /* A judgement about the content, which is final: the checks or the second pass read
+         this summary and rejected it. The paper publishes with its metadata and link. */
       paper.summaryFailed = out.why;
       stats.failed++;
       const k = String(out.why).slice(0, 80);
@@ -1724,6 +1744,36 @@ export default {
         if (want) out.published++; else out.queued++;
         if (dry) continue;
         p.approved = want;
+        await env.RESEARCH.put(K_PAPER(p.id), JSON.stringify(p));
+        const i = rows.findIndex(x => x.id === p.id);
+        if (i > -1) rows[i] = cardOf(p);
+      }
+      if (dry) {
+        out.note = "nothing changed \u2014 pass ?confirm=yes";
+        return json(out, origin, 0);
+      }
+      await writeIndex(env, rows);
+      return json(out, origin, 0);
+    }
+    /* UNDO THE DAMAGE THE ABOVE USED TO DO. Records marked summaryFailed with a reason that
+       was never a judgement about their content — a quota, an overload, a timeout — are
+       returned to the pending queue. A record rejected by the checks or the second pass is a
+       decision about what the summary said, and is left alone. */
+    if (url.pathname === "/research/unfail" && isAdmin) {
+      const rows = await readIndex(env);
+      const out = {looked: 0, cleared: 0, keptFinal: 0, ids: []};
+      const dry = url.searchParams.get("confirm") !== "yes";
+      for (const r of rows) {
+        if (r.summaryFailed !== true) continue;
+        const raw = await env.RESEARCH.get(K_PAPER(r.id));
+        if (!raw) continue;
+        const p = JSON.parse(raw);
+        out.looked++;
+        if (!/^summary call failed/.test(p.summaryFailed || "")) { out.keptFinal++; continue; }
+        out.cleared++;
+        if (out.ids.length < 50) out.ids.push(r.id);
+        if (dry) continue;
+        delete p.summaryFailed;
         await env.RESEARCH.put(K_PAPER(p.id), JSON.stringify(p));
         const i = rows.findIndex(x => x.id === p.id);
         if (i > -1) rows[i] = cardOf(p);

@@ -884,5 +884,43 @@ console.log("19 - CHANGING THE RULE HAS TO REACH WHAT IS ALREADY STORED");
      /"\/research\/reapprove"[\s\S]{0,1600}?origin, 0\)/.test(src), "");
 }
 
+console.log("20 - A QUOTA IS NOT A VERDICT ON THE PAPER");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* summaryFailed is permanent: the pass skips any paper carrying one. Right for a judgement
+     about the content, catastrophic for a transient. Pushing hundreds through found it at
+     once \u2014 one pass wrote 6 of 6, the next 1 of 6, the next 0 of 6, all on "gemini kept
+     refusing (last 429)". Recorded, that would have permanently denied a summary to every
+     paper unlucky enough to be next in the queue. */
+  ck("A CALL THAT NEVER ANSWERED IS NOT RECORDED AS A FAILURE",
+     /\} else if \(\/\^summary call failed\/\.test\(out\.why \|\| ""\)\) \{/.test(src), "");
+  ck("the paper is left pending for a later run, not marked",
+     /stats\.deferred = \(stats\.deferred \|\| 0\) \+ 1;/.test(src), "");
+  ck("AND THE PASS STOPS, because the next six will be refused too",
+     /stats\.stoppedOnTransient = out\.why;\s*\n\s*break;/.test(src), "");
+  ck("while a verdict on the content IS final, and publishes with metadata and link",
+     /paper\.summaryFailed = out\.why;/.test(src), "");
+
+  /* And the records already marked on a transient have to be recoverable. */
+  ck("there is a route to return them to the queue", /"\/research\/unfail"/.test(src), "");
+  ck("it only clears the transient ones",
+     /if \(!\/\^summary call failed\/\.test\(p\.summaryFailed \|\| ""\)\) \{ out\.keptFinal\+\+; continue; \}/.test(src), "");
+  ck("A REJECTION BY THE CHECKS IS LEFT ALONE, because that was a decision about the words",
+     /keptFinal/.test(src), "");
+  ck("and it is a dry run unless confirmed, like the others",
+     /"\/research\/unfail"[\s\S]{0,900}?confirm"\) !== "yes"/.test(src), "");
+
+  /* The two kinds of message must stay distinguishable, which is what the whole fix rests on. */
+  const transient = ["summary call failed: gemini 503 on gemini-flash-latest",
+                     "summary call failed: gemini kept refusing (last 429 on x)",
+                     "summary call failed: Too many subrequests by single Worker invocation"];
+  const final = ["failed the checks: fewer than two specific limitations",
+                 "second pass rejected 2 of 8 sentences after 2 passes",
+                 "failed the checks: causal wording in forLifters on a review design: causing"];
+  const isTransient = w=> /^summary call failed/.test(w);
+  ck("every transient message is recognised as one", transient.every(isTransient), "");
+  ck("and no verdict on the content is mistaken for one", final.every(w=> !isTransient(w)), "");
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 process.exit(bad ? 1 : 0);

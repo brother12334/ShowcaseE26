@@ -425,7 +425,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (222) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (232) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (71) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
@@ -579,6 +579,30 @@ GET /research/reapprove?token=…&confirm=yes
 A bare record is judged on the gate, a summarised one on the full rule. **A human's decision
 is never overwritten in either direction** — `approvedAt` marks a judgement somebody made,
 including a rejection, and those records are skipped and counted as `humanLeftAlone`.
+
+### A quota is not a verdict on the paper
+
+`summaryFailed` is permanent — the summarise pass skips any paper carrying one. That is right
+for a judgement about the content and catastrophic for a transient, and pushing hundreds of
+summaries through found the hole in three passes: 6 written of 6, then 1 of 6, then 0 of 6,
+the failures all `gemini kept refusing (last 429)`. Had those been recorded, a few minutes of
+exhausted quota would have permanently denied a summary to every paper that happened to be
+next in the queue, and nothing would ever have revisited them.
+
+So the two kinds of failure are now treated differently:
+
+| failure | recorded? | why |
+|---|---|---|
+| `summary call failed: …` (429, 503, 524, subrequests) | **no** — stays pending, and the pass stops | nothing was ever read, so there is nothing to judge; and if the far end is refusing, the next six will be refused too |
+| `failed the checks: …` / `second pass rejected …` | yes, final | the checks read this summary and rejected it; the paper publishes with metadata and link |
+
+`GET /research/unfail?token=…&confirm=yes` returns records already marked on a transient to
+the pending queue, and leaves every rejection-by-checks exactly as it is.
+
+**A caution on measuring the yield.** The failure rate looked like one in two until the
+pattern was separated out, and most of it was quota rather than the verifier. Any judgement
+about how strict the checks are has to be made from runs that did not hit a 429, or it is
+measuring the wrong thing.
 
 ### What the order means
 
