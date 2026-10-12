@@ -1596,12 +1596,38 @@ function json(data, origin, ttl) {
     }, cors(origin))
   });
 }
-async function rateOk(env, ip) {
+/* A RATE LIMITER MUST NEVER BE ABLE TO TAKE THE SERVICE DOWN, AND THIS ONE DID.
+
+   Both of its KV calls were unguarded, so any storage failure threw out of here and out of
+   fetch(), and every GET answered 1101 — including /research/feed, which does not need the
+   limiter to do its job at all. The app showed "Couldn't reach the research service" because
+   the thing counting requests could not write down the count.
+
+   It failed because the free plan's daily KV write allowance was exhausted driving the
+   summary backlog, and a limiter that writes on EVERY REQUEST is a large part of why: a
+   public feed served to a phone should not cost a storage write. So two changes.
+
+   IT FAILS OPEN. A limiter protects the service from abuse; a broken limiter that refuses
+   everybody has become the abuse. On any storage error the request is allowed through.
+
+   AND IT COUNTS A SAMPLE. One request in RATE_SAMPLE is recorded rather than every one,
+   which cuts the write cost by that factor and still catches anybody hammering it — the
+   threshold is divided to match, so the response to a flood is unchanged while the cost of
+   ordinary reading is a tenth. Admin routes are always counted: they are the expensive ones
+   and there are only ever a handful. */
+const RATE_SAMPLE = 10;
+async function rateOk(env, ip, always) {
   if (!env.RESEARCH || !ip) return true;
-  const k = "rl:" + ip + ":" + Math.floor(Date.now() / 60000);
-  const n = Number((await env.RESEARCH.get(k)) || 0) + 1;
-  await env.RESEARCH.put(k, String(n), {expirationTtl: 120});
-  return n <= RATE_PER_MIN;
+  if (!always && Math.random() * RATE_SAMPLE >= 1) return true;
+  try {
+    const k = "rl:" + ip + ":" + Math.floor(Date.now() / 60000);
+    const n = Number((await env.RESEARCH.get(k)) || 0) + 1;
+    await env.RESEARCH.put(k, String(n), {expirationTtl: 120});
+    return n <= Math.max(1, Math.ceil(RATE_PER_MIN / (always ? 1 : RATE_SAMPLE)));
+  } catch (e) {
+    /* Storage is unwell. A reason to stop counting, not a reason to stop serving. */
+    return true;
+  }
 }
 /* ONLY APPROVED PAPERS ARE EVER SERVED. The gate is here, in one place, on the way out —
    not scattered through the query paths where one branch could forget it.
@@ -1628,14 +1654,37 @@ export default {
     })());
   },
 
+  /* NOTHING INSIDE HERE MAY BE ABLE TO ANSWER 1101.
+
+     An unguarded throw anywhere in the request path returned Cloudflare's own error page
+     with no body the app could read and no reason anybody could see — and it took the
+     public feed down along with the route that actually broke. One rate limiter failing to
+     write a counter made every GET fail.
+
+     So the whole dispatch is wrapped. A thrown error becomes a 500 with a JSON body, the
+     CORS headers the app needs to read it, and the message, so the next failure is
+     diagnosable from the outside in one request instead of by elimination. */
   async fetch(request, env) {
+    try {
+      return await handle(request, env);
+    } catch (e) {
+      const origin = request.headers.get("origin") || "";
+      return new Response(JSON.stringify({error: "worker threw", detail: String((e && e.message) || e)}),
+        {status: 500, headers: Object.assign({"content-type": "application/json; charset=utf-8",
+                                              "cache-control": "private, no-store"}, cors(origin))});
+    }
+  }
+};
+
+async function handle(request, env) {
     const origin = request.headers.get("origin") || "";
     if (request.method === "OPTIONS") return new Response(null, {status: 204, headers: cors(origin)});
     if (request.method !== "GET") return new Response("method not allowed", {status: 405, headers: cors(origin)});
 
     const url = new URL(request.url);
     const ip = request.headers.get("cf-connecting-ip") || "";
-    if (!(await rateOk(env, ip)))
+    const isAdminReq = !!url.searchParams.get("token");
+    if (!(await rateOk(env, ip, isAdminReq)))
       return new Response(JSON.stringify({error: "rate limit"}), {status: 429, headers: cors(origin)});
 
     /* ADMIN ROUTES, BEHIND A SECRET, and deliberately the only non-GET-shaped thing here:
@@ -1901,8 +1950,7 @@ export default {
     }
 
     return new Response("not found", {status: 404, headers: cors(origin)});
-  }
-};
+}
 
 /* EXPORTED FOR THE TESTS. The verification and faithfulness rules are the part of this
    file that must not drift, and they are pure functions precisely so they can be run on

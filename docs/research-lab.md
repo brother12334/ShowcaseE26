@@ -425,7 +425,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (255) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (264) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (86) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
@@ -649,6 +649,43 @@ the queue drains at six a day.
 
 It deliberately does not know who the reader is. `researchRank()` in the app does, and should;
 a summary is written once and served to everybody.
+
+### I took the live feed down, and how
+
+Driving the summary backlog with a paced loop exhausted the free plan's **daily KV write
+allowance**, and the Worker then answered `error code: 1101` on every GET — including
+`/research/feed`, which does not need storage writes at all. The app showed "Couldn't reach
+the research service".
+
+The cause was `rateOk()`. Both its KV calls were unguarded, so a storage failure threw out
+of it and out of `fetch()`. **A rate limiter that cannot write a counter was able to refuse
+every request to the whole service.** It also wrote on *every* request, which is a large part
+of why the allowance went: a public feed served to a phone should not cost a storage write.
+
+Isolating it took three requests, which is worth remembering:
+
+| request | result | why |
+|---|---|---|
+| `OPTIONS /research/feed` | 204 | returns before the limiter |
+| `POST /research/feed` | 405 | returns before the limiter |
+| `GET /nope` | **500** | goes through the limiter, then would 404 |
+
+Three fixes:
+
+1. **The limiter fails open.** Any storage error allows the request. A limiter exists to
+   protect the service from abuse; a broken one that refuses everybody has become the abuse.
+2. **It samples rather than counting everything** — one request in `RATE_SAMPLE`, with the
+   threshold divided to match, so the response to a flood is unchanged and the write cost of
+   ordinary reading is a tenth. Admin routes are always counted; there are only ever a few.
+3. **The whole dispatch is wrapped.** A throw anywhere now returns a 500 with a JSON body,
+   the message, and the CORS headers the app needs to read it — so the next failure is
+   diagnosable from outside in one request instead of by elimination.
+
+**The operational lesson is separate from the code one.** The backfill and the drain loop
+write a paper record plus an index rewrite per paper, and the free plan allows 1,000 KV
+writes a day. Clearing a 340-paper backlog cannot be done in an afternoon on that plan at
+any pace, and pacing the model calls does nothing about the storage writes — which is the
+limit I had not counted.
 
 ### What the order means
 

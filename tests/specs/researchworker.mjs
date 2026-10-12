@@ -1010,5 +1010,31 @@ console.log("22 - SUMMARIES ARE WRITTEN IN THE ORDER A READER MEETS THEM");
      /out\.reasons\[off\] = \(out\.reasons\[off\] \|\| 0\) \+ 1;/.test(src), "");
 }
 
+console.log("23 - A RATE LIMITER MUST NOT BE ABLE TO TAKE THE SERVICE DOWN");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* It did. Both KV calls in rateOk were unguarded, the free plan's daily write allowance
+     ran out while draining the summary backlog, and every GET answered 1101 \u2014 including
+     /research/feed, which does not need the limiter at all. The app said "Couldn't reach the
+     research service" because the thing counting requests could not write down the count. */
+  ck("THE LIMITER FAILS OPEN, because a limiter that refuses everybody has become the abuse",
+     /catch \(e\) \{[\s\S]{0,160}return true;/.test(src), "");
+  ck("its storage calls are inside the try", /try \{[\s\S]{0,260}RESEARCH\.put\(k, String\(n\)/.test(src), "");
+  ck("AND IT DOES NOT WRITE ON EVERY REQUEST, which is what spent the allowance",
+     /Math\.random\(\) \* RATE_SAMPLE >= 1/.test(src), "");
+  ck("the threshold is divided to match the sampling, so a flood is still caught",
+     /RATE_PER_MIN \/ \(always \? 1 : RATE_SAMPLE\)/.test(src), "");
+  ck("and an admin request is always counted",
+     /rateOk\(env, ip, isAdminReq\)/.test(src), "");
+
+  /* And nothing else in the request path may be able to do it either. */
+  ck("THE WHOLE DISPATCH IS WRAPPED", /return await handle\(request, env\);/.test(src), "");
+  ck("a throw becomes a 500 with a readable body, not Cloudflare's error page",
+     /error: "worker threw", detail:/.test(src), "");
+  ck("with the CORS headers the app needs to read it",
+     /"worker threw"[\s\S]{0,300}cors\(origin\)/.test(src), "");
+  ck("and it is never cached", /"worker threw"[\s\S]{0,260}private, no-store/.test(src), "");
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 process.exit(bad ? 1 : 0);
