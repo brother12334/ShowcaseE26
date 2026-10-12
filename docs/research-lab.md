@@ -375,6 +375,7 @@ Each of these was invisible to the fixtures and only appeared against the real A
 | `forLifters does not name the population` on lines that named it | the check's word list held nine nouns and none of the generic ones; a review has no participants of its own | the generic nouns are accepted, and a pooled design may name the studies |
 | an identical `found 12, dropped 6` every run | only accepted papers entered the index, so excluded ones were re-fetched and re-screened daily | `reject:v1`, cleared by a reset |
 | every review rejected, 4 of 4, while 14 experiments passed | the prompt assumed the paper had participants, so a narrative review had to invent a population or name none | the participant rules are written twice, once for a design that ran an experiment and once for one that pooled others |
+| every admin route served `public, max-age=300, s-maxage=1800` | `ttl \|\| EDGE_TTL` read the `0` that meant "never cache" as absent | `ttl === 0` tested for identity, answering `private, no-store` |
 | `gemini 524` on two papers | 524 is Cloudflare's own gateway timeout and was not in the retry set | `408` and `524` added beside `503` |
 | no way to tell whether the rejection memory worked | neither the run nor the store reported a count, so a claim about it could not be checked | `rejectsKnown` and `rejectsAdded` per run, `rejectsRemembered` in `/research/stats` |
 | every run ending on `stoppedOnBudget` after four or five papers | the free-plan subrequest ceiling was hardcoded, and the paid limit is twenty times higher | `SUBREQ_MAX` is a var; the cautious value stays the default |
@@ -424,7 +425,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (198) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (203) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (71) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes

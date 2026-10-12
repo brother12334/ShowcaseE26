@@ -1454,13 +1454,36 @@ function cors(origin) {
     "access-control-max-age": "86400"
   };
 }
+/* ttl === 0 MEANT "DO NOT CACHE THIS" AT EVERY CALL SITE AND HAS NEVER ONCE DONE IT.
+
+   `ttl || EDGE_TTL` reads 0 as absent, so 0 became 1800. Every admin route — run, ingest,
+   summarise, reset, approve, launch, queue, stats — was served `public, max-age=300,
+   s-maxage=1800` while its author believed it was uncacheable. Two things follow, and the
+   second is worse than the first.
+
+   An admin action can be answered from the edge instead of being performed. Ten identical
+   /research/ingest calls are one URL: the first runs, and the rest may be handed the first
+   one's JSON for half an hour without the Worker ever waking. A caller watching the numbers
+   climb would see them stop and have no idea why.
+
+   And `public` on a token-authenticated response is simply wrong. /research/queue returns
+   unapproved papers — the ones held back precisely because nobody has read them yet — and
+   marking that publicly cacheable invites any intermediary to store it. The token being in
+   the URL keeps it out of a *shared* cache key in practice, which is the only reason this
+   is a defect rather than an incident.
+
+   So a zero now says what it meant: nothing stored, by anybody, and no revalidation games. */
 function json(data, origin, ttl) {
+  const cache = (ttl === 0)
+    ? "private, no-store, max-age=0"
+    : "public, max-age=300, s-maxage=" + (ttl || EDGE_TTL);
   return new Response(JSON.stringify(data), {
     headers: Object.assign({
       "content-type": "application/json; charset=utf-8",
-      /* PUBLIC, because every reader gets the same bytes. This is the whole reason the
-         research store is not in the account Worker: that one may never say public. */
-      "cache-control": "public, max-age=300, s-maxage=" + (ttl || EDGE_TTL)
+      /* The PUBLIC feed is public because every reader gets the same bytes, and that is the
+         whole reason the research store is not in the account Worker: that one may never say
+         public of anything. An admin route is the other case entirely. */
+      "cache-control": cache
     }, cors(origin))
   });
 }

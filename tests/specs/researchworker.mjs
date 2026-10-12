@@ -803,5 +803,29 @@ console.log("16 - TRIMMING THE INDEX MUST NOT THROW AWAY THE REVIEWED WORK");
   ck("and arrival time still breaks ties between equals", same[0].id === "b", same[0].id);
 }
 
+console.log("17 - A ZERO TTL HAS TO ACTUALLY MEAN DO NOT CACHE");
+{
+  /* Every admin route passed 0 to json() meaning "never cache this", and `ttl || EDGE_TTL`
+     read 0 as absent, so they were all served public, max-age=300, s-maxage=1800. Found by
+     reading the live response headers, not by any test \u2014 which is why there is one now. */
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  ck("ZERO IS TESTED FOR IDENTITY, not for truthiness",
+     /ttl === 0/.test(src) && !/s-maxage" \+ \(ttl \|\| EDGE_TTL\)\s*\n\s*\}, cors/.test(src), "");
+  ck("and a zero says no-store rather than a short age",
+     /private, no-store/.test(src), "");
+  ck("AN ADMIN RESPONSE IS NEVER MARKED PUBLIC, because the queue holds unapproved papers",
+     !/"\/research\/queue"[\s\S]{0,400}json\([^)]*origin\)\s*;/.test(src), "");
+  /* Every admin route must still be asking for zero; a route that forgets is one that gets
+     cached again. */
+  const adminRoutes = ["run", "ingest", "summarise", "reset", "approve", "launch", "queue", "stats"];
+  const missing = adminRoutes.filter(r=>{
+    const m = new RegExp('"\\/research\\/' + r + '"[\\s\\S]{0,1400}?origin, 0\\)');
+    return !m.test(src);
+  });
+  ck("every admin route asks for no cache at all", missing.length === 0, missing.join(","));
+  ck("but the public feed still caches, which is what makes it cheap to serve",
+     /return json\(\{papers: out, at: Date\.now\(\)\}, origin\);/.test(src), "");
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 process.exit(bad ? 1 : 0);
