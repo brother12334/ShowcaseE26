@@ -862,9 +862,15 @@ console.log("18 - APPROVAL GATES THE WRITTEN SUMMARY, NOT THE BARE RECORD");
      /const humanJudged = !!paper\.approvedAt;/.test(src), "");
   ck("approvedAt is set by the approve route and by nothing else",
      (src.match(/approvedAt = Date\.now\(\)/g) || []).length === 1, "");
+  /* THE RULE IS UNCHANGED AND THE CODE MOVED. These matched a per-paper queue write inside
+     the loop; that was a read and a write for every paper, which on a plan allowing a
+     thousand KV writes a day was a third of the cost of summarising one. The ids are now
+     collected and flushed once per run. Same two properties, asserted against the batch. */
   ck("AND A PAPER SENT BACK REACHES THE QUEUE A REVIEWER READS",
-     /if \(!paper\.approved\) \{[\s\S]{0,260}K_QUEUE, JSON\.stringify\(q\.concat/.test(src), "");
-  ck("without queueing the same id twice", /q\.indexOf\(paper\.id\) < 0/.test(src), "");
+     /if \(!paper\.approved\) sendBack\.push\(paper\.id\);/.test(src)
+     && /if \(sendBack\.length\) \{[\s\S]{0,300}K_QUEUE, JSON\.stringify\(q\.concat/.test(src), "");
+  ck("without queueing the same id twice",
+     /sendBack\.filter\(id => q\.indexOf\(id\) < 0\)/.test(src), "");
   ck("and the count is reported, so a run says how many it sent back",
      /stats\.queuedForReview/.test(src), "");
 
@@ -1034,6 +1040,20 @@ console.log("23 - A RATE LIMITER MUST NOT BE ABLE TO TAKE THE SERVICE DOWN");
   ck("with the CORS headers the app needs to read it",
      /"worker threw"[\s\S]{0,300}cors\(origin\)/.test(src), "");
   ck("and it is never cached", /"worker threw"[\s\S]{0,260}private, no-store/.test(src), "");
+}
+
+console.log("24 - THE STORAGE WRITES ARE THE LIMIT THAT BINDS");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* Pacing the model calls did nothing about the KV writes, which is the allowance that ran
+     out and took the service down. The queue was a read AND a write per paper, inside the
+     loop, which on 1,000 writes a day is a third of the cost of summarising one. */
+  ck("THE REVIEW QUEUE IS WRITTEN ONCE PER RUN, not once per paper",
+     /if \(!paper\.approved\) sendBack\.push\(paper\.id\);/.test(src), "");
+  ck("and flushed after the loop", /if \(sendBack\.length\) \{[\s\S]{0,260}K_QUEUE, JSON\.stringify/.test(src), "");
+  ck("without re-queueing an id already there", /add = sendBack\.filter\(id => q\.indexOf\(id\) < 0\)/.test(src), "");
+  ck("A RUN REPORTS WHAT IT COST IN WRITES, because that is the budget",
+     /stats\.kvWrites = /.test(src), "");
 }
 
 console.log(bad ? "BROKEN: " + bad : "all good");

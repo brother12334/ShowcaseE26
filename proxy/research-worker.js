@@ -1296,6 +1296,7 @@ async function runSummarise(env, limit) {
   const stats = {mode: "summarise", tried: 0, wrote: 0, failed: 0, reasons: {},
                  subreqCeiling: SUBREQ_CEIL};
   const want = limit || 6;
+  const sendBack = [];
   /* IN THE ORDER A READER MEETS THEM, NOT THE ORDER THEY ARRIVED.
 
      Oldest-first is the fair queue and it was the wrong one. The backfill put 440 bare
@@ -1391,15 +1392,22 @@ async function runSummarise(env, limit) {
     const i = rows.findIndex(r => r.id === paper.id);
     if (i > -1) rows[i] = cardOf(paper);
     /* AND IT HAS TO REACH THE QUEUE A REVIEWER ACTUALLY READS, or "sent back for review"
-       means "quietly dropped from the feed and forgotten". */
-    if (!paper.approved) {
-      const q = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
-      if (q.indexOf(paper.id) < 0) {
-        await env.RESEARCH.put(K_QUEUE, JSON.stringify(q.concat([paper.id]).slice(-200)));
-      }
-    }
+       means "quietly dropped from the feed and forgotten". Collected here and written once
+       after the loop: this was a read AND a write per paper, inside the loop, which on a
+       plan allowing 1,000 KV writes a day is a third of the cost of summarising one. */
+    if (!paper.approved) sendBack.push(paper.id);
   }
   await writeIndex(env, rows);
+  if (sendBack.length) {
+    const q = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
+    const add = sendBack.filter(id => q.indexOf(id) < 0);
+    if (add.length) await env.RESEARCH.put(K_QUEUE, JSON.stringify(q.concat(add).slice(-400)));
+  }
+  /* THE STORAGE COST OF A RUN, REPORTED, because it is the limit that actually binds and the
+     one I failed to count. A run of six costs six paper records, one index, one queue and one
+     stats write — about one and a half writes per paper. On a plan allowing a thousand a
+     day that is roughly 400 papers, and no amount of pacing the model calls changes it. */
+  stats.kvWrites = stats.wrote + stats.failed + 2 + (sendBack.length ? 1 : 0);
   await env.RESEARCH.put("stats:summarise", JSON.stringify(Object.assign({at: Date.now()}, stats)));
   return Object.assign({launched}, stats);
 }
