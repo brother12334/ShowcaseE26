@@ -119,14 +119,91 @@ It did expose one real defect that is now fixed: a flat "+2 sets" probe is 50% o
 doing four sets, and it broke the 20% cap on 8.5% of low-ceiling increases. The relative cap
 now wins.
 
+> **Correction.** The paragraph above about blocks spent re-checking is not supported by the
+> measurement it cites. The re-check arm was never given the accelerating ladder, so that
+> comparison was "climb with acceleration" against "re-check with no acceleration at all",
+> and the collapse in the two ceiling groups was the missing ladder rather than the cost of
+> re-checking. With the ladder restored, re-checking costs lifters who can take a lot
+> nothing: 91.4% against 91.3%. See `docs/volume-science.md` §5J.
+
+## Seven attempts, and what the steady-lifter cost actually is
+
+The cost is now **closed, unfixed**, after seven measured attempts. The useful outcome is not
+a fix; it is knowing precisely what the problem is, because six of the seven were aimed at
+the wrong thing.
+
+| attempt | what it changed | result |
+|---|---|---|
+| 1 | let a later good block withdraw the estimate | worse for four of five groups |
+| 2 | require two bad blocks before stopping | gave back the whole benefit |
+| 3 | periodic re-check above the estimate | fixed steady, broke both ceiling groups |
+| 4 | refuse to set the estimate on a borrowed noise figure | worse everywhere, steady worst |
+| 5 | remove the relative margin that holds the stop signal back | **no effect at all** |
+| 6 | re-check only settled, low-noise muscles | fired 0.01–0.06 times per lifter |
+| 7 | **stop accelerating the climb for repeatable lifters** | **0.5 and 1.4 points. Fails** |
+
+### Attempt 7, the one that was supposed to work
+
+The rule: **a muscle stops earning bigger steps once your own measurement noise is small
+enough to read a single set's worth of change.** Precisely — the step stays at +1 whenever
+you have a personal noise figure at all (eight logged exposures for that muscle) and that
+figure is at or below 1.0%, the trend that counts as "responding".
+
+The threshold is not tuned. The ladder exists to make a change big enough to see: if your
+detection bar is already tighter than the response you are looking for, a bigger step buys
+nothing. Above it, one set's change can hide inside the noise and the acceleration is
+earning its place.
+
+**It fires exactly where it should and still does not work.**
+
+| | time past recovery | | growth | |
+|---|---|---|---|---|
+| | now | attempt 7 | now | attempt 7 |
+| **steady** (seed 1) | 45.0% | **44.5%** | 78.1% | 79.0% |
+| **steady** (seed 7) | 41.1% | **39.7%** | 79.3% | 80.6% |
+| typical | 24.2 / 22.0% | 24.1 / 21.9% | 86.3 / 87.0% | 86.4 / 87.0% |
+| noisy | 13.6 / 14.8% | 13.6 / 14.8% | 88.5 / 88.6% | 88.5 / 88.6% |
+| low-ceiling | 39.6 / 38.4% | 39.5 / 38.4% | 75.2 / 76.2% | 75.4 / 76.2% |
+| high-ceiling | 4.6 / 5.4% | 4.5 / 5.3% | 91.3 / 91.4% | 91.3 / 91.4% |
+
+The gate asked for at least ten points off the steady figure. It delivers half a point and
+one and a half. Nothing else is harmed — and the arm is in fact free, costing no group
+anything and giving steady lifters about a point of growth — but the gate was about time past
+recovery, and on that it fails.
+
+### Three explanations ruled out, by measurement
+
+- **Not a rule that misses its target.** It slowed 24.8% and 23.3% of step-ups for steady
+  lifters, 1.0–1.8% for everyone else, and 0.0% for noisy lifters. The targeting is as clean
+  as it could be.
+- **Not a rule that arrives too late.** It needs eight exposures before it can fire, so the
+  suspicion was that the damage is done first. Run over 36 blocks instead of 14, where it is
+  active for most of the run, it still moves time past recovery by 0.6 points.
+- **Not the ladder.** This is the one that matters. `§5J` concluded the ladder was the
+  mechanism, because every arm with it sat at 41–45% and every arm without it at 18–27%. But
+  the arms without it also **stopped somewhere different** — the re-check arm finishes at 87%
+  of a steady lifter's recovery limit, while the climb finishes at 97–100%. Attempt 7 holds
+  the destination fixed and changes only the speed of getting there, and the answer is almost
+  nothing: identical finishing volume, identical time past recovery.
+
+### So what the cost actually is
+
+**For a steady lifter the climb stops at or above their recovery limit, and the time they
+spend past it follows from where it stops, not from how fast they got there.** Slowing the
+ascent delays arrival by a block or two and changes nothing over a cycle.
+
+Where it stops is the learned estimate. Six attempts have now tried to move that — weaker,
+later, revisable, conditioned, probed, gated — and every one either cost the groups the
+estimate protects or did nothing measurable. That is not proof it cannot be done, but it is
+seven arms and the search is closed.
+
+No app code carries any of this. `index.html` and `sw.js` are untouched; the arms live in
+`tests/sim/volume-sim.mjs` so every number above can be re-run.
+
 ## What is still open
 
-The steady-lifter cost is the one known price of what now ships. Three fixes have been
-measured and rejected, and they fail for the same reason: each tries to *loosen* the learned
-estimate, and loosening it costs the people the estimate is protecting. The next attempt
-should make the estimate **better conditioned when it is first set** — most likely by
-refusing to set it at all until a muscle has enough readings for your own noise figure to
-mean anything, which is exactly the condition steady lifters fail. That is `§6` item 1.
+The steady-lifter cost is the one known price of what ships, and it is now closed unfixed
+rather than open — see the section above for what it is and what has been ruled out.
 
 ## One thing the audit found that is already worth knowing
 

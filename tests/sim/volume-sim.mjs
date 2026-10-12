@@ -91,7 +91,8 @@ const SCENARIOS = [
    own detection bar is tight enough to be worth trusting. Everyone else keeps the climb
    exactly as it ships. */
 const POLICIES = ["oracle", "fixed", "mdc", "mdc-own", "adaptive", "peak", "probe",
-                  "peakgate", "peaknorel", "peakhalfrel", "probelad", "probegate"];
+                  "peakgate", "peaknorel", "peakhalfrel", "probelad", "probegate",
+                  "ladsteady"];
 
 const out = await p.evaluate(async (cfg)=>{
   const {N, CYCLES, SEED, SCENARIOS, POLICIES} = cfg;
@@ -150,7 +151,7 @@ const out = await p.evaluate(async (cfg)=>{
   const FIXED = {up: RESPOND_TREND_PCT, down: DECLINE_TREND_PCT, personal: false};
 
   const run = (u, policy, r)=>{
-    const PEAKY = ["peak", "peakgate", "peaknorel", "peakhalfrel"];
+    const PEAKY = ["peak", "peakgate", "peaknorel", "peakhalfrel", "ladsteady"];
     /* THE PROBE ARM NEVER HAD THE LADDER, AND §5H DID NOT KNOW IT.
 
        `adaptive` is what hands decideForMuscle the climb state, and therefore the
@@ -198,7 +199,7 @@ const out = await p.evaluate(async (cfg)=>{
     /* The climb state the adaptive policy carries, which is exactly what S.volClimb[g]
        holds in the app. */
     let streak = 0, lastRespondV = 0, flatV = 0, prevV = 0, prevTrend = null;
-    let relBound = 0, relTests = 0;
+    let relBound = 0, relTests = 0, ladSlowed = 0, ladTests = 0;
     /* How many blocks have been spent sitting on the estimate, whether a probe is in
        flight, and where to come back to if it fails. */
     let heldAt = 0, probing = false, preProbeV = 0, probes = 0, revised = 0;
@@ -376,7 +377,18 @@ const out = await p.evaluate(async (cfg)=>{
            and the next person will have it too. */
         streak++;
         lastRespondV = was;
-        v = Math.min(VOL_BANDS.thin, v + (adaptive ? volStepFor(was, streak)
+        /* "ladsteady": the ladder holds at its bottom rung for a lifter whose own detection
+           bar is at or below the responding threshold — the seventh attempt (§5K).
+
+           The test is written out here rather than called from the app, because the attempt
+           FAILED and no app code carries it. thr is estimated from the simulated READINGS by
+           mdcFrom() above, never from u.sigma, the hidden truth: a lifter whose readings
+           happen to look tight is treated as tight, and that estimation error is part of
+           what is being measured. */
+        const slowLadder = policy === "ladsteady"
+          && thr && thr.personal === true && thr.up > 0 && thr.up <= RESPOND_TREND_PCT;
+        ladTests++; if(slowLadder) ladSlowed++;
+        v = Math.min(VOL_BANDS.thin, v + (adaptive ? (slowLadder ? 1 : volStepFor(was, streak))
                                                    : ADD_SETS_PER_CYCLE));
       } else if(d.k === "hold" && d.probe){
         streak = 0;                                  // a flat block resets the ladder
@@ -406,6 +418,7 @@ const out = await p.evaluate(async (cfg)=>{
             maxJump, maxJumpFrac, bigJump, bigFrac, smallFrac, jumps, overRunMax,
             probes, revised,
             relBound: relTests ? relBound / relTests : 0,
+            ladSlowed: ladTests ? ladSlowed / ladTests : 0,
             overDepth: over ? overDepth / over : 0};
   };
 
@@ -442,6 +455,7 @@ const out = await p.evaluate(async (cfg)=>{
         if(o.overRunMax > a.runMax) a.runMax = o.overRunMax;
         if(o.over){ a.depth += o.overDepth; a.depthN++; }
         a.relBound = (a.relBound || 0) + (o.relBound || 0);
+        a.ladSlowed = (a.ladSlowed || 0) + (o.ladSlowed || 0);
         a.ofBest = (a.ofBest || 0) + o.endOfBest;
         a.ofLimit = (a.ofLimit || 0) + o.endOfLimit;
         if(o.hit10 != null){ a.hit += o.hit10; a.hitN++; }
@@ -473,7 +487,10 @@ const out = await p.evaluate(async (cfg)=>{
         /* What share of peak tests had the relative term, not the detection bar, setting the
            margin. If this is near zero the term cannot be the mechanism holding the stop
            signal back, whatever the reasoning said. */
-        relBoundPct: +((a.relBound || 0) / N * 100).toFixed(1)
+        relBoundPct: +((a.relBound || 0) / N * 100).toFixed(1),
+        /* What share of step-up decisions the repeatable-readings rule actually slowed. A
+           rule that never fires tells you nothing about whether slowing the ladder works. */
+        ladSlowedPct: +((a.ladSlowed || 0) / N * 100).toFixed(1)
       };
     });
     res.push(row);

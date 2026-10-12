@@ -1204,10 +1204,56 @@ are repeatable** — not the estimate, which four attempts have now failed to im
 weakening, conditioning, probing or gating. That is a fifth direction and it is recorded
 rather than taken, because two attempts were the budget.
 
+## 5K. Attempt seven: slowing the ladder, and what it rules out
+
+`§5J` recommended slowing the accelerating ladder for repeatable lifters. Built as the
+`ladsteady` arm and measured on both seeds, n=400, 14 cycles.
+
+**The rule, from data the app has.** The step stays at the bottom rung whenever
+`thr.personal === true` (the muscle has `TREND_NOISE_MIN_N` = 8 usable exposures, so
+`trendNoise()` has produced a figure from the lifter's own log) **and** `thr.up <=
+RESPOND_TREND_PCT` (1.0%). In the simulation `thr` comes from `mdcFrom(diffs)`, estimated
+from the simulated *readings* — never from `u.sigma`, the hidden truth — so a lifter whose
+readings happen to look tight is treated as tight and that estimation error is measured along
+with everything else.
+
+**Why that threshold.** The ladder exists to make a change large enough to detect. If the
+lifter's own detection bar is already at or below the trend that counts as responding, one
+reading separates responding from not-responding on its own and a bigger step buys nothing.
+Above it, a single set's change can hide inside the noise. Both sides of the comparison are
+existing constants; nothing is fitted.
+
+| population | time past recovery `peak` → `ladsteady` | growth `peak` → `ladsteady` | rule fired on |
+|---|---|---|---|
+| **steady** | 45.0 → **44.5** / 41.1 → **39.7** | 78.1 → 79.0 / 79.3 → 80.6 | **24.8% / 23.3%** |
+| typical | 24.2 → 24.1 / 22.0 → 21.9 | 86.3 → 86.4 / 87.0 → 87.0 | 1.4% / 1.0% |
+| noisy | 13.6 → 13.6 / 14.8 → 14.8 | 88.5 → 88.5 / 88.6 → 88.6 | 0.0% / 0.0% |
+| low-ceiling | 39.6 → 39.5 / 38.4 → 38.4 | 75.2 → 75.4 / 76.2 → 76.2 | 1.6% / 1.0% |
+| high-ceiling | 4.6 → 4.5 / 5.4 → 5.3 | 91.3 → 91.3 / 91.4 → 91.4 | 1.8% / 1.1% |
+
+**Fails the gate**, which asked for at least ten points off the steady figure: it delivers
+0.5 and 1.4. Nothing else is harmed and steady growth improves by about a point, so the arm
+is free — but free is not the gate.
+
+### What it rules out, which is the value in it
+
+- **The rule is not mistargeted.** It fired on a quarter of steady lifters' step-ups, about
+  1% for the other groups and 0% for noisy lifters.
+- **It is not arriving too late.** At 36 cycles, where it is active for most of the run, the
+  change is still 58.2 → 57.6.
+- **`§5J`'s attribution to the ladder was confounded.** The ladder-less arms also finished
+  somewhere else: `probe` ends at 87% of a steady lifter's recovery limit, `peak` at 97–100%.
+  Attempt 7 holds the destination fixed and varies only the ascent rate, and gets nothing —
+  `endOfLimit` is identical (100 → 100, 97 → 97). **The destination is the mechanism, not the
+  rate.**
+
+The destination is the learned estimate, which attempts 1, 2, 3, 4, 5 and 6 all failed to
+improve. Seven arms, closed. No app code carries any of it.
+
 ## 6. Still to do
 
-1. **~~The steady-lifter regression under `peak`.~~** **CLOSED.** Six attempts measured and
-   rejected: a revisable estimate (§5G), two strikes (§5G), the periodic re-check probe
+1. **~~The steady-lifter regression under `peak`.~~** **CLOSED FOR GOOD.** Seven attempts
+   measured and rejected: a revisable estimate (§5G), two strikes (§5G), the periodic re-check probe
    (§5H), conditioning the estimate on the lifter's own noise bar (§5I), removing the
    relative margin term (§5J), and a probe gated to settled low-noise muscles (§5J). The
    current rule stands.
@@ -1216,12 +1262,13 @@ rather than taken, because two attempts were the budget.
    weaker, later, revisable, conditioned, probed or gated, and every one either cost the
    populations the estimate protects or did nothing measurable at all.
 
-   **The mechanism is the ladder, not the estimate** (§5J). Steady lifters sit at 41–45% of
-   blocks past their recovery limit under every arm that has the accelerating +1/+2/+3
-   ladder, and 18–27% under every arm that does not, consistently across both seeds. Any
-   seventh attempt should slow the ladder for a lifter whose readings are repeatable and
-   leave the estimate alone. The cost to measure against is high-ceiling lifters, for whom
-   the ladder is worth about 21 points of growth.
+   **Nor is it the ladder, which §5J got wrong and §5K corrects.** §5J read the ladder as the
+   mechanism because every arm with it sat at 41–45% and every arm without it at 18–27% — but
+   the ladder-less arms also finished at a different volume. Attempt 7 slowed the ladder while
+   holding the destination fixed and moved time past recovery by 0.5 and 1.4 points, with
+   `endOfLimit` unchanged. **The mechanism is where the climb stops, not how fast it gets
+   there**, and where it stops is the estimate six other attempts failed to move. The search
+   is closed; the cost stands as the known price of what ships.
 2. **A probe for settled lifters only** — now understood differently, and worth less than it
    looked. §5H's rejection was confounded by a missing ladder (see the correction there), so
    re-checking is *not* expensive for high-ceiling lifters as that section claimed: with the
