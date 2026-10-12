@@ -466,6 +466,71 @@ console.log("12 - THE ORDER IS RELEVANCE TO THIS PERSON, AND THE REASON IS SHOWN
      ord.c > ord.a, ord.c + " vs " + ord.a);
 }
 
+console.log("13 - THE SCREEN SAYS HOW MANY PAPERS AND HOW OLD THEY ARE");
+{
+  /* This is what a live store of 480 papers showing as 20 on a phone looked like, and the
+     app said nothing: the feed is asked for once a day, the as-of line only appeared once
+     the cache was a day old, and "New this week" was unpaged so the cut never showed either. */
+  const r = await ev(()=>{
+    researchCacheWrite(researchCacheRead().papers, Date.now() - 2 * 3600000);
+    RESEARCH_SHOWN = 12;
+    goTab("research");
+    const asof = (document.querySelector(".rs-asof") || {}).textContent || "";
+    const more = document.getElementById("rsMore");
+    return {asof, asofN: document.querySelectorAll(".rs-asof").length,
+            more: more ? more.textContent : null};
+  });
+  ck("THE COUNT IS ON SCREEN EVEN WHEN THE CACHE IS FRESH", /\d+ papers?\./.test(r.asof), r.asof);
+  ck("and it says how long ago it was checked", /Checked .*(now|min|h ago|day)/.test(r.asof), r.asof);
+  ck("as ONE line, not two", r.asofN === 1, String(r.asofN));
+
+  /* The paging bug: every backfilled paper is "new this week", so that section held all of
+     them and the only paged section was empty. */
+  const pg = await ev(()=>{
+    const feed = researchCacheRead().papers;
+    const many = [];
+    for(let i = 0; i < 40; i++)
+      many.push(Object.assign({}, feed[0], {id: "bulk" + i, title: "Bulk paper " + i,
+                                            addedAt: Date.now() - 3600000}));
+    researchCacheWrite(many, Date.now());
+    RESEARCH_SHOWN = 12;
+    goTab("research");
+    const n1 = document.querySelectorAll(".rs-card:not(.rs-skel)").length;
+    const more = document.getElementById("rsMore");
+    const txt = more ? more.textContent : "";
+    if(more) more.click();
+    const n2 = document.querySelectorAll(".rs-card:not(.rs-skel)").length;
+    return {n1, n2, txt};
+  });
+  ck("FORTY PAPERS ADDED THIS WEEK DO NOT ALL RENDER AT ONCE", pg.n1 <= 20,
+     String(pg.n1));
+  ck("the Show more button appears for them", /Show more/.test(pg.txt), pg.txt);
+  ck("and says how many are left", /\d+/.test(pg.txt), pg.txt);
+  ck("AND IT ACTUALLY REVEALS MORE", pg.n2 > pg.n1, pg.n1 + " -> " + pg.n2);
+
+  /* A write too big to store must not leave the old cache in place in silence. */
+  const q = await ev(()=>{
+    const real = localStorage.setItem.bind(localStorage);
+    let calls = 0;
+    localStorage.setItem = (k, v)=>{
+      if(k === "e26.research.v1" && ++calls === 1){
+        const err = new Error("quota"); err.name = "QuotaExceededError"; throw err;
+      }
+      return real(k, v);
+    };
+    const many = [];
+    for(let i = 0; i < 30; i++) many.push({id: "q" + i, title: "t" + i, topics: [], addedAt: 1});
+    const ok = researchCacheWrite(many, Date.now());
+    const kept = RESEARCH_CACHE_KEPT;
+    localStorage.setItem = real;
+    return {ok, kept, stored: (researchCacheRead() || {papers: []}).papers.length};
+  });
+  ck("A REFUSED WRITE IS RETRIED SMALLER RATHER THAN ABANDONED", q.ok === true, JSON.stringify(q));
+  ck("something was actually stored", q.stored > 0, String(q.stored));
+  ck("and what was dropped is recorded, so the screen can say so",
+     !!q.kept && q.kept.of === 30 && q.kept.kept < 30, JSON.stringify(q.kept));
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 await b.close();
 process.exit(bad ? 1 : 0);

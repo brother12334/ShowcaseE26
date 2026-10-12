@@ -7018,7 +7018,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "57.6";
+const APP_VERSION = "57.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -42779,12 +42779,39 @@ function researchCacheRead(){
     return (o && Array.isArray(o.papers)) ? o : null;
   }catch(e){ return null; }
 }
+/* A FULL QUOTA IS NOT A REASON TO LOSE THE SCREEN — BUT SWALLOWING IT WHOLE WAS WRONG.
+
+   This used to catch the quota error and do nothing else, which meant the old cache stayed
+   put and every later fetch failed to replace it in exactly the same silence. The feed would
+   be frozen at whatever size last happened to fit, for ever, with nothing on screen saying
+   so and nothing in the console either. At twenty papers it could not happen; at 480 it is
+   about 350 KB sharing an origin with the training log, so it can.
+
+   So a failed write is retried with a smaller set rather than abandoned, and what survived
+   is recorded so the screen can say "showing 300 of 480" instead of quietly lying. Papers
+   the reader has saved or read are kept first whatever else goes: those are the ones they
+   would notice losing. */
+let RESEARCH_CACHE_KEPT = null;      // {kept, of} after a trim, else null
 function researchCacheWrite(papers, at){
-  try{
-    localStorage.setItem(RESEARCH_CACHE_KEY, JSON.stringify({
-      papers: papers || [], at: at || Date.now()
-    }));
-  }catch(e){ /* a full quota is not a reason to lose the screen */ }
+  const all = papers || [], stamp = at || Date.now();
+  const put = list=>{
+    localStorage.setItem(RESEARCH_CACHE_KEY, JSON.stringify({papers: list, at: stamp}));
+  };
+  try{ put(all); RESEARCH_CACHE_KEPT = null; return true; }catch(e){}
+  /* Keep what the reader has touched, then as much of the rest as fits. Halving rather than
+     stepping down one at a time, because each attempt costs a full serialise. */
+  const st = researchState();
+  const touched = all.filter(p=> p && (st.saved[p.id] || st.read[p.id]));
+  const others = all.filter(p=> p && !(st.saved[p.id] || st.read[p.id]));
+  for(let n = Math.floor(others.length / 2); n >= 0; n = Math.floor(n / 2)){
+    const list = touched.concat(others.slice(0, n));
+    try{
+      put(list);
+      RESEARCH_CACHE_KEPT = {kept: list.length, of: all.length};
+      return true;
+    }catch(e){ if(n === 0) break; }
+  }
+  return false;
 }
 /* Every paper the app has ever opened or saved is kept, so Saved Research and any detail
    page already visited work with no signal at all. */
@@ -43062,30 +43089,47 @@ function viewResearch(){
       + "web search. Try a broader word — “volume” rather than “chest volume”.", false);
     matched.forEach((p, i)=> h += researchCardHTML(p, i));
   } else {
-    if(fresh.length){
+    /* ONE PAGED LIST ACROSS BOTH SECTIONS, WHICH IS A BUG FIX AND NOT A TIDY-UP.
+
+       "New this week" used to render every fresh paper with no limit, while only "Recent
+       research" was paged. That was harmless while a run added four papers a day and broke
+       the screen the moment the backfill added four hundred: every one of them was added
+       this week, so `rest` was empty, the Show more button never appeared, and the tab tried
+       to build 480 cards in a single innerHTML on a phone.
+
+       So the page is taken across the whole list and the headings are placed inside it.
+       Fresh papers still come first; what changes is that the cut happens once, at the end,
+       wherever it lands. */
+    const feedList = fresh.concat(rest);
+    const page = feedList.slice(0, RESEARCH_SHOWN);
+    const nFresh = Math.min(fresh.length, page.length);
+    if(nFresh){
       h += `<div class="rs-sec">New this week</div>`;
-      fresh.forEach((p, i)=> h += researchCardHTML(p, i));
+      for(let i = 0; i < nFresh; i++) h += researchCardHTML(page[i], i);
     }
-    if(rest.length){
+    if(page.length > nFresh){
       /* THE HEADING HAS TO MATCH THE ORDER, or it is a small lie told every time the tab
          opens. The list is sorted by how strong the evidence is, whether a lifter could do
          anything with it, how recent it is, and how close it sits to what this person
          actually trains — so with signals to go on it is not "recent research", and
          without them it is. */
       h += `<div class="rs-sec">${sig ? "Most relevant to you" : "Recent research"}</div>`;
-      rest.slice(0, RESEARCH_SHOWN).forEach((p, i)=>{
+      for(let i = nFresh; i < page.length; i++){
         /* THE REASON IS SHOWN, NEVER THE NUMBER. Only where a rule about this person's own
            training fired rather than a broad one about their goal, and only near the top:
            a reason above every card is a page of reasons nobody reads, and it would also
            make the ordering look more certain than it is. */
-        const r = rel(p);
-        if(i < 6 && r.why && r.w >= 4) h += `<div class="rs-why">${esc(r.why)}</div>`;
-        h += researchCardHTML(p, i);
-      });
-      if(rest.length > RESEARCH_SHOWN)
-        h += `<button type="button" class="btn ghost" id="rsMore" style="width:100%;margin-top:4px">Show more</button>`;
+        const r = rel(page[i]);
+        if(i - nFresh < 6 && r.why && r.w >= 4) h += `<div class="rs-why">${esc(r.why)}</div>`;
+        h += researchCardHTML(page[i], i);
+      }
     }
-    if(!fresh.length && !rest.length && !picks.length)
+    /* AND THE COUNT GOES ON THE BUTTON, because "Show more" above a list of twelve when
+       there are four hundred and sixty-eight left is not telling anybody anything. */
+    if(feedList.length > page.length)
+      h += `<button type="button" class="btn ghost" id="rsMore" style="width:100%;margin-top:4px">Show more <span class="num">${
+        feedList.length - page.length}</span></button>`;
+    if(!feedList.length && !picks.length)
       h += researchNoteHTML("Nothing matches those filters",
         "Clear one and there will be more to read.", false);
   }
@@ -43094,12 +43138,24 @@ function viewResearch(){
   h += `<button type="button" class="rs-saved-link" id="rsSavedLink">
       <span>Saved research</span><span class="num">${nSaved}</span></button>`;
 
-  /* WHERE THIS CAME FROM AND WHEN, every time. A reader deciding whether to trust a claim
-     is entitled to know they are looking at a week-old cache. */
+  /* WHAT IS ON SCREEN AND WHEN IT CAME, ALWAYS, not only once it is a day old. A reader
+     deciding whether to trust a claim is entitled to know they are looking at a cache.
+
+     The as-of line used to appear only past RESEARCH_FRESH_MS, so somebody looking at a feed
+     fetched six hours ago had no way to tell it was not live. That is the whole of why the
+     backfill looked like it had not worked: the app asks the service once a day, so a phone
+     that had already fetched was showing the smaller store and saying nothing about it. The
+     count and the time are cheap and they answer the question before it is asked. */
   const age = cache.at ? Date.now() - cache.at : 0;
-  if(age > RESEARCH_FRESH_MS || RESEARCH_ERROR)
-    h += `<div class="rs-asof">${RESEARCH_ERROR === "offline" ? "You're offline. " : ""}Showing papers from ${
-      esc(fmtDate(dayStr(cache.at)))}${age > RESEARCH_STALE_MS ? " — pull down to refresh" : ""}.</div>`;
+  const nShown = papers.length;
+  h += `<div class="rs-asof">${RESEARCH_ERROR === "offline" ? "You're offline. " : ""}${
+    nShown} paper${nShown === 1 ? "" : "s"}${
+    RESEARCH_CACHE_KEPT ? " (" + RESEARCH_CACHE_KEPT.kept + " of " + RESEARCH_CACHE_KEPT.of
+                          + " kept \u2014 this device is out of room)" : ""
+    }. ${age > RESEARCH_FRESH_MS
+          ? "Showing papers from " + esc(fmtDate(dayStr(cache.at)))
+          : "Checked " + (cache.at ? relTime(cache.at) : "never")
+    }${age > RESEARCH_STALE_MS ? " \u2014 pull down to refresh" : ""}.</div>`;
   return h;
 }
 
@@ -56045,7 +56101,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "57.6";
+const NEWS_FOR = "57.7";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56072,6 +56128,12 @@ const NEWS = [
      + "own abstract before anybody else saw it.",
        /* 57.6. Folded into this entry rather than added as a second one about the same
           feature, which would have read as two announcements of one thing. */
+       /* 57.7. The feed was right and the screen was not: the app asks the service once a
+          day and never said so, and every backfilled paper counted as "new this week", which
+          was the one section with no limit on it. */
+       "If the list looked short, pull down on it \u2014 the app checks for new work about "
+     + "once a day, and it now says underneath how many papers it is showing and when it "
+     + "last looked.",
        "There are now hundreds of them rather than a handful, reaching five years back, and "
      + "the list is ordered by what you actually train \u2014 a muscle under its weekly "
      + "minimum, a habit of taking sets to failure, the lifts in your recent sessions \u2014 "
