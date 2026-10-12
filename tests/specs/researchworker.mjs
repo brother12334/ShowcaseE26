@@ -13,7 +13,7 @@ const {titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
        parseModelJson, summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
        resetSubreq, K_REJECT, summaryPrompt, subreqMax, BOILERPLATE,
        summaryStale, newPaper, keepRank, QUERIES, BACKFILL_DAYS, BACKFILL_PER_QUERY,
-       INDEX_MAX, K_CURSOR} = __test;
+       INDEX_MAX, K_CURSOR, OFF_TOPIC} = __test;
 import { readFileSync } from 'node:fs';
 
 let bad = 0;
@@ -757,8 +757,21 @@ console.log("15 - TAKING PAPERS IN IS NOT THE SAME JOB AS SUMMARISING THEM");
      /if \(paper\.summary \|\| paper\.summaryFailed\) continue;/.test(src), "");
   ck("and one whose summary failed is not retried for ever",
      /!r\.quickTakeaway && r\.summaryFailed !== true/.test(src), "");
-  ck("OLDEST WAITING FIRST, so nothing sits unsummarised indefinitely",
-     /sort\(\(a, b\) => \(a\.addedAt \|\| 0\) - \(b\.addedAt \|\| 0\)\)/.test(src), "");
+  /* THIS USED TO ASSERT OLDEST-WAITING-FIRST, which was true and was the wrong rule. The
+     backfill put 440 bare records in the store in one afternoon, so a fair queue made the
+     meta-analysis at the top of the feed wait behind four hundred papers it outranks, at six
+     summaries a day. The queue is now ordered by what a reader meets first.
+
+     The replacement is stronger where it can be and honest where it cannot. Within any one
+     priority nothing is starved, because arrival time still breaks ties — that is asserted.
+     Across priorities it is no longer guaranteed: a plain review with no apply target will
+     always lose to a meta-analysis, so if metas kept arriving for ever it would never be
+     written. That is an accepted trade, not an oversight, and the reason it is acceptable is
+     that strong designs arrive at a few a week while the queue drains at six a day. */
+  ck("the queue is ordered by what a reader meets first",
+     /summaryPriority\(b\) - summaryPriority\(a\)/.test(src), "");
+  ck("AND ARRIVAL TIME STILL BREAKS TIES, so nothing is starved within a priority",
+     /\|\| \(\(a\.addedAt \|\| 0\) - \(b\.addedAt \|\| 0\)\)/.test(src), "");
 
   /* Both passes must build the same record or they drift by a field nobody notices. */
   const rec = {pmid:"1", doi:"10.1/x", title:"T", journal:"J", authors:["A"],
@@ -920,6 +933,81 @@ console.log("20 - A QUOTA IS NOT A VERDICT ON THE PAPER");
   const isTransient = w=> /^summary call failed/.test(w);
   ck("every transient message is recognised as one", transient.every(isTransient), "");
   ck("and no verdict on the content is mistaken for one", final.every(w=> !isTransient(w)), "");
+}
+
+console.log("21 - OUT OF SCOPE IS NOT THE SAME THING AS UNSAFE");
+{
+  /* The 54-query feed produced 480 papers of which 92 were labelled older adults, 64 were
+     about patients or rehabilitation, 52 about athletes, 43 acute laboratory studies, and
+     only 70 carried anything a lifter could act on. Six queries were removed and a relevance
+     rule added. It is deliberately a SEPARATE list from NEVER: that one is about safety. */
+  ck("the relevance list exists and is its own thing",
+     Array.isArray(OFF_TOPIC) && OFF_TOPIC.length > 10, String(OFF_TOPIC && OFF_TOPIC.length));
+  const mk = (title, extra)=> Object.assign({pmid:"1", title, journal:"J", authors:["A"],
+    year:"2025", types:["Randomized Controlled Trial"], mesh:[],
+    abstract:"Trained men performed resistance training with 12 or 24 sets per week."}, extra || {});
+
+  const off = screen(mk("Resistance training for sarcopenia in older adults: a trial."), "strength");
+  ck("A SARCOPENIA PAPER IS DROPPED FOR RELEVANCE, NOT FOR SAFETY",
+     off.ok === false && /not what this feed is for/.test(off.why || ""), JSON.stringify(off));
+  ck("and the safety wording is NOT used for it",
+     !/excluded population or context/.test(off.why || ""), off.why);
+  const pain = screen(mk("Resistance training for chronic low back pain."), "injury");
+  ck("so is a low back pain trial", /not what this feed is for/.test(pain.why || ""), pain.why);
+  const pap = screen(mk("Post-activation performance enhancement after heavy squats."), "strength");
+  ck("and an acute potentiation protocol", /not what this feed is for/.test(pap.why || ""), pap.why);
+
+  /* The rule must not eat the feed it is protecting. */
+  const keep = screen(mk("Effects of training volume on hypertrophy in trained men."), "hypertrophy");
+  ck("A TRIAL IN TRAINED MEN IS STILL KEPT", keep.ok === true, JSON.stringify(keep));
+  ck("so is a bodybuilding paper",
+     screen(mk("Periodization practices of competitive bodybuilders."), "programming").ok === true, "");
+  ck("and a sex-differences paper, because half the readers are that population",
+     screen(mk("Sex differences in hypertrophy after resistance training."), "strength").ok === true, "");
+  ck("and blood flow restriction, which is a method somebody may choose",
+     screen(mk("Blood flow restriction training and muscle thickness in trained men."), "hypertrophy").ok === true, "");
+
+  /* THE SCOPE RULE READS THE TITLE AND THE INDEXING TERMS, NOT THE WHOLE ABSTRACT. A trial of
+     trained men that merely mentions older adults in its discussion is still a trial of
+     trained men. */
+  const mention = screen(mk("Training volume and hypertrophy in trained men.",
+    {abstract:"Trained men did resistance training with 12 or 24 sets per week. "
+             + "Whether this extends to older adults is unknown."}), "hypertrophy");
+  ck("A PASSING MENTION IN THE ABSTRACT DOES NOT DROP A PAPER", mention.ok === true,
+     JSON.stringify(mention));
+
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  ck("the six queries are gone", QUERIES.length === 48, String(QUERIES.length));
+  ck("and none of them is still in the list",
+     !QUERIES.some(q=> /older adults|low back pain|foam rolling|rate of force development|repeated bout|potentiation/.test(q.q)),
+     QUERIES.filter(q=> /older adults|low back pain/.test(q.q)).map(q=>q.q).join(" | "));
+  ck("with a note saying why, so they are not helpfully added back",
+     /SHOULD NOT COME BACK/.test(src), "");
+}
+
+console.log("22 - SUMMARIES ARE WRITTEN IN THE ORDER A READER MEETS THEM");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* Oldest-first is the fair queue and the wrong one: the backfill put 440 bare records in
+     the store in an afternoon, so the meta-analysis at the top of the feed could wait ten
+     weeks behind four hundred papers it outranks. */
+  ck("THE QUEUE IS SORTED BY FEED PRIORITY, not arrival",
+     /summaryPriority\(b\) - summaryPriority\(a\)/.test(src), "");
+  ck("arrival time only breaks ties",
+     /\|\| \(\(a\.addedAt \|\| 0\) - \(b\.addedAt \|\| 0\)\)/.test(src), "");
+  ck("design strength is the first term", /DESIGN_RANK\[r\.type\] \|\| 0\) \* 10/.test(src), "");
+  ck("being actionable counts for something", /r\.actionable \? 25 : 0/.test(src), "");
+  ck("and a meta-analysis outranks a review on design alone",
+     /meta: 6[\s\S]{0,80}review: 1/.test(src), "");
+
+  /* And the stored papers the removed queries already brought in have to go. */
+  ck("THERE IS A WAY TO RE-SCREEN WHAT IS ALREADY STORED", /"\/research\/purge"/.test(src), "");
+  ck("it is a dry run unless confirmed",
+     /"\/research\/purge"[\s\S]{0,900}?confirm"\) !== "yes"/.test(src), "");
+  ck("A PAPER A HUMAN APPROVED BY HAND IS NEVER PURGED",
+     /if \(p\.approvedAt\) \{ out\.humanLeftAlone\+\+; continue; \}/.test(src), "");
+  ck("and it reports the reasons, so the damage is visible before it is done",
+     /out\.reasons\[off\] = \(out\.reasons\[off\] \|\| 0\) \+ 1;/.test(src), "");
 }
 
 console.log(bad ? "BROKEN: " + bad : "all good");

@@ -425,7 +425,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (232) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (255) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (86) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
@@ -603,6 +603,52 @@ the pending queue, and leaves every rejection-by-checks exactly as it is.
 pattern was separated out, and most of it was quota rather than the verifier. Any judgement
 about how strict the checks are has to be made from runs that did not hit a 429, or it is
 measuring the wrong thing.
+
+### What is in scope, and what the 54 queries got wrong
+
+Expanding from 15 queries to 54 filled the feed and filled it with the wrong papers. Measured
+on the 480 it produced: **92 labelled older adults, 64 about patients or rehabilitation, 52
+about athletes (30 in a named sport), 43 acute single-session laboratory studies — and only
+70 of 480 carrying anything a lifter could act on.**
+
+Six queries are gone and will not be coming back: older adults and sarcopenia; low back,
+shoulder and knee pain; rate of force development, power output and jump performance;
+warm-ups and potentiation; stretching, foam rolling, massage and cold water immersion;
+delayed onset soreness, creatine kinase and the repeated bout effect. There is a note in
+`QUERIES` saying so.
+
+Sex differences stays, because half the readers are that population. Powerlifting and
+bodybuilding stay, because those *are* lifters. Blood flow restriction stays, because it is a
+method somebody may choose.
+
+**`OFF_TOPIC` is a separate list from `NEVER`, deliberately.** `NEVER` is about safety:
+populations for whom "is heavy lifting good for this" must not be read off a feed built for
+lifters. `OFF_TOPIC` is about relevance — a sarcopenia meta-analysis is real science,
+honestly reported, and simply not what this tab is for. They have different drop reasons so
+they can never be confused in a log, and the relevance rule reads **the title and the MeSH
+terms only**, so a trial of trained men that merely mentions older adults in its discussion
+is still kept.
+
+`GET /research/purge?token=…&confirm=yes` re-screens stored records against the current rules
+and drops what would no longer be admitted, reporting the reasons first. It applies the scope
+rule to the title alone, since MeSH is not kept on the record — the stricter half, so it
+cannot drop anything `screen()` would have kept. A paper a human approved by hand is never
+purged.
+
+### Summaries are written in feed order, not arrival order
+
+Oldest-first is the fair queue and it was the wrong one. The backfill put 440 bare records in
+the store in an afternoon, so at six summaries a day the meta-analysis at the *top* of the
+feed could wait ten weeks behind four hundred papers it outranks.
+
+`summaryPriority()` weights design strength (×10), then whether a lifter could act on it
+(+25), then recency. Arrival time breaks ties, so nothing is starved within a priority.
+Across priorities it is not guaranteed — a plain review with no apply target always loses to
+a meta-analysis — and that is an accepted trade: strong designs arrive at a few a week and
+the queue drains at six a day.
+
+It deliberately does not know who the reader is. `researchRank()` in the app does, and should;
+a summary is written once and served to everybody.
 
 ### What the order means
 

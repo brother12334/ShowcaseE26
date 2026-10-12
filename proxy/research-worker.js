@@ -105,17 +105,30 @@ const QUERIES = [
   {topic:"exercise",    q:'(unilateral[tiab] OR bilateral[tiab] OR cross-education[tiab]) AND resistance training[tiab]'},
   {topic:"exercise",    q:'(stretch-mediated hypertrophy[tiab] OR muscle length[tiab] OR long-length[tiab]) AND (hypertrophy[tiab] OR training[tiab])'},
 
+  /* SIX QUERIES WERE REMOVED FROM THIS LIST AND THEY SHOULD NOT COME BACK.
+
+     Older adults and sarcopenia; low back, shoulder and knee pain; rate of force
+     development, power output and jump performance; warm-ups and potentiation; stretching,
+     foam rolling, massage and cold water immersion; delayed onset soreness, creatine kinase
+     and the repeated bout effect.
+
+     Every one was added to "cover more ground" and every one covered somebody else's. On
+     the 480-paper feed they produced: 92 papers labelled older adults, 64 about patients or
+     rehabilitation, 52 about athletes with 30 in a named sport, 43 acute single-session
+     laboratory studies — and only 70 of 480 carrying anything a lifter could act on. A feed
+     where most entries are about someone else is not broader, it is worse.
+
+     Sex differences stays, because half the readers are the population it describes.
+     Powerlifting and bodybuilding stay, because those ARE lifters. Blood flow restriction
+     stays, because it is a method somebody might choose. */
+
   // Who was trained, which is what makes a paper apply to a reader or not
   {topic:"strength",    q:'(trained men[tiab] OR resistance-trained[tiab] OR well-trained[tiab]) AND (hypertrophy[tiab] OR strength[tiab])'},
   {topic:"strength",    q:'(women[tiab] OR female*[tiab] OR sex difference*[tiab]) AND resistance training[tiab] AND (hypertrophy[tiab] OR strength[tiab])'},
-  {topic:"strength",    q:'(older adults[tiab] OR sarcopenia[tiab] OR masters athlete*[tiab]) AND resistance training[tiab] AND (strength[tiab] OR muscle mass[tiab])'},
   {topic:"strength",    q:'(powerlifting[tiab] OR weightlifting[tiab] OR bodybuilding[tiab]) AND (training[tiab] OR performance[tiab])'},
-  {topic:"strength",    q:'(rate of force development[tiab] OR power output[tiab] OR jump performance[tiab]) AND resistance training[tiab]'},
 
   // Recovery, fatigue and sleep
   {topic:"recovery",    q:'(deload[tiab] OR taper[tiab] OR reduced training[tiab]) AND (strength[tiab] OR muscle[tiab])'},
-  {topic:"recovery",    q:'(stretching[tiab] OR foam rolling[tiab] OR massage[tiab] OR cold water immersion[tiab]) AND (recovery[tiab] OR adaptation*[tiab])'},
-  {topic:"recovery",    q:'(delayed onset muscle soreness[tiab] OR creatine kinase[tiab] OR repeated bout effect[tiab])'},
   {topic:"fatigue",     q:'(neuromuscular fatigue[tiab] OR central fatigue[tiab] OR peripheral fatigue[tiab]) AND resistance[tiab]'},
   {topic:"sleep",       q:'(sleep quality[tiab] OR sleep duration[tiab] OR napping[tiab]) AND (recovery[tiab] OR performance[tiab] OR muscle[tiab])'},
 
@@ -128,8 +141,6 @@ const QUERIES = [
   {topic:"supplements", q:'(ashwagandha[tiab] OR ecdysterone[tiab] OR HMB[tiab] OR omega-3[tiab] OR vitamin D[tiab]) AND (muscle[tiab] OR strength[tiab])'},
 
   // Keeping training possible at all
-  {topic:"injury",      q:'(low back pain[tiab] OR shoulder pain[tiab] OR knee pain[tiab]) AND resistance training[tiab]'},
-  {topic:"injury",      q:'(warm-up[tiab] OR warm up[tiab] OR potentiation[tiab]) AND (performance[tiab] OR injury[tiab])'},
   {topic:"injury",      q:'(technique[tiab] OR lifting technique[tiab] OR spinal load*[tiab]) AND (squat[tiab] OR deadlift[tiab])'}
 ];
 /* Applied to every query. "humans" keeps out the cell and rodent work that would otherwise
@@ -439,6 +450,25 @@ const NEVER = [
    that some genuinely actionable papers will be missed, and that is the right side to
    err on: a missing Apply button is a small loss, and one offered against a study that
    cannot support it is the kind of thing that makes the whole feature untrustworthy. */
+/* OUT OF SCOPE, WHICH IS NOT THE SAME THING AS UNSAFE.
+
+   NEVER above is a safety list: populations for whom "is heavy lifting good for this" must
+   not be read off a feed built for lifters. This is a relevance list. A sarcopenia
+   meta-analysis is real science, honestly reported, and simply not what somebody opens this
+   tab for; nothing here is excluded for being doubtful.
+
+   Kept separate for exactly that reason, with its own drop reason, so the two can never be
+   confused in a log or widened into each other by accident. The queries that fed most of
+   this are gone; this catches what the remaining ones still drag in. */
+const OFF_TOPIC = [
+  "sarcopeni", "older adult", "elderly", "nursing home", "community-dwelling",
+  "frailty", "falls prevention", "fall risk", "mobility limitation",
+  "low back pain", "shoulder pain", "knee pain", "patellofemoral", "tendon pain",
+  "rehabilitation programme", "rehabilitation program", "physiotherapy", "physical therapy",
+  "post-activation", "postactivation", "potentiation protocol",
+  "foam rolling", "cold water immersion", "cryotherapy", "whole-body vibration",
+  "static stretching"
+];
 const APPLY_MAP = [
   ["volume",    ["training volume", "weekly set", "number of sets", "set volume",
                  "dose-response", "volume-equated", "higher volume", "low-volume"]],
@@ -463,6 +493,13 @@ function screen(rec, queryTopic) {
   const reasons = [];
   const nope = NEVER.find(x => hay.indexOf(x) > -1);
   if (nope) return {ok: false, why: "excluded population or context: " + nope};
+  /* AND THEN THE RELEVANCE RULE, read from the title and the indexing terms rather than the
+     whole abstract: a trial of trained men that merely MENTIONS older adults in its
+     discussion is still a trial of trained men, and dropping it would be the list
+     overreaching. */
+  const scope = ((rec.title || "") + " " + (rec.mesh || []).join(" ")).toLowerCase();
+  const off = OFF_TOPIC.find(x => scope.indexOf(x) > -1);
+  if (off) return {ok: false, why: "not what this feed is for: " + off};
   const hit = MUST_MENTION.find(x => hay.indexOf(x) > -1);
   if (!hit) return {ok: false, why: "no resistance-training context found"};
   reasons.push("mentions " + hit);
@@ -1259,8 +1296,26 @@ async function runSummarise(env, limit) {
   const stats = {mode: "summarise", tried: 0, wrote: 0, failed: 0, reasons: {},
                  subreqCeiling: SUBREQ_CEIL};
   const want = limit || 6;
+  /* IN THE ORDER A READER MEETS THEM, NOT THE ORDER THEY ARRIVED.
+
+     Oldest-first is the fair queue and it was the wrong one. The backfill put 440 bare
+     records in the store in an afternoon, and at six summaries a day the paper at the TOP of
+     the feed — a meta-analysis, actionable, recent — could wait ten weeks behind four
+     hundred it outranks. The reader sees the top of the list; that is what should be
+     written first.
+
+     The weights mirror the app's own ordering closely enough to be honest about it: design
+     strength first, then whether a lifter could act on it, then recency. The app's
+     researchRank() also knows who the reader is, which this cannot and should not — a
+     summary is written once and served to everybody. */
+  const DESIGN_RANK = {meta: 6, systematic: 5, rct: 4, controlled: 3, observational: 2, review: 1};
+  const summaryPriority = r=>
+      (DESIGN_RANK[r.type] || 0) * 10
+    + (r.actionable ? 25 : 0)
+    + Math.max(0, 8 - Math.floor((Date.now() - (r.publishedAt || 0)) / (365 * 86400000)));
   const pending = rows.filter(r => !r.quickTakeaway && r.summaryFailed !== true)
-                      .sort((a, b) => (a.addedAt || 0) - (b.addedAt || 0));
+                      .sort((a, b) => (summaryPriority(b) - summaryPriority(a))
+                                   || ((a.addedAt || 0) - (b.addedAt || 0)));
   stats.pending = pending.length;
 
   for (const row of pending) {
@@ -1785,6 +1840,48 @@ export default {
       await writeIndex(env, rows);
       return json(out, origin, 0);
     }
+    /* RE-SCREEN WHAT IS STORED AGAINST THE RULES AS THEY ARE NOW.
+
+       Removing a query stops new papers arriving; it does nothing about the ones already in
+       the store, and there is no point re-fetching 90 papers to re-apply a rule that reads
+       only their title and indexing terms. This drops every record the current screen would
+       no longer admit, and reports the reasons so the damage is visible before it is done.
+
+       It needs the title and the MeSH terms, and MeSH is not kept on the record — only the
+       title is. So the scope rule is applied to the title alone here, which is the stricter
+       half of what screen() does and cannot drop anything screen() would have kept.
+
+       A PAPER A HUMAN APPROVED BY HAND IS NEVER TOUCHED. approvedAt means somebody read it
+       and decided; a change of scope is not a reason to overrule that silently. */
+    if (url.pathname === "/research/purge" && isAdmin) {
+      const rows = await readIndex(env);
+      const out = {looked: 0, dropped: 0, humanLeftAlone: 0, reasons: {}, ids: []};
+      const dry = url.searchParams.get("confirm") !== "yes";
+      const gone = new Set();
+      for (const r of rows) {
+        out.looked++;
+        const raw = await env.RESEARCH.get(K_PAPER(r.id));
+        const p = raw ? JSON.parse(raw) : null;
+        if (!p) continue;
+        if (p.approvedAt) { out.humanLeftAlone++; continue; }
+        const off = OFF_TOPIC.find(x => String(p.title || "").toLowerCase().indexOf(x) > -1);
+        if (!off) continue;
+        out.dropped++;
+        out.reasons[off] = (out.reasons[off] || 0) + 1;
+        if (out.ids.length < 30) out.ids.push(r.id);
+        gone.add(r.id);
+      }
+      if (dry) {
+        out.note = "nothing changed \u2014 pass ?confirm=yes";
+        return json(out, origin, 0);
+      }
+      for (const id of gone) await env.RESEARCH.delete(K_PAPER(id));
+      await writeIndex(env, rows.filter(r => !gone.has(r.id)));
+      const q = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
+      await env.RESEARCH.put(K_QUEUE, JSON.stringify(q.filter(id => !gone.has(id))));
+      out.remaining = rows.length - gone.size;
+      return json(out, origin, 0);
+    }
     if (url.pathname === "/research/stats" && isAdmin) {
       const last = JSON.parse((await env.RESEARCH.get("stats:last")) || "{}");
       const rej = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
@@ -1813,7 +1910,7 @@ export default {
 export const __test = {
   titleAgrees, evidenceType, screen, checkFaithful, numbersIn, monthNum,
   verify, needsApproval, launchApproved, cardOf, servable, CAUSAL, BLOCKED_TYPES,
-  K_LAUNCH, K_REJECT, scoreModel, parseModelJson, summaryPrompt, subreqMax, BOILERPLATE,
+  K_LAUNCH, K_REJECT, OFF_TOPIC, scoreModel, parseModelJson, summaryPrompt, subreqMax, BOILERPLATE,
   summaryStale, newPaper, keepRank, runIngest, runSummarise, QUERIES,
   BACKFILL_DAYS, BACKFILL_PER_QUERY, INDEX_MAX, K_CURSOR,
   summarise, SUBREQ_MAX, PER_PAPER_SUBREQ, subreqLeft,
