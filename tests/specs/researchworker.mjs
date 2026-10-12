@@ -827,5 +827,43 @@ console.log("17 - A ZERO TTL HAS TO ACTUALLY MEAN DO NOT CACHE");
      /return json\(\{papers: out, at: Date\.now\(\)\}, origin\);/.test(src), "");
 }
 
+console.log("18 - APPROVAL GATES THE WRITTEN SUMMARY, NOT THE BARE RECORD");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* needsApproval() holds back pooled designs and actionable papers, which is right for a
+     summary and perverse for a record with none. After the backfill, 140 of 442 were queued
+     and only 3 meta-analyses were visible: a reader browsing hundreds was shown the single
+     trials and denied the pooled analyses, and the 140 waiting had no sentence on them to
+     judge. */
+  ck("A BARE RECORD PUBLISHES ON THE GATE ALONE, whatever its design",
+     /paper\.approved = launched === true;/.test(src), "");
+  ck("and nothing publishes while the gate is shut",
+     /if \(!launched\) return true;/.test(src), "");
+
+  /* The dangerous half: a bare meta-analysis auto-approved, then summarised, must go back
+     for review. My first version kept the approval \u2014 once true, always true. */
+  ck("THE RULE IS RE-APPLIED FROM SCRATCH WHEN A SUMMARY LANDS, not OR-ed with the old answer",
+     /paper\.approved = humanJudged \|\| !needsApproval\(paper, launched\);/.test(src)
+     && !/paper\.approved = paper\.approved === true \|\| !needsApproval/.test(src), "");
+  ck("only a human approval survives it, and approvedAt is what marks one",
+     /const humanJudged = !!paper\.approvedAt;/.test(src), "");
+  ck("approvedAt is set by the approve route and by nothing else",
+     (src.match(/approvedAt = Date\.now\(\)/g) || []).length === 1, "");
+  ck("AND A PAPER SENT BACK REACHES THE QUEUE A REVIEWER READS",
+     /if \(!paper\.approved\) \{[\s\S]{0,260}K_QUEUE, JSON\.stringify\(q\.concat/.test(src), "");
+  ck("without queueing the same id twice", /q\.indexOf\(paper\.id\) < 0/.test(src), "");
+  ck("and the count is reported, so a run says how many it sent back",
+     /stats\.queuedForReview/.test(src), "");
+
+  /* The rule itself is unchanged, and it is the thing all of the above defers to. */
+  ck("a meta-analysis with a summary still needs a human",
+     needsApproval({type:"meta"}, true) === true, "");
+  ck("so does a systematic review", needsApproval({type:"systematic"}, true) === true, "");
+  ck("so does anything actionable", needsApproval({type:"rct", applyTo:"volume"}, true) === true, "");
+  ck("a plain trial does not", needsApproval({type:"rct"}, true) === false, "");
+  ck("AND NOTHING AT ALL IS EXEMPT BEFORE LAUNCH",
+     needsApproval({type:"rct"}, false) === true, "");
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 process.exit(bad ? 1 : 0);

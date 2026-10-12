@@ -1210,10 +1210,24 @@ async function runIngest(env, limit) {
         const sc = screen(rec, spec.topic);
         if (!sc.ok) { drop(sc.why); newRejects.push("pm" + rec.pmid); continue; }
         const paper = newPaper(rec, sc, v, await sha256(rec.abstract));
-        /* A BARE RECORD CARRIES NO WRITTEN CLAIM, so the gate's ordinary rule is enough:
-           a plain trial publishes, while a pooled design or anything actionable still waits
-           for a human — and will be looked at again when its summary arrives. */
-        paper.approved = !needsApproval(paper, launched);
+        /* APPROVAL GATES THE WRITTEN SUMMARY, NOT THE BARE RECORD, and I had that the wrong
+           way round, which skewed the feed against the best evidence in it.
+
+           needsApproval() holds back meta-analyses, systematic reviews and anything
+           actionable. That is right for a summary: those are the claims that matter most and
+           cost the most to get wrong. Applied to a record with no summary it did something
+           perverse. After the backfill, 140 of 442 papers were queued and only 3 of the
+           meta-analyses were visible, so somebody browsing hundreds of papers was shown the
+           single trials and denied the pooled analyses — and the 140 waiting were bare
+           records with no sentence on them for a human to judge. That review would have been
+           140 clicks that read nothing.
+
+           So a bare record publishes whenever the gate is open, whatever its design: a real
+           title, journal, date, type label and link, each verified against Crossref, and no
+           AI text at all. When its summary is written, runSummarise() applies the full rule
+           again and sends it back to the queue if it needs a human, which is where the
+           review belongs. */
+        paper.approved = launched === true;
         if (!paper.approved) stats.queued++;
         await env.RESEARCH.put(K_PAPER(paper.id), JSON.stringify(paper));
         seen.push(cardOf(paper));
@@ -1282,13 +1296,33 @@ async function runSummarise(env, limit) {
       const k = String(out.why).slice(0, 80);
       stats.reasons[k] = (stats.reasons[k] || 0) + 1;
     }
-    /* APPROVAL IS DECIDED AGAIN, because a paper that now HAS a summary may need a human
-       where the bare record did not. It is only ever tightened here, never loosened: a
-       paper a human already approved stays approved. */
-    paper.approved = paper.approved === true || !needsApproval(paper, launched);
+    /* AND HERE IS WHERE IT IS DECIDED PROPERLY, because the paper now carries a written
+       claim where a moment ago it carried none.
+
+       I had this as `approved === true || !needsApproval(...)` under a comment claiming it
+       only ever tightened. It did the exact opposite: once true, always true. A
+       meta-analysis published as a bare record would have kept that approval the instant a
+       summary was attached, and sailed straight past the review that exists for precisely
+       that case. That is the approval gate failing open again, in a new place, written by
+       the same hand that fixed it the first time.
+
+       So the rule is applied from scratch and only a HUMAN approval survives it. approvedAt
+       is set by the approve route and by nothing else, so an automatic approval cannot
+       masquerade as a judgement somebody made. */
+    const humanJudged = !!paper.approvedAt;
+    paper.approved = humanJudged || !needsApproval(paper, launched);
+    if (!paper.approved) stats.queuedForReview = (stats.queuedForReview || 0) + 1;
     await env.RESEARCH.put(K_PAPER(paper.id), JSON.stringify(paper));
     const i = rows.findIndex(r => r.id === paper.id);
     if (i > -1) rows[i] = cardOf(paper);
+    /* AND IT HAS TO REACH THE QUEUE A REVIEWER ACTUALLY READS, or "sent back for review"
+       means "quietly dropped from the feed and forgotten". */
+    if (!paper.approved) {
+      const q = JSON.parse((await env.RESEARCH.get(K_QUEUE)) || "[]");
+      if (q.indexOf(paper.id) < 0) {
+        await env.RESEARCH.put(K_QUEUE, JSON.stringify(q.concat([paper.id]).slice(-200)));
+      }
+    }
   }
   await writeIndex(env, rows);
   await env.RESEARCH.put("stats:summarise", JSON.stringify(Object.assign({at: Date.now()}, stats)));
