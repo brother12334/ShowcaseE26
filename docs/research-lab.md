@@ -687,6 +687,27 @@ writes a day. Clearing a 340-paper backlog cannot be done in an afternoon on tha
 any pace, and pacing the model calls does nothing about the storage writes — which is the
 limit I had not counted.
 
+### Draining the backlog: `tools/research-drain.sh`
+
+```
+./tools/research-drain.sh <admin-token> [write-budget]      # default budget 600 writes
+```
+
+It checks the feed answers 200 before starting, runs `/research/summarise?n=6` in a loop,
+adds up the `kvWrites` each run reports, and stops on the budget, on an empty queue, or on
+**any** response it cannot read. A sick service is a reason to stop, not to retry harder —
+which is the opposite of what the first version of this did. It waits 90 seconds instead of
+10 whenever a run reports a `deferred` paper, because that is Gemini rate-limiting.
+
+**Budget arithmetic.** A run of six costs about nine writes — six paper records, one index,
+one queue, one stats — so roughly 1.5 per paper. On the free plan's 1,000 writes a day, a
+600-write budget is about 400 papers and leaves 400 writes for the cron, the approve route
+and the app. The allowance resets at 00:00 UTC.
+
+When it is exhausted the Worker says so exactly:
+`{"error":"worker threw","detail":"KV put() limit exceeded for the day."}` — which is the
+wrapped dispatch doing its job. Before that wrapper the same condition was a bare `1101`.
+
 ### What the order means
 
 `researchRank()` combines evidence grade, whether a lifter could act on it, recency,
