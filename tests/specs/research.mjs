@@ -531,6 +531,35 @@ console.log("13 - THE SCREEN SAYS HOW MANY PAPERS AND HOW OLD THEY ARE");
      !!q.kept && q.kept.of === 30 && q.kept.kept < 30, JSON.stringify(q.kept));
 }
 
+console.log("14 - THERE IS A WAY TO ASK FOR NEW RESEARCH THAT IS NOT AN ERROR STATE");
+{
+  /* The only manual fetch was #rsRetry, which renders inside the error and empty notes. A
+     reader whose feed was merely a few hours old had no route to a new one: the automatic
+     fetch waits a full day and nothing else called researchFetchFeed(). Three strings told
+     them to "pull down", a gesture this app has never had. */
+  const r = await ev(async ()=>{
+    researchCacheWrite(researchCacheRead().papers, Date.now() - 2 * 3600000);
+    RESEARCH_ERROR = "";
+    goTab("research");
+    const btn = document.getElementById("rsCheck");
+    return {present: !!btn, label: btn ? btn.textContent : "",
+            inErrorState: !!document.querySelector(".rs-note"),
+            pullTalk: /pull down/i.test(document.getElementById("app").textContent)};
+  });
+  ck("THE CONTROL IS THERE ON A HEALTHY, SLIGHTLY STALE FEED", r.present === true, JSON.stringify(r));
+  ck("it is not an error state", r.inErrorState === false, String(r.inErrorState));
+  ck("and it says what it does", /check for new research/i.test(r.label), r.label);
+  ck("NOTHING TELLS THE READER TO PULL DOWN ANY MORE", r.pullTalk === false, "");
+
+  /* And it has to actually fetch, not merely exist. Counted from the Node side, where every
+     request the page makes is already recorded. */
+  const before = seen.filter(x=> /\/research\/feed/.test(x.url)).length;
+  await ev(()=>{ goTab("research"); document.getElementById("rsCheck").click(); });
+  await p.waitForTimeout(500);
+  const after = seen.filter(x=> /\/research\/feed/.test(x.url)).length;
+  ck("AND TAPPING IT ACTUALLY ASKS THE SERVICE", after > before, before + " -> " + after);
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 await b.close();
 process.exit(bad ? 1 : 0);
