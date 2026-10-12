@@ -1088,19 +1088,71 @@ the figure is now 0%. Worth carrying into any future version of this.
 `VOL_RECHECK_BLOCKS` and `VOL_RECHECK_FRAC` are in the source, read only by the simulation,
 and marked as not shipped.
 
+## 5I. The fourth attempt, and why the diagnosis in §6 was wrong
+
+§6 proposed making the peak estimate **better conditioned when first set** rather than
+loosening it afterwards: refuse to write `flatV` at all until `thr.personal` is true, so the
+estimate is never set using the population default bar. The stated reason was that this "is
+the condition steady lifters fail". Implemented as the `peakgate` arm in
+`tests/sim/volume-sim.mjs` and measured on two seeds, 400 lifters, 14 cycles:
+
+| population | `mdc` (live) | `peak` (ships) | `peakgate` | overreach `peak` → `peakgate` |
+|---|---|---|---|---|
+| typical | 85.3 / 85.5 | 86.3 / 87.0 | **76.1 / 76.8** | 24.2 → 43.1, 22.0 → 40.6 |
+| noisy | 85.1 / 85.9 | 88.5 / 88.6 | **81.0 / 80.9** | 13.6 → 33.5, 14.8 → 32.6 |
+| steady | 84.7 / 84.4 | 78.1 / 79.3 | **68.6 / 68.0** | 45.0 → 56.2, 41.1 → 54.0 |
+| low-ceiling | 27.2 / 23.5 | 75.2 / 76.2 | **62.3 / 63.2** | 39.6 → 57.3, 38.4 → 55.5 |
+| high-ceiling | 69.2 / 70.1 | 91.3 / 91.4 | 91.5 / 90.4 | 4.6 → 14.2, 5.4 → 15.4 |
+
+**DO NOT SHIP.** Four of five populations are materially worse, and the population it was
+designed for is the worst hit: steady loses nine to eleven points of growth and spends a
+further eleven to thirteen percent of its blocks above its own recovery limit. The only
+population it helps is high-ceiling, and only on reaching the target (78.5% → 92%), not on
+growth.
+
+**The diagnosis was wrong, not just the fix.** The §6 story was that steady lifters get
+capped too early, on a borrowed bar, at a volume they had not finished growing out of. The
+numbers say the opposite. Under `peak`, steady lifters end at **97–100% of their true
+recovery limit** with 41–45% of blocks overreached — they are not being capped too early,
+they are climbing too far before the cap arrives at all. Removing the cap from their early
+cycles, which is exactly what the gate does, lets them climb further still, and the
+overreach column shows it doing precisely that.
+
+So all four attempts now share a shape, and it is not the one §6 claimed. Every arm that
+gives the estimate *less* authority — revisable, two-strike, probed, or gated — costs the
+populations the estimate protects. The estimate is not too aggressive. For steady lifters it
+arrives too late, which is a different problem and needs a different instrument.
+
+One thing in the table is worth keeping in view: `probe` is the only arm that beats the live
+baseline for steady on both seeds (85.6 / 85.9 vs 84.7 / 84.4, with overreach down from
+23.4 / 26.8 to 17.8 / 19.6), and it keeps them at 87% of their limit instead of 100%. It is
+the right-shaped intervention for that population and was rejected for what it costs
+high-ceiling (−5 points) and low-ceiling (−42). That is what §6.2 is about.
+
 ## 6. Still to do
 
-1. **The steady-lifter regression under `peak`**, which is now the only known cost of what
-   ships. Three attempts are measured and rejected: making the estimate revisable (§5G),
-   requiring two strikes (§5G), and the periodic re-check probe (§5H). What they have in
-   common is that each tries to loosen the estimate, and loosening it costs the populations
-   the estimate is protecting. The next attempt should instead make the estimate **better
-   conditioned when it is first set** — for example by refusing to set it at all until the
-   muscle has enough readings for its own detection bar to be meaningful, which is the
-   condition steady lifters fail.
+1. **The steady-lifter regression under `peak`**, still the only known cost of what ships,
+   and now with four measured and rejected attempts behind it: a revisable estimate (§5G),
+   two strikes (§5G), the periodic re-check probe (§5H), and conditioning the estimate on
+   the lifter's own noise bar (§5I).
+
+   §5I is also the one that killed the lead this section used to offer. Do **not** try to
+   make the peak estimate later, weaker or more revisable again: four arms have now tested
+   that family and every one of them cost the populations the estimate protects. The measured
+   fact is that steady lifters under `peak` finish at 97–100% of their recovery limit with
+   41–45% of blocks overreached, so for them the cap arrives **too late**, not too early.
+
+   A fifth attempt should therefore make the stop signal fire *sooner* for a lifter whose
+   readings are repeatable — not later — and the obvious candidate is the `0.25 × prevTrend`
+   term in `peakMargin`, which for a steady lifter with a strong trend is what holds the test
+   back when their own detection bar would already have fired. That term was added because
+   steady lifters needed it (§5G); whether it is now overshooting for the same population is
+   measurable and untested.
 2. **A probe for settled lifters only**, if the re-check idea is revived: it needs a way to
    tell "settled because this is my best" from "settled because the estimate is wrong", and
-   §5H is the evidence that volume alone cannot tell them apart.
+   §5H is the evidence that volume alone cannot tell them apart. §5I adds that `probe` is
+   nonetheless the only arm that has ever beaten the live baseline for steady lifters, which
+   is a reason to keep looking for that discriminator rather than to abandon the idea.
 
 The plain-English version of all of this, for deciding whether to ship it, is
 `docs/volume-model-summary.md`.

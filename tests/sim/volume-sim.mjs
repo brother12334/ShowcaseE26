@@ -69,7 +69,7 @@ const SCENARIOS = [
    vbest:[24, 40], slack:[0.15, 0.45], sigma:[0.8, 3.0], resp:[0.7, 1.4]}
 ];
 
-const POLICIES = ["oracle", "fixed", "mdc", "mdc-own", "adaptive", "peak", "probe"];
+const POLICIES = ["oracle", "fixed", "mdc", "mdc-own", "adaptive", "peak", "probe", "peakgate"];
 
 const out = await p.evaluate(async (cfg)=>{
   const {N, CYCLES, SEED, SCENARIOS, POLICIES} = cfg;
@@ -125,13 +125,13 @@ const out = await p.evaluate(async (cfg)=>{
   const FIXED = {up: RESPOND_TREND_PCT, down: DECLINE_TREND_PCT, personal: false};
 
   const run = (u, policy, r)=>{
-    const adaptive = policy === "adaptive" || policy === "peak";
+    const adaptive = policy === "adaptive" || policy === "peak" || policy === "peakgate";
     /* "peak" is the same ladder with a different STOP SIGNAL. The specified ladder climbs
        until the lifter breaks down, and breakdown sits well above the volume where growth
        stops rising -- so every climb-until-signal policy ends 25-50% past the best. This
        one stops when ADDING SETS STOPS IMPROVING THE RESPONSE, which is the definition of
        the best, and comes back to the last volume that was better. See 5G. */
-    const peak = policy === "peak" || policy === "probe";
+    const peak = policy === "peak" || policy === "probe" || policy === "peakgate";
     /* "probe" is peak plus a periodic re-check of the learned ceiling. The peak estimate is
        deliberately never withdrawn by ordinary evidence (5G), which is what keeps most
        lifters near their best -- and is also what pins the minority whose first peak call
@@ -249,7 +249,27 @@ const out = await p.evaluate(async (cfg)=>{
          than only about its detectability. Measured: it is what steady needs, and it
          costs the other populations nothing. */
       const peakMargin = Math.max(thr.up, 0.25 * Math.max(0, prevTrend || 0));
-      if(peak && prevV > 0 && was > prevV && prevTrend != null
+      /* "peakgate": THE SAME TEST, BUT IT MAY NOT SET THE ESTIMATE ON A BORROWED BAR.
+
+         Everything measured so far tried to LOOSEN the estimate once made — make it
+         revisable, require two strikes, probe it periodically — and each cost the
+         populations the estimate protects, because a ceiling you can talk your way out of
+         is not a ceiling. §6 proposed the opposite: make the estimate better CONDITIONED
+         when it is first set.
+
+         The condition is the one steady lifters fail. thr.personal is false until the
+         muscle has had TREND_NOISE_MIN_N usable exposures, and until then the margin is
+         built from RESPOND_TREND_PCT — a population default, not this lifter's noise. A
+         steady lifter's own bar is far tighter than that default, so early in their log the
+         test is being run with the wrong ruler, and flatV gets written at a volume they had
+         not finished growing out of. Once written it is never withdrawn, which is why one
+         early mistake costs them every cycle that follows.
+
+         So the peak test only sets the estimate once the bar is the lifter's own. It still
+         runs the back-off either way; what it may not do on a borrowed bar is write down a
+         permanent ceiling. */
+      const mayLearn = policy !== "peakgate" || thr.personal === true;
+      if(peak && mayLearn && prevV > 0 && was > prevV && prevTrend != null
          && trendPct < prevTrend - peakMargin){
         /* ONE STRIKE, NOT TWO -- AND THE ASYMMETRY IS THE REASON.
 
