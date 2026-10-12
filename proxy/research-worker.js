@@ -1696,6 +1696,45 @@ export default {
                    rejectionsForgotten: rej.length,
                    staleSummaries: staleWhy}, origin, 0);
     }
+    /* RE-APPLY THE CURRENT APPROVAL RULE TO WHAT IS ALREADY STORED.
+
+       A record's approval is decided once, when it is written. So changing the rule leaves
+       every existing record judged by the old one — the 140 bare records queued under "a
+       pooled design needs a human" stay queued for ever, even though the rule that put them
+       there has been replaced. A reset would re-fetch them, but re-fetching 140 papers to
+       change one boolean is absurd when the records are already correct in every other way.
+
+       A HUMAN'S JUDGEMENT IS NEVER OVERWRITTEN HERE, in either direction. approvedAt marks a
+       decision somebody made, including a rejection, and those are left exactly as they are.
+       Only records nobody has looked at are re-judged. */
+    if (url.pathname === "/research/reapprove" && isAdmin) {
+      const launched = await launchApproved(env);
+      const rows = await readIndex(env);
+      const out = {launched, looked: 0, changed: 0, published: 0, queued: 0, humanLeftAlone: 0};
+      const dry = url.searchParams.get("confirm") !== "yes";
+      for (const r of rows) {
+        const raw = await env.RESEARCH.get(K_PAPER(r.id));
+        if (!raw) continue;
+        const p = JSON.parse(raw);
+        out.looked++;
+        if (p.approvedAt) { out.humanLeftAlone++; continue; }
+        const want = p.summary ? !needsApproval(p, launched) : (launched === true);
+        if (want === (p.approved === true)) continue;
+        out.changed++;
+        if (want) out.published++; else out.queued++;
+        if (dry) continue;
+        p.approved = want;
+        await env.RESEARCH.put(K_PAPER(p.id), JSON.stringify(p));
+        const i = rows.findIndex(x => x.id === p.id);
+        if (i > -1) rows[i] = cardOf(p);
+      }
+      if (dry) {
+        out.note = "nothing changed \u2014 pass ?confirm=yes";
+        return json(out, origin, 0);
+      }
+      await writeIndex(env, rows);
+      return json(out, origin, 0);
+    }
     if (url.pathname === "/research/stats" && isAdmin) {
       const last = JSON.parse((await env.RESEARCH.get("stats:last")) || "{}");
       const rej = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");

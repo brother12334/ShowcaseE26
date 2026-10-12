@@ -425,7 +425,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (216) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (222) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (71) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
@@ -564,6 +564,21 @@ comment claiming it only ever tightened. It did the opposite — once true, alwa
 bare meta-analysis would have kept its automatic approval the instant a summary was attached
 and skipped the review that exists for exactly that case. That is the approval gate failing
 open a second time, in a new place, written by the same hand that fixed it the first time.
+
+### Re-judging what is already stored
+
+A record's approval is written once, when the record is. So changing the rule leaves every
+existing record judged by the old one — the 140 bare records queued under the previous rule
+would have stayed queued for ever.
+
+```
+GET /research/reapprove?token=…                 # dry run: looked / published / queued
+GET /research/reapprove?token=…&confirm=yes
+```
+
+A bare record is judged on the gate, a summarised one on the full rule. **A human's decision
+is never overwritten in either direction** — `approvedAt` marks a judgement somebody made,
+including a rejection, and those records are skipped and counted as `humanLeftAlone`.
 
 ### What the order means
 

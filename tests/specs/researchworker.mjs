@@ -865,5 +865,24 @@ console.log("18 - APPROVAL GATES THE WRITTEN SUMMARY, NOT THE BARE RECORD");
      needsApproval({type:"rct"}, false) === true, "");
 }
 
+console.log("19 - CHANGING THE RULE HAS TO REACH WHAT IS ALREADY STORED");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* Approval is decided once, when a record is written, so changing the rule leaves every
+     existing record judged by the old one. 140 bare records queued under "a pooled design
+     needs a human" would have stayed queued for ever. */
+  ck("THERE IS A WAY TO RE-JUDGE STORED RECORDS", /"\/research\/reapprove"/.test(src), "");
+  ck("it is a dry run unless confirmed",
+     /const dry = url\.searchParams\.get\("confirm"\) !== "yes"/.test(src), "");
+  ck("A HUMAN DECISION IS NEVER OVERWRITTEN, including a rejection",
+     /if \(p\.approvedAt\) \{ out\.humanLeftAlone\+\+; continue; \}/.test(src), "");
+  ck("a bare record is judged on the gate and a summarised one on the full rule",
+     /p\.summary \? !needsApproval\(p, launched\) : \(launched === true\)/.test(src), "");
+  ck("and it reports what it would do before doing it",
+     /published|queued/.test(src) && /humanLeftAlone/.test(src), "");
+  ck("it never caches, like every other admin route",
+     /"\/research\/reapprove"[\s\S]{0,1600}?origin, 0\)/.test(src), "");
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 process.exit(bad ? 1 : 0);
