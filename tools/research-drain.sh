@@ -56,7 +56,7 @@ print("OK", d.get("wrote",0), d.get("failed",0), d.get("pending",0),
 # in the Worker; this stops anyway, because a loop that cannot tell "finished" from "stuck"
 # will always choose to keep going.
 STALL_LIMIT=3
-stall=0; lastpending=""
+stall=0; lastpending=""; unread=0
 spent=0; wrote=0; failed=0; runs=0
 while [ "$spent" -lt "$BUDGET" ]; do
   resp=$(curl -s --max-time 240 "$U/research/summarise?token=$T&n=6")
@@ -65,9 +65,21 @@ while [ "$spent" -lt "$BUDGET" ]; do
   set -- $line
   status="$1"
   if [ "$status" = "UNREADABLE" ]; then
-    echo "run $runs: response could not be read - stopping"
-    break
+    # A DEPLOY TAKES LONGER TO PROPAGATE THAN ANYONE WAITS. Run seconds after a deploy, this
+    # gets the PREVIOUS version's response - and if that version was broken, an error page
+    # that is not JSON. Stopping on the first one is right in spirit and wrong in practice,
+    # so it allows a couple of attempts with a pause before giving up. Still bounded: an
+    # unreadable service is a reason to stop, just not quite that quickly.
+    unread=$((unread + 1))
+    if [ "$unread" -ge 3 ]; then
+      echo "run $runs: response could not be read three times - stopping"
+      break
+    fi
+    echo "run $runs: response could not be read (attempt $unread of 3) - waiting 30s"
+    sleep 30
+    continue
   fi
+  unread=0
   if [ "$status" = "ERROR" ]; then
     shift 5
     echo "run $runs: the worker reported an error - stopping"

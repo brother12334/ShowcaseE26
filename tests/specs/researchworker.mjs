@@ -1082,6 +1082,14 @@ console.log("25 - A RUN THAT CANNOT FETCH ANYTHING HAS TO SAY SO");
   ck("judged on no progress AND an unchanged pending count",
      /\$w" = "0" \] && \[ "\$f" = "0" \] && \[ "\$pending" = "\$lastpending"/.test(sh), "");
   ck("and it surfaces the unfetchable count", /could not be fetched from PubMed/.test(sh), "");
+  /* A deploy takes longer to propagate than anyone waits, so a run started just after one
+     gets the previous version's response — and an error page is not JSON. Stopping on the
+     first unreadable answer is right in spirit and wrong in practice. */
+  ck("AN UNREADABLE RESPONSE IS RETRIED A FEW TIMES, not stopped on instantly",
+     /\$unread" -ge 3/.test(sh) && /attempt \$unread of 3/.test(sh), "");
+  ck("but it is still bounded, so a dead service stops the loop",
+     /could not be read three times - stopping/.test(sh), "");
+  ck("and the counter resets after a readable run", /^  unread=0$/m.test(sh), "");
 }
 
 console.log(bad ? "BROKEN: " + bad : "all good");
