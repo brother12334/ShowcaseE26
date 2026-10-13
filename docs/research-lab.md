@@ -425,7 +425,7 @@ that quotes it faithfully is still rejected, and that is deliberate: the app doe
 | spec | what it holds |
 |---|---|
 | `tests/specs/navresearch.mjs` (38) | five tabs in order; the four survivors untouched; Settings one tap from Today with a 44px target and a way back; every Settings sub-page renders; Workout tab mid-session; tour and release note updated |
-| `tests/specs/researchworker.mjs` (268) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
+| `tests/specs/researchworker.mjs` (277) | title disagreement, retractions, missing source link, invented numbers, causal verbs by design, mandatory limitations, label demotion, clinical-population exclusion, post-surgical exclusion, approval gating, model resolution and scoring, JSON recovery and diagnostics, the second-pass retry, the subrequest budget |
 | `tests/specs/research.mjs` (86) | feed/filter/search/detail from fixtures; a summary-less paper says so and still links out; save/read survive reload; offline cache and its date line; **no request carries training data**; **Apply never touches `S.program`** |
 
 `tests/fixtures/research-feed.json` is synthetic. A fixture that hard-codes a real DOI goes
@@ -707,6 +707,26 @@ and the app. The allowance resets at 00:00 UTC.
 When it is exhausted the Worker says so exactly:
 `{"error":"worker threw","detail":"KV put() limit exceeded for the day."}` — which is the
 wrapped dispatch doing its job. Before that wrapper the same condition was a bare `1101`.
+
+### The stall, and why a run could not tell "finished" from "stuck"
+
+The first real drain wrote 105 summaries and then spent **32 consecutive runs writing
+nothing**, with the pending count frozen at 167 and the output identical to "nothing left to
+do". Two causes, compounding:
+
+1. **One `efetch` per paper.** Draining hundreds of papers asked PubMed once per paper
+   rather than once per six, without an API key, until NCBI stopped answering.
+2. **A fetch that returned nothing was skipped silently** — no mark, no counter. So the run
+   spent its whole subrequest budget on the same few ids at the head of the queue and
+   reported `0 written, 0 failed`.
+
+Now the run fetches its abstracts in one batched call (6 ids per subrequest, stopping if the
+budget runs low) and counts what the batch did not return as `unfetchable`. The paper is
+still **not** marked: a fetch failure is a fact about the network, not about the paper. But
+it is visible, and one bad id costs a slice of one call instead of the whole run.
+
+`tools/research-drain.sh` stops after three runs with no progress *and* an unchanged pending
+count, because a loop that cannot tell finished from stuck will always choose to keep going.
 
 ### What the order means
 

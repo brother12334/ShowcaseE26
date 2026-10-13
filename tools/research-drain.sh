@@ -45,9 +45,18 @@ except Exception:
 if d.get("error"):
     print("ERROR 0 0 0 0", (d.get("detail") or "")[:70]); raise SystemExit
 print("OK", d.get("wrote",0), d.get("failed",0), d.get("pending",0),
-      1 if d.get("deferred") else 0, d.get("kvWrites",9))
+      1 if d.get("deferred") else 0, d.get("kvWrites",9),
+      d.get("unfetchable",0))
 '
 
+# A STALL IS NOT PROGRESS, AND THE FIRST VERSION OF THIS COULD NOT TELL.
+# The live drain spent thirty-two consecutive runs writing nothing with the pending count
+# frozen, because the Worker was asking PubMed one paper at a time until NCBI stopped
+# answering, and a fetch that returned nothing was skipped without a counter. Both are fixed
+# in the Worker; this stops anyway, because a loop that cannot tell "finished" from "stuck"
+# will always choose to keep going.
+STALL_LIMIT=3
+stall=0; lastpending=""
 spent=0; wrote=0; failed=0; runs=0
 while [ "$spent" -lt "$BUDGET" ]; do
   resp=$(curl -s --max-time 240 "$U/research/summarise?token=$T&n=6")
@@ -65,9 +74,21 @@ while [ "$spent" -lt "$BUDGET" ]; do
     echo "          $*"
     break
   fi
-  w="$2"; f="$3"; pending="$4"; deferred="$5"; kv="$6"
+  w="$2"; f="$3"; pending="$4"; deferred="$5"; kv="$6"; unfetchable="${7:-0}"
   wrote=$((wrote + w)); failed=$((failed + f)); spent=$((spent + kv))
-  echo "run $runs: +$w written, $f failed the checks, $pending still pending, ~$spent/$BUDGET writes spent"
+  note=""
+  [ "$unfetchable" != "0" ] && note="  ($unfetchable could not be fetched from PubMed)"
+  echo "run $runs: +$w written, $f failed the checks, $pending still pending, ~$spent/$BUDGET writes spent$note"
+  if [ "$w" = "0" ] && [ "$f" = "0" ] && [ "$pending" = "$lastpending" ]; then
+    stall=$((stall + 1))
+    if [ "$stall" -ge "$STALL_LIMIT" ]; then
+      echo "STALLED - $stall runs with no progress and pending stuck at $pending. Stopping."
+      break
+    fi
+  else
+    stall=0
+  fi
+  lastpending="$pending"
   if [ "$pending" = "0" ]; then
     echo "DONE - nothing pending"
     break

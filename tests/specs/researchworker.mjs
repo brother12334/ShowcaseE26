@@ -1056,5 +1056,33 @@ console.log("24 - THE STORAGE WRITES ARE THE LIMIT THAT BINDS");
      /stats\.kvWrites = /.test(src), "");
 }
 
+console.log("25 - A RUN THAT CANNOT FETCH ANYTHING HAS TO SAY SO");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* The live drain spent 32 consecutive runs writing nothing with pending frozen at 167, and
+     the output was indistinguishable from "nothing left to do". Two causes: PubMed was asked
+     once per paper rather than once per six, until NCBI stopped answering; and a fetch that
+     returned nothing was skipped with no mark and no counter, so the run burned its whole
+     subrequest budget on the same ids at the head of the queue. */
+  ck("THE WHOLE RUN'S ABSTRACTS ARE FETCHED TOGETHER, not one call per paper",
+     /efetch\(pmids\.slice\(i, i \+ 6\), env\)/.test(src), "");
+  ck("and the single-paper efetch is gone", !/efetch\(\[paper\.pmid\], env\)/.test(src), "");
+  ck("WHAT COULD NOT BE FETCHED IS COUNTED, so a stalled run is distinguishable",
+     /stats\.unfetchable = \(stats\.unfetchable \|\| 0\) \+ 1/.test(src), "");
+  ck("but the paper is NOT marked, because a fetch failure is about the network",
+     !/if \(!rec \|\| !rec\.abstract\) \{ *paper\.summaryFailed/.test(src), "");
+  ck("the batch is bounded rather than the whole queue",
+     /pending\.slice\(0, Math\.max\(want, 6\) \* 2\)/.test(src), "");
+  ck("and fetching stops if the subrequest budget runs low",
+     /i < pmids\.length && subreqLeft\(\) > 4/.test(src), "");
+
+  const sh = readFileSync(new URL('../../tools/research-drain.sh', import.meta.url), 'utf8');
+  ck("AND THE DRAIN SCRIPT STOPS ON A STALL rather than looping for ever",
+     /STALL_LIMIT=3/.test(sh) && /STALLED/.test(sh), "");
+  ck("judged on no progress AND an unchanged pending count",
+     /\$w" = "0" \] && \[ "\$f" = "0" \] && \[ "\$pending" = "\$lastpending"/.test(sh), "");
+  ck("and it surfaces the unfetchable count", /could not be fetched from PubMed/.test(sh), "");
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 process.exit(bad ? 1 : 0);

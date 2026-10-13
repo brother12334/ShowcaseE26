@@ -1319,20 +1319,45 @@ async function runSummarise(env, limit) {
                                    || ((a.addedAt || 0) - (b.addedAt || 0)));
   stats.pending = pending.length;
 
-  for (const row of pending) {
-    if (stats.wrote + stats.failed >= want) break;
-    if (subreqLeft() < PER_PAPER_SUBREQ) { stats.stoppedOnBudget = true; break; }
+  /* ONE efetch FOR THE WHOLE RUN, AND A COUNT OF WHAT IT COULD NOT GET.
+
+     This fetched one paper per call and skipped silently when nothing came back. Two things
+     went wrong with that and they compounded. PubMed was asked once per paper rather than
+     once per six, so draining the backlog hammered NCBI without an API key until it stopped
+     answering; and a fetch that returned nothing was skipped with no mark and no counter, so
+     the run spent its entire subrequest budget on the same few ids at the head of the queue
+     and reported "0 written, 0 failed" — indistinguishable from "nothing left to do".
+
+     The live drain showed exactly that: thirty-two consecutive runs wrote nothing with
+     pending frozen at 167, and nothing in the output said why.
+
+     So the ids are fetched together, in one subrequest, and anything the batch did not
+     return is counted as unfetchable and reported. The paper is still not marked, because a
+     fetch failure is a fact about the network and not about the paper — but it is now
+     visible, and one bad id costs a slice of one call instead of the whole budget. */
+  const batch = pending.slice(0, Math.max(want, 6) * 2);
+  const byId = {};
+  for (const row of batch) {
     const raw = await env.RESEARCH.get(K_PAPER(row.id));
     if (!raw) continue;
     const paper = JSON.parse(raw);
     if (paper.summary || paper.summaryFailed) continue;
-    /* THE ABSTRACT IS NOT STORED, so it is fetched again here: one efetch per paper rather
-       than per six, which is the price of separating the passes and is still small beside
-       the four model calls it is paying for. */
-    let recs = [];
-    try { recs = await efetch([paper.pmid], env); } catch (e) { continue; }
-    const rec = recs[0];
-    if (!rec || !rec.abstract) continue;
+    byId[paper.pmid] = paper;
+  }
+  const pmids = Object.keys(byId);
+  const recs = {};
+  for (let i = 0; i < pmids.length && subreqLeft() > 4; i += 6) {
+    let got = [];
+    try { got = await efetch(pmids.slice(i, i + 6), env); } catch (e) { got = []; }
+    got.forEach(r => { if (r && r.pmid) recs[r.pmid] = r; });
+  }
+
+  for (const pmid of pmids) {
+    if (stats.wrote + stats.failed >= want) break;
+    if (subreqLeft() < PER_PAPER_SUBREQ) { stats.stoppedOnBudget = true; break; }
+    const paper = byId[pmid];
+    const rec = recs[pmid];
+    if (!rec || !rec.abstract) { stats.unfetchable = (stats.unfetchable || 0) + 1; continue; }
     stats.tried++;
     const out = await summarise(rec, paper.type, paper.population, env);
     if (!out.ok && /too many subrequests/i.test(out.why || "")) {
