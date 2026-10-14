@@ -225,6 +225,23 @@ async function paced(fn){
   SUBREQ++;
   return fn();
 }
+/* A REFUSAL ARRIVES AS A STATUS CODE AS WELL AS AS A BODY, AND THE STATUS GOT THERE FIRST.
+
+   The first version of this read the 200-with-an-error-body shape and stopped the run on
+   it, which was the shape I had in front of me. It was half the problem. An api_key of the
+   wrong LENGTH comes back as HTTP 400 with the same error body, and `if (!r.ok) return []`
+   swallowed it one line above the new check — so the run still reported 42 queries, 42
+   exhausted, 0 found, and still looked exactly like a quiet week.
+
+   4xx is the service telling us about US: a bad key, a malformed request. Nothing about
+   that improves by trying the next query, so it ends the run. 5xx and 429 are the service
+   telling us about ITSELF, which is the ordinary hiccup the callers already skip past. */
+async function ncbiRefusal(r) {
+  if (r.status < 400 || r.status >= 500 || r.status === 429) return;
+  let body = "";
+  try { body = (await r.text()).slice(0, 120); } catch (e) {}
+  throw new Error("ncbi refused the request: " + r.status + " " + body);
+}
 function ncbiUrl(path, params, env) {
   const u = new URL(NCBI + path);
   Object.keys(params).forEach(k => u.searchParams.set(k, params[k]));
@@ -244,7 +261,10 @@ async function esearch(query, env, opt) {
     reldate: String(o.days || FEED_WINDOW_DAYS), datetype: "pdat"
   }, env);
   const r = await paced(() => fetch(url));
-  if (!r.ok) return o.withCount ? {ids: [], total: 0} : [];
+  if (!r.ok) {
+    await ncbiRefusal(r);                      // 4xx: a refusal, and it ends the run
+    return o.withCount ? {ids: [], total: 0} : [];
+  }
   const j = await r.json();
   /* A BAD KEY IS A 200 WITH AN ERROR IN IT, AND IT LOOKED EXACTLY LIKE "NOTHING NEW".
 
@@ -275,7 +295,7 @@ async function efetch(pmids, env) {
     db: "pubmed", retmode: "xml", id: pmids.join(",")
   }, env);
   const r = await paced(() => fetch(url));
-  if (!r.ok) return [];
+  if (!r.ok) { await ncbiRefusal(r); return []; }
   const xml = await r.text();
   /* Same refusal, same reasoning, in the shape efetch sends it: a JSON error body where
      PubmedArticle records were expected. Thrown for the same reason — "no abstracts came

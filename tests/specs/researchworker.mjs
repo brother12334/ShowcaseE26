@@ -1164,6 +1164,18 @@ console.log("28 - A CREDENTIAL THE SERVICE REFUSES IS NOT A QUIET WEEK");
   ck("and the run says which service refused it", /stats\.stoppedOnNcbi = e\.message/.test(src), "");
   /* The ordinary failures must still be skipped — one query, one hiccup, forty-one left. */
   ck("an ordinary failure is still just the next query", /\n\s*continue;\n\s*\}/.test(src), "");
+  /* AND THE STATUS CODE GETS THERE FIRST. The checks above read the 200-with-an-error-body
+     shape, which was the one in front of me and half the problem: an api_key of the wrong
+     LENGTH comes back as HTTP 400 with that same body, and `if (!r.ok) return []` swallowed
+     it one line earlier. Confirmed against the live service: a 36-character bad key is a
+     200 with the error inside, a 126-character one is a 400. */
+  ck("A 4XX IS READ AS A REFUSAL, not as a query with nothing in it",
+     /if \(!r\.ok\) \{\s*\n?\s*await ncbiRefusal\(r\)/.test(src)
+     && /if \(!r\.ok\) \{ await ncbiRefusal\(r\); return \[\]; \}/.test(src), "");
+  ck("it is the status that decides, 4xx and not 5xx",
+     /r\.status < 400 \|\| r\.status >= 500 \|\| r\.status === 429\) return;/.test(src), "");
+  ck("and a throttle or an outage is still the ordinary hiccup",
+     /r\.status === 429\) return;/.test(src), "");
 }
 
 console.log(bad ? "BROKEN: " + bad : "all good");
