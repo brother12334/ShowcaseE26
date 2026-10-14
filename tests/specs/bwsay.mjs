@@ -154,6 +154,27 @@ console.log("9 - AND THE CARD SAYS WHICH DUMBBELLS TO PICK UP");
   ck("and the card carries it", /a hand/.test(r.line), r.line);
 }
 
+console.log("10 - AND THE RAISE MESSAGE SAYS THE PAIR, NOT JUST THE TOTAL");
+{
+  /* Reported, in these words: "if I had 50s in my hands wouldn't it be a 100 pounds plus
+     bodyweight? Or am I logging it wrong?" \u2014 against "you 139.6 + 50 in your hands",
+     which meant 25 a hand. They were logging it right; the sentence was vague. */
+  const r = await ev(()=>({
+    bw:    loadMakeupOf({name:"Dumbbell Bulgarian Split Squat", bwOn:132.6}, 182.6),
+    note:  loadMakeupNote({name:"Dumbbell Bulgarian Split Squat", bwOn:132.6}, 182.6),
+    belt:  loadMakeupOf({name:"Weighted Dip", bwOn:132.6}, 162.6),
+    db:    loadMakeupOf({name:"Dumbbell Curl"}, 30),
+    none:  loadMakeupOf({name:"Dumbbell Bulgarian Split Squat", bwOn:132.6}, 132.6)
+  }));
+  console.log("   ", JSON.stringify(r));
+  ck("the total you added is still named", /\+ 50 in your hands/.test(r.bw), r.bw);
+  ck("and so is what goes in each hand", /25 lb a hand/.test(r.bw), r.bw);
+  ck("the parenthetical carries it too", /a hand\)$/.test(r.note), r.note);
+  ck("a belt is not halved", /on the belt/.test(r.belt) && !/a hand/.test(r.belt), r.belt);
+  ck("an ordinary dumbbell movement is unchanged", r.db === "a hand", r.db);
+  ck("and nothing added still reads as just you", /^just you/.test(r.none), r.none);
+}
+
 console.log(errs.length?("PAGE ERRORS: "+errs.join(" | ")):"no page errors");
 if(errs.length) bad++;
 console.log(bad?("BROKEN: "+bad):"all good");

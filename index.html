@@ -7018,7 +7018,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "58.1";
+const APP_VERSION = "58.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -56159,7 +56159,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "58.1";
+const NEWS_FOR = "58.2";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56229,6 +56229,10 @@ const NEWS = [
      + "number in the box is you plus what is in your hands, and the part you can actually "
      + "change was never named. The line under the sets now says it per hand: "
      + "<b>you 139.6 + 20 lb in your hands \u00b7 10 lb a hand</b>.",
+       /* 58.2. "If I had 50s in my hands wouldn\u2019t it be a 100 pounds plus bodyweight?" */
+       "Every message that names what a number is made of says the pair now, not just the "
+     + "total: <b>you 139.6 + 50 in your hands, 25 lb a hand</b>. It used to stop at the "
+     + "total, which reads as 50 in each hand to anybody standing at a rack.",
        "It also stops asking for pairs that do not exist. Two dumbbells move in twos, so a "
      + "total like 20.4 lb \u2014 10.2 in each hand \u2014 is now rounded to a pair you told us you "
      + "own, and where an older number is still an odd one the line names the nearest pair "
@@ -57059,9 +57063,17 @@ function roundLoadableOn(entry, w, name){
 /* WHAT THAT NUMBER IS MADE OF, in a few words, or "" when there is nothing worth saying.
 
    Three cases and they are different sentences:
-     a movement counting you  \u2192 "you 132.6 + 25 in your hands". Not "a hand": with your
-       bodyweight in the same number the app cannot honestly say how the rest was split,
-       and inventing a per-hand figure is worse than naming the total you added.
+     a movement counting you  \u2192 "you 132.6 + 25 in your hands, 12.5 lb a hand".
+
+       THE PER-HAND FIGURE USED TO BE REFUSED HERE, on the grounds that with bodyweight in
+       the same number the app could not honestly say how the rest was split. That was
+       true and it is not any more: a bodyweight-inclusive total now rounds its added part
+       in TWOS where the load is held in both hands, so the split is exactly half and the
+       app knows it. It was also actively misleading. Reported, in these words: "if I had
+       50s in my hands wouldn't it be a 100 pounds plus bodyweight? Or am I logging it
+       wrong?" — against a message reading "you 139.6 + 50 in your hands", which meant 25
+       a hand. Nobody reads it the other way, and being vague cost more than being wrong
+       would have. A belt is still a belt: nothing is halved there.
      a dumbbell movement      \u2192 "a hand", which is the convention every load in the app
        already follows for dumbbells and which nothing ever said out loud.
      anything else            \u2192 nothing. A barbell already has its plate line. */
@@ -57072,7 +57084,11 @@ function loadMakeupOf(entry, total){
   const bw = bwPartOf(entry);
   if(bw > 0){
     const added = Math.round((t - bw) * 10) / 10;
-    if(added > 0.05) return "you " + r1(bw) + " + " + r1(added) + " " + addedLoadWhere(name);
+    if(added > 0.05){
+      const hand = handLoadSay(name, added);
+      return "you " + r1(bw) + " + " + r1(added) + " " + addedLoadWhere(name)
+           + (hand ? ", " + hand : "");
+    }
     return "just you, " + r1(bw);
   }
   if(startingLoadPerHand(name) || /dumbbell|\bdb\b|kettlebell/i.test(nrm(name))) return "a hand";
