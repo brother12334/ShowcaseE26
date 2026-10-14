@@ -7018,7 +7018,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "58.0";
+const APP_VERSION = "58.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -15660,9 +15660,25 @@ function recordRestIfRunning(){
   save();
   pushSyncSchedule();          // and take the phone alert back off the schedule
 }
+/* HOW LONG AGO THE SET ENDED IS A FACT, NOT A CONSEQUENCE OF TAPPING.
+
+   Reported: "still able to go back on previous sets and reclick the arrow and restarting
+   the rest timer". Untick the set you just logged — to fix the reps, to change the load,
+   because the thumb landed wrong — and tick it again, and the clock went back to 0:00
+   while you were a minute into the rest it was supposed to be timing. Tap it three times
+   and you are three minutes behind your own session with a clock saying you just started.
+
+   The rest belongs to the SET, so re-ticking the same set inside the same rest resumes
+   the clock it already had instead of starting a new one. Only that set, and only while
+   the clock would still be plausible — past that it is a new rest and starts as one. */
+const REST_RESUME_MAX = 2 * 60 * 60 * 1000;      // beyond this it is a new rest, not a resume
 function startRest(e, s){
   recordRestIfRunning();
-  S.active.restTimer = {start: Date.now(), e, s, min: true};
+  const st = ((S.active.entries[e] || {}).sets || [])[s];
+  const was = st && Number(st.restFrom);
+  const resume = was > 0 && Date.now() - was < REST_RESUME_MAX ? was : 0;
+  if(st) delete st.restFrom;
+  S.active.restTimer = {start: resume || Date.now(), e, s, min: true};
   save();
   scheduleRestAlert();
   /* And the same deadline to the phone, which is the half that survives the app being put
@@ -45999,6 +46015,9 @@ function bind(){
         // unchecking: cancel its running timer and clear its recorded rest
         const rt = S.active.restTimer;
         if(rt && rt.e===ei && rt.s===si){
+          /* Kept, so ticking this set again resumes the clock rather than restarting it
+             — see startRest(). The rest you have taken is not undone by a correction. */
+          st.restFrom = rt.start;
           S.active.restTimer=null; clearRestAlert(); pushSyncSchedule(); hideRestUI();
         }
         delete st.rest;
@@ -56140,7 +56159,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "58.0";
+const NEWS_FOR = "58.1";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56182,6 +56201,20 @@ const NEWS = [
      entry because the person who hit it will look for exactly this sentence. */
   /* 58.0. Reported from the screen: a Smith squat prescribing 70 with a top warm-up rung
      of 70. */
+  /* 58.1. Reported: "still able to go back on previous sets and reclick the arrow and
+     restarting the rest timer". */
+  {k: "Correcting a set no longer restarts your rest",
+   s: ["Unticking the set you just logged \u2014 to fix the reps, to change the load, because "
+     + "your thumb landed wrong \u2014 and ticking it again sent the rest clock back to 0:00, "
+     + "while you were already a minute into that rest.",
+       "The rest belongs to the set, so ticking the same set again now resumes its clock "
+     + "instead of starting a new one. A different set still starts a fresh rest, and the "
+     + "time you had already rested still counts toward what gets written down.",
+       "Also reported: a set cut the app decided could look like it had been ignored. It "
+     + "had not \u2014 a row you have already written in is never deleted for you, in a "
+     + "superset or anywhere else, so the cut waits for the next session. The card says "
+     + "that now instead of showing \u22121 set over a session that still has them all."]},
+
   {k: "Your warm-up stops below your working set",
    s: ["The last rung of a ramp could land on the load you were about to lift \u2014 a working "
      + "set hiding inside the warm-up.",
@@ -58912,6 +58945,21 @@ function planChangeLineHTML(en){
                                  + (c.from - c.to === 1 ? "" : "s")});
     subs.push("cut to " + c.to + " set" + (c.to === 1 ? "" : "s")
       + " until " + fmtDateShort(dayStr(c.until)) + ", back to " + c.from);
+    /* AND WHEN THE SESSION IN FRONT OF YOU IS NOT HONOURING IT, SAY SO.
+
+       Reported as a cut "not being applied" while the card still said −1 set. Both
+       halves were behaving: the plan took the cut, and the live catch-up refuses to
+       delete a row you have already written in — "the plan does not get to delete work"
+       is a rule worth keeping, and it is why the row survives. What was missing is that
+       the card asserted a cut the rows plainly were not showing and explained nothing,
+       so the only reading left was that the app had failed to do what it said.
+
+       The rows are not touched. The sentence is. */
+    const liveN = Array.isArray(en && en.sets) ? en.sets.length : 0;
+    if(S.active && liveN > c.to){
+      subs.push("this session still has " + liveN + " — a row you have already written in "
+        + "is never deleted for you, so take one off with − if you want the cut today");
+    }
     if(c.reason) whys.push(c.reason);
   }
   if(!chips.length) return "";
