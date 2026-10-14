@@ -96,6 +96,30 @@ console.log("\n3 - THE EXPORT CARRIES THE WHOLE SESSION");
   ck("the file is named after the session", /element26-.*\.json$/.test(r.name), r.name);
 }
 
+console.log("\n3b - AND A WARM-UP EARNS NO VOLUME HERE EITHER");
+{
+  /* The first export ever generated showed a 135 x 8 warm-up inside a bench press's
+     totalVolume and counted in its working sets, over a `warmup: true` flag on the very
+     same set. An export that contradicts itself three lines apart is worse than one that
+     leaves the figure out. */
+  const r = await p.evaluate(()=>{
+    const s = {id:"warm1", workoutId:ROTATION[0], date:todayStr(),
+      startedAt:Date.now()-3600e3, finishedAt:Date.now(),
+      entries:[{name:"Barbell Bench Press", reps:"6-10", sets:[
+        {weight:"135", reps:"8",  rpe:"6", done:true, warmup:true},
+        {weight:"185", reps:"8",  rpe:"8", done:true},
+        {weight:"185", reps:"7",  rpe:"9", done:true}]}]};
+    const x = workoutExport(s);
+    return {flagged: x.exercises[0].sets[0].warmup, vol: x.exercises[0].totalVolume,
+            n: x.exercises[0].workingSets, total: x.workout.totalVolume};
+  });
+  console.log("   ", JSON.stringify(r));
+  ck("the warm-up is still marked as one", r.flagged === true, String(r.flagged));
+  ck("but it is not in the volume", r.vol === 185*8 + 185*7, String(r.vol));
+  ck("nor in the working-set count", r.n === 2, String(r.n));
+  ck("and the session total agrees", r.total === r.vol, r.total + " vs " + r.vol);
+}
+
 console.log("\n4 - A SESSION WITH NO PER-SET TIMES SAYS SO RATHER THAN INVENTING THEM");
 {
   const r = await p.evaluate(()=>{
