@@ -1093,6 +1093,21 @@ console.log("25 - A RUN THAT CANNOT FETCH ANYTHING HAS TO SAY SO");
   ck("but it is still bounded, so a dead service stops the loop",
      /could not be read three times - stopping/.test(sh), "");
   ck("and the counter resets after a readable run", /^  unread=0$/m.test(sh), "");
+  /* A RUN THE MODEL REFUSED IS NOT A RUN THAT MADE NO PROGRESS, and these two rules used to
+     contradict each other with the stall counter running first: a deferred paper writes
+     nothing and leaves pending where it was, so three quota-limited runs killed the loop
+     while the line at the bottom was waiting 90 seconds for exactly that to clear.
+     Observed live: five runs, two written, "STALLED, pending stuck at 23", with the Worker
+     reporting 429 on every one of them. */
+  ck("A RATE-LIMITED RUN IS COUNTED SEPARATELY from a stall",
+     /if \[ "\$deferred" = "1" \]; then\s*\n\s*defer=\$\(\(defer \+ 1\)\)/.test(sh), "");
+  ck("and it skips the stall accounting rather than feeding it",
+     /defer=\$\(\(defer \+ 1\)\)[\s\S]{0,420}continue/.test(sh), "");
+  ck("but waiting on a quota is still bounded", /DEFER_LIMIT=8/.test(sh)
+     && /the model has deferred \$defer runs in a row/.test(sh), "");
+  ck("and it says who will finish the job instead",
+     /the daily cron will take them/.test(sh), "");
+  ck("the ordinary run still paces itself", /^  sleep 10$/m.test(sh), "");
 }
 
 console.log("26 - THE ADMIN STATS SAY WHICH SECRETS ARE IN PLACE, AND NEVER WHAT THEY ARE");

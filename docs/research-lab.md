@@ -802,6 +802,13 @@ budget runs low) and counts what the batch did not return as `unfetchable`. The 
 still **not** marked: a fetch failure is a fact about the network, not about the paper. But
 it is visible, and one bad id costs a slice of one call instead of the whole run.
 
+**A rate-limited run is not a stalled one.** A paper deferred because Gemini is throttling
+writes nothing and leaves `pending` where it was, which is the exact shape of a stall — so
+the stall counter killed the loop after three of them while the wait at the bottom existed
+for precisely that case. Deferred runs are counted on their own now and waited out 90
+seconds at a time, bounded at eight: a free-tier quota that has not cleared in twelve
+minutes is not clearing inside this loop, and the daily cron takes those papers anyway.
+
 `tools/research-drain.sh` stops after three runs with no progress *and* an unchanged pending
 count, because a loop that cannot tell finished from stuck will always choose to keep going.
 

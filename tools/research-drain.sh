@@ -56,7 +56,8 @@ print("OK", d.get("wrote",0), d.get("failed",0), d.get("pending",0),
 # in the Worker; this stops anyway, because a loop that cannot tell "finished" from "stuck"
 # will always choose to keep going.
 STALL_LIMIT=3
-stall=0; lastpending=""; unread=0
+DEFER_LIMIT=8                 # x 90s: twelve minutes of waiting on a quota that is not moving
+stall=0; lastpending=""; unread=0; defer=0
 spent=0; wrote=0; failed=0; runs=0
 while [ "$spent" -lt "$BUDGET" ]; do
   resp=$(curl -s --max-time 240 "$U/research/summarise?token=$T&n=6")
@@ -91,6 +92,31 @@ while [ "$spent" -lt "$BUDGET" ]; do
   note=""
   [ "$unfetchable" != "0" ] && note="  ($unfetchable could not be fetched from PubMed)"
   echo "run $runs: +$w written, $f failed the checks, $pending still pending, ~$spent/$BUDGET writes spent$note"
+  # A RUN THE MODEL REFUSED IS NOT A RUN THAT MADE NO PROGRESS.
+  #
+  # These two rules contradicted each other, and the stall counter ran first. A paper
+  # deferred because Gemini is rate-limiting writes nothing and leaves `pending` where it
+  # was, which is exactly the shape of a stall - so three quota-limited runs killed the
+  # loop, while the line at the bottom was waiting 90 seconds for precisely that condition
+  # to clear. Observed: five runs, two written, "STALLED, pending stuck at 23", with the
+  # Worker reporting `429 on gemini-flash-latest` every time.
+  #
+  # So a deferred run is counted separately and waited out, with its own bound: a free-tier
+  # quota that has not cleared in twelve minutes of waiting is not clearing inside this
+  # loop, and the daily cron will take those papers tomorrow at no cost to anybody.
+  if [ "$deferred" = "1" ]; then
+    defer=$((defer + 1))
+    if [ "$defer" -ge "$DEFER_LIMIT" ]; then
+      echo "RATE-LIMITED - the model has deferred $defer runs in a row. Stopping;"
+      echo "          $pending papers are still queued and the daily cron will take them."
+      break
+    fi
+    echo "          the model is rate-limiting (run $defer of $DEFER_LIMIT) - waiting 90s"
+    lastpending="$pending"
+    sleep 90
+    continue
+  fi
+  defer=0
   if [ "$w" = "0" ] && [ "$f" = "0" ] && [ "$pending" = "$lastpending" ]; then
     stall=$((stall + 1))
     if [ "$stall" -ge "$STALL_LIMIT" ]; then
@@ -105,7 +131,7 @@ while [ "$spent" -lt "$BUDGET" ]; do
     echo "DONE - nothing pending"
     break
   fi
-  # A deferred paper means Gemini is rate-limiting. Wait properly rather than burning runs.
-  if [ "$deferred" = "1" ]; then sleep 90; else sleep 10; fi
+  # The deferred case is handled above, with its own counter; this is the ordinary pace.
+  sleep 10
 done
 echo "STOPPED after $runs runs: $wrote written, $failed failed the checks, ~$spent writes spent"
