@@ -1178,5 +1178,25 @@ console.log("28 - A CREDENTIAL THE SERVICE REFUSES IS NOT A QUIET WEEK");
      /r\.status === 429\) return;/.test(src), "");
 }
 
+console.log("29 - THE PACE FOLLOWS THE KEY THAT IS ACTUALLY THERE");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* NCBI publishes 3 requests a second without a key and 10 with one. 350 ms was the right
+     default while there was no key and then became the only thing slowing a run entitled to
+     go three times faster. */
+  ck("there are two paces, not one", /NCBI_GAP_KEYED = 120/.test(src) && /NCBI_GAP_OPEN\s+= 350/.test(src), "");
+  ck("the keyed pace is still inside the limit it is allowed",
+     (()=>{ const m = src.match(/NCBI_GAP_KEYED = (\d+)/); return m && 1000 / Number(m[1]) < 10; })(), "");
+  ck("and the keyless one inside ITS limit",
+     (()=>{ const m = src.match(/NCBI_GAP_OPEN\s+= (\d+)/); return m && 1000 / Number(m[1]) < 3; })(), "");
+  ck("THE KEY DECIDES, read from the environment",
+     /NCBI_GAP_MS = \(env && env\.NCBI_API_KEY\) \? NCBI_GAP_KEYED : NCBI_GAP_OPEN/.test(src), "");
+  /* Per run, not at module load: a key can be added, rotated or deleted without a deploy,
+     and an isolate that started before that must not keep the old pace. */
+  const runs = (src.match(/SUBREQ_CEIL = subreqMax\(env\);\s*\n\s*pacing\(env\);/g) || []).length;
+  ck("EVERY RUN READS IT AFRESH, so a key added without a deploy takes effect", runs === 3, String(runs));
+  ck("and the stats report the figure in force", /pacedForKey: pacing\(env\)/.test(src), "");
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 process.exit(bad ? 1 : 0);

@@ -62,7 +62,11 @@ to everybody, from the edge cache. Those are opposite security postures:
 
 **PubMed E-utilities** (`esearch` + `efetch`) is the discovery source. `tool` and `email`
 go on every request, the API key is a Worker secret, and calls are paced at one every
-350 ms — well inside NCBI's published limit, because nothing here is urgent.
+350 ms without an API key and 120 ms with one — NCBI publishes 3 requests a second
+and 10 respectively, so both are a fraction of what is allowed rather than the ceiling,
+because nothing here is urgent and a shared public service is not a resource to use up
+to its edge. The pace is read from the environment on every run, so a key added, rotated
+or removed takes effect without a deploy; `/research/stats` reports the figure in force.
 
 **Crossref** is the cross-check, not a source: a DOI must resolve there and its title,
 journal and year must agree with PubMed's.

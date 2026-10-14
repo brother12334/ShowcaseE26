@@ -41,7 +41,23 @@
 const NCBI = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const NCBI_TOOL = "element26";
 const NCBI_EMAIL = "research@element26.app";
-const NCBI_GAP_MS = 350;
+/* TWO PACES, AND THE KEY DECIDES WHICH. NCBI publishes 3 requests a second without an API
+   key and 10 with one. 350 ms honoured the keyless limit with room to spare and was the
+   right default while there was no key; it then became the only thing slowing a run that
+   was entitled to go three times faster. 120 ms is 8.3 a second — still under the limit it
+   is allowed, still a fraction rather than the ceiling, because nothing here is urgent and
+   a shared public service is not a resource to use up to its edge.
+
+   Read from the environment per run rather than fixed at module load: a key can be added,
+   rotated or deleted without a deploy, and the pace has to follow the key that is actually
+   there. The stats route reports the figure in force. */
+const NCBI_GAP_KEYED = 120;
+const NCBI_GAP_OPEN  = 350;
+let NCBI_GAP_MS = NCBI_GAP_OPEN;
+function pacing(env) {
+  NCBI_GAP_MS = (env && env.NCBI_API_KEY) ? NCBI_GAP_KEYED : NCBI_GAP_OPEN;
+  return NCBI_GAP_MS;
+}
 
 const EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest";
 const CROSSREF = "https://api.crossref.org/works";
@@ -1244,6 +1260,7 @@ function newPaper(rec, sc, v, hash) {
 async function runIngest(env, limit) {
   SUBREQ = 0;
   SUBREQ_CEIL = subreqMax(env);
+  pacing(env);
   const launched = await launchApproved(env);
   const seen = await readIndex(env);
   const rejected = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
@@ -1342,6 +1359,7 @@ async function runIngest(env, limit) {
 async function runSummarise(env, limit) {
   SUBREQ = 0;
   SUBREQ_CEIL = subreqMax(env);
+  pacing(env);
   const launched = await launchApproved(env);
   const rows = await readIndex(env);
   const stats = {mode: "summarise", tried: 0, wrote: 0, failed: 0, reasons: {},
@@ -1500,6 +1518,7 @@ async function runPipeline(env, limit) {
      and process nothing at all. */
   SUBREQ = 0;
   SUBREQ_CEIL = subreqMax(env);
+  pacing(env);
   const launched = await launchApproved(env);
   const seen = await readIndex(env);
   const rejected = JSON.parse((await env.RESEARCH.get(K_REJECT)) || "[]");
@@ -2045,7 +2064,7 @@ async function handle(request, env) {
            operational information, its contents are not. */
         ncbiKey: !!env.NCBI_API_KEY,
         geminiKey: !!env.GEMINI_API_KEY,
-        pacedForKey: NCBI_GAP_MS
+        pacedForKey: pacing(env)
       }), origin, 0);
     }
 
