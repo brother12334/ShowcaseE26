@@ -1659,24 +1659,28 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
 .pct-line{border-left-color:var(--dim)}
 .pct-line .linklike{margin-left:6px}
 .set{display:grid;grid-template-columns:44px 1fr 1fr 86px 48px;gap:7px;align-items:center;margin-bottom:8px}
-/* M1 — the three states of a set row. */
-.set.is-live{position:relative}
-.set.is-live::before{content:"";position:absolute;left:-10px;top:-4px;bottom:-4px;width:3px;
-  border-radius:var(--r-xs);background:var(--acc)}
-.set.is-live .idx{color:var(--acc)}
-.set.is-logged{opacity:.62;transition:opacity var(--t-mid) var(--ease)}
+/* M1'S THREE STATES OF A SET ROW, NOW UNDRESSED.
+
+   The copper edge marking "the set you are on", the fade on the rows behind it and the
+   line that swept under a row as it closed were one design: the card telling you where
+   you are without being asked. Reported as "this weird buggy highlight when logging
+   that wasn't there from legacy", and the report is fair — the mark is moved by hand
+   rather than by a redraw (the logger deliberately does not re-render on a tick, to keep
+   a half-typed number alive), so any path that misses markSetStates leaves it on a row
+   you have finished. A cue that is wrong some of the time is worse than no cue, and the
+   ✓ already says which sets are done.
+
+   THE CLASSES STAY. They are the model of which set is live, the rest rules and several
+   specs read them, and nothing about that was the complaint. Only the paint is gone. */
 .set.is-logged:focus-within{opacity:1}
 /* BANKED. A 1px rule drawn left to right under the row that just closed — the one
    piece of motion in this app that means "that is recorded now". It is a TRANSFORM, it
    is 140ms, and it runs once, on the row you just ticked and no other.
 
    A line rather than a flash because a flash is an alert and this is a receipt. */
-.set-sweep{position:absolute;left:-10px;right:0;bottom:-3px;height:1px;background:var(--acc);
-  transform-origin:0 50%;transform:scaleX(0)}
-.set.sweeping{position:relative}
-.set.sweeping .set-sweep{animation:setSweep .14s linear forwards}
-@keyframes setSweep{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-@media (prefers-reduced-motion: reduce){ .set.sweeping .set-sweep{animation:none} }
+/* The sweep is part of the same removal: the element and its hook are still emitted, so
+   nothing that looks for them breaks, and it draws nothing. */
+.set-sweep{display:none}
 .set .idx{color:var(--faint);font:var(--fs-4) var(--mono);text-align:center;display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1.1}
 .side-chip{
   font-family:var(--disp);font-style:normal;font-weight:700;font-size:var(--fs-2);
@@ -4675,7 +4679,29 @@ body.cele-open{overflow:hidden}
    through the middle so the session still signs it. And the progress goes where a real
    plate's colour goes, on the RIM, which is also the only place on a disc this size
    where a 6px arc can be read at a glance from arm's length. */
+/* THE DIAL IS GONE, AND THE CLOCK IT CARRIED IS NOT.
+
+   Asked for directly: the rest screen back to a plain clock. The plate was a metal disc
+   with eight cut spokes, a conic arc counting the target down and a hub that popped on
+   every minute — a lot of screen, and a lot of motion, for a number you glance at
+   between sets.
+
+   The MARKUP is untouched, deliberately: showRestUI() still builds .pf-plate, .pf-ring
+   and .pf-hub, the tick still writes the arc's percentage and the minute pop, and rest2
+   still finds what it looks for. All of that now paints as a plain panel with the time
+   in it, so one stylesheet change undoes this and nothing had to be rewired to get it.
+   The ± 30s buttons, what you are resting from and "I'm ready" all stay where they are. */
 .pf-plate{
+  position:relative;width:min(92vw,460px);border-radius:var(--r-lg);
+  padding:26px 18px;background:var(--card);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.055);
+  display:flex;align-items:center;justify-content:center;
+}
+.pf-tex,.pf-ring{display:none}
+.pf-hub{position:static;inset:auto;border-radius:0;background:none;box-shadow:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.pf-hub.pop{animation:none}
+.pf-plate-unused{
   position:relative;width:min(76vw,52vh,340px);aspect-ratio:1;border-radius:50%;
   /* The day's colour stays on the plate and stops being the plate: a wash through the
      middle at a tenth of its strength, so the session still signs the screen and the
@@ -7018,7 +7044,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "58.2";
+const APP_VERSION = "58.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -45802,6 +45828,13 @@ function bind(){
     const auto = setIsWarmup(en, si);
     if(auto === !shown) delete st.warmup; else st.warmup = !shown;
     save(); render();
+    /* AND IT SAYS WHAT IT DID. Reported as "I don't know what the W is on the side of the
+       set" — a single letter with a tooltip nobody can hover on a phone. The letter stays
+       (there is room for a letter and not for a word beside a set number), and now one tap
+       tells you what it means, which is the only moment anybody asks. */
+    toast(setIsWarmup(en, si)
+      ? "Marked a warm-up — it won't count toward your volume or your grade"
+      : "Counted as a working set again", "good");
   });
   document.querySelectorAll("[data-setnote]").forEach(b=> b.onclick = ()=>{
     const [ei, si] = b.dataset.setnote.split(":").map(x=> parseInt(x, 10));
@@ -56159,7 +56192,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "58.2";
+const NEWS_FOR = "58.3";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56203,6 +56236,21 @@ const NEWS = [
      of 70. */
   /* 58.1. Reported: "still able to go back on previous sets and reclick the arrow and
      restarting the rest timer". */
+  /* 58.3. Asked for directly, after "revert the logging screen to the legacy". */
+  {k: "The logging screen is plainer again",
+   s: ["The copper edge marking the set you are on, the fade over sets you had already "
+     + "logged and the line that swept under a set as it closed are gone. That mark was "
+     + "moved by hand rather than by a redraw, so it could sit on a row you had finished "
+     + "\u2014 a cue that is wrong some of the time is worse than no cue, and the \u2713 already "
+     + "says which sets are done.",
+       "The rest screen is a plain panel with the time on it rather than a dial. What you "
+     + "are resting from, \u00b1 30 seconds and <b>I'm ready</b> are all still there.",
+       "And the <b>W</b> beside a set number \u2014 which marks it a warm-up, so it does not "
+     + "count toward your volume or your grade \u2014 now says so when you tap it, instead of "
+     + "hiding it in a tooltip no phone can show.",
+       "Nothing about how a set is logged changed, and last session's numbers still open "
+     + "under the exercise where they were."]},
+
   {k: "Correcting a set no longer restarts your rest",
    s: ["Unticking the set you just logged \u2014 to fix the reps, to change the load, because "
      + "your thumb landed wrong \u2014 and ticking it again sent the rest clock back to 0:00, "
@@ -58664,6 +58712,8 @@ function setRowHTML(en, ei, si, last, idxLabel){
       const said = typeof st.warmup === "boolean";
       return `<button type="button" class="wu-btn${on ? " on" : ""}${said ? " said" : ""}"
         data-setwarm="${ei3}:${si}" aria-pressed="${on}"
+        aria-label="${on ? "This set is a warm-up \u2014 tap to count it as working"
+                        : "Mark set " + idx + " as a warm-up"}"
         title="${on ? (said ? "You marked this a warm-up" : "Detected as a warm-up")
                     : "Mark as a warm-up"} \u2014 warm-ups do not count toward your volume"
         >W</button>`;

@@ -82,7 +82,13 @@ console.log("2 - THE RIM MEANS THIS REST, NOT THIS MINUTE");
      JSON.stringify([r.over.down.over, r.over.up.over]));
 }
 
-console.log("3 - THE PLATE IS STEEL, AND THE DAY SIGNS IT RATHER THAN PAINTING IT");
+/* THE DIAL WAS REMOVED ON REQUEST \u2014 "revert the logging screen to the legacy", with the
+   rest dial named. What this section used to assert (a machined disc, a conic rim
+   carrying the accent) is gone on purpose. The invariants that remain are the ones that
+   were never about the disc: the clock is there, the day's colour is still carried
+   rather than painted on, the arc's reading is still computed so restoring the old look
+   is a stylesheet away, and the thing fits the screen. */
+console.log("3 - THE REST SCREEN IS A PLAIN PANEL WITH THE TIME IN IT");
 {
   const r = await ev(async ()=>{
     S.active.restTimer.start = Date.now() - 40000;
@@ -91,19 +97,23 @@ console.log("3 - THE PLATE IS STEEL, AND THE DAY SIGNS IT RATHER THAN PAINTING I
     const pl = document.querySelector(".pf-plate");
     const ring = document.querySelector(".pf-ring");
     const cs = getComputedStyle(pl);
-    return {bg: cs.backgroundImage.slice(0, 220),
-            inlineBg: pl.style.background,
+    return {inlineBg: pl.style.background,
             dc: pl.style.getPropertyValue("--dc"),
-            ring: getComputedStyle(ring).backgroundImage.slice(0, 120),
+            round: cs.borderRadius,
+            ringShown: getComputedStyle(ring).display,
             sw: ring.style.getPropertyValue("--sw"),
-            w: Math.round(pl.getBoundingClientRect().width)};
+            time: (document.querySelector(".rest-full .rest-time")||{}).textContent||"",
+            w: Math.round(pl.getBoundingClientRect().width),
+            vw: Math.round(document.documentElement.clientWidth)};
   });
   ck("the plate is not painted the day's colour", !r.inlineBg, "'" + r.inlineBg + "'");
   ck("but it still carries it", !!r.dc, r.dc);
-  ck("it is a machined gradient", /gradient/.test(r.bg), r.bg.slice(0, 60));
-  ck("the rim carries the accent", /rgb/.test(r.ring), r.ring.slice(0, 60));
-  ck("and the rim has a reading on it", /%/.test(r.sw), r.sw);
-  ck("the dial is no longer 86vw of white", r.w <= 340, String(r.w));
+  ck("it is not a disc any more", !/50%/.test(r.round), r.round);
+  ck("and the rim is not drawn at all", r.ringShown === "none", r.ringShown);
+  ck("the arc's reading is still computed, so the old look is a stylesheet away",
+     /%/.test(r.sw), r.sw);
+  ck("the clock is on it", /\d/.test(r.time), r.time);
+  ck("and it fits the screen", r.w <= r.vw, r.w + " of " + r.vw);
 }
 
 console.log("4 - IT SAYS WHAT YOU ARE RESTING FOR");
