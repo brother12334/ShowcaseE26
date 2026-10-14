@@ -7044,7 +7044,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "58.3";
+const APP_VERSION = "58.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -34050,11 +34050,22 @@ function sleepLineFor(wid){
   return win.fits ? "start by " + fmtTimeOfDay(win.latestStart) + ", out by " + fmtTimeOfDay(win.latestEnd) : "";
 }
 function asymNote(){
-  if(!asymRetestDue()) return null;
+  /* THE MEASUREMENT HAS ALREADY HAPPENED — see autoAsymRetest(). This card is no longer
+     the thing that makes it happen; it is the thing that tells you what it found, and it
+     stays until you have said you have read it. The numbers it shows are the live ones,
+     so a movement that has moved since reads true rather than frozen. */
+  if(!asymRetestUnseen()) return null;
+  const res = S.asymRetest || {};
   const rows = unilateralInPlan().map(e=>({e, st: sideStats(e.name)}));
+  const nRet = (res.retired || []).length, nKeep = (res.kept || []).length;
   return {k:"asym", act:true, label:"Four-week asymmetry re-test",
-    line:"The rep-matching rule has run its four weeks.",
-    body:`<div class="nt-p">Here is where each side actually sits.</div>
+    line: nRet
+      ? "Done on its own: the rule has come off " + nRet + " movement" + (nRet===1?"":"s") + "."
+      : "Done on its own: the gaps are still open, so the rule stays on.",
+    body:`<div class="nt-p">${nKeep
+        ? "Each side, measured on balanced windows. The rule keeps matching the weaker side on "
+          + esc((res.kept||[]).join(", ")) + "."
+        : "Each side, measured on balanced windows."}</div>
       ${rows.map(({e, st})=>`<div class="asym-row">
         <b>${esc(e.name)}</b>
         <div class="asym-gap">${esc(asymGapText(st))}</div>
@@ -34065,7 +34076,7 @@ function asymNote(){
             : "Still outside " + ASYM_CLOSED_GAP + " reps &mdash; keep matching the weaker side"
         }</div>` : ""}
       </div>`).join("")}
-      <button class="fc-btn" id="asymRetestBtn">Apply and close the re-test</button>`};
+      <button class="fc-btn" id="asymRetestBtn">Got it</button>`};
 }
 /* The rules in force. Informational by definition — they describe what the app is already
    doing to the numbers in front of you, and there is nothing to press. */
@@ -37964,12 +37975,23 @@ function viewBody(){
     /* The re-test is an ACTION, and it was only ever reachable from a card on Today
        that appears for a few days and then does not. It belongs wherever the rule's
        state is shown. */
-    if(asymRetestDue()){
+    /* THE RE-TEST RUNS ITSELF, so this is its result rather than its button. Unread, it
+       says what just happened and offers to be dismissed; read, it stays as a one-line
+       record of when the rule last moved and what it decided, which is the question this
+       block exists to answer. */
+    if(S.asymRetest && S.asymRetest.at){
+      const r = S.asymRetest, nRet = (r.retired||[]).length, nKeep = (r.kept||[]).length;
+      const when = fmtDateShort(dayStr(r.at));
       h += `<div class="nb-side-retest">
-        <b>The four-week re-test is due.</b> It measures each movement on a balanced
-        window and retires the rule wherever the gap has closed to within
-        ${ASYM_CLOSED_GAP} rep${ASYM_CLOSED_GAP===1?"":"s"}.
-        <button class="btn small" id="nbSideRetest" style="margin-top:10px">Run the re-test</button>
+        <b>${asymRetestUnseen() ? "The four-week re-test has run." : "Last re-test \u00b7 " + esc(when)}</b>
+        ${nRet ? "The rule came off " + esc((r.retired||[]).join(", ")) + "." : "Nothing was retired."}
+        ${nKeep ? " Still matching the weaker side on " + esc((r.kept||[]).join(", ")) + "." : ""}
+        It measures each movement on a balanced window and retires the rule wherever the gap
+        has closed to within ${ASYM_CLOSED_GAP} rep${ASYM_CLOSED_GAP===1?"":"s"}, and it runs
+        again on its own whenever one of the movements it kept closes.
+        ${asymRetestUnseen()
+          ? `<button class="btn small" id="nbSideRetest" style="margin-top:10px">Got it</button>`
+          : ""}
       </div>`;
     }
     h += `<div class="nb-lfoot">A gap is only read from sessions where both sides got the
@@ -45598,13 +45620,10 @@ function bind(){
   });
 
   const art = $("#asymRetestBtn");
-  if(art) art.onclick = ()=>{
-    const res = applyAsymRetest();
-    render();
-    toast(res.retired.length
-      ? "Rule retired on "+res.retired.length+" movement"+(res.retired.length===1?"":"s")
-      : "Gaps still open, rule stays on");
-  };
+  /* Acknowledgement, not application: the re-test ran itself and this says you have read
+     it. Re-running it here would measure the same windows and write a second change-log
+     line claiming it happened twice. */
+  if(art) art.onclick = ()=>{ asymRetestSeen(); render(); };
 
   const dlStart = $("#startDeloadBtn");
   if(dlStart) dlStart.onclick = ()=>{ startDeload(); render(); toast("Deload week started"); };
@@ -47290,13 +47309,7 @@ function bind(){
     toast(on ? "Each side trained on its own merits" : "Stronger side now capped to the weaker one");
   };
   const nst = $("#nbSideRetest");
-  if(nst) nst.onclick = ()=>{
-    const r = applyAsymRetest();
-    render();
-    toast(r.retired.length
-      ? "Rule retired on " + r.retired.length + " movement" + (r.retired.length===1?"":"s")
-      : "Re-test done, the gaps are still open");
-  };
+  if(nst) nst.onclick = ()=>{ asymRetestSeen(); render(); };
   const bmb = $("#bmBack");
   if(bmb) bmb.onclick = ()=>{ BODY_FOCUS = null; BODY_EXPAND = false; render(); };
   document.querySelectorAll("[data-mrow]").forEach(r=> r.onclick=()=>{
@@ -48303,6 +48316,9 @@ async function checkGymAtStart(){
   askDifferentGym(pos, near);
 }
 function startWorkout(wid){
+  /* An app left open for days reaches its re-test date without ever being launched again,
+     so the other moment that always happens is used too. */
+  try{ autoAsymRetest(); }catch(e){}
   /* The same shape of problem from the other end: tapping "start" repeatedly built a
      fresh session object each time, discarding the sets already logged into the previous
      one. A session already in progress IS the session you are in. */
@@ -56192,7 +56208,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "58.3";
+const NEWS_FOR = "58.4";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56237,6 +56253,18 @@ const NEWS = [
   /* 58.1. Reported: "still able to go back on previous sets and reclick the arrow and
      restarting the rest timer". */
   /* 58.3. Asked for directly, after "revert the logging screen to the legacy". */
+  /* 58.4. "Shouldn't the retest each side thing for the side balance happen
+     automatically?" It should have from the start. */
+  {k: "The side-balance re-test runs itself",
+   s: ["If you train both sides to the weaker one, the rule is re-tested after four weeks: "
+     + "each movement is measured on balanced windows and the rule comes off wherever the "
+     + "gap has closed to within two reps. That measurement needed a button, so the rule "
+     + "stayed on past the day your own numbers said it should come off.",
+       "It runs on its own now, and the report waits for you instead \u2014 what it found, "
+     + "movement by movement, until you have read it. The Body tab keeps the record of when "
+     + "it last ran and what it decided. Nothing is retired on a shaky reading, and it will "
+     + "not run at all until at least one movement has a balanced window to read."]},
+
   {k: "The logging screen is plainer again",
    s: ["The copper edge marking the set you are on, the fade over sets you had already "
      + "logged and the line that swept under a set as it closed are gone. That mark was "
@@ -57992,6 +58020,40 @@ function applyAsymRetest(){
   ], {note:"Gaps measured on balanced windows only, so positional bias from the opening-side flip is cancelled."});
   save(); queueSync();
   return {retired, kept};
+}
+/* AND IT RUNS ITSELF.
+
+   Asked for directly: "shouldn't the retest each side thing for the side balance in the
+   body tab happen automatically". It should, and the reason it did not is worth keeping
+   in view: the rule was held in force until you had PRESSED something, so that it could
+   not lapse silently on the day its four weeks ran out without you ever seeing the
+   numbers. That instinct is right about the numbers and wrong about the measurement.
+   applyAsymRetest() asks nothing of you — it reads each movement's gap off balanced
+   windows and retires the rule where the gap is inside two reps — so making you the
+   trigger only means the rule stays on past the day the data says it should come off.
+
+   So the measurement runs on its own and the REPORT is what waits for you: the card and
+   the Body tab show what it found until you have acknowledged it, which is the part that
+   was actually worth protecting. Nothing is retired on a provisional reading, because
+   applyAsymRetest's own `confident` guard is untouched; and asymRetestDue() only says yes
+   once at least one movement has a reading, so this cannot stamp itself done on no data. */
+function autoAsymRetest(){
+  try{
+    if(!asymRetestDue()) return null;
+    const res = applyAsymRetest();
+    S.asymRetest.seen = false;
+    S.asymRetest.auto = true;
+    save();
+    return res;
+  }catch(e){ return null; }
+}
+/* Something the automatic run has found and you have not seen yet. */
+function asymRetestUnseen(){
+  const r = S.asymRetest;
+  return !!(r && r.at && r.seen === false);
+}
+function asymRetestSeen(){
+  if(S.asymRetest && S.asymRetest.at){ S.asymRetest.seen = true; save(); queueSync(); }
 }
 
 /* =====================================================================
@@ -61737,6 +61799,7 @@ if(!hasAccount()) startAccountFlow("signup");
 else if(needsOnboarding()) startOnboarding();
 else render();
 try{ restoreSetCuts(); }catch(e){}   // a lapsed cut goes back on the plan at launch too
+try{ if(autoAsymRetest()) render(); }catch(e){}   // and the side re-test runs itself
 if(S.active && S.active.restTimer) showRestUI(S.active.restTimer.min);
 /* A signed-in account on a device that has been away: pull once, and only repaint if
    the server actually had something newer than what is on this device. */
