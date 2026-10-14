@@ -710,6 +710,60 @@ writes a day. Clearing a 340-paper backlog cannot be done in an afternoon on tha
 any pace, and pacing the model calls does nothing about the storage writes — which is the
 limit I had not counted.
 
+### Running it by hand: the four commands
+
+Everything below needs the admin token. It is **not written down in this repository** — read
+it from the Worker's secrets, or from wherever you keep it, and export it for the session:
+
+```bash
+export T=<admin-token>
+export U=https://element26-research.ferbyablon.workers.dev
+```
+
+**1. Is it healthy, and what is in it?**
+
+```bash
+curl "$U/research/stats?token=$T"
+```
+
+`inIndex` is how many papers exist, `withSummary` how many have been written up, `approved`
+how many the feed will serve, `pending` how many are queued for a summary. `ncbiKey` and
+`geminiKey` say whether each secret is bound; `pacedForKey` is the gap in milliseconds
+between PubMed calls, which should read 120 with a key and 350 without. A `stoppedOnNcbi`
+line anywhere means the key is being refused — see §11D.
+
+**2. More papers.** One run stops at 45 subrequests by design, so it is a loop:
+
+```bash
+for i in $(seq 1 12); do
+  curl -s "$U/research/ingest?token=$T" | cut -c1-140; echo
+  sleep 5
+done
+```
+
+`added` is new papers that passed every check; `dropped` with its `reasons` is the screen
+working, not a fault. Watch for `stoppedOnNcbi`. `inIndex` should climb.
+
+**3. Summaries for everything waiting.** This is the one with a real budget behind it:
+
+```bash
+./tools/research-drain.sh "$T" 600
+```
+
+**4. Summaries without the repo** (a phone, a borrowed machine):
+
+```bash
+for i in $(seq 1 40); do
+  r=$(curl -s --max-time 180 "$U/research/summarise?token=$T")
+  echo "$i: $r" | cut -c1-160
+  case "$r" in *'"pending":0'*) echo done; break;; esac
+  case "$r" in *429*|*503*|*quota*) sleep 90;; *) sleep 20;; esac
+done
+```
+
+The 90-second branch matters: a 429 or 503 is Gemini's free-tier quota, and hammering it
+makes the rest of the run worse rather than better.
+
 ### Draining the backlog: `tools/research-drain.sh`
 
 ```
