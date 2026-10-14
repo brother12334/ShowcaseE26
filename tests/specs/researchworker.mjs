@@ -1145,5 +1145,26 @@ console.log("27 - THE DEPLOY CONFIG IS IN THE REPOSITORY AND IS DEPLOYABLE");
      !/^\s*LAUNCH_APPROVED\s*=/m.test(cfg), "");
 }
 
+console.log("28 - A CREDENTIAL THE SERVICE REFUSES IS NOT A QUIET WEEK");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* NCBI answers an invalid api_key with HTTP 200 and {"error":"API key invalid"}. There is
+     no esearchresult in that body, so idlist was undefined, every query read as empty, and
+     a run reported 42 queries tried, 42 exhausted, 0 found — indistinguishable from a quiet
+     week in the literature. Observed live, for the most ordinary reason there is: the key
+     was rotated at NCBI and the Worker still held the old one. */
+  ck("THE ERROR BODY IS READ, not stepped over", /if \(j && j\.error\) throw new Error\("ncbi refused/.test(src), "");
+  ck("and the same refusal in efetch's shape too",
+     /"error"\\s\*:/.test(src) && /throw new Error\("ncbi refused the request: " \+ xml/.test(src), "");
+  /* Throwing is not enough on its own: every caller here wraps its fetch in a catch that
+     skips to the next query, which would turn 42 refusals back into a clean-looking run. */
+  const skips = src.match(/catch \(e\) \{[\s\S]{0,240}?\}/g) || [];
+  const guarded = (src.match(/ncbi refused\/\.test\(e\.message \|\| ""\)\) \{ stats\.stoppedOnNcbi/g) || []).length;
+  ck("EVERY NCBI CALL SITE ENDS THE RUN on a refusal rather than skipping", guarded >= 3, String(guarded));
+  ck("and the run says which service refused it", /stats\.stoppedOnNcbi = e\.message/.test(src), "");
+  /* The ordinary failures must still be skipped — one query, one hiccup, forty-one left. */
+  ck("an ordinary failure is still just the next query", /\n\s*continue;\n\s*\}/.test(src), "");
+}
+
 console.log(bad ? "BROKEN: " + bad : "all good");
 process.exit(bad ? 1 : 0);

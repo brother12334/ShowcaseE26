@@ -246,6 +246,19 @@ async function esearch(query, env, opt) {
   const r = await paced(() => fetch(url));
   if (!r.ok) return o.withCount ? {ids: [], total: 0} : [];
   const j = await r.json();
+  /* A BAD KEY IS A 200 WITH AN ERROR IN IT, AND IT LOOKED EXACTLY LIKE "NOTHING NEW".
+
+     NCBI answers an invalid api_key with {"error":"API key invalid","type":"invalid"} and
+     HTTP 200. There is no esearchresult in that body, so idlist came back undefined, the
+     run read it as an empty result and reported every query "exhausted" — 42 queries, 0
+     found, stoppedOnBudget, no error anywhere. The feed had stopped ingesting entirely and
+     the only clue was a zero that looks identical to a quiet week in the literature.
+
+     It happened for the most ordinary reason there is: a key was rotated at NCBI and the
+     Worker still held the old one. So the body is checked for the error NCBI actually
+     sends, and it is THROWN rather than returned — a credential the service rejects is not
+     a quiet day, it is a run that must stop and say so. */
+  if (j && j.error) throw new Error("ncbi refused the request: " + String(j.error).slice(0, 120));
   const res = j.esearchresult || {};
   const ids = res.idlist || [];
   /* count comes back as a string and is what says whether a deeper page exists at all. */
@@ -264,6 +277,11 @@ async function efetch(pmids, env) {
   const r = await paced(() => fetch(url));
   if (!r.ok) return [];
   const xml = await r.text();
+  /* Same refusal, same reasoning, in the shape efetch sends it: a JSON error body where
+     PubmedArticle records were expected. Thrown for the same reason — "no abstracts came
+     back" and "the service will not talk to us" must not look alike. */
+  if (/^\s*\{/.test(xml) && /"error"\s*:/.test(xml))
+    throw new Error("ncbi refused the request: " + xml.slice(0, 120));
   return xml.split("<PubmedArticle>").slice(1).map(chunk => parseArticle(chunk));
 }
 const tag = (s, t) => {
@@ -1229,7 +1247,16 @@ async function runIngest(env, limit) {
     try {
       got = await esearch(spec.q, env, {retstart: rs, retmax: BACKFILL_PER_QUERY,
                                         days: BACKFILL_DAYS, withCount: true});
-    } catch (e) { continue; }
+    } catch (e) {
+      /* A REFUSAL IS NOT A QUERY WITH NOTHING IN IT. Every other failure here is worth
+         skipping past — one query, one hiccup, forty-one more to try. A service that will
+         not accept the credential will refuse all forty-two in exactly the same way, and
+         `continue` turned that into a clean-looking run with found: 0. It ends the run and
+         says so instead, which is the difference between a quiet week in the literature
+         and a feed that has silently stopped ingesting. */
+      if (/ncbi refused/.test(e.message || "")) { stats.stoppedOnNcbi = e.message; break; }
+      continue;
+    }
     const ids = (got && got.ids) || [];
     if (!ids.length) { stats.exhausted++; cur.rs[qi] = 0; continue; }
     cur.rs[qi] = (rs + ids.length >= (got.total || 0)) ? 0 : rs + ids.length;
@@ -1238,7 +1265,11 @@ async function runIngest(env, limit) {
     for (let b = 0; b < fresh.length && stats.added < want; b += 6) {
       if (subreqLeft() < 4) { stats.stoppedOnBudget = true; break; }
       let recs = [];
-      try { recs = await efetch(fresh.slice(b, b + 6), env); } catch (e) { continue; }
+      try { recs = await efetch(fresh.slice(b, b + 6), env); }
+      catch (e) {
+        if (/ncbi refused/.test(e.message || "")) { stats.stoppedOnNcbi = e.message; break; }
+        continue;
+      }
       for (const rec of recs) {
         if (subreqLeft() < 2) { stats.stoppedOnBudget = true; break; }
         stats.found++;
@@ -1348,7 +1379,13 @@ async function runSummarise(env, limit) {
   const recs = {};
   for (let i = 0; i < pmids.length && subreqLeft() > 4; i += 6) {
     let got = [];
-    try { got = await efetch(pmids.slice(i, i + 6), env); } catch (e) { got = []; }
+    try { got = await efetch(pmids.slice(i, i + 6), env); }
+    catch (e) {
+      /* Same rule on the summarise side: a refused credential stops the pass rather than
+         turning every paper into one that "could not be fetched". */
+      if (/ncbi refused/.test(e.message || "")) { stats.stoppedOnNcbi = e.message; break; }
+      got = [];
+    }
     got.forEach(r => { if (r && r.pmid) recs[r.pmid] = r; });
   }
 
