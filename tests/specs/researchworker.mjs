@@ -1115,20 +1115,29 @@ console.log("26 - THE ADMIN STATS SAY WHICH SECRETS ARE IN PLACE, AND NEVER WHAT
      /url\.pathname === "\/research\/stats" && isAdmin/.test(src), "");
 }
 
-console.log("27 - THE DEPLOY CONFIG HAS A SHAPE IN THE REPOSITORY");
+console.log("27 - THE DEPLOY CONFIG IS IN THE REPOSITORY AND IS DEPLOYABLE");
 {
-  const cfg = readFileSync(new URL('../../proxy/wrangler.research.toml.example', import.meta.url), 'utf8');
+  const cfg = readFileSync(new URL('../../wrangler.research.toml', import.meta.url), 'utf8');
   const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
   /* Deploying needed a file nobody had but one machine, and the docs described it rather
      than shipping it. The id stays a placeholder: it belongs to one account. */
   ck("it names this Worker and this entry point",
-     /name = "element26-research"/.test(cfg) && /main = "research-worker\.js"/.test(cfg), "");
+     /name = "element26-research"/.test(cfg) && /main = "proxy\/research-worker\.js"/.test(cfg), "");
   ck("it binds the store the code actually reads",
      /binding = "RESEARCH"/.test(cfg) && /env\.RESEARCH/.test(src), "");
-  ck("WITH NO REAL NAMESPACE ID IN IT", /REPLACE_WITH_KV_NAMESPACE_ID/.test(cfg)
-     && !/id = "[0-9a-f]{32}"/.test(cfg), "");
-  ck("and no secret of any kind",
-     !/(NCBI_API_KEY|GEMINI_API_KEY|ADMIN_TOKEN)\s*=\s*"[^"]+"/.test(cfg), "");
+  /* The id IS written down, deliberately: it names a namespace and opens nothing without an
+     authenticated session, and the placeholder cost a deploy — the obvious repair for it
+     creates a second, EMPTY namespace and serves a feed with nothing in it. */
+  ck("it names the real store rather than a placeholder",
+     /id = "[0-9a-f]{32}"/.test(cfg) && !/REPLACE_WITH_KV_NAMESPACE_ID/.test(cfg), "");
+  /* A KEY AS A PLAIN VAR IS DELETABLE BY ANY DEPLOY AND PRINTED IN FULL IN WRANGLER'S DIFF.
+     That is how one was read out of a terminal and into a chat window. Secrets are not part
+     of the configuration, so they survive a deploy and are never echoed. */
+  ck("and no key of any kind, as a var or otherwise",
+     !/(NCBI_API_KEY|GEMINI_API_KEY|ADMIN_TOKEN)\s*=\s*"[^"]+"/.test(cfg)
+     && !/^\s*\[vars\]/m.test(cfg), "");
+  ck("with the deploy-overwrites-remote hazard written down where it bites",
+     /overwrites the worker's remote configuration/i.test(cfg), "");
   ck("the cron is set, because the feed is a daily job", /crons = \[/.test(cfg)
      && /async scheduled\(/.test(src), "");
   /* The gate is the whole reason the feed can be deployed safely before it is approved. */

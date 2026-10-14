@@ -277,19 +277,22 @@ is the Gemini plan-reader proxy, and you would deploy this file over that Worker
 
 ### Once
 
-The config itself is not in the repository, because it carries a KV namespace id that
-means nothing in anybody else's account. `proxy/wrangler.research.toml.example` is its
-shape; copy it and fill the id in. It is an `.example` for a second reason too: a machine
-that already has a working config must be able to pull without git refusing to overwrite
-it. On a machine with no wrangler installed, `npx wrangler` runs it without installing
-anything, and every command below works the same with `npx ` in front.
+`wrangler.research.toml` is in the repository, at the root, with the live namespace id in
+it, so a fresh clone can deploy. On a machine with no wrangler installed, `npx wrangler`
+runs it without installing anything and every command below works with `npx ` in front.
+
+**A DEPLOY OVERWRITES THE WORKER'S REMOTE CONFIGURATION WITH THAT FILE.** A cron or a plain
+variable set in the dashboard and absent from the file is removed by the upload; wrangler
+prints the difference and asks first, and that diff is the one moment the two copies are
+shown side by side. Read it. Encrypted secrets are the exception and that is the point of
+them: they are not part of the configuration, so a deploy cannot delete one and wrangler
+cannot print one. **A key set as a plain variable is both** — removable by any deploy, and
+echoed in full in that diff, where it ends up in a terminal, a screenshot or a transcript.
+A key that has been printed anywhere is a key to rotate.
 
 ```bash
-cp wrangler.research.toml.example wrangler.research.toml
-wrangler kv namespace create RESEARCH --config wrangler.research.toml
-# paste the printed id into wrangler.research.toml, replacing REPLACE_WITH_KV_NAMESPACE_ID
-# AN EXISTING feed's namespace id is in the dashboard instead: Workers & Pages -> KV ->
-# RESEARCH. Creating a second namespace gives you an empty feed, not the running one.
+# The namespace already exists and holds the live feed. Do NOT run `kv namespace create`
+# to repair a failed deploy: it makes a second, EMPTY namespace and serves no papers.
 
 wrangler secret put NCBI_API_KEY   --config wrangler.research.toml   # ncbi.nlm.nih.gov/account
 

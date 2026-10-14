@@ -11,10 +11,23 @@
 # and that "no training data ever leaves the device" is provable from a network log rather
 # than asserted in a comment: the only origin this feature talks to has no user records.
 #
-# Deploy, from the repo root:
-#   wrangler kv namespace create RESEARCH --config wrangler.research.toml
-# That prints an id — paste it below in place of REPLACE_WITH_KV_NAMESPACE_ID, then:
-#   wrangler deploy --config wrangler.research.toml
+# Deploy, from the repo root, on any machine with Node (npx fetches wrangler itself):
+#   npx wrangler login
+#   npx wrangler deploy --config wrangler.research.toml
+#
+# The namespace below already exists and holds the live feed, so there is nothing to create.
+# DO NOT run `kv namespace create` to "fix" a deploy: it makes a second, empty namespace and
+# points the Worker at a feed with no papers in it.
+#
+# A DEPLOY OVERWRITES THE WORKER'S REMOTE CONFIGURATION WITH THIS FILE. Whatever is set in
+# the dashboard and missing here — a cron, a plain variable — is removed by the upload, and
+# wrangler prints the difference and asks before it does it. Read that diff. It is the one
+# moment the two copies are shown side by side.
+#
+# SECRETS ARE THE EXCEPTION, and this is the whole reason to use them: an encrypted secret
+# is not part of this configuration, so a deploy cannot remove it and wrangler cannot print
+# it. A key set as a plain VARIABLE instead is both — deletable by any deploy, and echoed
+# in full in that diff, in a terminal, in a screenshot, in a transcript.
 #
 # THE KEYS DO NOT GO IN THIS FILE, or in any file in this repo. All three are encrypted
 # secrets on Cloudflare:
@@ -29,9 +42,14 @@ name = "element26-research"
 main = "proxy/research-worker.js"
 compatibility_date = "2024-11-01"
 
+# The id is an ACCOUNT-SCOPED IDENTIFIER, not a credential: it names a namespace and opens
+# nothing without an authenticated wrangler session. It is written down here because the
+# placeholder cost a deploy — a fresh clone could not deploy at all, and the obvious repair
+# (`kv namespace create`) makes a SECOND, EMPTY namespace and points the Worker at a feed
+# with nothing in it, which is a far worse failure than naming the real one.
 [[kv_namespaces]]
 binding = "RESEARCH"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "05d53738fd094c51bcf7d940343b99f5"
 
 # THE CRON IS THE WHOLE PIPELINE. Without it the read routes still serve whatever is in KV
 # and nothing is ever added, so the feed would be frozen at whatever the last manual
