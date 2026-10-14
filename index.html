@@ -7018,7 +7018,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "57.8";
+const APP_VERSION = "57.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -14031,7 +14031,32 @@ function mergeDiskInto(disk){
     S.program = disk.program;
     if(disk.customSplit !== undefined) S.customSplit = disk.customSplit;
     if(disk.splitId !== undefined) S.splitId = disk.splitId;
-    if(disk.prefs && typeof disk.prefs === "object") S.prefs = Object.assign({}, S.prefs||{}, disk.prefs);
+    /* AN UNANSWERED SETTING MUST NEVER OVERWRITE AN ANSWERED ONE.
+
+       This was Object.assign({}, S.prefs, disk.prefs), so the newer copy won on every key.
+       That is right for a setting somebody has changed and wrong for one they have never
+       touched, because PREF_DEFAULTS seeds every preference into the object — so "not
+       answered" is an explicit null, not an absent key, and a null from a newer copy
+       therefore beat a real answer.
+
+       It showed up as "it asks me this every time": you tell the app your smallest plate
+       mid-set, it saves, and the next copy to arrive from anywhere that had not answered
+       that question quietly puts it back to null and asks again. Reproduced exactly: set
+       2.5, merge a newer copy whose plateStep is null, read back null.
+
+       So a newer value wins only when it IS a value. The cost is that deliberately CLEARING
+       a setting no longer propagates from another device, which is the right way round: a
+       lost answer is a question asked again in the middle of a working set, and a clear that
+       has to be made twice is a minor annoyance. */
+    if(disk.prefs && typeof disk.prefs === "object"){
+      const merged = Object.assign({}, S.prefs || {});
+      Object.keys(disk.prefs).forEach(k=>{
+        const v = disk.prefs[k];
+        if(v !== null && v !== undefined) merged[k] = v;
+        else if(!(k in merged)) merged[k] = v;
+      });
+      S.prefs = merged;
+    }
   }
 }
 function persist(){
@@ -56115,7 +56140,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "57.8";
+const NEWS_FOR = "57.9";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56153,6 +56178,16 @@ const NEWS = [
      + "minimum, a habit of taking sets to failure, the lifts in your recent sessions \u2014 "
      + "with the reason written above the ones at the top. Some are still waiting for their "
      + "plain-English summary and say so; the paper itself is there to open either way."]},
+  /* 57.9. A reported bug, and the only change in this release. Kept as its own short
+     entry because the person who hit it will look for exactly this sentence. */
+  {k: "A setting you answered stays answered",
+   s: ["Telling Element 26 something about your gym \u2014 your smallest plate, a machine's "
+     + "carriage weight \u2014 could be forgotten again, so the same question came back the "
+     + "next time you needed it, usually in the middle of a set.",
+       "Syncing was overwriting answers with blanks: a copy of your data that had never been "
+     + "asked a question counted as a newer answer of \"nothing\". Now a blank never "
+     + "overwrites an answer. Changing a setting still carries across your devices as it did."]},
+
   {k: "A plan, written for you",
    s: ["Element 26 will build you a programme now. Seven questions — your goal, how long "
      + "you have been training, days a week, minutes a session, what equipment you can "
