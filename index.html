@@ -1658,6 +1658,11 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
   font-size:var(--fs-2);margin-bottom:3px}
 .pct-line{border-left-color:var(--dim)}
 .pct-line .linklike{margin-left:6px}
+/* The export preview: a monospace block you can see your own workout in before sending it
+   anywhere, scrollable rather than tall, because the point is to recognise it, not read it. */
+.exp-pre{max-height:38vh;overflow:auto;background:var(--card2);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:10px;font:var(--fs-2) var(--mono);color:var(--dim);
+  white-space:pre;line-height:1.45;margin:0}
 .set{display:grid;grid-template-columns:44px 1fr 1fr 86px 48px;gap:7px;align-items:center;margin-bottom:8px}
 /* M1'S THREE STATES OF A SET ROW, NOW UNDRESSED.
 
@@ -7044,7 +7049,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "58.4";
+const APP_VERSION = "58.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -42665,6 +42670,7 @@ function viewHistory(){
       <div class="btn-row" style="margin-top:8px">
         <button class="btn ghost small" data-scoresess="${s.id}">${q?"Quality "+q.grade:"Grade it"}</button>
         <button class="btn ghost small" data-editsess="${s.id}">Edit session</button>
+        <button class="btn ghost small" data-exportsess="${s.id}">Export</button>
       </div>
       <div class="btn-row">
         ${s.date===todayStr()?`<button class="btn ghost small" data-resumesess="${s.id}">Resume</button>`:""}
@@ -46044,6 +46050,14 @@ function bind(){
            switched the preference off. */
         const gov = setGovernor(entry, si);
         if(gov) st.gov = gov; else delete st.gov;
+        /* WHEN IT HAPPENED, RECORDED AT THE MOMENT IT HAPPENED. The log knew the order of
+           your sets and the rest between them and never the clock time of any of them, so
+           "when did I actually do that triple" had no answer and an export could only have
+           invented one. Written on the tick and removed when the tick is taken back, which
+           makes it a fact about a set that happened rather than a guess about one.
+           Sessions logged before this exists carry no `at`, and the export says so rather
+           than back-filling a plausible number. */
+        st.at = Date.now();
         /* The ✓ starts the stopwatch, except in two cases: inside a superset, where
            there is deliberately no rest, and on the very last set of the very last
            exercise, where there is nothing left to rest FOR. Timing the walk to the
@@ -46074,6 +46088,7 @@ function bind(){
         }
         delete st.rest;
         delete st.pr;
+        delete st.at;               // it did not happen, so it did not happen at a time
         delete st.why;              // no longer a completed set, so its reason is stale
       }
       el.classList.toggle("on", st.done);
@@ -47310,6 +47325,10 @@ function bind(){
   };
   const nst = $("#nbSideRetest");
   if(nst) nst.onclick = ()=>{ asymRetestSeen(); render(); };
+  /* THE SAME EXPORT FROM BOTH PLACES IT IS WANTED: here, where you look a session up
+     weeks later, and on the card that appears the moment you finish one. */
+  document.querySelectorAll("[data-exportsess]").forEach(b=> b.onclick = ()=>
+    openWorkoutExport(b.dataset.exportsess));
   const bmb = $("#bmBack");
   if(bmb) bmb.onclick = ()=>{ BODY_FOCUS = null; BODY_EXPAND = false; render(); };
   document.querySelectorAll("[data-mrow]").forEach(r=> r.onclick=()=>{
@@ -52125,7 +52144,8 @@ function scoreCardHTML(q, sess){
     <button type="button" class="scf-x" id="scfClose" aria-label="Close">${ICON.close}</button>
     ${scfPanel(0, NAMES[0], p1 + onward(1, NAMES[1]), "scf-hero")}
     ${scfPanel(1, NAMES[1], p2 + onward(2, NAMES[2]))}
-    ${scfPanel(2, NAMES[2], p3 + `<button class="btn scf-done" id="scDone">Got it</button>`)}
+    ${scfPanel(2, NAMES[2], p3 + `<button class="btn scf-done" id="scDone">Got it</button>
+      <button class="btn ghost small" id="scExport" style="margin-top:8px;width:100%">Export this workout</button>`)}
   </div>`;
 }
 /* Reveals a long card top to bottom on a fixed schedule. The delay is capped, so a card
@@ -52320,6 +52340,11 @@ function openScoreCard(sess, onDone){
   wireProgression();
   const b = $("#scDone");
   if(b) b.onclick = hideModal;      // hideModal fires MODAL_DISMISS exactly once
+  /* Offered at the end of every workout, which is the moment somebody who wants the data
+     wants it. It REPLACES this sheet rather than stacking on it, and closing the export
+     leaves you where you were: two modals deep on a phone is a trap. */
+  const x = $("#scExport");
+  if(x) x.onclick = ()=>{ hideModal(); openWorkoutExport(sess.id); };
 }
 
 /* =====================================================================
@@ -56208,7 +56233,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "58.4";
+const NEWS_FOR = "58.5";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56255,6 +56280,19 @@ const NEWS = [
   /* 58.3. Asked for directly, after "revert the logging screen to the legacy". */
   /* 58.4. "Shouldn't the retest each side thing for the side balance happen
      automatically?" It should have from the start. */
+  /* 58.5. Asked for: a whole workout exported as data, after every session and from
+     History, with per-set timestamps. */
+  {k: "Export a whole workout as data",
+   s: ["Every finished session can now be exported as JSON \u2014 every exercise, every set, "
+     + "the load, the reps, the effort, the rest, the side, the technique, the personal "
+     + "records, your note, the grade and the session's own start and finish times.",
+       "It is offered twice: on the card that appears when you finish, and on every "
+     + "session in <b>History</b>. Copy it to the clipboard or save the file.",
+       "<b>Sets now record the time they were logged</b>, so an export says when each one "
+     + "actually happened. Sessions from before this release have no per-set times and the "
+     + "export says so rather than inventing plausible ones \u2014 the rest lengths they did "
+     + "record are still there."]},
+
   {k: "The side-balance re-test runs itself",
    s: ["If you train both sides to the weaker one, the rule is re-tested after four weeks: "
      + "each movement is measured on balanced windows and the rule comes off wherever the "
@@ -61137,6 +61175,142 @@ async function repoBackup(announce){
     repoBusy = false;
     if(repoAgain){ repoAgain = false; repoBackup(false); }
   }
+}
+
+/* =====================================================================
+   ONE WORKOUT, AS DATA
+
+   Asked for directly: an export of a finished session with everything in it — the
+   exercises, every set, the reps, the loads, the timestamps — in a form something else
+   can read.
+
+   WHY JSON AND NOT THE CSV THAT ALREADY EXISTS. The CSV at the foot of History is a
+   spreadsheet of rows, and a session is not a rectangle: a set carries a side, a
+   technique, a governor, a rest, a PR mark and a note, and a rectangle either loses them
+   or grows forty mostly-empty columns. This is the session's own shape, nested the way it
+   actually is, and it is the whole record rather than a summary of it.
+
+   WHAT IT WILL NOT DO IS INVENT ANYTHING. `at` is the moment the ✓ was pressed, and it
+   exists only for sets logged since 58.5. Everything before that has no clock time and
+   says so — `setTimes` tells the reader which case they are holding, because an export
+   that quietly fabricated plausible timestamps would be worse than one that admits the
+   gap. Rest seconds have always been recorded and are exported wherever they exist.
+
+   Every figure here is read off the session, not recomputed: volume is the sum of what
+   was logged, and a set with no reps in it is exported as a set with no reps in it. */
+const EXPORT_FORMAT = 1;
+function workoutExport(s){
+  if(!s) return null;
+  const perSet = [];
+  const entries = (s.entries || []).map((e, ei)=>{
+    const sets = (e.sets || []).map((st, si)=>{
+      const out = {
+        set: si + 1,
+        done: !!st.done,
+        weight: st.weight === "" || st.weight == null ? null : Number(st.weight),
+        reps:   st.reps   === "" || st.reps   == null ? null : Number(st.reps),
+        rpe:    st.rpe    === "" || st.rpe    == null ? null : Number(st.rpe),
+        warmup: setIsWarmup(e, si) || undefined,
+        side:   st.side || undefined,
+        technique: st.tech || undefined,
+        restSeconds: st.rest != null ? st.rest : undefined,
+        personalRecord: st.pr ? true : undefined,
+        note: st.unote || undefined
+      };
+      if(st.at > 0){
+        out.at = new Date(st.at).toISOString();
+        out.atEpochMs = st.at;
+        perSet.push(st.at);
+      }
+      Object.keys(out).forEach(k=>{ if(out[k] === undefined) delete out[k]; });
+      return out;
+    });
+    const worked = sets.filter(x=> x.done && x.reps > 0);
+    return {
+      order: ei + 1,
+      exercise: e.name,
+      prescribed: {sets: (e.sets || []).length, reps: e.reps || null, rpe: e.rpe || null},
+      supersetWith: (e.superset && (s.entries[ei+1] || {}).name) || undefined,
+      note: e.note || undefined,
+      totalVolume: Math.round(worked.reduce((t,x)=> t + (x.weight || 0) * (x.reps || 0), 0)),
+      workingSets: worked.length,
+      sets
+    };
+  });
+  entries.forEach(x=>{ if(x.supersetWith === undefined) delete x.supersetWith;
+                       if(x.note === undefined) delete x.note; });
+  const q = s.quality || null;
+  return {
+    format: "element26.workout",
+    formatVersion: EXPORT_FORMAT,
+    app: {name: "Element 26", version: APP_VERSION},
+    exportedAt: new Date().toISOString(),
+    /* SAYS WHICH KIND OF RECORD THIS IS, so a reader never has to guess whether a missing
+       timestamp means "not recorded" or "did not happen". */
+    setTimes: perSet.length
+      ? (perSet.length === entries.reduce((t,x)=> t + x.sets.filter(y=> y.done).length, 0)
+          ? "every logged set carries the time it was logged"
+          : "some sets predate per-set timestamps and carry none")
+      : "this session predates per-set timestamps; rest lengths are still recorded",
+    units: unitWord(),
+    workout: {
+      id: s.id || null,
+      day: s.workoutId ? dayName(s.workoutId) : null,
+      date: s.date || null,
+      startedAt: s.startedAt ? new Date(s.startedAt).toISOString() : null,
+      finishedAt: s.finishedAt ? new Date(s.finishedAt).toISOString() : null,
+      durationMinutes: (s.startedAt && s.finishedAt && s.finishedAt > s.startedAt)
+        ? Math.round((s.finishedAt - s.startedAt) / 60000) : null,
+      gym: s.gymName || null,
+      feel: s.feel || null,
+      note: s.note || null,
+      quality: q ? {grade: q.grade, percent: Math.round(q.pct * 100)} : null,
+      totalVolume: entries.reduce((t,x)=> t + x.totalVolume, 0),
+      workingSets: entries.reduce((t,x)=> t + x.workingSets, 0)
+    },
+    exercises: entries
+  };
+}
+function workoutExportText(s){ return JSON.stringify(workoutExport(s), null, 2); }
+function workoutExportName(s){
+  const d = (s && s.date) || todayStr();
+  const day = (s && s.workoutId) ? dayName(s.workoutId) : "workout";
+  return "element26-" + profSlug() + "-" + d + "-"
+       + String(day).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + ".json";
+}
+function downloadWorkout(s){
+  const blob = new Blob([workoutExportText(s)], {type: "application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = workoutExportName(s);
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+/* The sheet, because an export has two destinations and neither is obviously the right
+   one: a file to keep, or the clipboard to paste into whatever is going to read it. The
+   preview is there so you can see it IS your workout before you send it anywhere. */
+function openWorkoutExport(sessId){
+  const s = (S.sessions || []).find(x=> x.id === sessId)
+         || (S.active && S.active.id === sessId ? S.active : null);
+  if(!s){ toast("That session is not here any more"); return; }
+  const text = workoutExportText(s);
+  const lines = text.split("\n").length;
+  showModal(`<h3>Export this workout</h3>
+    <div class="sub" style="margin:6px 0 12px;text-transform:none;letter-spacing:0">
+      ${esc(String(((s.entries||[]).length)))} exercise${(s.entries||[]).length===1?"":"s"},
+      ${esc(String(workoutExport(s).workout.workingSets))} working sets, as JSON — ${esc(String(lines))} lines.
+      Every set carries its load, reps, effort, rest and, where it was recorded, the time it
+      was logged.</div>
+    <pre class="exp-pre">${esc(text.slice(0, 4000))}${text.length > 4000 ? "\n…" : ""}</pre>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn" id="expCopy" style="flex:1">Copy</button>
+      <button class="btn ghost" id="expFile" style="flex:1">Download</button>
+    </div>
+    <button class="btn ghost small" id="closeModal" style="margin-top:10px">Close</button>`);
+  const c = $("#expCopy");
+  if(c) c.onclick = ()=> copyText(text).then(ok=> toast(ok ? "Workout copied" : "Could not copy — use Download", ok ? "good" : "warn"));
+  const f = $("#expFile");
+  if(f) f.onclick = ()=>{ downloadWorkout(s); toast("Saved", "good"); };
 }
 
 /* ---------- backup ---------- */
