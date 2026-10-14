@@ -1,0 +1,47 @@
+# THE RESEARCH WORKER'S CONFIG, AS A TEMPLATE.
+#
+# WHY THIS FILE IS AN .example AND NOT THE REAL THING. The working copy carries a KV
+# namespace id, which is an identifier for one person's account and means nothing in
+# anybody else's — so the repository holds the shape and you fill in the id. It is named
+# .example for a second reason as well: a machine that already has a working
+# wrangler.research.toml must be able to `git pull` without git refusing to overwrite it,
+# or being pulled over.
+#
+#   cp wrangler.research.toml.example wrangler.research.toml
+#   npx wrangler kv namespace create RESEARCH --config wrangler.research.toml
+#   # paste the printed id below, replacing REPLACE_WITH_KV_NAMESPACE_ID
+#
+# An EXISTING namespace's id is in the dashboard instead: Workers & Pages -> KV -> the
+# RESEARCH namespace. Use that one; creating a second namespace gives you an empty feed,
+# not the one that is already running.
+#
+# Then the secrets, which are never written in here:
+#
+#   npx wrangler secret put NCBI_API_KEY   --config wrangler.research.toml
+#   npx wrangler secret put GEMINI_API_KEY --config wrangler.research.toml
+#   npx wrangler secret put ADMIN_TOKEN    --config wrangler.research.toml
+#   npx wrangler deploy                    --config wrangler.research.toml
+#
+# EVERY command passes --config. Without it wrangler picks up wrangler.toml, which is the
+# Gemini plan-reader proxy, and you would deploy this Worker over that one.
+
+name = "element26-research"
+main = "research-worker.js"
+compatibility_date = "2024-11-01"
+
+# The feed's whole store: papers, the index, the review queue, the rejection memory and
+# the cursors. Free plan: 1,000 writes a day, which is the allowance that actually binds.
+[[kv_namespaces]]
+binding = "RESEARCH"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Once a day: summaries first, then ingest with whatever subrequest budget is left.
+[triggers]
+crons = ["0 5 * * *"]
+
+# Both gates are closed by default and are deliberately NOT set here — see the deploy
+# section of docs/research-lab.md. LAUNCH_APPROVED is what makes the feed serve; without
+# it the Worker ingests and summarises and shows nobody anything.
+# [vars]
+# LAUNCH_APPROVED = "yes"
+# SUBREQ_MAX = "45"
