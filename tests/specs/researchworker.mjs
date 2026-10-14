@@ -832,7 +832,10 @@ console.log("17 - A ZERO TTL HAS TO ACTUALLY MEAN DO NOT CACHE");
      cached again. */
   const adminRoutes = ["run", "ingest", "summarise", "reset", "approve", "launch", "queue", "stats"];
   const missing = adminRoutes.filter(r=>{
-    const m = new RegExp('"\\/research\\/' + r + '"[\\s\\S]{0,1400}?origin, 0\\)');
+    /* The window is the route's whole body, so it grows when a route gains a field. The
+       stats route outgrew 1400 when the secret-presence booleans were added; the check is
+       about the ttl argument, not about how long a route is. */
+    const m = new RegExp('"\\/research\\/' + r + '"[\\s\\S]{0,2200}?origin, 0\\)');
     return !m.test(src);
   });
   ck("every admin route asks for no cache at all", missing.length === 0, missing.join(","));
@@ -1090,6 +1093,26 @@ console.log("25 - A RUN THAT CANNOT FETCH ANYTHING HAS TO SAY SO");
   ck("but it is still bounded, so a dead service stops the loop",
      /could not be read three times - stopping/.test(sh), "");
   ck("and the counter resets after a readable run", /^  unread=0$/m.test(sh), "");
+}
+
+console.log("26 - THE ADMIN STATS SAY WHICH SECRETS ARE IN PLACE, AND NEVER WHAT THEY ARE");
+{
+  const src = readFileSync(new URL('../../proxy/research-worker.js', import.meta.url), 'utf8');
+  /* A secret set in the Cloudflare dashboard cannot be read back, and from outside the
+     Worker a healthy PubMed run looks identical with or without an NCBI key at the pace
+     this thing keeps. So "did that take?" had no answer short of trusting the dashboard. */
+  ck("the NCBI key's PRESENCE is reported", /ncbiKey: !!env\.NCBI_API_KEY/.test(src), "");
+  ck("and the model key's too", /geminiKey: !!env\.GEMINI_API_KEY/.test(src), "");
+  /* The whole point of the booleans is that they cannot leak the thing they describe. */
+  const statsBlock = (src.match(/url\.pathname === "\/research\/stats"[\s\S]{0,1400}/) || [""])[0];
+  ck("NOTHING IN THE STATS PRINTS A KEY, a prefix or a length",
+     !/env\.(NCBI_API_KEY|GEMINI_API_KEY|ADMIN_TOKEN)(?!\b *\})(?![\s\S]{0,3}\n)/.test(
+       statsBlock.replace(/!!env\.(NCBI_API_KEY|GEMINI_API_KEY)/g, "")),
+     statsBlock.slice(0, 0));
+  ck("no key is sliced, substringed or measured anywhere in the file",
+     !/(NCBI_API_KEY|GEMINI_API_KEY|ADMIN_TOKEN)\s*\.\s*(slice|substring|substr|length)/.test(src), "");
+  ck("and the route stays admin-only",
+     /url\.pathname === "\/research\/stats" && isAdmin/.test(src), "");
 }
 
 console.log(bad ? "BROKEN: " + bad : "all good");

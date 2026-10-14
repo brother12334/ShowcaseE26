@@ -1978,7 +1978,17 @@ async function handle(request, env) {
         inIndex: idx.length,
         withSummary: idx.filter(r => !!r.quickTakeaway).length,
         approved: idx.filter(r => r.approved === true).length,
-        rejectsRemembered: rej.length
+        rejectsRemembered: rej.length,
+        /* WHICH SECRETS ARE ACTUALLY IN PLACE, as booleans and never as values.
+           A key set in the dashboard cannot be read back, and from outside the Worker a
+           healthy PubMed run looks identical with or without one at the pace this thing
+           keeps \u2014 so "did that take?" had no answer short of trusting the dashboard. It
+           answers it here, on the admin-only route, saying only whether the binding
+           exists. Nothing prints a key, a prefix or a length: the presence of a secret is
+           operational information, its contents are not. */
+        ncbiKey: !!env.NCBI_API_KEY,
+        geminiKey: !!env.GEMINI_API_KEY,
+        pacedForKey: NCBI_GAP_MS
       }), origin, 0);
     }
 

@@ -282,6 +282,12 @@ wrangler kv namespace create RESEARCH --config wrangler.research.toml
 # paste the printed id into wrangler.research.toml, replacing REPLACE_WITH_KV_NAMESPACE_ID
 
 wrangler secret put NCBI_API_KEY   --config wrangler.research.toml   # ncbi.nlm.nih.gov/account
+
+Checking a secret took, from anywhere: `/research/stats` reports `ncbiKey` and `geminiKey`
+as booleans. Presence only — nothing prints a key, a prefix or a length, and the route is
+admin-only. A secret set in the dashboard cannot be read back, and a healthy PubMed run
+looks identical with or without an NCBI key at the pace this Worker keeps, so this is the
+only honest answer to "did that take?"
 wrangler secret put GEMINI_API_KEY --config wrangler.research.toml
 wrangler secret put ADMIN_TOKEN    --config wrangler.research.toml   # long random string
 
