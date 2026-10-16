@@ -10,7 +10,25 @@ await p.addInitScript(()=>{ localStorage.clear();
   localStorage.setItem('e26.ns0','E26-X'); });
 await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
 await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
-const boot = (opts)=> p.evaluate((o)=>{
+/* THE OPENING PROMPTS RUN ON A TIMER, SO THE FIXTURE WAITS THEM OUT RATHER THAN RACING
+   THEM. openingPrompts() fires 480ms after the splash is removed and may put What's New or
+   the morning check-in on the screen. Clearing the splash early does not cancel it, so the
+   sheet landed partway through the interactions below and this spec passed or failed
+   depending on where that timer fell — intermittently, which is the worst kind. Booting
+   now means: set the state, let the timer fire, then clear whatever it opened, so only the
+   thing under test is on the screen. */
+const boot = async (opts)=>{
+  await bootState(opts);
+  await new Promise(r=> setTimeout(r, 700));
+  await p.evaluate(()=>{
+    try{ hideModal(); }catch(e){}
+    const nf = document.getElementById("newsFull"); if(nf) nf.hidden = true;
+    document.body.classList.remove('ai-open','onboarding','pfl-open','spec-open','news-open');
+    try{ closeSpecPage(false); }catch(e){}
+    render();
+  });
+};
+const bootState = (opts)=> p.evaluate((o)=>{
   const sp=document.getElementById('splash'); if(sp) sp.remove();
   try{OB=null}catch(e){} hideModal();
   document.body.classList.remove('ai-open','onboarding','pfl-open','spec-open');
@@ -20,6 +38,14 @@ const boot = (opts)=> p.evaluate((o)=>{
   S.setup={name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()};
   S.tourDone=true; S.geo='off'; S.splitId=DEFAULT_SPLIT; applySplit();
   S.spec=null; S.specPast=[]; S.deload=null; S.specDraft=null; BODY_OPEN={};
+  /* THE RELEASE NOTES ARE NOT PART OF THIS TEST, and they open themselves. openingPrompts()
+     runs on a 480ms timer after the splash and shows What's New whenever the stored version
+     differs from NEWS_FOR — true for any fixture with sessions in it the first time a spec
+     runs against a new release. It landed in the middle of the interactions below, so this
+     spec passed or failed depending on where that timer fell. Marked as seen, the same way
+     every other spec disables the sleep prompt: the fixture's job is to leave only the
+     thing under test on the screen. */
+  S.seenNews = NEWS_FOR; S.sleepAsked = todayStr();
   S.prefs = Object.assign({}, S.prefs, {calGoal:"maintain"});
   S.checkins = {};
   const day=86400000, now=Date.now();

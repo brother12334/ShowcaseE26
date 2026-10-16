@@ -227,6 +227,15 @@ console.log("8 - M3: TRAINING WEEKS, A LAYOFF, AND WHO IS PROMPTED");
       const base = mon - w * 7 * d;
       S.sessions.push(mk(base), mk(base + 2 * d), mk(base + 4 * d));
     }
+    /* AND ONE SESSION THIS WEEK, OR THIS FIXTURE TESTS THE WRONG RULE.
+       Anchored on Monday, the newest session above is Monday + 4 days — so from Friday
+       onwards the gap to "now" reaches LAYOFF_DELOAD_DAYS and layoffNow() fires, at which
+       point deloadDue() correctly returns null because a layoff has already done what a
+       deload does. The spec passed Monday to Thursday and failed Friday to Sunday, which
+       is a fixture that tests the calendar rather than the clock it means to. One recent
+       session removes the layoff; it does not add a counted training week, because a week
+       needs two sessions to count, so "seven training weeks" below still means seven. */
+    S.sessions.push(mk(now - 2 * d));
     S.blockStart = mon - 8 * 7 * d;
     S.expManual = "intermediate";
     const counted = trainingWeeksInBlock();
