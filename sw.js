@@ -28,7 +28,7 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "51.8";
+const VERSION = "51.9";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -147,6 +147,41 @@ async function pushToken(){
   }catch(e){ return ""; }
 }
 
+/* WHAT THE APP ALREADY KNEW, kept where this worker can reach it.
+
+   The reminder's words are worked out by the app when it posts its schedule — the day's
+   name, the opening lift and its load, whether this is the last session of the cycle. The
+   only way in here used to be asking the server at delivery time, so any failure of that
+   one request produced the generic line below instead. This reads the copy the app left
+   in the cache and picks the reminder nearest to now.
+
+   Deliberately tolerant about time and deliberately bounded: a push can be held by Do Not
+   Disturb or a sleeping phone for a while, so anything within three hours either side
+   counts, and anything older than a day is treated as stale and ignored rather than
+   announcing a session from last week. */
+const PUSH_PLAN_URL = "./__e26_push_plan";
+const PLAN_NEAR_MS = 3 * 60 * 60 * 1000;
+const PLAN_STALE_MS = 24 * 60 * 60 * 1000;
+async function plannedNotification(){
+  try{
+    const cache = await caches.open(PUSH_TOKEN_CACHE);
+    const hit = await cache.match(PUSH_PLAN_URL);
+    if(!hit) return null;
+    const plan = await hit.json();
+    if(!plan || !Array.isArray(plan.items) || !plan.items.length) return null;
+    if(Date.now() - Number(plan.at || 0) > PLAN_STALE_MS) return null;
+    const now = Date.now();
+    let best = null, bestGap = Infinity;
+    plan.items.forEach(it=>{
+      if(!it || !it.title) return;
+      const gap = Math.abs(Number(it.at || 0) - now);
+      if(gap < bestGap){ bestGap = gap; best = it; }
+    });
+    if(!best || bestGap > PLAN_NEAR_MS) return null;
+    return {title: best.title, body: best.body || "", tag: best.tag || ("e26-" + (best.kind || "reminder"))};
+  }catch(e){ return null; }
+}
+
 async function pendingNotification(){
   const t = await pushToken();
   if(!t) return null;
@@ -166,6 +201,10 @@ self.addEventListener("push", event=>{
        future sender can skip the round trip without another worker release. */
     try{ if(event.data) n = event.data.json(); }catch(e){ n = null; }
     if(!n || !n.title) n = await pendingNotification();
+    /* The server is asked first, because it knows which of several reminders is actually
+       due. This is the same text by another route, for when that request cannot be made
+       or the queue has already expired. */
+    if(!n || !n.title) n = await plannedNotification();
     /* THE LAST-RESORT TEXT, and it says something rather than saying the app's name.
        The device already tells you which app a notification came from — that line is the
        operating system's and cannot be removed — so spending the title on the same word

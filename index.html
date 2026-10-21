@@ -7052,7 +7052,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "58.8";
+const APP_VERSION = "58.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -25890,6 +25890,43 @@ function reminderHook(wid, ex){
 }
 /* The training sentence. Written to be true whenever it is READ rather than whenever it
    was composed — it is stored now and shown hours later, so it never says "tomorrow". */
+/* THE SAME SENTENCE NINE TIMES IS A SENTENCE NOBODY READS.
+
+   Reported from a lock screen holding nine identical notifications. Most of that was the
+   delivery fault fixed in pushSyncSchedule() — the real text never arrived — but the
+   closing line was genuinely always "Ready when you are.", so two ordinary days in a row
+   still read the same even when everything works.
+
+   These rotate, and they rotate DETERMINISTICALLY: the line is picked from the date and
+   the day's own id, so it is stable all day (a reminder re-scheduled at noon says what it
+   said at nine) and different tomorrow. Not random, because a notification that changes
+   its wording each time the app re-syncs looks like a bug.
+
+   None of them is a motivational slogan. Each one says something true about what is
+   waiting, because the alternative is the app shouting encouragement at somebody who has
+   simply not trained yet today. */
+const REMINDER_CLOSERS = [
+  "Ready when you are.",
+  "The card is already built.",
+  "Everything is set up and waiting.",
+  "Nothing to decide — it is all written down.",
+  "Open it and the first set is there.",
+  "Your numbers from last time are on the card.",
+  "It will take as long as it takes."
+];
+const REST_CLOSERS = [
+  "Tap to mark the rest and keep the cycle straight.",
+  "Mark the rest so the cycle stays honest.",
+  "A rest only counts once it is written down.",
+  "Log the rest and the cycle carries on."
+];
+function reminderVariant(list, seed){
+  /* Date plus whatever the caller is about: same day and same workout, same line. */
+  const key = String(todayStr()) + "|" + String(seed || "");
+  let h = 0;
+  for(let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return list[h % list.length];
+}
 function reminderText(forTomorrow){
   const rest = forTomorrow ? restDueNotToday() : isRestToday();
   const wid = forTomorrow ? ROTATION[S.pointer] : todaysWorkoutId();
@@ -25899,7 +25936,7 @@ function reminderText(forTomorrow){
     /* A rest day still has a reason to open the app: the rest only counts once it is on
        the record, and the cycle is waiting on it. */
     return {title: "Rest day \u2014 nothing to log",
-            body: name + " is next. Tap to mark the rest and keep the cycle straight."};
+            body: name + " is next. " + reminderVariant(REST_CLOSERS, wid || "rest")};
   }
   /* No plan yet — this renders inside Setup, so a throw here would take the whole page
      with it rather than costing a sentence. */
@@ -25910,9 +25947,10 @@ function reminderText(forTomorrow){
   const shape = ex.length ? name + " \u00b7 " + ex.length + " exercises, " + sets + " sets." : "";
   let hook = null;
   try{ hook = reminderHook(wid, ex); }catch(e){ hook = null; }
-  if(!hook) return {title: name, body: (shape ? shape + " " : "") + "Ready when you are."};
+  const closer = reminderVariant(REMINDER_CLOSERS, wid);
+  if(!hook) return {title: name, body: (shape ? shape + " " : "") + closer};
   const why = hook.why ? (shape ? shape + " " : "") + hook.why : shape;
-  return {title: hook.title, body: why || "Ready when you are."};
+  return {title: hook.title, body: why || closer};
 }
 
 /* =====================================================================
@@ -26184,6 +26222,18 @@ async function pushSyncSchedule(){
       });
       // only remembered once the server has it, so a failure is retried by the next call
       if(res && res.ok) PUSH_SCHED_LAST = sig;
+      /* AND A COPY THE SERVICE WORKER CAN READ WITHOUT A NETWORK.
+         The text of a reminder lived only on the server: the worker was woken by an empty
+         push and had to go and ASK what to say. Every way that round trip can fail — the
+         phone offline at 6pm, Do Not Disturb holding the push past the hour the queue
+         lives, a token the worker could not read — ends at the same hardcoded sentence,
+         which is why nine notifications in a row said "Your next session is up" while the
+         app had written "Last session of the cycle" for one of them. A worker cannot read
+         localStorage, so this goes in the same Cache the push token does. */
+      try{
+        const cache = await caches.open("e26-push");
+        await cache.put("./__e26_push_plan", new Response(JSON.stringify({at: Date.now(), items})));
+      }catch(e){}
     }while(PUSH_SCHED_AGAIN);
   }catch(e){}
   finally{ PUSH_SCHED_BUSY = false; }
@@ -26269,7 +26319,9 @@ async function pushDisable(){
     const sub = await reg.pushManager.getSubscription();
     if(sub) await sub.unsubscribe();
   }catch(e){}
-  try{ const c = await caches.open("e26-push"); await c.delete("./__e26_push_token"); }catch(e){}
+  try{ const c = await caches.open("e26-push");
+       await c.delete("./__e26_push_token");
+       await c.delete("./__e26_push_plan"); }catch(e){}
   try{
     await apiFetch("/push/unsubscribe", {method:"POST", headers:{"Authorization": accountAuth()}});
   }catch(e){}
@@ -56293,7 +56345,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "58.8";
+const NEWS_FOR = "58.9";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56347,6 +56399,21 @@ const NEWS = [
      pushed, so somebody may have read about it and gone looking for it; a feature that
      appears in What changed and then silently vanishes is worse than one that says it
      has gone. Short, because there is not much to say. */
+  /* 58.9. Reported with a screenshot of nine identical notifications. */
+  {k: "Reminders that say something",
+   s: ["Every reminder has been arriving as <b>\u201cYour next session is up\u201d</b> \u2014 which is "
+     + "the fallback sentence, not anything the app wrote. It works out the real text when "
+     + "it schedules a reminder (the day, the opening lift and its load, whether this one "
+     + "closes the cycle) and that only ever reached your phone through a request made at "
+     + "the moment the notification arrived. Offline, or held by Do Not Disturb until the "
+     + "message had expired, that request failed and you got the generic line every time.",
+       "The text now travels with the schedule, so the notification says what is waiting "
+     + "whether or not anything can be reached: <b>Last session of the cycle</b>, or "
+     + "<b>Bench Press is up to 185 lb</b>, rather than the same seven words.",
+       "And the line it ends on changes from day to day instead of always reading "
+     + "\u201cReady when you are.\u201d \u2014 the same within a day, so a reminder never "
+     + "appears to reword itself, and different tomorrow."]},
+
   {k: "The Garmin band connection has been withdrawn",
    s: ["The experimental Garmin CIRQA connection that appeared in 58.7 is gone. It needed "
      + "Web Bluetooth in the browser, which is not available where it would have had to "
