@@ -7052,7 +7052,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "58.9";
+const APP_VERSION = "59.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -17641,7 +17641,7 @@ function lastBox(workoutId, exName, anyDay, occ){
     : "Last<br>"+esc(d);
   return `<div class="ex-last${away?" ll-away":""}" style="border-left-color:${away ? "var(--acc)" : color}">
     <span class="ll-tag">${tag}</span>
-    ${sets.map(st=>`<span class="ll-set">${esc(fmtSetShort(st))}</span>`).join("")}
+    ${sets.map(st=>`<span class="ll-set">${esc(fmtSetShort(st, l))}</span>`).join("")}
     ${away ? `<div class="ll-gym">${ICON.pin || ""}<span>Those were at <b>${esc(away.name)}</b>, ${
       esc(away.ago)} \u00b7 ${esc(fmtDate(away.date))}. Different bar, different stack \u2014 not
       necessarily a number to beat here.</span></div>` : ""}
@@ -17695,9 +17695,38 @@ function insight(exName, occ){
   }
   return null;
 }
-function fmtSet(st){
+/* WHAT A BODYWEIGHT-INCLUSIVE LOAD READS AS: bw+20, not 159.6.
+
+   Asked for directly. The number the log stores for a movement that counts you is you
+   plus what you added, which is the right thing to STORE — it is the load the leg is
+   under, and every piece of arithmetic in this app depends on it being the whole figure.
+   It is a poor thing to read. "159.6 lb" on a split squat tells you nothing you can act
+   on, changes the day you weigh yourself, and buries the only part you chose: the
+   dumbbells. "bw+20" is the instruction.
+
+   The stored number does not change. One formatter decides how it is spoken, and the
+   boxes you type into are deliberately not among its callers: a weight box has to hold a
+   number somebody can edit. */
+function bwLoadText(bw, total, withUnit){
+  const added = Math.round((Number(total) - Number(bw)) * 10) / 10;
+  if(!(Math.abs(added) > 0.05)) return "bw";
+  return "bw" + (added > 0 ? "+" : "\u2212") + Math.abs(added) + (withUnit ? " " + unitWord() : "");
+}
+/* The same thing where the ENTRY is at hand, which is the only way to know a load counts
+   you at all. Returns null when it does not, so callers fall back to the plain number. */
+function bwSay(entry, total, withUnit){
+  try{
+    const bw = bwPartOf(entry);
+    if(!(bw > 0)) return null;
+    const t = parseFloat(total);
+    if(!isFinite(t) || !(t > 0)) return null;
+    return bwLoadText(bw, t, withUnit);
+  }catch(e){ return null; }
+}
+function fmtSet(st, entry){
   if(!st) return " ";
-  let out = (st.weight!=null && st.weight!=="" ? st.weight : "bw") + "×" + (st.reps||"?");
+  const said = (st.weight != null && st.weight !== "") ? bwSay(entry, st.weight) : null;
+  let out = (said || (st.weight!=null && st.weight!=="" ? st.weight : "bw")) + "×" + (st.reps||"?");
   if(st.rpe) out += " · RPE "+st.rpe;
   return out;
 }
@@ -34656,9 +34685,9 @@ function setListHTML(e){
        and the log showed a single set of 8, which reads as a lighter session than it was. */
     const subs = subSetsFor(e, i);
     const tail = subs.length
-      ? ` <span class="sub-list">(${esc(subs.map(x=> x.label + " " + fmtSet(x)).join(", "))})</span>`
+      ? ` <span class="sub-list">(${esc(subs.map(x=> x.label + " " + fmtSet(x, e)).join(", "))})</span>`
       : "";
-    parts.push(chip + esc(fmtSet(st)) + flag + tail);
+    parts.push(chip + esc(fmtSet(st, e)) + flag + tail);
   });
   return parts.join("&nbsp; · &nbsp;") || " ";
 }
@@ -53100,7 +53129,11 @@ function progressionFor(sess, entry){
       endsStretch: !!already,
       msg: step.bodyweight && from == null
         ? "Add " + fmtLoad(step.amount) + " next time"
-        : "Add weight next time: " + fmtLoad(from) + " → " + fmtLoad(to)
+        /* On a movement that counts you, the pair of totals says almost nothing: 179.6
+           to 189.6 is ten pounds of dumbbell hidden inside two numbers that are mostly
+           the lifter. The bw+ form puts the change where it happened. */
+        : "Add weight next time: " + (bwSay(entry, from, true) || fmtLoad(from))
+          + " → " + (bwSay(entry, to, true) || fmtLoad(to))
           + loadMakeupNote(entry, to),
       sub: (atSets.length > 1
              ? "All " + atSets.length + " sets at " + fmtLoad(isNaN(load) ? null : load) +
@@ -56345,7 +56378,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "58.9";
+const NEWS_FOR = "59.0";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56400,6 +56433,21 @@ const NEWS = [
      appears in What changed and then silently vanishes is worse than one that says it
      has gone. Short, because there is not much to say. */
   /* 58.9. Reported with a screenshot of nine identical notifications. */
+  /* 59.0. Asked for: say bw+20, not 159.6. */
+  {k: "Bodyweight lifts read as bw+20",
+   s: ["A movement that counts your bodyweight used to show the whole load \u2014 <b>159.6 lb</b> "
+     + "on a split squat, most of which is you. It now reads <b>bw+20</b>: the part you "
+     + "actually chose, and the part that changes when you train rather than when you "
+     + "weigh yourself.",
+       "Last time's sets, the session list, the history export's CSV and the raise messages "
+     + "all speak that way now \u2014 <b>bw+40 lb \u2192 bw+50 lb</b> instead of two numbers that are "
+     + "mostly the same person. Assisted work reads as <b>bw\u22125</b>, and nothing added is "
+     + "just <b>bw</b>.",
+       "<b>The number itself has not changed.</b> The log still stores the whole load, "
+     + "because that is the load the leg is under and every calculation depends on it; the "
+     + "weight box still takes a number you can type; and a workout export still carries "
+     + "the figure rather than the notation."]},
+
   {k: "Reminders that say something",
    s: ["Every reminder has been arriving as <b>\u201cYour next session is up\u201d</b> \u2014 which is "
      + "the fallback sentence, not anything the app wrote. It works out the real text when "
@@ -59064,7 +59112,10 @@ function plateLineHTML(en, last){
     if(!(want > 0)) return "";
     const added = Math.round((want - bw) * 10) / 10;
     const hand = handLoadSay(en.name, added);
-    return `<div class="plate-line"><div class="pl-say"><b>${esc(fmtLoad(want))}</b> = you ${
+    /* The headline is what you can act on; the full total still follows it, because the
+       number in the box is that total and the two must be visibly the same thing. */
+    return `<div class="plate-line"><div class="pl-say"><b>${esc(bwLoadText(bw, want, true))}</b>
+      \u00b7 ${esc(fmtLoad(want))} = you ${
       esc(r1(bw))} + ${added > 0.05
         ? `<b>${esc(fmtLoad(added))}</b> ` + esc(addedLoadWhere(en.name))
           + (hand ? " \u00b7 " + esc(hand) : "")
@@ -59415,7 +59466,10 @@ function exContextHTML(en, ei, parts){
   if(parts.last){
     /* Pull the first "150×8 @8" out of last time's box so the number itself is on the
        chip. It is the single most-read thing on this screen. */
-    const m = String(parts.last).replace(/<[^>]*>/g, " ").match(/(\d[\d.]*\s*×\s*\d+(?:\s*@\s*[\d.]+)?)/);
+    /* The load may be a number or the bw+20 form a bodyweight movement is spoken in, and
+       a pattern that only knew the first turned the chip into the word "logged". */
+    const m = String(parts.last).replace(/<[^>]*>/g, " ")
+      .match(/((?:bw(?:[+\u2212-][\d.]+)?|\d[\d.]*)\s*×\s*\d+(?:\s*@\s*[\d.]+)?)/);
     chips.push(`<span class="exc-chip"><b>LAST</b>${m ? esc(m[1].replace(/\s+/g,"")) : "logged"}</span>`);
   }
   if(!chips.length && parts.cue) chips.push(`<span class="exc-chip"><b>CUE</b>how to do it</span>`);
@@ -61196,8 +61250,9 @@ function downloadDoc(){
 
 /* ---------- repo backup (CSV + JSON committed to the GitHub repo) ---------- */
 function b64(str){ return btoa(unescape(encodeURIComponent(str))); }
-function fmtSetShort(st){
-  const w = (st.weight!=null && st.weight!=="") ? st.weight : "bw";
+function fmtSetShort(st, entry){
+  const w = (st.weight!=null && st.weight!=="")
+    ? (bwSay(entry, st.weight) || st.weight) : "bw";
   let s = w+"×"+(st.reps||"?");
   if(st.rpe) s += " @"+st.rpe;
   return s;
@@ -61230,7 +61285,7 @@ function buildCSV(){
       const sets = e.sets.filter(st=>st.reps||st.weight);
       if(!sets.length) return;
       const row = [e.name];
-      for(let i=0;i<maxSets;i++) row.push(sets[i] ? fmtSetShort(sets[i]) : "");
+      for(let i=0;i<maxSets;i++) row.push(sets[i] ? fmtSetShort(sets[i], e) : "");
       rows.push(row);
     });
     rows.push(Array(maxSets+1).fill(""));
