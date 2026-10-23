@@ -197,7 +197,24 @@ html,body{margin:0;padding:0}
    surface still scrolls exactly as far as it did, with the same momentum and the same
    rubber band. On iOS the page's own indicator is drawn by the system over the top of the
    web view and no stylesheet reaches it; everything the page draws itself is covered. */
-html{scrollbar-width:none;-ms-overflow-style:none}
+/* THE PAGE NEVER SCROLLS SIDEWAYS, AND NOTHING INSIDE IT MAY DECIDE OTHERWISE.
+
+   Reported as "huge padding at the right, like it's not fitting the screen": every card
+   ended about 45px short of the edge while the tab bar still spanned it. That is what iOS
+   does when something inside the page is wider than the viewport — it widens the layout
+   viewport to fit the content and scales the whole page down, so the part that fits looks
+   inset and the fixed bar, which sizes to the layout viewport, still reaches both edges.
+   One over-wide element anywhere therefore shrinks EVERY screen, which is a lot of blast
+   radius for a single stray width.
+
+   `clip` rather than `hidden` on purpose: `hidden` turns this into a scroll container in
+   both axes and breaks every position:sticky inside it — the session bar, the tab
+   headers. `clip` contains the overflow without creating one.
+
+   This is a floor, not a fix: it stops one bad element from rescaling the app, and the
+   spec that sweeps every tab for overflow is what keeps the bad element from existing. */
+html{scrollbar-width:none;-ms-overflow-style:none;overflow-x:clip}
+body{overflow-x:clip}
 *{scrollbar-width:none}
 ::-webkit-scrollbar{width:0;height:0}
 ::-webkit-scrollbar-thumb,::-webkit-scrollbar-track{background:transparent}
@@ -7052,7 +7069,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.1";
+const APP_VERSION = "59.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -56407,7 +56424,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.1";
+const NEWS_FOR = "59.2";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56465,6 +56482,17 @@ const NEWS = [
   /* 59.0. Asked for: say bw+20, not 159.6. */
   /* 59.1. Reported: "it's saying to do 29.9 lbs, how am I even supposed to put that on a
      cable machine". Nothing was rounding cables or machines at all. */
+  /* 59.2. Reported as "huge padding at the right, like it's not fitting the screen". */
+  {k: "The page fits the screen again",
+   s: ["If every card has been ending short of the right edge while the tab bar still "
+     + "reached it, that is iOS shrinking the whole page because something inside it was "
+     + "wider than the screen. One stray element did that to every screen in the app.",
+       "The page now clips sideways instead of rescaling, so a single bad width can never "
+     + "shrink everything again, and the test suite checks every tab at three phone widths "
+     + "for anything reaching past the edge.",
+       "If a card still looks inset after this, tell me which tab \u2014 it would mean the "
+     + "element is one I have not found yet."]},
+
   {k: "Cables and machines get loads you can actually set",
    s: ["Element 26 knew what a barbell and a dumbbell move in and nothing at all about a "
      + "cable or a machine, so those were the two kinds of gear whose suggestions were "
