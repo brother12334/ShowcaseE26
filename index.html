@@ -7052,7 +7052,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.0";
+const APP_VERSION = "59.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8798,6 +8798,16 @@ const PREF_DEFAULTS = {
      exactly where it was; set, it is the answer and the weight unit is not consulted. */
   tapeUnit: null,    // null follows `units` | "in" | "cm"
   plateStep: null,   // smallest plate you own — a bar changes by twice this
+  /* AND THE ONE NOBODY HAD ASKED ABOUT: WHAT A STACK MOVES IN.
+     loadStepFor() answered zero for a cable or a machine, which meant roundLoadable()
+     did nothing at all to them — every other kind of gear got snapped to something
+     loadable and these two were handed back untouched. That is how "Drop to about
+     29.9 lb" reached a cable hammer curl, and why the Apply box beside it held
+     29.944: a number no stack in any gym can be set to.
+     Five is the default because it is the most common selectorized step and because
+     rounding COARSER is the safer error: a load on the 5s is reachable on a 5 and on a
+     2.5, while one on the 2.5s is unreachable on both the 5s and the 10s. */
+  stackStep: 5,      // what a cable or machine stack moves in
   /* WHERE THE RACK STOPS. A rack that ends at 50 makes every suggestion above 50 a
      weight that does not exist in the building, and the app was happy to print them.
      Null is "nobody has said", and then it behaves exactly as it always did. */
@@ -32278,7 +32288,10 @@ function hasLoggedUnilateral(){
    is just no longer the only way in. */
 const PLATE_STEPS = {lb: [1.25, 2.5, 5, 10], kg: [0.5, 1.25, 2.5, 5]};
 const DB_STEPS    = {lb: [2.5, 5, 10],       kg: [1, 2, 2.5, 5]};
-let STEP_OTHER = {plateStep: false, dbStep: false};
+/* Stacks differ more than racks do: 5 is the usual pin, 10 and 15 are common on older
+   machines, and 2.5 appears where there is an add-on magnet or a half-pin. */
+const STACK_STEPS = {lb: [2.5, 5, 10, 15],   kg: [1.25, 2.5, 5, 7.5]};
+let STEP_OTHER = {plateStep: false, dbStep: false, stackStep: false};
 const stepNum = v=> String(Math.round(v * 100) / 100);
 function stepChoiceHTML(key, attr, opts, cur){
   const inList = opts.some(v=> v === cur);
@@ -32287,8 +32300,10 @@ function stepChoiceHTML(key, attr, opts, cur){
       `<button class="${cur === v ? "on" : ""}" ${attr}="${v}">${stepNum(v)}</button>`).join("")
     }<button class="${other ? "on" : ""}" ${attr}="other">Other</button></div>` +
     (other ? `<div class="field" style="margin:8px 0 0"><label>${
-      key === "plateStep" ? "Smallest plate, one side" : "Gap between dumbbells"}</label>
-      <input id="pref${key === "plateStep" ? "PlateStep" : "DbStep"}" inputmode="decimal"
+      key === "plateStep" ? "Smallest plate, one side"
+      : key === "stackStep" ? "What one pin moves the stack"
+      : "Gap between dumbbells"}</label>
+      <input id="pref${key === "plateStep" ? "PlateStep" : key === "stackStep" ? "StackStep" : "DbStep"}" inputmode="decimal"
         value="${esc(cur == null ? "" : cur)}" placeholder="in ${unitWord()}"></div>` : "");
 }
 /* ONE GYM'S KIT, EDITED WHERE THE GYM LIVES.
@@ -32407,6 +32422,15 @@ function gymGearHTML(){
       `<div class="set-says">${db > 0
         ? "So " + stepNum(base) + ", " + stepNum(base + db) + ", " + fmtLoad(base + db*2) + " \u2014 and nothing in between."
         : "Not set, so it can suggest a dumbbell that isn\u2019t on your rack."}</div>`)
+    /* THE QUESTION NOBODY HAD BEEN ASKED, and the one that produced "drop to 29.9 lb" on
+       a cable. Every other kind of gear had a step and these did not, so nothing rounded
+       them at all. */
+    + setBlock("What a cable or machine stack moves in",
+      "One pin on the stack. It is what keeps a suggested load to a weight the pin can actually sit at.",
+      stepChoiceHTML("stackStep", "data-stkstep", STACK_STEPS[kg ? "kg" : "lb"], p.stackStep) +
+      `<div class="set-says">${p.stackStep > 0
+        ? "So a cable or a machine is suggested in <b>" + fmtLoad(p.stackStep) + "</b> steps, and never between two pins."
+        : "Not set, so a cable can be suggested a weight no stack in the building can be set to."}</div>`)
     + setBlock("What the empty Smith machine carriage weighs",
       "They run from about " + (kg ? "3" : "6") + " to " + smithBarDefault() + "+ " + unitWord() +
       " depending on the machine, and every warm-up and comparison comes off it.",
@@ -47036,6 +47060,7 @@ function bind(){
     gymNameSheet(pos);
   };
   stepIn("prefPlateStep", "plateStep", "Smallest plate");
+  stepIn("prefStackStep", "stackStep", "Stack step");
   stepIn("prefDbStep", "dbStep", "Dumbbell gap");
   const stepChip = (attr, key, word)=> document.querySelectorAll("#app [" + attr + "]").forEach(b=> b.onclick = ()=>{
     const raw = b.getAttribute(attr);
@@ -47047,6 +47072,7 @@ function bind(){
   });
   stepChip("data-plstep", "plateStep", "Smallest plate");
   stepChip("data-dbstep", "dbStep", "Dumbbell gap");
+  stepChip("data-stkstep", "stackStep", "Stack step");
   const smW = $("#prefSmithW");
   if(smW) smW.onchange = ()=>{
     const v = parseFloat(smW.value);
@@ -52833,7 +52859,10 @@ function impossibleLoadCheck(target, entry, sess){
   if(!(suggest > 0) || !(suggest < base)){
     suggest = roundLoadableOn(entry, base - step.amount * 2, target.name);
     if(!(suggest < base)) suggest = roundLoadableOn(entry, base - step.amount, target.name);
-    if(!(suggest < base)) suggest = Math.max(0, Math.round((base * 0.9) * 2) / 2);
+    /* The last resort was the one that still handed back an unloadable number: a flat
+       10% off, snapped to a half pound. Through the same rounding as the others, so a
+       cable gets a stack figure here too rather than 31.5. */
+    if(!(suggest < base)) suggest = roundLoadableOn(entry, base * 0.9, target.name);
   }
   suggest = Math.max(0, suggest);
   /* AND NEVER UNDER A WEIGHT YOU HAVE ALREADY WORKED IN THE RANGE.
@@ -56378,7 +56407,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.0";
+const NEWS_FOR = "59.1";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56434,6 +56463,19 @@ const NEWS = [
      has gone. Short, because there is not much to say. */
   /* 58.9. Reported with a screenshot of nine identical notifications. */
   /* 59.0. Asked for: say bw+20, not 159.6. */
+  /* 59.1. Reported: "it's saying to do 29.9 lbs, how am I even supposed to put that on a
+     cable machine". Nothing was rounding cables or machines at all. */
+  {k: "Cables and machines get loads you can actually set",
+   s: ["Element 26 knew what a barbell and a dumbbell move in and nothing at all about a "
+     + "cable or a machine, so those were the two kinds of gear whose suggestions were "
+     + "never rounded \u2014 which is how <b>\u201cdrop to about 29.9 lb\u201d</b> reached a cable curl, "
+     + "with 29.944 in the box beside it.",
+       "They now move in whole pins like everything else. <b>Settings \u203a Where you train</b> "
+     + "asks what one pin is worth on your stacks: 5 to begin with, since that is the usual "
+     + "selectorized step, and 2.5, 10 or 15 if yours are different.",
+       "Nothing else changed: a bar is still twice your smallest plate, and a dumbbell is "
+     + "still the gap on your rack."]},
+
   {k: "Bodyweight lifts read as bw+20",
    s: ["A movement that counts your bodyweight used to show the whole load \u2014 <b>159.6 lb</b> "
      + "on a split squat, most of which is you. It now reads <b>bw+20</b>: the part you "
@@ -57273,6 +57315,10 @@ function loadStepFor(name){
   if(eq === "dumbbell" || eq === "kettlebell") return p.dbStep > 0 ? p.dbStep : 0;
   // a bar takes a plate on each end, so the smallest change is two of the smallest plate
   if(eq === "barbell" || eq === "smith") return p.plateStep > 0 ? p.plateStep * 2 : 0;
+  /* A stack is a stack: it moves in whole pins, and the only question is how big one is.
+     Zero here meant no rounding at all, which is worse than a step that is occasionally
+     the wrong size — a wrong-sized step still lands on a number somebody could try. */
+  if(eq === "cable" || eq === "machine") return p.stackStep > 0 ? p.stackStep : 0;
   return 0;
 }
 /* Rounded to something loadable. The BAR is held out of the arithmetic first: it is not
