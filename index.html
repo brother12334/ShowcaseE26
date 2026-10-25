@@ -7098,7 +7098,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.5";
+const APP_VERSION = "59.6";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -49631,11 +49631,32 @@ function recomputeCycle(announce){
   /* Judged on the state this call has just produced, not the one it started with: the
      rest day that releases the held review is usually recorded in the same breath. */
   flushHeldCycleReview();
-  // if the suggested day is already done, move to the next unchecked one
-  if(S.cycleDone.includes(S.pointer)){
-    for(let k=1;k<=ROTATION.length;k++){
-      const idx = (S.pointer+k)%ROTATION.length;
-      if(!S.cycleDone.includes(idx)){ S.pointer = idx; break; }
+  /* THE POINTER IS DERIVED, NOT ONLY ADVANCED — AND THAT IS A BUG FIX.
+
+     Reported: a workout finished by accident with nothing in it, deleted from History,
+     and then the day it had been could not be trained again. "Choose my own day" did not
+     help either.
+
+     The checkmarks were always derived — cycleDone is rebuilt from the sessions on disk a
+     few lines above, so deleting the session did clear its tick. The POINTER was not. It
+     could only ever step forward, over slots that were done, so the session that moved it
+     off Push B left it on the next day for good; delete that session and the pointer is
+     sitting one slot past a day nothing was ever spent on. slotIsPast() reads anything
+     behind the pointer as a day the cycle has already had, so Push B was unreachable:
+     unselectable on the strip, and refused by pickDayToday() under free choice too, which
+     is why neither route worked.
+
+     The invariant this file already describes — "the day you stepped over is still
+     unchecked, so recomputeCycle() leaves the pointer on it and it is what comes up next"
+     — is simply the earliest slot that is not done. Deriving it says the same thing and
+     cannot drift out of step with the log, whichever way the log moves. It agrees with
+     the old forward walk in every case where nothing has been deleted: the pointer
+     advances off a finished day to the next unchecked one, a day skipped under free
+     choice stays next, and a full cycle is handled by the roll-over above. */
+  for(let i = 0; i < ROTATION.length; i++){
+    if(!S.cycleDone.includes(i)){
+      if(S.pointer !== i) S.pointer = i;
+      break;
     }
   }
   saveQuiet();   // derived recomputation, don't claim a newer change on every boot
@@ -56580,7 +56601,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.5";
+const NEWS_FOR = "59.6";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56647,6 +56668,22 @@ const NEWS = [
      should say bw+" — with the old equation circled. */
   /* 59.5. The weight boxes circled: "I like this one" (the bw+ box) and "there's no
      point of this button it's automatic". */
+  /* 59.6. Reported: a workout finished by accident with nothing in it, deleted from
+     History, and then the day it had been could not be trained again — "even if I press
+     choose my own day". */
+  {k: "Deleting a session gives its day back",
+   s: ["Delete a session from History and its checkmark cleared, but the rotation stayed "
+     + "on the day AFTER it — so the day you had just freed up read as one the cycle had "
+     + "already had. It was unselectable on the day strip, and <b>choose my own day</b> "
+     + "refused it for the same reason.",
+       "The rotation now sits on the earliest day of the cycle you have not trained, "
+     + "worked out from your sessions rather than nudged along as you go. Delete the "
+     + "session and the day comes straight back, on both routes. Nothing else moves: a "
+     + "day you genuinely trained is still spent, and a day you stepped over under free "
+     + "choice is still the one that comes up next.",
+       "If you are stuck on this right now, it repairs itself the moment this version "
+     + "loads — there is nothing to tap."]},
+
   {k: "The weight box says bw+ too",
    s: ["On a movement that counts you, the box asked for the whole load — <b>169.8</b>, "
      + "most of which is you, clipped to <b>169.</b> in the space the column has. It now "
