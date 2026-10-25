@@ -4802,14 +4802,22 @@ body.cele-open{overflow:hidden}
   font:var(--fs-2) var(--mono);color:var(--faint);line-height:1.6;text-align:right;
   margin-left:auto;
 }
+.ex-po .ins-tag{background:var(--acc-soft, rgba(201,138,75,.12));color:var(--acc)}
+.po-sub{display:block;margin-top:3px;color:var(--faint);font-size:var(--fs-1)}
 .rest-aim-l b{color:var(--dim);font-weight:400}
 .rest-x{
   position:absolute;top:calc(16px + env(safe-area-inset-top));right:16px;
   width:50px;height:50px;border-radius:50%;border:1px solid var(--line);
   background:var(--card2);color:var(--text);font-size:var(--fs-7);cursor:pointer;z-index:1;
 }
+/* THE PILL RIDES ON THE BAR, rather than beside it on a guess. 86px was measured once
+   against a tab bar sitting flat on the bottom of the screen; the bar then moves for
+   Safari's toolbar, so with a rest running every scroll had the two of them drift apart
+   and then collide. --navGap is the same correction the bar itself uses. */
 .rest-mini{
-  position:fixed;right:12px;bottom:calc(86px + env(safe-area-inset-bottom));z-index:150;
+  position:fixed;right:12px;
+  bottom:calc(86px + env(safe-area-inset-bottom) + var(--navGap, 0px));z-index:150;
+  transition:bottom var(--t-mid, .2s) var(--ease, ease);
   display:flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--line);
   border-radius:var(--r-pill);padding:6px 7px 6px 6px;box-shadow:0 8px 28px rgba(0,0,0,.55);
   animation:restPillIn .55s cubic-bezier(.22,1,.36,1) both;
@@ -7069,7 +7077,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.2";
+const APP_VERSION = "59.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -8825,6 +8833,13 @@ const PREF_DEFAULTS = {
      rounding COARSER is the safer error: a load on the 5s is reachable on a 5 and on a
      2.5, while one on the 2.5s is unreachable on both the 5s and the 10s. */
   stackStep: 5,      // what a cable or machine stack moves in
+  /* THE NUMBER TO BEAT, SAID BEFORE THE SETS RATHER THAN AFTER THEM. "Last" already
+     printed what happened last time; reading a progression out of it — is 10 the top of
+     the range, does the load go up, by how much given what I own — is arithmetic nobody
+     does standing at a rack. On by default, because it only ever speaks where there is a
+     previous session to beat, and one tap off in Settings for anybody who would rather
+     decide for themselves. */
+  overloadTips: true,
   /* WHERE THE RACK STOPS. A rack that ends at 50 makes every suggestion above 50 a
      weight that does not exist in the building, and the app was happy to print them.
      Null is "nobody has said", and then it behaves exactly as it always did. */
@@ -17674,6 +17689,81 @@ function lastBox(workoutId, exName, anyDay, occ){
       necessarily a number to beat here.</span></div>` : ""}
   </div>`;
 }
+/* =====================================================================
+   PROGRESSIVE OVERLOAD TIPS
+
+   Asked for directly: "tell me what numbers I have to beat before starting an exercise
+   to max out progressive overload."
+
+   Overload is one of two moves and never a third: the same load for one more rep, or,
+   once the rep range is full, the smallest load step your gear actually has at the
+   bottom of the range. So the tip states both halves of the only decision there is —
+   what last time was, and which of the two moves clears it — and it quotes a heavier
+   load only in a size you can physically put on (loadStepFor, the same step every other
+   suggestion in this app is snapped to).
+
+   It says nothing at all when it has nothing to say: no previous session for this
+   movement, or a previous session with no reps logged. A tip that invents a number to
+   beat is worse than no tip. */
+function overloadTipsOn(){ return trainPrefs().overloadTips !== false; }
+function overloadTarget(workoutId, en, anyDay, occ){
+  try{
+    if(!en || !en.name) return null;
+    const l = lastEntryFor(workoutId, en.name, anyDay, occ);
+    if(!l) return null;
+    const sets = (l.sets || []).filter(st=> (parseFloat(st && st.reps) || 0) > 0);
+    if(!sets.length) return null;
+    /* THE TOP SET IS THE ONE TO BEAT: heaviest, and among equals the longest. Beating an
+       average is not a thing you can do a single set of. */
+    let top = null;
+    sets.forEach(st=>{
+      const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
+      if(!top || w > top.w || (w === top.w && r > top.r)) top = {w, r};
+    });
+    const vol = sets.reduce((x, st)=> x + (parseFloat(st.weight) || 0) * (parseFloat(st.reps) || 0), 0);
+    const reps = sets.reduce((x, st)=> x + (parseFloat(st.reps) || 0), 0);
+    const rr = repRange(en.reps);
+    const step = loadStepFor(en.name);
+    /* FULL RANGE MEANS THE LOAD MOVES. Below the top of the range there is a rep left to
+       take, and taking it is the cheaper progression; at the top, more reps is a different
+       exercise and the load is what changes. With no range written down there is no "top"
+       to be at, so reps it is. */
+    const atCap = !!rr && top.r >= rr[1];
+    let way;
+    if(top.w > 0 && atCap && step > 0) way = {kind:"load", w: Math.round((top.w + step) * 10) / 10, r: rr[0]};
+    else if(top.w > 0 && atCap)       way = {kind:"anyload", w: top.w, r: rr[0]};
+    else                              way = {kind:"reps", w: top.w, r: top.r + 1};
+    return {top, vol: Math.round(vol), reps, way, range: rr, step, date: l.date, entry: l};
+  }catch(e){ return null; }
+}
+function overloadTipHTML(workoutId, en, anyDay, occ){
+  if(!overloadTipsOn()) return "";
+  const t = overloadTarget(workoutId, en, anyDay, occ);
+  if(!t) return "";
+  /* A BODYWEIGHT-INCLUSIVE LOAD IS SPOKEN AS ONE. Quoting 169.8 lb as the number to beat
+     on a split squat is the same fault bwSay() exists to fix, and a tip is exactly where
+     it would hurt most: it is read as an instruction. */
+  const say = w=>{ const b = bwSay(t.entry, w, true); return b || fmtLoad(w); };
+  const was = t.top.w > 0 ? say(t.top.w) + " \u00d7 " + t.top.r : t.top.r + " reps";
+  let how;
+  if(t.way.kind === "reps"){
+    how = t.top.w > 0
+      ? "one more rep at the same load clears it \u2014 <b>" + esc(say(t.way.w)) + " \u00d7 " + t.way.r + "</b>"
+      : "one more rep clears it \u2014 <b>" + t.way.r + " reps</b>";
+  }else if(t.way.kind === "load"){
+    how = "that is the top of your rep range, so the load goes up: <b>" + esc(say(t.way.w))
+        + " \u00d7 " + t.way.r + "</b>";
+  }else{
+    how = "that is the top of your rep range, so the next move is heavier \u2014 the smallest "
+        + "step your gear has. Tell the app what you can load in Settings and it will name it.";
+  }
+  const totals = t.top.w > 0
+    ? "Last time's total work was " + Math.round(t.vol).toLocaleString() + " " + unitWord()
+      + "\u00d7reps across " + t.reps + " reps; matching the top set and adding a rep anywhere beats that too."
+    : t.reps + " reps in total last time.";
+  return `<div class="ex-insight ex-po"><span class="ins-tag">Beat</span><span>Last time's best was <b>${
+    esc(was)}</b> \u2014 ${how} <span class="po-sub">${esc(totals)}</span></span></div>`;
+}
 function exHistory(name, n, occ){
   occ = occ || 0;
   const out = [];
@@ -25160,6 +25250,12 @@ let refreshNavBounds = ()=>{};
     if(navHeld){ heldHide = v; return; }
     hidden = v;
     nav.style.setProperty("--navY", v ? "calc(100% + 2px)" : "0px");
+    /* MIRRORED ONTO THE ROOT, because the tab bar is not the only thing anchored to the
+       bottom of the screen and the others were guessing. The rest pill sat on a hard 86px
+       while the bar moved underneath it for two separate reasons — Safari's toolbar
+       correction and the auto-hide — so scrolling with a rest running had the two drift
+       apart and overlap. One source of truth, read by both. */
+    document.documentElement.style.setProperty("--navHidden", v ? "1" : "0");
     /* Coming back, it has to be re-measured: the correction skips a bar that is moving,
        so the one that slid away while the chrome changed would otherwise arrive anchored
        to where the bottom of the screen used to be. 300ms is the 260ms slide and a frame. */
@@ -25268,6 +25364,7 @@ let refreshNavBounds = ()=>{};
     if(g === gapNow) return;
     gapNow = g;
     nav.style.setProperty("--navGap", g + "px");
+    document.documentElement.style.setProperty("--navGap", g + "px");
   };
   const anchorNav = ()=>{
     if(!vv) return;
@@ -25325,6 +25422,7 @@ let refreshNavBounds = ()=>{};
     anchorNav();
   }else{
     nav.style.setProperty("--navGap", "0px");
+    document.documentElement.style.setProperty("--navGap", "0px");
   }
   /* COMING BACK TO THE APP IS THE OTHER MOMENT THE CORRECTION GOES STALE. The gap is
      recomputed when the visual viewport changes, and a phone that was locked, switched
@@ -32235,6 +32333,13 @@ function prefsSessionHTML(){
       {v:"off", t:"Weight and reps only", d:"Drops the column. Still graded, with less to go on."}
     ], "data-prefrpe", p.rpe === false ? "off" : "on",
     "What " + term("rpe","RPE") + " means, if you have not used it before.");
+  h += setChoice("Progressive overload tips", [
+      {v:"on",  t:"Tell me the number to beat",
+       d:"Before each exercise: last session's best set, and which single change clears "
+         + "it \u2014 one more rep, or the next load your gear can actually do."},
+      {v:"off", t:"Off",
+       d:"Last time's sets are still shown. Working out what beats them is yours."}
+    ], "data-prefpo", p.overloadTips === false ? "off" : "on");
   h += setChoice("When a weight is ready to go up", [
       {v:"auto", t:"Automatic",   d:"Writes the increase into your plan the moment a session earns it."},
       {v:"ask",  t:"Ask me",      d:"Offers it on the grade card with a one-tap Apply."},
@@ -34638,6 +34743,7 @@ function viewToday(){
       h += warmupHTML(e, warmupKindFor(rp.map(x=>x.chosen), rpi),
                       {workoutId: wid, anyDay: isFinisher || sharedAcrossDays(e.name), occ});
     if(ll) h += ll;
+    h += overloadTipHTML(wid, e, isFinisher || sharedAcrossDays(e.name), occ);
     if(needsCalibration(e)) h += calibrateHTML(e);
     h += inlineTipHTML(tips[nrm(e.name)], tipsSeen);
     if(ins) h += `<div class="ex-insight"><span class="ins-tag">${esc(ins.tag)}</span><span>${esc(ins.msg)}</span></div>`;
@@ -35002,6 +35108,10 @@ function viewActiveSession(){
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
     h += asymHintHTML(en);
+    /* NOT IN THE CHIP STRIP. The strip folds away what you can look up; a number to beat
+       is what you are about to act on, and the whole point of it is that it is read
+       before the first set rather than looked up after it. */
+    h += overloadTipHTML(a.workoutId, en, anyDay, occ);
     h += setLabelsHTML();
     en.sets.forEach((st,si)=>{ h += setRowHTML(en, ei, si, last); });
     h += rebuildLineHTML(en);
@@ -36157,6 +36267,7 @@ function viewFocusSession(){
   h += supersetNoteHTML(supersetInfo(a.entries, ei));
   if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
   if(ll) h += ll;
+  h += overloadTipHTML(a.workoutId, en, anyDay, occ);
   h += inlineTipHTML(focusTipsFor(a.workoutId)[nrm(en.name)]);
   h += exNoteLineHTML(en);
   if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
@@ -46021,6 +46132,21 @@ function bind(){
   /* Out of Settings entirely, back to the screen its icon lives on. */
   const setT = $("#setToToday");
   if(setT) setT.onclick = ()=> goTab("today");
+  /* The one tap that turns a typed-added weight into the total the box asks for. It
+     writes the set and says what it did, because a number changing under you with no
+     explanation is worse than the wrong number. */
+  document.querySelectorAll("[data-bwfix]").forEach(b=> b.onclick = ()=>{
+    const [ei, si] = b.dataset.bwfix.split(":").map(x=> parseInt(x, 10));
+    const en = S.active && S.active.entries[ei];
+    const st = en && en.sets[si];
+    if(!st) return;
+    const bw = entryBwOn(en);
+    const typed = parseFloat(st.weight);
+    if(!(bw > 0) || !(typed > 0)) return;
+    st.weight = String(Math.round((bw + typed) * 10) / 10);
+    save(); render();
+    toast("Set to " + fmtLoad(parseFloat(st.weight)) + " — you plus " + fmtLoad(typed), "good");
+  });
   document.querySelectorAll("[data-setwarm]").forEach(b=> b.onclick = ()=>{
     const [ei, si] = b.dataset.setwarm.split(":").map(x=> parseInt(x, 10));
     const en = S.active && S.active.entries[ei];
@@ -46693,6 +46819,10 @@ function bind(){
     b.dataset.prefdeload === "auto" ? "Deloads suggested when due" : "Deloads left to you"));
   document.querySelectorAll("[data-prefrpe]").forEach(b=> b.onclick=()=> setPref("rpe", b.dataset.prefrpe === "on",
     b.dataset.prefrpe === "on" ? "Rating every set again" : "RPE off — weight and reps only"));
+  document.querySelectorAll("[data-prefpo]").forEach(b=> b.onclick=()=>
+    setPref("overloadTips", b.dataset.prefpo === "on",
+      b.dataset.prefpo === "on" ? "Overload tips on \u2014 the number to beat, before each exercise"
+                                : "Overload tips off"));
   document.querySelectorAll("[data-prefrpicks]").forEach(b=> b.onclick=()=>
     setPref("researchPicks", b.dataset.prefrpicks === "on",
       b.dataset.prefrpicks === "on" ? "Research picks on" : "Research picks off"));
@@ -56424,7 +56554,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.2";
+const NEWS_FOR = "59.3";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56483,6 +56613,37 @@ const NEWS = [
   /* 59.1. Reported: "it's saying to do 29.9 lbs, how am I even supposed to put that on a
      cable machine". Nothing was rounding cables or machines at all. */
   /* 59.2. Reported as "huge padding at the right, like it's not fitting the screen". */
+  /* 59.3. Asked for: "a feature you can turn off in settings called Progressive overload
+     tips where it will tell you what numbers you have to beat before starting an
+     exercise". Plus the reported nav-bar glitch with a rest running, and two faults the
+     bw+20 notation invited, read off a photograph of the workout tab. */
+  {k: "Progressive overload tips",
+   s: ["Before each exercise, Element 26 now says the number to beat and which single "
+     + "change clears it: <b>last time's best was 30 lb × 10 — one more rep at the same "
+     + "load clears it, 30 lb × 11</b>. At the top of your rep range it stops asking for "
+     + "reps and names the next load instead, in a step your gear can actually be set to.",
+       "It only ever speaks where there is a previous session of that movement to beat, "
+     + "and it never invents a number. <b>Settings › How training is run</b> turns it off; "
+     + "last time's sets stay either way."]},
+
+  {k: "The rest pill stays with the tab bar",
+   s: ["Scrolling with a rest running had the clock and the tab bar drift apart and then "
+     + "overlap. The pill was pinned at a fixed height measured once against a bar sitting "
+     + "flat on the bottom of the screen — and the bar moves, both for Safari's toolbar "
+     + "and for its own auto-hide.",
+       "They read the same figure now, so the gap between them is the same gap at every "
+     + "scroll position."]},
+
+  {k: "Two things the bw+20 notation got wrong",
+   s: ["The warm-up chips were carrying a whole sentence — <b>“15 lb a hand is the nearest "
+     + "pair you have (30 lb)”</b> — inside a chip, in a row of chips. They say <b>15 lb a "
+     + "hand</b> now; the explanation stays where there is room for it.",
+       "And typing <b>30</b> into the weight box of a bodyweight movement, meaning the "
+     + "dumbbells, stored 30 as the whole load — which is less than you weigh, so it read "
+     + "back as <b>bw−109.8</b>. The app now says what happened and offers one tap to make "
+     + "it the total it was asking for. Assisted work, which really is under your own "
+     + "weight, is left alone."]},
+
   {k: "The page fits the screen again",
    s: ["If every card has been ending short of the right edge while the tab bar still "
      + "reached it, that is iOS shrinking the whole page because something inside it was "
@@ -57382,7 +57543,13 @@ function loadStepFor(name){
    told us they have. Where the total does not split into a pair they own — which is how
    the report arrived — the nearest pair that does is named rather than the impossible
    figure being left to stand on its own. */
-function handLoadSay(name, added){
+/* TWO LENGTHS, BECAUSE A CHIP IS NOT A SENTENCE.
+
+   This had one form, and it was the explanatory one. Used as a warm-up rung's LABEL it
+   put "15 lb a hand is the nearest pair you have (30 lb)" inside a chip built for "30 lb"
+   — which is how a warm-up ended up wider than the phone. `short` is the figure and
+   nothing else; the long form stays where there is a line to say it on. */
+function handLoadSay(name, added, short){
   const a = Math.round((parseFloat(added) || 0) * 10) / 10;
   if(!(a > 0.05) || !heldInBothHands(name)) return "";
   const stepHand = trainPrefs().dbStep > 0 ? trainPrefs().dbStep : 0;
@@ -57390,9 +57557,10 @@ function handLoadSay(name, added){
   const near = stepHand > 0 ? Math.max(stepHand, Math.round(each / stepHand) * stepHand)
                             : Math.round(each * 10) / 10;
   if(!(near > 0)) return "";
-  return Math.abs(near - each) < 0.05
-    ? fmtLoad(near) + " a hand"
-    : fmtLoad(near) + " a hand is the nearest pair you have (" + fmtLoad(near * 2) + ")";
+  const exact = Math.abs(near - each) < 0.05;
+  if(short) return fmtLoad(near) + " a hand";
+  return exact ? fmtLoad(near) + " a hand"
+               : fmtLoad(near) + " a hand is the nearest pair you have (" + fmtLoad(near * 2) + ")";
 }
 function addedLoadWhere(name){
   return /\bdip|pull[- ]?up|chin[- ]?up|muscle[- ]?up/i.test(nrm(name || ""))
@@ -57982,7 +58150,7 @@ function warmupPlan(e, kind, ctx){
       const bare = !(capAdd > 0) || a < capAdd;
       /* Said per hand where that is what it is, for the same reason the line above the
          sets is: "5 lb in your hands" is two dumbbells nobody named. */
-      const perHand = bare ? handLoadSay(e && e.name, a) : "";
+      const perHand = bare ? handLoadSay(e && e.name, a, true) : "";
       const label = !bare ? "bodyweight"
         : (perHand ? perHand : a + " " + unitWord() + " " + addedLoadWhere(e && e.name));
       const prev = outBw[outBw.length - 1];
@@ -59185,6 +59353,31 @@ function plateLineHTML(en, last){
       : parseFloat(last !== undefined ? planLoadPh(en, last, 0) : planLoadFor(en));
     if(!(want > 0)) return "";
     const added = Math.round((want - bw) * 10) / 10;
+    /* A NUMBER BELOW WHAT YOU WEIGH IS NOT AN ASSISTED SET, IT IS THE WRONG BOX.
+
+       Seen on a real card: "bw−109.8 lb · 30 lb = you 139.8 + nothing added", because 30
+       had been typed into a box that wants you PLUS what you are holding. That reading is
+       the app's own fault twice over — the bw+20 notation introduced in 59.0 tells you
+       the added figure everywhere, and then the box asks for a different number without
+       saying so — and rendering it as a minus made it look like assisted work.
+
+       Genuinely assisted movements exist (a counterweighted pull-up IS bodyweight minus
+       the machine), so the minus is kept for the movements whose names say so. Anything
+       else below bodyweight is read as what it almost certainly is: the weight you added,
+       typed on its own. The set is NOT rewritten — it is your log — but the line says
+       what it thinks happened and offers the one tap that fixes it. */
+    const assisted = /\bassist/i.test(nrm(en.name || ""));
+    if(added < -0.05 && !assisted){
+      const ei4 = entryIndexOf(en);
+      const si4 = (en.sets || []).findIndex(st=> parseFloat(st && st.weight) === want);
+      return `<div class="plate-line plate-gap"><div class="pl-say">
+        <b>${esc(fmtLoad(want))}</b> is less than you weigh, so this reads as
+        ${esc(bwLoadText(bw, want, true))}. If you meant <b>${esc(fmtLoad(want))}</b> in your
+        hands, the box wants you and the weight together — ${esc(fmtLoad(bw + want))}.
+        ${ei4 >= 0 && si4 >= 0
+          ? `<button type="button" class="linklike" data-bwfix="${ei4}:${si4}">Make it ${esc(bwLoadText(bw, bw + want))}</button>`
+          : ""}</div></div>`;
+    }
     const hand = handLoadSay(en.name, added);
     /* The headline is what you can act on; the full total still follows it, because the
        number in the box is that total and the two must be visibly the same thing. */
@@ -59690,6 +59883,7 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
     return {
       last: lastSetsFor(a.workoutId, p.en.name, anyDay, occ, p.en.startSide),
       box:  lastBox(a.workoutId, p.en.name, anyDay, occ),
+      po:   overloadTipHTML(a.workoutId, p.en, anyDay, occ),
       ctx:  {workoutId: a.workoutId, anyDay, occ}
     };
   });
@@ -59750,6 +59944,7 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
       ${exNoteLineHTML(p.en)}
       ${p.en.warm ? warmupHTML(p.en, p.en.warm, meta[k].ctx) : ""}
       ${meta[k].box || ""}
+      ${meta[k].po || ""}
       ${inlineTipHTML(tips[nrm(p.en.name)], tipsSeen)}
       ${p.en.startSide ? altHintHTML(p.en.altStyle||"side", p.en.startSide, p.en.sets.length, p.en.name) : ""}
       ${asymHintHTML(p.en)}

@@ -222,20 +222,23 @@ console.log("8 - M3: TRAINING WEEKS, A LAYOFF, AND WHO IS PROMPTED");
     const mon = Date.parse(weekStartStr(dayStr(now)) + "T12:00:00");
     const mk = (at)=> ({id:"y"+at, workoutId:DAYS[0], date: dayStr(at), startedAt: at,
                         finishedAt: at + 3600e3, entries:[]});
+    /* THE FIXTURE RUNS UP TO TODAY, WHATEVER DAY TODAY IS.
+
+       This used to stop at last week and then bolt one session onto the end, two days
+       ago. Both versions test the calendar rather than the clock they mean to: anchored
+       on Monday, the gap between the end of the generated weeks and that lone recent
+       session is seven days on a Sunday, which is LAYOFF_DELOAD_DAYS exactly — so the
+       block restarted, trainingWeeksInBlock() came back 0, and the spec failed on
+       Sundays and passed the rest of the week.
+
+       Generating this week too, and dropping anything in the future, leaves no gap
+       bigger than three days on any day of the week. Seven full weeks still precede it,
+       which is what the assertion below is about. */
     S.sessions = [];
-    for(let w = 7; w >= 1; w--){
+    for(let w = 7; w >= 0; w--){
       const base = mon - w * 7 * d;
-      S.sessions.push(mk(base), mk(base + 2 * d), mk(base + 4 * d));
+      [base, base + 2 * d, base + 4 * d].forEach(at=>{ if(at <= now) S.sessions.push(mk(at)); });
     }
-    /* AND ONE SESSION THIS WEEK, OR THIS FIXTURE TESTS THE WRONG RULE.
-       Anchored on Monday, the newest session above is Monday + 4 days — so from Friday
-       onwards the gap to "now" reaches LAYOFF_DELOAD_DAYS and layoffNow() fires, at which
-       point deloadDue() correctly returns null because a layoff has already done what a
-       deload does. The spec passed Monday to Thursday and failed Friday to Sunday, which
-       is a fixture that tests the calendar rather than the clock it means to. One recent
-       session removes the layoff; it does not add a counted training week, because a week
-       needs two sessions to count, so "seven training weeks" below still means seven. */
-    S.sessions.push(mk(now - 2 * d));
     S.blockStart = mon - 8 * 7 * d;
     S.expManual = "intermediate";
     const counted = trainingWeeksInBlock();
