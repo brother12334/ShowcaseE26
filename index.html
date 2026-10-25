@@ -7098,7 +7098,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.8";
+const APP_VERSION = "59.9";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -56601,7 +56601,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.8";
+const NEWS_FOR = "59.9";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56674,6 +56674,20 @@ const NEWS = [
   /* 59.7. "Also still hawking me for the plate sizes every time." */
   /* 59.8. "Where's the updated body weight exercise thing?" — on a weighted dips card
      whose numbers plainly counted the lifter, drawn as a plain load. */
+  /* 59.9. "It's impossible for me to do that warmup, I weigh 139" — weighted dips,
+     warming up at 80 lb. */
+  {k: "No warm-up lighter than you are",
+   s: ["A warm-up rung of <b>80 lb</b> on weighted dips is not a light set, it is not a "
+     + "set at all: the lightest dip available is you, and you cannot take sixty pounds "
+     + "of yourself off between rungs.",
+       "On a movement that counts you — dips, pull-ups, split squats — the ramp runs over "
+     + "what you ADD and never over you. That rule was there and it only applied when the "
+     + "app knew the movement counted you; it no longer needs telling. Your own weight is "
+     + "the floor on anything you hang off yourself, whatever else is on file.",
+       "Nothing else moves. A number below your bodyweight is read as the belt on its "
+     + "own and still ramps, an assisted machine really can take weight off and still "
+     + "ramps, and a barbell is a barbell."]},
+
   {k: "Bodyweight lifts remember themselves",
    s: ["If a lift that counts you came up as a plain load — <b>144.6 lb</b> on weighted "
      + "dips instead of <b>bw+5</b> — the switch for that movement had gone missing. It "
@@ -58373,7 +58387,34 @@ function warmupPlan(e, kind, ctx){
      goes. The same rule roundLoadable() already follows for the boxes: only the loadable
      part of a bodyweight-inclusive total is loadable. When nothing is added, the ramp is
      easy reps — which is what warming up for a bodyweight movement has always been. */
-  const bwPart = (function(){ try{ return bwPartOf(e) || 0; }catch(err){ return 0; } })();
+  /* AND YOU CANNOT BE LIGHTER THAN YOU ARE.
+
+     Reported on weighted dips: "it's impossible for me to do that warmup, I weigh 139",
+     under a ramp of 60 / 95 / 130 lb. Those came out of the ordinary percentage ladder,
+     which ran because bwPartOf() said the movement did not count the lifter — the switch
+     for it had gone missing (see bwRemembered). The ramp was then taking percentages of
+     a number that was mostly a person.
+
+     The switch is worth repairing and it is not worth TRUSTING here, because the
+     impossibility does not depend on it: on an unassisted bodyweight movement there is
+     no rung below your own weight, whatever any table says. So where the movement counts
+     you by its nature, your weight is known, and the working number is at or above it —
+     which is what makes it a total rather than what is on the belt — the ramp runs over
+     the added load, exactly as it does when the switch is on.
+
+     A number BELOW bodyweight is read as the belt on its own and left alone: ramping 25 lb
+     on a dip belt to 15 is a warm-up somebody can actually do. */
+  const bwPart = (function(){
+    try{
+      const stamped = bwPartOf(e) || 0;
+      if(stamped > 0) return stamped;
+      const nm = (e && e.name) || "";
+      if(!isBodyweightMovement(nm)) return 0;
+      if(/\bassist/i.test(nrm(nm))) return 0;
+      const mine = bodyWeightNow() || 0;
+      return (mine > 0 && w >= mine) ? mine : 0;
+    }catch(err){ return 0; }
+  })();
   if(bwPart > 0){
     const added = Math.round((w - bwPart) * 10) / 10;
     if(!(added > 0)){
