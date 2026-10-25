@@ -7098,7 +7098,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.6";
+const APP_VERSION = "59.7";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -56601,7 +56601,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.6";
+const NEWS_FOR = "59.7";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56671,6 +56671,21 @@ const NEWS = [
   /* 59.6. Reported: a workout finished by accident with nothing in it, deleted from
      History, and then the day it had been could not be trained again — "even if I press
      choose my own day". */
+  /* 59.7. "Also still hawking me for the plate sizes every time." */
+  {k: "It stops asking for plates you already named",
+   s: ["There are two ways to tell Element 26 which plates you have: the chip that asks "
+     + "for your smallest one, and <b>Where you train</b>, which takes the exact sizes on "
+     + "the tree. The second is the better answer — and every piece of the plate maths "
+     + "only ever read the first.",
+       "So ticking your plate sizes and leaving the smallest-plate box empty read as "
+     + "though nothing had been said: no plate count under your sets, no rounding on a "
+     + "barbell, and the card asking for the plates back on every bar in every session. "
+     + "Answering in the fuller way made the app ask more, not less.",
+       "The smallest plate on a tree you have named is now your smallest plate, wherever "
+     + "the question is asked. If you already ticked your sizes, the nagging stops the "
+     + "moment this version loads. A backup can no longer unanswer it either — a setting "
+     + "the file never had does not overwrite one you have set."]},
+
   {k: "Deleting a session gives its day back",
    s: ["Delete a session from History and its checkmark cleared, but the rotation stayed "
      + "on the day AFTER it — so the day you had just freed up read as one the cycle had "
@@ -57593,7 +57608,11 @@ function loadStepFor(name){
      where roundLoadableOn() applies it. */
   if(eq === "dumbbell" || eq === "kettlebell") return p.dbStep > 0 ? p.dbStep : 0;
   // a bar takes a plate on each end, so the smallest change is two of the smallest plate
-  if(eq === "barbell" || eq === "smith") return p.plateStep > 0 ? p.plateStep * 2 : 0;
+  /* Read the same way as the plate count: a named tree answers this as well as the chip
+     does, and better. Without it, somebody who had ticked their plate sizes got no
+     rounding on a bar at all and an overload tip that asked them to go to Settings and
+     name the plates they had already named. */
+  if(eq === "barbell" || eq === "smith"){ const st = smallestPlate(); return st > 0 ? st * 2 : 0; }
   /* A stack is a stack: it moves in whole pins, and the only question is how big one is.
      Zero here meant no rounding at all, which is worse than a step that is occasionally
      the wrong size — a wrong-sized step still lands on a number somebody could try. */
@@ -57813,6 +57832,30 @@ function capToRack(w, name){
    worse than none, because you would have to check it. */
 const PLATE_SETS_LB = [45, 35, 25, 10, 5, 2.5, 1.25];
 const PLATE_SETS_KG = [25, 20, 15, 10, 5, 2.5, 1.25];
+/* THE SMALLEST PLATE YOU OWN, WHICHEVER WAY YOU SAID IT.
+
+   Reported as "still hawking me for the plate sizes every time", and it was: there are
+   two ways to answer that question and the plate maths only ever read one of them.
+
+     plateStep  is the chip answer — "my smallest plate is 2.5".
+     plates     is the full answer, given in Where you train — the exact sizes on the
+                tree, which is strictly MORE information and is what plateBreakdown()
+                uses in preference to the step once it gets that far.
+
+   Somebody who ticked their plate sizes had answered the question in its best form and
+   left plateStep null, so every reader of plateStep concluded nothing had been said:
+   plateBreakdown() returned null, the plate line vanished, and the card asking for the
+   plates came back on every barbell, in every session, for good. Answering it in the
+   fuller way made the app ask more, not less.
+
+   One function now, and the smallest plate on a named tree IS your smallest plate. */
+function smallestPlate(){
+  const p = trainPrefs();
+  if(p.plateStep > 0) return p.plateStep;
+  const named = Array.isArray(p.plates)
+    ? p.plates.map(Number).filter(x=> isFinite(x) && x > 0) : [];
+  return named.length ? Math.min.apply(null, named) : 0;
+}
 function plateBreakdown(total, name){
   const p = trainPrefs();
   const eq = equipmentOf(name);
@@ -57831,7 +57874,7 @@ function plateBreakdown(total, name){
   let perSide = (w - barW) / 2;
   if(perSide < 0) return null;                  // lighter than the empty bar
   if(perSide === 0) return {bar: barW, plates: [], perSide: 0, exact: true};
-  const step = p.plateStep > 0 ? p.plateStep : 0;
+  const step = smallestPlate();
   if(!step) return null;                        // no plate collection named
   /* WHAT IS ACTUALLY ON THE TREE. The standard set filtered by the smallest plate you own
      is right for most gyms and wrong for the ones missing a 35, or with nothing between a
@@ -57874,7 +57917,7 @@ function plateGapFor(name, total){
   const miss = [];
   if(p.barMode === "total" && !(implementWeight(name) > 0))
     miss.push(eq === "smith" ? "what your Smith carriage weighs" : "what your bar weighs");
-  if(!(p.plateStep > 0)) miss.push("which plates you have");
+  if(!(smallestPlate() > 0)) miss.push("which plates you have");
   return miss.length ? {miss, eq} : null;
 }
 /* WHAT IS MISSING, NOT "NOTHING IS SET UP".
@@ -57895,11 +57938,11 @@ function plateGapHTML(gap, total, name){
   const p = trainPrefs();
   const kg = inKg();
   const haveBar = !(gap.miss.some(x=> /bar|carriage/.test(x)));
-  const needPlates = !(p.plateStep > 0);
+  const needPlates = !(smallestPlate() > 0);
   const known = [];
   if(haveBar && implementWeight(name) > 0)
     known.push((gap.eq === "smith" ? "carriage" : "bar") + " " + fmtLoad(implementWeight(name)));
-  if(!needPlates && p.plateStep > 0) known.push("plates from " + fmtLoad(p.plateStep));
+  if(!needPlates) known.push("plates from " + fmtLoad(smallestPlate()));
   return `<div class="pl-gap-s">No plate count for ${esc(fmtLoad(total))} yet${
       known.length ? " \u2014 " + esc(joinList(known)) + " " + (known.length > 1 ? "are" : "is")
                      + " set, but Element 26 still needs " + esc(joinList(gap.miss)) : ""}.</div>
@@ -62011,9 +62054,29 @@ function mergeBackup(into, d){
   ["restDays","restLog","skipLog","restDeleted","restAuto","deleted","planLog"].forEach(k=>{
     if(d[k]) into[k] = uniqDates(into[k], d[k]);
   });
-  ["checkins","exAliases","stalls","asymRetired","prefs","exMuscles","rpeSugSkip","maxes","bodyLog"].forEach(k=>{
+  ["checkins","exAliases","stalls","asymRetired","exMuscles","rpeSugSkip","maxes","bodyLog"].forEach(k=>{
     if(d[k] && typeof d[k] === "object") into[k] = Object.assign({}, into[k]||{}, d[k]);
   });
+  /* PREFS ARE NOT A PLAIN MERGE, FOR THE REASON mergeDiskInto() SPELLS OUT.
+
+     PREF_DEFAULTS seeds every preference into the object, so "never answered" is an
+     explicit null rather than an absent key — and Object.assign let a null from the file
+     beat a real answer on this device. Restoring a backup taken before you told the app
+     your smallest plate put plateStep back to null, and the question came back in the
+     middle of a working set.
+
+     A value from the file wins; a null does not overwrite an answer. Same rule, same
+     trade: a deliberate CLEAR no longer travels in a backup, which is a setting to change
+     twice rather than an answer silently lost. */
+  if(d.prefs && typeof d.prefs === "object"){
+    const merged = Object.assign({}, into.prefs || {});
+    Object.keys(d.prefs).forEach(k=>{
+      const v = d.prefs[k];
+      if(v !== null && v !== undefined) merged[k] = v;
+      else if(!(k in merged)) merged[k] = v;
+    });
+    into.prefs = merged;
+  }
   /* The plan and everything that describes it comes across whole or not at all: half of
      one programme and half of another is not a programme. */
   if(d.program && typeof d.program === "object"){
