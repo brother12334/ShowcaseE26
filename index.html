@@ -1587,6 +1587,19 @@ button.warm-set{cursor:pointer;font:inherit;border:inherit}
 .bw-led .bw-tot{margin-left:auto;font:var(--fs-1) var(--mono);color:var(--faint);white-space:nowrap}
 .bw-led .bw-sub{margin-top:6px;font-size:var(--fs-2);color:var(--dim)}
 .bw-led .bw-sub b{color:var(--text);font-weight:400}
+/* The off switch reads as part of the sentence, not as a button parked in it. */
+.bw-led .bw-you{font:inherit;color:var(--dim);border-bottom:1px dotted var(--line);padding:0}
+.bw-led .bw-you:hover{color:var(--text)}
+/* The bw+ in front of the weight box. Not a separate control: it cannot be focused or
+   tapped, it is the box's own label sitting inside it, and the number keeps the room it
+   needs — which the old total did not have. */
+.wx-wrap{position:relative;display:block}
+.wx-pre{position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none;
+  font:var(--fs-2) var(--mono);color:var(--acc);letter-spacing:.02em}
+.set .wx-wrap input{width:100%;padding-left:34px;padding-right:6px;text-align:left}
+/* Gym mode's boxes are bigger, so the label in front of them has to be. */
+.card.focus .set .wx-wrap input{padding-left:40px;padding-right:8px}
+.card.focus .wx-pre{left:11px;font-size:var(--fs-3)}
 .warm-pl{font:var(--fs-3) var(--mono);color:var(--dim);line-height:1.45;
   border:1px dashed var(--line);border-radius:var(--r-sm);padding:8px 10px;margin:8px 0 0}
 .warm-set.warm-pl-on{box-shadow:inset 0 0 0 1px var(--acc);color:var(--text)}
@@ -7085,7 +7098,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.4";
+const APP_VERSION = "59.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -46092,7 +46105,10 @@ function bind(){
          thumb on the wrong key, and either one poisons every average, every PR and every
          recommendation that reads this exercise afterwards. Asked once, before it is
          believed, with the number in the question. */
-      const odd = insaneValue(f, el.value, entryS, ei, si);
+      /* The box may be speaking bw+, so everything downstream of here — the sanity
+         check, the stored value, the undo — works in the number the SET holds. */
+      const val = (f === "weight") ? bwBoxStore(el) : el.value;
+      const odd = insaneValue(f, val, entryS, ei, si);
       if(odd){
         const ok = await askConfirm({
           title: "Is that right?",
@@ -46100,15 +46116,16 @@ function bind(){
           meta: odd.meta || "",
           yes: "Yes, that's right", no: "Let me fix it"});
         if(!ok){
-          el.value = prev == null ? "" : prev;
+          el.value = (f === "weight" && el.dataset.bwadd)
+            ? bwBoxText(Number(el.dataset.bwadd), prev) : (prev == null ? "" : prev);
           el.focus();
           if(el.select) try{ el.select(); }catch(e){}
           return;
         }
-        SANE_OK.add(ei + ":" + si + ":" + f + ":" + el.value);
+        SANE_OK.add(ei + ":" + si + ":" + f + ":" + val);
       }
-      st[f] = el.value;
-      if(String(el.value).trim() !== "") markPriorDone(ei, si);
+      st[f] = val;
+      if(String(val).trim() !== "") markPriorDone(ei, si);
       // Typing a heavier weight (or more reps) onto an already-ticked set is a PR path
       // the old code never looked at. Re-check the whole exercise, then surface it.
       if(st.done && (f==="weight" || f==="reps")){
@@ -46525,7 +46542,8 @@ function bind(){
     if(!S.active) return;
     document.querySelectorAll(".set input[data-e], .set select[data-e]").forEach(el=>{
       const {e,s,f} = el.dataset;
-      if(S.active.entries[e] && S.active.entries[e].sets[s]) S.active.entries[e].sets[s][f] = el.value;
+      const v = (f === "weight") ? bwBoxStore(el) : el.value;
+      if(S.active.entries[e] && S.active.entries[e].sets[s]) S.active.entries[e].sets[s][f] = v;
     });
     harvestSubs();
     const n = $("#sessNote");
@@ -56562,7 +56580,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.4";
+const NEWS_FOR = "59.5";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56627,6 +56645,22 @@ const NEWS = [
      bw+20 notation invited, read off a photograph of the workout tab. */
   /* 59.4. "I don't like how it says like the full weight is long and confusing, maybe it
      should say bw+" — with the old equation circled. */
+  /* 59.5. The weight boxes circled: "I like this one" (the bw+ box) and "there's no
+     point of this button it's automatic". */
+  {k: "The weight box says bw+ too",
+   s: ["On a movement that counts you, the box asked for the whole load — <b>169.8</b>, "
+     + "most of which is you, clipped to <b>169.</b> in the space the column has. It now "
+     + "asks for the one number you choose, with a fixed <b>bw+</b> in front of it: type "
+     + "<b>30</b> for the dumbbells in your hands.",
+       "<b>What is stored has not changed.</b> The set still holds you plus what you "
+     + "added, because that is the load the leg is under and every figure in the app is "
+     + "worked out from it. Assisted movements keep the old box, since those really are "
+     + "your weight minus the machine.",
+       "The <b>✓ you (139.8 lb)</b> button at the foot of the card has gone. Once a lift "
+     + "counts you it is switched on again every session, so the button was restating "
+     + "what the card now says in its largest text. Not counting yourself on a given day "
+     + "is still one tap — it is the <b>you 139.8</b> on the load line."]},
+
   {k: "The bodyweight line leads with bw+",
    s: ["It used to read <b>bw+30 lb · 169.8 lb = you 139.8 + 30 lb in your hands · 15 lb a "
      + "hand</b>: four numbers, all the same size, with the only one you chose buried in "
@@ -57941,6 +57975,45 @@ function bwApply(e, on, wNow){
   }
   return true;
 }
+/* =====================================================================
+   THE WEIGHT BOX ON A MOVEMENT THAT COUNTS YOU
+
+   "The full weight is long and confusing, maybe it should say bw+", with the boxes
+   circled. They held 169.8 — the whole load, most of which is you — and clipped to
+   "169." in the width the column has.
+
+   The box now asks for the one number you choose: what is in your hands. A fixed
+   <b>bw+</b> sits in front of it saying so, and what it stores is unchanged — you plus
+   that, because the total is the load the leg is under and every figure in this app is
+   computed from it. Two functions do the conversion and nothing else is allowed to:
+   bwBoxText going out to the box, bwBoxStore coming back in.
+
+   ASSISTED WORK IS LEFT ON THE OLD BOX. A counterweighted pull-up is genuinely your
+   weight MINUS the machine, so "bw+" in front of its box would be a lie, and a negative
+   number after it is not something anybody wants to type. */
+function bwBoxOn(e){
+  if(!e || !entryBwOn(e)) return 0;
+  try{ if(/\bassist/i.test(nrm(e.name || ""))) return 0; }catch(err){ return 0; }
+  return entryBwOn(e);
+}
+/* The stored total, as the box should read it: what you added. */
+function bwBoxText(bw, total){
+  if(!(bw > 0)) return total == null ? "" : String(total);
+  const t = parseFloat(total);
+  if(!isFinite(t)) return "";
+  return String(Math.round((t - bw) * 10) / 10);
+}
+/* And back: what was typed, as the set should store it. A blank box is still a blank
+   set — "you, and nothing decided yet" is not the same claim as "you". */
+function bwBoxStore(el){
+  const bw = Number(el && el.dataset && el.dataset.bwadd);
+  const raw = String((el && el.value) == null ? "" : el.value).trim();
+  if(!(isFinite(bw) && bw > 0)) return el ? el.value : "";
+  if(raw === "") return "";
+  const n = parseFloat(raw);
+  if(!isFinite(n)) return el.value;
+  return String(Math.round((bw + n) * 10) / 10);
+}
 /* A set added AFTER the switch was thrown still has to carry it, or one card ends up with
    two kinds of number in it. */
 /* The button, on movements where counting yourself is the right question to ask and
@@ -57949,14 +58022,22 @@ function bwApply(e, on, wNow){
 function bwButtonHTML(e, ei){
   if(!e || !isBodyweightMove(e.name)) return "";
   const on = entryBwOn(e);
-  const w = on || bodyWeightNow();
+  /* ALREADY ON IS NOT A QUESTION. Reported with the button circled: "there's no point of
+     this button it's automatic" — and that is exactly right once the switch has been
+     thrown for a movement, because startWorkout() throws it again every session. It then
+     sat at the bottom of the card restating something the card already says twice over,
+     in the biggest text on it: bw+30, you 139.8.
+
+     The OFF switch is not removed, because deciding not to count yourself on a day is a
+     real decision. It moves onto the words that state the fact — "you 139.8" on the load
+     line is the control — so there is one place saying it instead of two. */
+  if(on) return "";
+  const w = bodyWeightNow();
   if(!(w > 0)){
     return `<button class="btn ghost small" data-bwneed="${ei}">+ my weight</button>`;
   }
-  return `<button class="btn ghost small${on?" on":""}" data-bw="${ei}"
-    aria-pressed="${on?"true":"false"}">${on
-      ? "\u2713 you (" + r1(on) + " " + unitWord() + ")"
-      : "+ my weight (" + r1(w) + " " + unitWord() + ")"}</button>`;
+  return `<button class="btn ghost small" data-bw="${ei}" aria-pressed="false">${
+    "+ my weight (" + r1(w) + " " + unitWord() + ")"}</button>`;
 }
 function bwSeedSet(e, st){
   const w = entryBwOn(e);
@@ -59274,8 +59355,16 @@ function setRowHTML(en, ei, si, last, idxLabel){
                     : "Mark as a warm-up"} \u2014 warm-ups do not count toward your volume"
         >W</button>`;
     })()}</span>
-    <input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight" value="${esc(st.weight??"")}" placeholder="${esc(String(planLoadPh(en, last, si)))}"${
-      planLoadPh(en, last, si) === planLoadFor(en, si) && planLoadFor(en, si) !== "" ? ` class="ph-plan"` : ""}>
+    ${(()=>{
+      const bwB = bwBoxOn(en);
+      const ph = planLoadPh(en, last, si);
+      const cls = (ph === planLoadFor(en, si) && planLoadFor(en, si) !== "") ? " ph-plan" : "";
+      const box = `<input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight"${
+        bwB ? ` data-bwadd="${esc(String(bwB))}"` : ""} value="${
+        esc(bwB ? bwBoxText(bwB, st.weight) : (st.weight ?? ""))}" placeholder="${
+        esc(bwB ? bwBoxText(bwB, ph) : String(ph))}"${cls ? ` class="${cls.trim()}"` : ""}>`;
+      return bwB ? `<span class="wx-wrap"><span class="wx-pre" aria-hidden="true">bw+</span>${box}</span>` : box;
+    })()}
     ${rx.rebuild && rx.rebuild.top != null && !st.done
       /* THE TARGET, IN THE BOX THAT ASKS FOR IT. "10" alone never said what 10 was for.
          Absolutely positioned so the caption cannot change the row's height — a rep box
@@ -59410,7 +59499,17 @@ function plateLineHTML(en, last){
       <div class="bw-head"><span class="bw-big">${esc(bwLoadText(bw, want))}</span><span
         class="bw-unit">${esc(unitWord())}</span><span class="bw-tot">${
         esc(fmtLoad(want))} in the box</span></div>
-      <div class="bw-sub">you ${esc(r1(bw))} + ${added > 0.05
+      <div class="bw-sub">${(()=>{
+        /* The off switch, on the words that state the fact rather than on a button of
+           its own. Only inside a live session, where there is an entry to turn off. */
+        const eiB = entryIndexOf(en);
+        const youSay = "you " + r1(bw);
+        return eiB >= 0
+          ? `<button type="button" class="linklike bw-you" data-bw="${eiB}"
+              title="This lift counts your bodyweight. Tap to stop counting it today."
+              aria-pressed="true">${esc(youSay)}</button>`
+          : esc(youSay);
+      })()} + ${added > 0.05
         ? `<b>${esc(fmtLoad(added))}</b> ` + esc(addedLoadWhere(en.name))
           + (hand ? " \u00b7 " + esc(hand) : "")
         : "nothing added"}</div></div>`;

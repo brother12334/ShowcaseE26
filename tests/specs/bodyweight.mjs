@@ -71,11 +71,16 @@ console.log("2 - ONE PRESS PUTS YOUR WEIGHT ON EVERY SET");
     const en = S.active.entries[ei];
     return {weights: en.sets.map(s=> s.weight), on: entryBwOn(en),
             remembered: bwRemembered("Weighted Chest Dip"),
-            label: (document.querySelector('[data-bw="'+ei+'"]')||{}).textContent || ""};
+            label: (document.querySelector('[data-bw="'+ei+'"]')||{}).textContent || "",
+            onLine: !!(document.querySelector('[data-bw="'+ei+'"]')||{}).closest
+                    && !!document.querySelector('[data-bw="'+ei+'"]').closest('.bw-led')};
   });
   ck("every set carries it", r.weights.join(",") === "185,185,185", r.weights.join(","));
   ck("the entry records the figure used", r.on === 185, String(r.on));
-  ck("the button says it is on", /you \(185/.test(r.label), r.label);
+  /* 59.5: once it is on there is no question left to ask, so the button at the foot of
+     the card goes and the OFF switch is the "you 185" on the load line itself. */
+  ck("and the switch is the 'you 185' on the load line",
+     r.onLine && /^you 185$/.test(r.label.trim()), JSON.stringify({label: r.label.trim(), onLine: r.onLine}));
   ck("and it is remembered for next time", r.remembered, String(r.remembered));
 }
 

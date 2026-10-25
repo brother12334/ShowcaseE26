@@ -81,12 +81,21 @@ console.log("4 - PRESSING IT PUTS YOUR WEIGHT ON EVERY SET");
     document.querySelector("[data-bw]").click();
     await new Promise(r2=> setTimeout(r2, 120));
     const en = S.active.entries[0];
+    const sw = document.querySelector("[data-bw]");
     return {on: entryBwOn(en), weights: (en.sets||[]).map(s=> s.weight),
-            txt: (document.querySelector("[data-bw]")||{}).textContent};
+            txt: sw ? sw.textContent.trim() : null,
+            onLine: !!(sw && sw.closest(".bw-led")),
+            bottomBtn: [...document.querySelectorAll(".card.ex .btn[data-bw]")].length};
   });
   ck("it is on, stamped at the weight it used", r.on === 180, String(r.on));
   ck("and every set carries it", r.weights.join(",") === "180,180,180", r.weights.join(","));
-  ck("the button now says it is counting you", /✓/.test(r.txt || ""), (r.txt||"").trim());
+  /* ONCE IT IS ON, IT IS NOT A QUESTION ANY MORE. Reported as "there's no point of this
+     button it's automatic", which is true: the switch is thrown again by startWorkout()
+     every session. The button at the foot of the card goes, and the OFF switch moves
+     onto the words on the load line that state the fact. */
+  ck("the switch is now the 'you 180' on the load line", r.onLine && /^you 180$/.test(r.txt || ""),
+     JSON.stringify({txt: r.txt, onLine: r.onLine}));
+  ck("and the button at the bottom of the card is gone", r.bottomBtn === 0, String(r.bottomBtn));
 }
 
 console.log("5 - ADDING WEIGHT TO THE BAR STILL ADDS TO IT");
