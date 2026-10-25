@@ -7098,7 +7098,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.7";
+const APP_VERSION = "59.8";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -48717,7 +48717,7 @@ function startWorkout(wid){
      each session, so it tracks what you actually weigh rather than what you weighed the
      day you turned it on. */
   (S.active.entries || []).forEach(en=>{
-    if(bwRemembered(en.name) && isBodyweightMove(en.name)) bwApply(en, true);
+    if(bwRemembered(en.name) && isBodyweightMove(en.name)) bwApply(en, true, 0, {seedBlank: false});
   });
   S.active.planSnap = planSnapOf(slots);
   S.active.planSig  = JSON.stringify(S.active.planSnap);
@@ -56601,7 +56601,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.7";
+const NEWS_FOR = "59.8";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56672,6 +56672,24 @@ const NEWS = [
      History, and then the day it had been could not be trained again — "even if I press
      choose my own day". */
   /* 59.7. "Also still hawking me for the plate sizes every time." */
+  /* 59.8. "Where's the updated body weight exercise thing?" — on a weighted dips card
+     whose numbers plainly counted the lifter, drawn as a plain load. */
+  {k: "Bodyweight lifts remember themselves",
+   s: ["If a lift that counts you came up as a plain load — <b>144.6 lb</b> on weighted "
+     + "dips instead of <b>bw+5</b> — the switch for that movement had gone missing. It "
+     + "lived in one small table that a backup never carried, so a restore turned every "
+     + "one of them off while your sessions and your plan kept numbers that still "
+     + "included you.",
+       "Your log is the record that always travels, and it already knows: each logged set "
+     + "carries the figure that was added. So where nothing has been said about a "
+     + "movement, the last session of it answers — counted then, counted now. Switching "
+     + "it off is recorded as off and is not overruled, and the table itself now travels "
+     + "in a backup like every other answer.",
+       "One related fix: starting a session no longer writes your bodyweight into the "
+     + "empty rows. On a lift that counts you the plan\u2019s load is already a total, and "
+     + "overwriting it lost whatever was on the belt — 144.6 became 139.6. The rows stay "
+     + "empty and offer the planned load as <b>bw+5</b>."]},
+
   {k: "It stops asking for plates you already named",
    s: ["There are two ways to tell Element 26 which plates you have: the chip that asks "
      + "for your smallest one, and <b>Where you train</b>, which takes the exact sizes on "
@@ -58017,20 +58035,55 @@ function entryBwOn(e){
 }
 /* Remembered per movement, so a switch thrown once does not have to be thrown again every
    session. It is still per ENTRY in the log: what a session recorded is what it recorded. */
+/* WHAT THE LOG ALREADY KNOWS, BECAUSE THE SIDE-TABLE CAN GO MISSING.
+
+   Reported as "where's the updated bodyweight exercise thing?" on a card whose numbers
+   plainly counted the lifter — 144.6 lb on weighted dips at a bodyweight of 139.6, and
+   last time's set said the same — drawn as a plain load with no bw+ anywhere on it.
+
+   The switch was off. Everything about counting yourself hangs off bwRemembered(), and
+   that read ONE place: S.bwEx, a per-movement table that is written when the switch is
+   pressed and lives nowhere else. It was not in BACKUP_FIELDS, so a backup never carried
+   it and a restore wiped it; and nothing else in the app could put it back. Lose that
+   one object and every bodyweight movement quietly reverts to a plain total, while the
+   sessions and the plan keep numbers that still include you — which is the screenshot.
+
+   So the table is no longer the only witness. A session entry carries bwOn, the figure
+   that was added, stamped at the moment it was added; sessions travel in every backup,
+   every sync and every export, because they are the log. If nothing has been said about
+   a movement, the last session of it answers: counted then, counted now.
+
+   SAID is now distinct from UNSAID. Turning the switch off used to delete the key, which
+   under the rule above would read as "nothing said" and let the log switch it straight
+   back on. Off is recorded as off. An older save that deleted its key falls through to
+   the log, which is exactly the repair this is for. */
+function bwLoggedOn(name){
+  try{
+    const list = S.sessions || [];
+    for(let i = list.length - 1; i >= 0; i--){
+      const hits = occurrencesIn(list[i], name);
+      if(!hits.length) continue;
+      return hits.some(en=> entryBwOn(en) > 0);
+    }
+  }catch(e){}
+  return false;
+}
 function bwRemembered(name){
   const k = nrm(name);
-  return !!(S.bwEx && S.bwEx[k]);
+  const said = S.bwEx ? S.bwEx[k] : undefined;
+  if(said === 1) return true;
+  if(said === 0) return false;
+  return bwLoggedOn(name);
 }
 function bwRemember(name, on){
   if(!S.bwEx || typeof S.bwEx !== "object") S.bwEx = {};
-  const k = nrm(name);
-  if(on) S.bwEx[k] = 1; else delete S.bwEx[k];
+  S.bwEx[nrm(name)] = on ? 1 : 0;
 }
 /* Turning it on adds your bodyweight to every set; turning it off takes back exactly what
    was added. A set left blank becomes your bodyweight on its own, and goes back to blank.
    Idempotent in both directions, because a button people press in a gym gets pressed
    twice. */
-function bwApply(e, on, wNow){
+function bwApply(e, on, wNow, opts){
   if(!e) return false;
   const has = entryBwOn(e);
   if(on && has) return false;
@@ -58038,9 +58091,20 @@ function bwApply(e, on, wNow){
   if(on){
     const w = (wNow > 0) ? wNow : bodyWeightNow();
     if(!(w > 0)) return false;
+    /* A BLANK SET IS NOT A SET AT ZERO, AT THE START OF A SESSION.
+
+       Pressing the switch by hand on a card you are filling in turns a blank row into
+       "you, and nothing added", which is the right reading of a deliberate press. Doing
+       the same thing to a fresh card throws the prescription away: the plan's load for a
+       movement that counts you is already a total, and writing bare bodyweight into every
+       row replaced 144.6 with 139.6 and lost the 5 lb on the belt. Left blank, the
+       placeholder carries the planned total and says it as bw+5. */
+    const seedBlank = !(opts && opts.seedBlank === false);
     (e.sets || []).forEach(st=>{
       const cur = parseFloat(st.weight);
-      st.weight = String(Math.round(((isFinite(cur) && cur > 0 ? cur : 0) + w) * 10) / 10);
+      const live = isFinite(cur) && cur > 0;
+      if(!live && !seedBlank) return;
+      st.weight = String(Math.round(((live ? cur : 0) + w) * 10) / 10);
     });
     e.bwOn = w;
   } else {
@@ -60889,6 +60953,11 @@ const BACKUP_FIELDS = [
      override are this-moment state; and sync carries the old gist token, which
      syncSafeState() strips on purpose and must never travel in a file. */
   "pushOn","pushAsked","pushNever","ciAsked","sleepGuard","seenNews","eatPhase",
+  /* WHICH MOVEMENTS COUNT YOU. One object, per movement, written when the switch is
+     thrown — and left out of this list, so a backup dropped it and a restore turned
+     every one of them off while the sessions it restored kept numbers that still
+     counted the lifter. */
+  "bwEx",
   /* The volume-model stamp and its one-time summary. Carried deliberately, unlike the
      one-shot markers above: re-running the migration against already-migrated
      calibrations would re-base them a second time, so the stamp has to travel with

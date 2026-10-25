@@ -213,13 +213,20 @@ console.log("10 - A CHOICE MADE ONCE HOLDS FOR THE NEXT SESSION");
     if(!wid) return {none:true};
     startWorkout(wid); hideModal();
     const en = (S.active.entries||[]).find(e=> /pull-?up/i.test(e.name));
-    return {on: en && entryBwOn(en), weights: en && en.sets.map(s=> s.weight).join(",")};
+    return {on: en && entryBwOn(en), weights: en && en.sets.map(s=> s.weight).join(","),
+            add: en ? bwBoxOn(en) : null};
   });
   if(r.none){ ck("no pull-up day in this programme to test with", true, ""); }
   else {
     ck("the next session starts with it already on", r.on === 180, String(r.on));
     ck("and the figure is today's weight, not the day you switched it on",
-       /180/.test(r.weights || ""), r.weights);
+       r.on === 180 && r.add === 180, JSON.stringify({on: r.on, add: r.add}));
+    /* 59.8: a fresh card keeps the plan's own load, which for a movement that counts you
+       is already a total. Writing bare bodyweight into every empty row threw the
+       prescription away — 144.6 became 139.6 and the 5 lb on the belt was gone. The rows
+       stay empty and their placeholders carry the planned load, spoken as bw+. */
+    ck("without bodyweight being written over the empty rows",
+       (r.weights || "").replace(/,/g, "") === "", JSON.stringify(r.weights));
   }
 }
 
