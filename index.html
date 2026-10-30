@@ -7098,7 +7098,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "59.9";
+const APP_VERSION = "60.0";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -56601,7 +56601,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "59.9";
+const NEWS_FOR = "60.0";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56676,6 +56676,25 @@ const NEWS = [
      whose numbers plainly counted the lifter, drawn as a plain load. */
   /* 59.9. "It's impossible for me to do that warmup, I weigh 139" — weighted dips,
      warming up at 80 lb. */
+  /* 60.0. "For any bodyweight exercise the bodyweight look should automatically be
+     applied, you shouldn't have to add you, and also remove that button that says
+     +you." */
+  {k: "Bodyweight lifts just are bodyweight lifts",
+   s: ["Counting yourself used to be something you switched on, behind a <b>+ my weight</b> "
+     + "button at the foot of the card. A dip is a dip whether or not anybody found that "
+     + "button — and what you got for not finding it was <b>149.6 lb</b>, which is the one "
+     + "reading nobody wants on the movement where the number is mostly a person.",
+       "Dips, pull-ups, chin-ups, split squats, lunges and the rest now count you from "
+     + "the first session, with no button anywhere. The box asks for what you add, the "
+     + "line reads <b>bw+9.8</b>, and the warm-up ramps what is on the belt.",
+       "Not counting yourself on a lift is still your call and still one tap — the "
+     + "<b>you 139.8</b> on the load line — and it is remembered. A lift you have switched "
+     + "off says so, with one tap back. With no weigh-in on file the card says which fact "
+     + "it is missing instead of going quiet. Assisted machines are left alone, since "
+     + "those take weight off rather than adding it.",
+       "An old number written down as the belt alone — <b>25</b> on a dip — is read as the "
+     + "25 it is, rather than as a dip done by somebody a fifth of your size."]},
+
   {k: "No warm-up lighter than you are",
    s: ["A warm-up rung of <b>80 lb</b> on weighted dips is not a light set, it is not a "
      + "set at all: the lightest dip available is you, and you cannot take sixty pounds "
@@ -58082,12 +58101,65 @@ function bwLoggedOn(name){
   }catch(e){}
   return false;
 }
+/* AND NOW IT IS NOT OPT-IN. Asked for directly: "for any bodyweight exercise the
+   bodyweight look should automatically be applied, you shouldn't have to add you."
+
+   The note above argues the opposite and was written before the app could say bw+30. It
+   is worth reading next to what it actually produced: a dip is a dip whether or not
+   anybody pressed a button, so the opt-in bought nothing except cards that described the
+   same movement two different ways depending on a switch most people never found — and
+   a plain "144.6 lb", which is the reading nobody wants, was what you got for not
+   finding it.
+
+   What the note gets right is that only the lifter knows whether a set was a full dip or
+   half of one off a band. That is a reason to let them turn it OFF, which they can, on
+   the load line itself; it is not a reason to make everybody turn it on.
+
+   Assisted work is excluded because its machine takes weight OFF, so counting you and
+   then subtracting is the wrong shape for it, and nothing can happen at all until there
+   is a weigh-in to count. */
+function bwAutoCount(name){
+  if(!isBodyweightMove(name)) return false;
+  try{ if(/\bassist/i.test(nrm(name || ""))) return false; }catch(e){ return false; }
+  return (bodyWeightNow() || 0) > 0;
+}
+/* WHAT AN OLD NUMBER ON A COUNTING MOVEMENT MEANS.
+
+   Before the counting was automatic, plenty of dips and pull-ups were written down as
+   the belt alone — "25" for a movement whose lifter weighs 139.6. Read as a total, 25 is
+   a dip done by somebody a fifth of your size, and every reader of it says something
+   absurd: a warm-up of bodyweight-only for a loaded set, a load line of bw−114.6.
+
+   A number at or above your bodyweight is a total that counts you. A number below it is
+   the part you added, because nothing else is possible. This is the same inference the
+   warm-up ramp makes and it belongs in one place. Typed SET values are deliberately not
+   put through it — see the plate line, which offers to fix those rather than guessing,
+   because a set is something you wrote and a plan is something the app wrote. */
+function bwTotalOf(bw, n){
+  const v = parseFloat(n);
+  if(!(bw > 0) || !isFinite(v) || !(v > 0)) return v;
+  return v >= bw ? v : Math.round((bw + v) * 10) / 10;
+}
+/* A movement that WOULD be counted automatically, held up by the one missing fact.
+   Not asked where somebody has switched the counting off: they have answered. */
+function bwAutoAsk(e){
+  const name = (e && e.name) || "";
+  if(!isBodyweightMove(name)) return false;
+  try{ if(/\bassist/i.test(nrm(name))) return false; }catch(err){ return false; }
+  if(S.bwEx && S.bwEx[nrm(name)] === 0) return false;
+  return !((bodyWeightNow() || 0) > 0);
+}
+/* "Dips", "A pull-up" — the movement as the subject of a sentence. */
+function exNounFor(name){
+  const n = String(name || "").trim();
+  return n || "This lift";
+}
 function bwRemembered(name){
   const k = nrm(name);
   const said = S.bwEx ? S.bwEx[k] : undefined;
   if(said === 1) return true;
-  if(said === 0) return false;
-  return bwLoggedOn(name);
+  if(said === 0) return false;              // switched off by hand, and it stays off
+  return bwAutoCount(name) || bwLoggedOn(name);
 }
 function bwRemember(name, on){
   if(!S.bwEx || typeof S.bwEx !== "object") S.bwEx = {};
@@ -58179,23 +58251,22 @@ function bwBoxStore(el){
    into six boxes should say 85 first. */
 function bwButtonHTML(e, ei){
   if(!e || !isBodyweightMove(e.name)) return "";
-  const on = entryBwOn(e);
-  /* ALREADY ON IS NOT A QUESTION. Reported with the button circled: "there's no point of
-     this button it's automatic" — and that is exactly right once the switch has been
-     thrown for a movement, because startWorkout() throws it again every session. It then
-     sat at the bottom of the card restating something the card already says twice over,
-     in the biggest text on it: bw+30, you 139.8.
+  /* "REMOVE THAT BUTTON THAT SAYS +YOU." It was the way in to a decision that is no
+     longer a decision: a movement that counts you counts you, from the first session,
+     without being asked. What is left for it to say is "turn this on", which the app has
+     already done, and it said that at the foot of the card under numbers that were
+     already speaking bw+.
 
-     The OFF switch is not removed, because deciding not to count yourself on a day is a
-     real decision. It moves onto the words that state the fact — "you 139.8" on the load
-     line is the control — so there is one place saying it instead of two. */
-  if(on) return "";
-  const w = bodyWeightNow();
-  if(!(w > 0)){
-    return `<button class="btn ghost small" data-bwneed="${ei}">+ my weight</button>`;
-  }
-  return `<button class="btn ghost small" data-bw="${ei}" aria-pressed="false">${
-    "+ my weight (" + r1(w) + " " + unitWord() + ")"}</button>`;
+     The row it sat in keeps + set and − set. Turning the counting OFF is still one tap,
+     on the "you 139.8" that states it on the load line — the same place it has been
+     since 59.5 — and the weigh-in nudge moves onto the load line too, where the absence
+     is what shows (see bwAutoAsk). */
+  /* Every state of it now has a home on the load line: counted says so and is the way
+     off, switched off says so and is the way back on, and no weigh-in says which fact
+     is missing. Nothing is left for a button in the set controls to do, on any movement
+     — assisted work included, which the automatic rule leaves alone because its machine
+     takes weight OFF. */
+  return "";
 }
 function bwSeedSet(e, st){
   const w = entryBwOn(e);
@@ -58416,7 +58487,10 @@ function warmupPlan(e, kind, ctx){
     }catch(err){ return 0; }
   })();
   if(bwPart > 0){
-    const added = Math.round((w - bwPart) * 10) / 10;
+    /* Same reading as the load line: a working number below your own weight is the belt,
+       not a total, so the ramp runs over it as the added load it is. */
+    const wTot = bwTotalOf(bwPart, w);
+    const added = Math.round((wTot - bwPart) * 10) / 10;
     if(!(added > 0)){
       return kind === "full"
         ? [{label:"bodyweight", reps:"8", bwAdd:true}, {label:"bodyweight", reps:"5", bwAdd:true}]
@@ -59547,7 +59621,7 @@ function setRowHTML(en, ei, si, last, idxLabel){
       const box = `<input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight"${
         bwB ? ` data-bwadd="${esc(String(bwB))}"` : ""} value="${
         esc(bwB ? bwBoxText(bwB, st.weight) : (st.weight ?? ""))}" placeholder="${
-        esc(bwB ? bwBoxText(bwB, ph) : String(ph))}"${cls ? ` class="${cls.trim()}"` : ""}>`;
+        esc(bwB ? bwBoxText(bwB, bwTotalOf(bwB, ph)) : String(ph))}"${cls ? ` class="${cls.trim()}"` : ""}>`;
       return bwB ? `<span class="wx-wrap"><span class="wx-pre" aria-hidden="true">bw+</span>${box}</span>` : box;
     })()}
     ${rx.rebuild && rx.rebuild.top != null && !st.done
@@ -59640,10 +59714,41 @@ function plateLineHTML(en, last){
      hands, and the one figure somebody standing at the rack needs is the second one. It
      was the only thing on the screen that could not be read off anywhere. */
   const bw = entryBwOn(en);
+  /* THE ONE THING THAT STOPS IT BEING AUTOMATIC, SAID WHERE IT SHOWS.
+
+     Counting you needs a figure to count, and with no weigh-in on file there is none.
+     The old "+ my weight" button carried that message at the foot of the card; it is
+     gone, and the absence would otherwise be silent — a dip card that looks like every
+     other dip card and simply never speaks bw+. So the load line says it, in the place
+     the bw+ line would have been, and the tap goes where the answer is. */
+  /* SWITCHED OFF HAS TO BE REVERSIBLE. With the button gone, a movement somebody turned
+     the counting off on would have no way back — the switch lives on a line that is only
+     drawn while it is on. So the off state gets its own quiet line, in the same place,
+     saying what it is and offering the one tap back. */
+  if(!bw && bwAutoCount(en.name) && S.bwEx && S.bwEx[nrm(en.name)] === 0){
+    const eiOff = entryIndexOf(en);
+    return `<div class="plate-line bw-off"><div class="pl-say">Not counting your bodyweight
+      on this one.${eiOff >= 0
+        ? ` <button type="button" class="linklike" data-bw="${eiOff}">Count it</button>`
+        : ""}</div></div>`;
+  }
+  if(!bw && bwAutoAsk(en)){
+    return `<div class="plate-line plate-gap"><div class="pl-say">
+      ${esc(exNounFor(en.name))} counts your bodyweight, and Element 26 does not know what
+      you weigh yet. <button type="button" class="linklike" data-bwneed="${
+        entryIndexOf(en)}">Log a weigh-in</button> and this reads as bw+ what you add.</div></div>`;
+  }
   if(bw){
     const typedBw = (en.sets || []).map(st=> parseFloat(st && st.weight)).find(v=> v > 0);
-    const want = typedBw != null ? typedBw
-      : parseFloat(last !== undefined ? planLoadPh(en, last, 0) : planLoadFor(en));
+    const planned = parseFloat(last !== undefined ? planLoadPh(en, last, 0) : planLoadFor(en));
+    /* NO LOAD IS NOT NO LINE, ON A MOVEMENT THAT COUNTS YOU.
+
+       A plain dip or pull-up has nothing written in the box and nothing prescribed, and
+       that used to leave the card silent — no bw line, and therefore nowhere to turn the
+       counting off, since the switch lives on it. The load is not missing: it is you.
+       Said, it reads "bw · 180 lb · you 180 + nothing added", which is the truth about
+       the set and carries the switch with it. */
+    const want = typedBw != null ? typedBw : (planned > 0 ? bwTotalOf(bw, planned) : bw);
     if(!(want > 0)) return "";
     const added = Math.round((want - bw) * 10) / 10;
     /* A NUMBER BELOW WHAT YOU WEIGH IS NOT AN ASSISTED SET, IT IS THE WRONG BOX.

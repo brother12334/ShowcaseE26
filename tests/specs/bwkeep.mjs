@@ -107,33 +107,38 @@ console.log("\n4 - AND A BACKUP CARRIES THE TABLE NOW");
   ck("and the answer is in the file", r.inFile, String(r.inFile));
 }
 
-console.log("\n5 - A MOVEMENT NOBODY HAS EVER COUNTED IS STILL NOT COUNTED");
+console.log("\n5 - AND A MOVEMENT NOBODY HAS EVER COUNTED IS COUNTED ANYWAY NOW");
+/* 59.10: counting you stopped being opt-in. A dip is a dip whether or not anybody found
+   the switch, so the question the log answers is only "has this been switched OFF". */
 {
-  const r = await ev(()=> ({bench: bwRemembered("Barbell Bench Press"),
-                            loggedBench: (typeof bwLoggedOn === "function") ? bwLoggedOn("Barbell Bench Press") : false,
-                            dipNever: (S.bwEx = {}, bwRemembered("Weighted Pull Up"))}));
+  const r = await ev(()=> {
+    S.bwEx = {};
+    return {bench: bwRemembered("Barbell Bench Press"),
+            loggedBench: (typeof bwLoggedOn === "function") ? bwLoggedOn("Barbell Bench Press") : false,
+            fresh: bwRemembered("Weighted Pull Up"),
+            auto: bwAutoCount("Weighted Pull Up")};
+  });
   console.log("   ", JSON.stringify(r));
   ck("a barbell lift is not swept in", r.bench === false && r.loggedBench === false,
-     JSON.stringify(r));
-  ck("nor is a bodyweight movement with nothing logged", r.dipNever === false,
-     String(r.dipNever));
+     JSON.stringify({bench: r.bench, logged: r.loggedBench}));
+  ck("a bodyweight movement with nothing logged counts you from the start",
+     r.fresh === true && r.auto === true, JSON.stringify({fresh: r.fresh, auto: r.auto}));
 }
 
-console.log("\n6 - AND A SESSION LOGGED WITHOUT IT TURNS IT BACK OFF");
-/* The derivation reads the LAST session, so it follows a decision rather than latching. */
+console.log("\n6 - BUT NOT WITHOUT A WEIGH-IN TO COUNT");
+/* The one precondition. Nothing can be added until there is a figure to add. */
 {
   const r = await ev(a=>{
-    S.bwEx = {};
-    S.sessions.push({id:"s2", workoutId:ROTATION[0], date:todayStr(-1),
-      startedAt:Date.now()-864e5, finishedAt:Date.now()-864e5+3600e3,
-      entries:[{name:a.NAME, sets:[{weight:"25", reps:"8", done:true}]}]});
-    save();
-    return {logged: (typeof bwLoggedOn === "function") ? bwLoggedOn(a.NAME) : false,
-            remembered: bwRemembered(a.NAME)};
+    const keep = S.bodyLog; S.bodyLog = {};
+    const out = {auto: bwAutoCount(a.NAME), ask: bwAutoAsk({name: a.NAME}),
+                 applied: bwApply({name: a.NAME, sets: [{weight: ""}]}, true)};
+    S.bodyLog = keep;
+    return out;
   }, {NAME});
   console.log("   ", JSON.stringify(r));
-  ck("the newest session decides", r.logged === false, String(r.logged));
-  ck("so it is off again", r.remembered === false, String(r.remembered));
+  ck("nothing is counted with no weigh-in on file", r.auto === false, String(r.auto));
+  ck("and nothing can be written in the meantime", r.applied === false, String(r.applied));
+  ck("but the card is told to ask for one", r.ask === true, String(r.ask));
 }
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");

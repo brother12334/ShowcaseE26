@@ -63,66 +63,84 @@ console.log("2 - AND NOTHING YOU DO NOT STAND IN");
   ck("a barbell lift is not a bodyweight movement", r.length === 0, "wrongly matched: " + r.join(", "));
 }
 
-console.log("3 - THE BUTTON IS ON THE CARD, AND IT SAYS THE NUMBER");
+console.log("3 - THE CARD COMES UP COUNTING YOU, WITH NOTHING TO PRESS");
+/* "For any bodyweight exercise the bodyweight look should automatically be applied, you
+   shouldn't have to add you" — and "remove that button that says +you". A dip is a dip
+   whether or not anybody found a switch. */
 {
   await setup("Weighted Chest Dips", true);
   const r = await ev(()=>{
-    const btn = document.querySelector("[data-bw]");
-    return {found: !!btn, txt: btn ? btn.textContent.trim() : "",
-            need: !!document.querySelector("[data-bwneed]")};
-  });
-  ck("there is a switch on the dips card", r.found === true, r.need ? "it is asking for a weigh-in" : "no button at all");
-  ck("and it says what it will add", /180/.test(r.txt), r.txt);
-}
-
-console.log("4 - PRESSING IT PUTS YOUR WEIGHT ON EVERY SET");
-{
-  const r = await ev(async ()=>{
-    document.querySelector("[data-bw]").click();
-    await new Promise(r2=> setTimeout(r2, 120));
     const en = S.active.entries[0];
     const sw = document.querySelector("[data-bw]");
-    return {on: entryBwOn(en), weights: (en.sets||[]).map(s=> s.weight),
-            txt: sw ? sw.textContent.trim() : null,
-            onLine: !!(sw && sw.closest(".bw-led")),
-            bottomBtn: [...document.querySelectorAll(".card.ex .btn[data-bw]")].length};
+    return {on: entryBwOn(en), said: S.bwEx[nrm("Weighted Chest Dips")],
+            foot: [...document.querySelectorAll(".card.ex .btn[data-bw]")].length,
+            need: !!document.querySelector("[data-bwneed]"),
+            onLine: !!(sw && sw.closest(".bw-led")), txt: sw ? sw.textContent.trim() : null};
   });
-  ck("it is on, stamped at the weight it used", r.on === 180, String(r.on));
-  ck("and every set carries it", r.weights.join(",") === "180,180,180", r.weights.join(","));
-  /* ONCE IT IS ON, IT IS NOT A QUESTION ANY MORE. Reported as "there's no point of this
-     button it's automatic", which is true: the switch is thrown again by startWorkout()
-     every session. The button at the foot of the card goes, and the OFF switch moves
-     onto the words on the load line that state the fact. */
-  ck("the switch is now the 'you 180' on the load line", r.onLine && /^you 180$/.test(r.txt || ""),
-     JSON.stringify({txt: r.txt, onLine: r.onLine}));
-  ck("and the button at the bottom of the card is gone", r.bottomBtn === 0, String(r.bottomBtn));
+  console.log("   ", JSON.stringify(r));
+  ck("it counts you from the first session, unasked", r.on === 180, String(r.on));
+  ck("without anything having been recorded as a choice", r.said === undefined, String(r.said));
+  ck("THE +YOU BUTTON IS GONE", r.foot === 0 && !r.need, JSON.stringify({foot: r.foot, need: r.need}));
+  ck("and the only switch is the 'you 180' on the load line",
+     r.onLine && /^you 180$/.test(r.txt || ""), JSON.stringify({txt: r.txt, onLine: r.onLine}));
 }
 
-console.log("5 - ADDING WEIGHT TO THE BAR STILL ADDS TO IT");
+console.log("4 - AND TURNING IT OFF GIVES BACK EXACTLY WHAT IT ADDED");
 {
   const r = await ev(async ()=>{
     const en = S.active.entries[0];
     en.sets[0].weight = "205";           // 180 of you, 25 hung off you
     save(); render();
     await new Promise(r2=> setTimeout(r2, 60));
-    document.querySelector("[data-bw]").click();   // and off again
+    document.querySelector("[data-bw]").click();
     await new Promise(r2=> setTimeout(r2, 120));
-    return (S.active.entries[0].sets || []).map(s=> s.weight);
+    return {w: (S.active.entries[0].sets || []).map(s=> s.weight),
+            said: S.bwEx[nrm("Weighted Chest Dips")],
+            on: entryBwOn(S.active.entries[0])};
   });
-  ck("turning it off gives back exactly what it added", r[0] === "25", r.join(","));
-  ck("and a set that was only you goes back to empty", r[1] === "", "[" + r.join(",") + "]");
+  console.log("   ", JSON.stringify(r));
+  ck("turning it off gives back exactly what it added", r.w[0] === "25", r.w.join(","));
+  ck("a set that was only you goes back to empty", r.w[1] === "", "[" + r.w.join(",") + "]");
+  ck("and it is off", r.on === 0, String(r.on));
 }
 
-console.log("6 - WITH NO WEIGH-IN IT ASKS FOR ONE INSTEAD OF HIDING");
+console.log("5 - AND IT STAYS OFF, BECAUSE THAT WAS AN ANSWER");
+/* The automatic rule must not switch it straight back on next session. */
+{
+  const r = await ev(async ()=>{
+    const said = S.bwEx[nrm("Weighted Chest Dips")];
+    S.active = null; startWorkout(DAYS[0]);
+    const pf=document.getElementById('preflight'); if(pf) pf.remove();
+    try{PF=null}catch(e){}
+    save(); render();
+    await new Promise(r2=> setTimeout(r2, 60));
+    return {said, remembered: bwRemembered("Weighted Chest Dips"),
+            on: entryBwOn(S.active.entries[0]),
+            auto: bwAutoCount("Weighted Chest Dips")};
+  });
+  console.log("   ", JSON.stringify(r));
+  ck("off is recorded as off", r.said === 0, String(r.said));
+  ck("the movement would otherwise count you", r.auto === true, String(r.auto));
+  ck("but the next session honours the answer", r.remembered === false && r.on === 0,
+     JSON.stringify({remembered: r.remembered, on: r.on}));
+}
+
+console.log("6 - WITH NO WEIGH-IN IT SAYS SO WHERE THE BW+ LINE WOULD BE");
 {
   await setup("Pull-Ups", false);
   const r = await ev(()=>{
     const need = document.querySelector("[data-bwneed]");
-    return {need: !!need, txt: need ? need.textContent.trim() : "",
-            live: !!document.querySelector("[data-bw]")};
+    return {need: !!need, txt: need ? (need.closest(".plate-line")||need).innerText.replace(/\s+/g," ").trim() : "",
+            onCard: !!(need && need.closest(".plate-line")),
+            foot: [...document.querySelectorAll(".card.ex .btn[data-bw]")].length,
+            on: entryBwOn(S.active.entries[0])};
   });
-  ck("the offer is still made", r.need === true, r.live ? "it thinks it knows a weight" : "nothing offered");
-  ck("and it asks rather than guessing", /weight/i.test(r.txt), r.txt);
+  console.log("   ", JSON.stringify(r));
+  ck("nothing is counted, because there is nothing to count", r.on === 0, String(r.on));
+  ck("it says why rather than going quiet", r.need && r.onCard,
+     JSON.stringify({need: r.need, onCard: r.onCard}));
+  ck("and asks for the one fact it is missing", /weigh-in/i.test(r.txt), r.txt.slice(0, 90));
+  ck("still with no +you button", r.foot === 0, String(r.foot));
 }
 
 console.log("7 - NOTHING THREW");

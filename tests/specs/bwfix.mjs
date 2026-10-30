@@ -129,10 +129,16 @@ console.log("6 - FIXING IT ALSO TURNS IT ON FROM NOW ON");
     bwFixApply(["weighted chest dip"]);
     ["weighted chest dip"].forEach(k=> bwRemember(k, true));
     return {remembered: bwRemembered("Weighted Chest Dip"),
-            pull: bwRemembered("Pull-Up")};
+            said: S.bwEx[nrm("Weighted Chest Dip")],
+            pullSaid: S.bwEx[nrm("Pull-Up")]};
   });
   ck("the movement is counted from now on too", r.remembered, String(r.remembered));
-  ck("and one you did not fix is not", !r.pull, String(r.pull));
+  /* Counting is automatic on every bodyweight movement now, so "not counted" is no
+     longer what distinguishes one you left alone. What does is that no CHOICE was
+     recorded against it: the fix speaks for the movement it repaired and no other. */
+  ck("and the fix recorded a choice only for the movement it fixed",
+     r.said === 1 && r.pullSaid === undefined,
+     JSON.stringify({said: r.said, pull: r.pullSaid}));
 }
 
 console.log("7 - A LOG ALREADY COUNTING YOU IS NOT OFFERED AGAIN");

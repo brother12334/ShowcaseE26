@@ -37,7 +37,7 @@ const boot = (weighed)=> p.evaluate((weighed)=>{
 }, weighed);
 await boot(true);
 
-console.log("1 - THE BUTTON IS OFFERED WHERE IT MAKES SENSE AND NOWHERE ELSE");
+console.log("1 - IT APPLIES WHERE IT MAKES SENSE AND NOWHERE ELSE");
 {
   const r = await p.evaluate(()=>({
     dip: isBodyweightMove("Weighted Chest Dip"),
@@ -49,39 +49,38 @@ console.log("1 - THE BUTTON IS OFFERED WHERE IT MAKES SENSE AND NOWHERE ELSE");
     /* the plan merges its own rows into a seeded session, so count against what is
        actually there rather than against what the spec put there */
     qualify: (S.active.entries||[]).map((e,i)=> isBodyweightMove(e.name) ? i : -1).filter(i=> i>=0),
-    buttons: [...document.querySelectorAll("[data-bw],[data-bwneed]")]
-      .map(x=> parseInt(x.dataset.bw != null ? x.dataset.bw : x.dataset.bwneed, 10)),
-    label: (document.querySelector("[data-bw]")||{}).textContent || ""
+    counted: (S.active.entries||[]).map((e,i)=> entryBwOn(e) > 0 ? i : -1).filter(i=> i>=0),
+    buttons: [...document.querySelectorAll(".card.ex .btn[data-bw], [data-bwneed]")].length
   }));
   ck("a weighted dip counts as a bodyweight movement", r.dip, String(r.dip));
   ck("so do pull-ups and push-ups", r.pull && r.push, JSON.stringify(r));
   ck("a bench press does not", !r.bench, String(r.bench));
   ck("nor a curl", !r.curl, String(r.curl));
-  ck("the button is drawn on exactly the rows that qualify",
-     r.buttons.slice().sort((a,b)=>a-b).join(",") === r.qualify.join(","),
-     r.buttons.join(",") + " vs " + r.qualify.join(","));
-  ck("and it says the figure it will use", /185/.test(r.label), r.label);
+  /* 59.10: counting you is not opt-in any more. Exactly the rows that qualify are
+     counted, from the first session, and there is no button anywhere. */
+  ck("every row that qualifies is already counted",
+     r.counted.join(",") === r.qualify.join(","), r.counted.join(",") + " vs " + r.qualify.join(","));
+  ck("AND THERE IS NO +YOU BUTTON ON ANY OF THEM", r.buttons === 0, String(r.buttons));
 }
 
-console.log("2 - ONE PRESS PUTS YOUR WEIGHT ON EVERY SET");
+console.log("2 - THE SWITCH ON THE LOAD LINE IS THE WAY OUT OF IT");
 {
   const r = await p.evaluate(()=>{
     const ei = S.active.entries.findIndex(e=> /weighted chest dip/i.test(e.name));
-    document.querySelector('[data-bw="'+ei+'"]').click();
     const en = S.active.entries[ei];
-    return {weights: en.sets.map(s=> s.weight), on: entryBwOn(en),
-            remembered: bwRemembered("Weighted Chest Dip"),
-            label: (document.querySelector('[data-bw="'+ei+'"]')||{}).textContent || "",
-            onLine: !!(document.querySelector('[data-bw="'+ei+'"]')||{}).closest
-                    && !!document.querySelector('[data-bw="'+ei+'"]').closest('.bw-led')};
+    const before = entryBwOn(en);
+    const sw = document.querySelector('[data-bw="'+ei+'"]');
+    const onLine = !!(sw && sw.closest('.bw-led'));
+    const label = sw ? sw.textContent.trim() : "";
+    if(sw) sw.click();
+    return {before, onLine, label, after: entryBwOn(S.active.entries[ei]),
+            said: S.bwEx[nrm("Weighted Chest Dip")]};
   });
-  ck("every set carries it", r.weights.join(",") === "185,185,185", r.weights.join(","));
-  ck("the entry records the figure used", r.on === 185, String(r.on));
-  /* 59.5: once it is on there is no question left to ask, so the button at the foot of
-     the card goes and the OFF switch is the "you 185" on the load line itself. */
-  ck("and the switch is the 'you 185' on the load line",
-     r.onLine && /^you 185$/.test(r.label.trim()), JSON.stringify({label: r.label.trim(), onLine: r.onLine}));
-  ck("and it is remembered for next time", r.remembered, String(r.remembered));
+  ck("the entry was stamped with what you weigh", r.before === 185, String(r.before));
+  ck("the switch is the 'you 185' on the load line",
+     r.onLine && /^you 185$/.test(r.label), JSON.stringify({label: r.label, onLine: r.onLine}));
+  ck("tapping it turns the counting off", r.after === 0, String(r.after));
+  ck("and that is recorded as an answer, not as silence", r.said === 0, String(r.said));
 }
 
 console.log("3 - AND WHAT YOU HANG OFF IT GOES ON TOP");
@@ -114,6 +113,9 @@ console.log("5 - PRESSING IT TWICE DOES NOT DOUBLE ANYTHING");
   const r = await p.evaluate(()=>{
     const en = S.active.entries.find(e=> /pull-?up/i.test(e.name)) || S.active.entries[1];
     window.__pu = S.active.entries.indexOf(en);
+    /* It arrives already on now, so this starts from off to test the thing it is about:
+       that applying twice in either direction changes nothing the second time. */
+    bwApply(en, false);
     const a = bwApply(en, true);
     const b2 = bwApply(en, true);              // again
     const w1 = en.sets.map(s=> s.weight).join(",");
