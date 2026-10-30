@@ -4835,6 +4835,21 @@ body.cele-open{overflow:hidden}
    against a tab bar sitting flat on the bottom of the screen; the bar then moves for
    Safari's toolbar, so with a rest running every scroll had the two of them drift apart
    and then collide. --navGap is the same correction the bar itself uses. */
+/* BACK TO THE SET YOU ARE ON. Mirror of the rest clock — same height off the bottom,
+   same anchor, the other side of the screen — so the two can never be in each other's
+   way however the tab bar moves. */
+.live-jump{
+  position:fixed;left:12px;
+  bottom:calc(86px + env(safe-area-inset-bottom) + var(--navGap, 0px));z-index:150;
+  transition:bottom var(--t-mid, .2s) var(--ease, ease);
+  display:flex;align-items:center;gap:7px;background:var(--card);
+  border:1px solid var(--acc-line);border-radius:var(--r-pill);
+  padding:8px 13px 8px 11px;color:var(--text);cursor:pointer;
+  box-shadow:0 8px 28px rgba(0,0,0,.55);
+  animation:restPillIn .4s cubic-bezier(.22,1,.36,1) both;
+}
+.live-jump .lj-arrow{color:var(--acc);font-size:var(--fs-6);line-height:1}
+.live-jump .lj-txt{font:var(--fs-2) var(--mono);letter-spacing:.04em;color:var(--dim)}
 .rest-mini{
   position:fixed;right:12px;
   bottom:calc(86px + env(safe-area-inset-bottom) + var(--navGap, 0px));z-index:150;
@@ -7098,7 +7113,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "60.0";
+const APP_VERSION = "60.1";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -34929,6 +34944,84 @@ function sessionBarTick(){
   SESS_BAR_TICK = setInterval(draw, 20000);
   return draw;
 }
+/* =====================================================================
+   BACK TO THE SET YOU ARE ON
+
+   Asked for: "make an arrow when currently logging a workout at the bottom of the screen
+   when you scroll up and it will take you back to your current exercise."
+
+   A session is a long page and every reason to leave the set you are on sends you up it:
+   checking what you did last time, what is coming, how far through you are. Coming back
+   meant scrolling until you recognised the card — on a screen held in one hand, mid-rest,
+   with a bar loaded.
+
+   The live row already knows where it is. `.set.is-live` is drawn on exactly one row in
+   the session (sessionLiveSet decides, and the whole app agrees with it), so there is
+   nothing to work out: the button points at that row's card and says which way it went.
+
+   It appears only when that card is off screen, so it never covers anything you can
+   already see, and it sits on the opposite side from the rest clock, on the same
+   bottom anchor the tab bar uses — see --navGap. */
+let LIVE_JUMP_RAF = 0;
+function liveJumpTarget(){
+  const row = document.querySelector(".set.is-live");
+  if(!row) return null;
+  return row.closest(".card.ex") || row;
+}
+function syncLiveJump(){
+  let el = document.getElementById("liveJump");
+  const a = S.active;
+  /* Gym mode draws one exercise at a time, so there is never anywhere else to be; a
+     modal, the preflight sheet or a full-screen panel owns the screen while it is open
+     and must not have a floating control of somebody else's on top of it. */
+  /* What is actually over the screen, asked of the screen. The preflight sheet is read
+     by its element rather than by its body class: the class outlives the sheet in more
+     than one path, and a control that hides itself because of a stale class is a control
+     that is missing for no reason anybody can see. */
+  const live = a && TAB === "workout" && S.viewMode !== "focus"
+    && !document.body.classList.contains("modal-live")
+    && !document.body.classList.contains("ai-open")
+    && !document.getElementById("preflight");
+  const target = live ? liveJumpTarget() : null;
+  if(!target){ if(el) el.remove(); return; }
+  const r = target.getBoundingClientRect();
+  const top = navGapTop();
+  /* Out of sight is the whole condition: any part of the card on screen and there is
+     nothing to go back to. The margins keep it from flickering on as the card's last
+     few pixels leave under the tab bar. */
+  const below = r.top > window.innerHeight - 70;
+  const above = r.bottom < top + 56;
+  if(!below && !above){ if(el) el.remove(); return; }
+  if(!el){
+    el = document.createElement("button");
+    el.id = "liveJump";
+    el.type = "button";
+    el.className = "live-jump";
+    el.onclick = ()=>{
+      const t = liveJumpTarget();
+      if(!t) return;
+      t.scrollIntoView({block: "center", behavior: "smooth"});
+    };
+    document.body.appendChild(el);
+  }
+  el.classList.toggle("lj-up", above);
+  el.setAttribute("aria-label", "Back to the set you are on");
+  el.innerHTML = `<span class="lj-arrow" aria-hidden="true">${above ? "\u2191" : "\u2193"}</span>
+    <span class="lj-txt">Your set</span>`;
+}
+/* The top of the usable screen, which is not zero while a sticky session bar is over it. */
+function navGapTop(){
+  const bar = document.getElementById("sessBar");
+  if(!bar) return 0;
+  const r = bar.getBoundingClientRect();
+  return r.bottom > 0 && r.top < 120 ? r.bottom : 0;
+}
+function liveJumpWatch(){
+  if(LIVE_JUMP_RAF) return;
+  LIVE_JUMP_RAF = requestAnimationFrame(()=>{ LIVE_JUMP_RAF = 0; syncLiveJump(); });
+}
+window.addEventListener("scroll", liveJumpWatch, {passive: true});
+window.addEventListener("resize", liveJumpWatch, {passive: true});
 function viewWorkoutTab(){
   const a = S.active;
   if(!a) return viewToday();                  // finished in another tab; nothing to show
@@ -46438,6 +46531,7 @@ function bind(){
       } else el.classList.remove("just-done");
       markSetStates(ei);
       sessionBarTick();                     // the set just landed; the bar says so now
+      syncLiveJump();                       // and "here" has moved on
       refreshPRs(ei);
       drawPRBadges(ei);
       save();
@@ -46538,6 +46632,7 @@ function bind(){
   const sbFin = $("#sessBarFinish");
   if(sbFin) sbFin.onclick = finishWorkout;
   sessionBarTick();
+  syncLiveJump();
   function harvestActive(){
     if(!S.active) return;
     document.querySelectorAll(".set input[data-e], .set select[data-e]").forEach(el=>{
@@ -56601,7 +56696,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "60.0";
+const NEWS_FOR = "60.1";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56679,6 +56774,17 @@ const NEWS = [
   /* 60.0. "For any bodyweight exercise the bodyweight look should automatically be
      applied, you shouldn't have to add you, and also remove that button that says
      +you." */
+  /* 60.1. Asked for: an arrow at the bottom of the screen during a session that takes
+     you back to the exercise you are on. */
+  {k: "Back to the set you are on",
+   s: ["A session is a long page, and every reason to leave the set you are on sends you "
+     + "up it — what you did last time, what is coming, how far through you are. Coming "
+     + "back meant scrolling until you recognised the card.",
+       "Scroll your current exercise off the screen and a small <b>↑ Your set</b> appears "
+     + "at the bottom; one tap puts that card back in the middle of the screen. It points "
+     + "whichever way the card went, it is only there while the card is not, and it sits "
+     + "opposite the rest clock so the two are never in each other\u2019s way."]},
+
   {k: "Bodyweight lifts just are bodyweight lifts",
    s: ["Counting yourself used to be something you switched on, behind a <b>+ my weight</b> "
      + "button at the foot of the card. A dip is a dip whether or not anybody found that "
