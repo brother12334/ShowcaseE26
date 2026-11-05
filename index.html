@@ -4829,6 +4829,16 @@ body.cele-open{overflow:hidden}
    happened. Quiet, because it is a footnote about provenance and not a warning. */
 .ph-src{font:var(--fs-1) var(--mono);color:var(--faint);border:1px solid var(--line);
   border-radius:var(--r-sm);padding:1px 6px;white-space:nowrap;align-self:flex-start}
+/* The effort block. Built like a finding row rather than a card: one line of verdict,
+   one of evidence, one button. */
+.ef-row{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.ef-row:last-of-type{border-bottom:none}
+.ef-b{min-width:0;flex:1}
+.ef-t{color:var(--text);font-size:var(--fs-4);line-height:1.35}
+.ef-s{color:var(--dim);font-size:var(--fs-2);margin-top:3px;line-height:1.45}
+.ef-why{color:var(--faint);font-size:var(--fs-1);margin-top:10px;line-height:1.5}
+.ef-row.sev2 .ef-t{color:var(--text)}
+.ef-row.sev2 .ef-b{border-left:2px solid var(--acc-line);padding-left:9px;margin-left:-11px}
 .rest-aim-l b{color:var(--dim);font-weight:400}
 .rest-x{
   position:absolute;top:calc(16px + env(safe-area-inset-top));right:16px;
@@ -7117,7 +7127,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "60.3";
+const APP_VERSION = "60.4";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -37933,6 +37943,13 @@ function viewBody(){
         </div>` : ""}
     </div>`;
   }
+  /* ---- THE LOAD THAT IS WRONG FOR THE EFFORT IT ASKS FOR -------------------------
+     Its own block rather than a row in "Worth a look", for two reasons. That list is one
+     finding per MUSCLE and keeps the highest-scoring one, so an effort reading would be
+     swallowed by any volume finding on the same muscle; and the remedy is not the remedy
+     those rows offer — there is nothing to spread or swap, it is one number on one
+     movement, and it applies in a tap. */
+  h += effortBlockHTML();
   const spanDays = (Date.now() - S.sessions[0].startedAt)/DAY_MS;
   const enoughWP = S.sessions.length >= 4 && spanDays >= 6;
   h += `<div class="nb-fix nb-in" style="--d:360ms">
@@ -47694,6 +47711,28 @@ function bind(){
     dropAfterDeload(m);
     render();
   });
+  /* THE LOAD THAT IS WRONG FOR THE EFFORT. One tap: the plan is written through the
+     same function every other load change goes through — so it gets the undo snapshot,
+     the sanity check, the plan-history row and the byApp stamp for free — and then the
+     session you are in the middle of is brought along with it, because a plan change you
+     cannot act on until next week is not what somebody standing at the rack asked for. */
+  document.querySelectorAll("[data-effortfix]").forEach(b=> b.onclick = ()=>{
+    const name = b.dataset.effortfix;
+    const f = effortMismatchFor(name);
+    if(!f){ toast("That one has already been answered"); render(); return; }
+    const why = f.dir === "down"
+      ? "Reps were landing inside the range at about " + r1(f.avg) + " RPE past the target "
+        + "across " + f.hits.length + " of the last " + f.n + " sessions, so the load was "
+        + "buying fatigue rather than reps."
+      : "Reps were landing inside the range at about " + r1(f.avg) + " RPE short of the "
+        + "target across " + f.hits.length + " of the last " + f.n + " sessions, so the load "
+        + "was lighter than the prescription asks for.";
+    if(!applyProgression(name, f.to, why, "effort")) return;
+    const live = effortApplyToActive(name, f.from, f.to);
+    render();
+    toast(fmtLoad(f.from) + " \u2192 " + fmtLoad(f.to) + " on " + name
+      + (live ? ", today's session too" : ""), "good");
+  });
   document.querySelectorAll("[data-adno]").forEach(b=> b.onclick = ()=>{
     const m = b.dataset.adno;
     dropAfterDeload(m);
@@ -53445,6 +53484,208 @@ function atTopLoadSets(entry){
   const at = all.filter(x=> x.w >= top - 0.01);
   return {all, at, top, backoffs: all.length - at.length};
 }
+/* =====================================================================
+   THE LOAD IS WRONG FOR THE EFFORT IT IS ASKING FOR
+
+   Asked for directly, after the question "does the app have a mechanism where if the
+   user is doing reps inside the rep range but not in the RPE range it'll ask if they
+   want to go down in weight". It did not, and the gap is real.
+
+   Everything else here reads REPS. Double progression earns a raise by clearing the top
+   of the range, and effort is only a gate on it: miss the target RPE and the raise is
+   held. That leaves one state with no exit. Hit 8-12 at RPE 10 every week and the raise
+   is blocked forever, nothing says the load is why, and "hold this load one more
+   session" repeats indefinitely. The mirror case is quieter and just as wrong: reps
+   inside the range at RPE 6 is a weight that is too light, and double progression will
+   take three or four sessions to work that out one rep at a time.
+
+   WHY THIS IS NOT READ OFF ONE SET. Self-reported RPE in people who are not competitive
+   lifters is off by a point or two, and biased toward UNDER-reporting how close to
+   failure a set was. One RPE 9.5 is noise. The same movement reading the same way across
+   two of its last three sessions is a signal, and that is the bar here.
+
+   AND WHY THE TWO DIRECTIONS ARE NOT SYMMETRICAL. Being wrong about "too heavy" costs
+   training weight somebody earned, so it needs 1.5 RPE of daylight over the target.
+   Being wrong about "too light" costs one session of a load that was too easy anyway, so
+   2 under the bottom of the band is enough to speak up — and that case is only raised
+   where double progression is NOT already about to raise it.
+
+   One step, never a guess at the "right" weight: the step is what the gear can do and
+   what the rest of this app moves loads by. */
+const EFFORT_SESSIONS = 3;      // how far back to look
+const EFFORT_MIN_HITS = 2;      // how many of them have to agree
+/* A BAND IS ALREADY A TOLERANCE, AND A SINGLE NUMBER IS NOT.
+
+   "RPE 8" on a set means about 8, so a reading has to be a clear 1.5 past it before the
+   load is the explanation rather than the estimate. "RPE 7-9" has said its own tolerance
+   out loud: everything from 7 to 9 is what was asked for, so a full point outside THAT
+   is the same size of statement. Holding both to 1.5 would make a banded plan almost
+   impossible to trip — RPE 10 against 7-9 is only one over the top — and a banded plan
+   is what most imported programmes are. */
+const EFFORT_OVER  = 1.5;       // RPE past a single-number target before a cut is offered
+const EFFORT_OVER_BAND  = 1;    // past the top of a written band
+const EFFORT_UNDER = 2;         // RPE under a single-number target before a raise
+const EFFORT_UNDER_BAND = 1.5;  // under the bottom of a written band
+/* The prescribed band for a set, as a pair. Per-set targets where the plan wrote a ramp,
+   otherwise the summary range the card shows — which is what an imported document
+   usually gives and what somebody reading "RPE 7-9" is actually working to. */
+function rpeBandFor(entry, si){
+  const one = rpeTargetFor(entry, si);
+  if(one != null && isFinite(parseFloat(one))){
+    const v = parseFloat(one);
+    return {lo: v, hi: v, perSet: true};
+  }
+  const txt = String((entry && entry.rpe) || "");
+  const m = txt.match(/(\d+(?:\.\d+)?)\s*[-\u2013]\s*(\d+(?:\.\d+)?)/);
+  if(m) return {lo: parseFloat(m[1]), hi: parseFloat(m[2]), perSet: false};
+  const one2 = txt.match(/(\d+(?:\.\d+)?)/);
+  if(one2){ const v = parseFloat(one2[1]); return {lo: v, hi: v, perSet: false}; }
+  return null;
+}
+/* One session's read on a movement: did the reps land inside the range, and how far
+   outside the prescribed band did the effort sit. Null where it cannot be judged. */
+function effortReadOf(entry){
+  const range = repRange(entry && entry.reps);
+  if(!range) return null;
+  const grp = atTopLoadSets(entry);
+  if(!grp || !grp.at.length) return null;
+  let over = 0, under = 0, n = 0, inRange = true, cleared = true, written = false;
+  grp.at.forEach(x=>{
+    const reps = parseFloat(x.st.reps) || 0;
+    const rpe  = parseFloat(x.st.rpe)  || 0;
+    const band = rpeBandFor(entry, x.i);
+    if(reps < range[0]) inRange = false;
+    if(reps < range[1]) cleared = false;
+    if(!rpe || !band) return;
+    n++;
+    if(!band.perSet && band.hi > band.lo) written = true;
+    if(rpe > band.hi) over  += rpe - band.hi;
+    if(rpe < band.lo) under += band.lo - rpe;
+  });
+  if(!n) return null;
+  return {inRange, cleared, over: over / n, under: under / n, load: grp.top, sets: n,
+          /* Which threshold this reading has to clear, decided by what the plan wrote. */
+          overNeed:  written ? EFFORT_OVER_BAND  : EFFORT_OVER,
+          underNeed: written ? EFFORT_UNDER_BAND : EFFORT_UNDER};
+}
+/* The finding, or null. Reads the log only — so it speaks for a plan that has been run
+   for a while without anybody having to turn anything on. */
+function effortMismatchFor(name){
+  if(!rpeTracked()) return null;
+  const where = findProgramEntryWhere(name);
+  const e = where && where.e;
+  if(!e) return null;                                  // not in the plan: nothing to change
+  const planW = parseFloat(e.weight);
+  if(!(planW > 0)) return null;
+  const hist = [];
+  for(let i = S.sessions.length - 1; i >= 0 && hist.length < EFFORT_SESSIONS; i--){
+    const hit = (S.sessions[i].entries || []).find(en=> nrm(en.name) === nrm(name));
+    if(!hit) continue;
+    const read = effortReadOf(hit);
+    if(read) hist.push(Object.assign({date: S.sessions[i].date}, read));
+  }
+  if(hist.length < EFFORT_MIN_HITS) return null;
+  /* Only sessions worked at the load the plan currently asks for. A card that proposes
+     cutting 155 because 185 felt hard is reading the wrong number. */
+  const atPlan = hist.filter(h=> Math.abs(h.load - planW) <= 0.01 + planW * 0.02);
+  if(atPlan.length < EFFORT_MIN_HITS) return null;
+  const step = progressionStep(e);
+  const amt = step && step.amount > 0 ? step.amount : 0;
+  if(!(amt > 0)) return null;                          // nothing loadable to move by
+  const hard = atPlan.filter(h=> h.inRange && h.over >= h.overNeed);
+  if(hard.length >= EFFORT_MIN_HITS){
+    const to = roundLoadableOn(e, planW - amt, name);
+    if(!(to > 0) || to >= planW) return null;
+    return {name: e.name, dir: "down", from: planW, to, step: amt, hits: hard, n: atPlan.length,
+            avg: hard.reduce((t,h)=> t + h.over, 0) / hard.length};
+  }
+  /* Nothing is offered upward while a deload is running, or on a movement carrying a
+     niggle: both are states where "add weight" is the wrong sentence whatever the RPE
+     says. A cut is still offered in both, because a load that is too heavy is too heavy. */
+  if(deloadActive() || hurtFor(name)) return null;
+  const easy = atPlan.filter(h=> h.inRange && !h.cleared && h.under >= h.underNeed);
+  if(easy.length >= EFFORT_MIN_HITS){
+    const to = roundLoadableOn(e, planW + amt, name);
+    if(!(to > planW)) return null;
+    return {name: e.name, dir: "up", from: planW, to, step: amt, hits: easy, n: atPlan.length,
+            avg: easy.reduce((t,h)=> t + h.under, 0) / easy.length};
+  }
+  return null;
+}
+/* Every movement in the plan that reads this way, worst first. */
+function effortMismatches(){
+  const seen = {}, out = [];
+  DAYS.forEach(wid=> (S.program[wid] || []).forEach(e=>{
+    if(!e || !e.name || seen[nrm(e.name)]) return;
+    seen[nrm(e.name)] = 1;
+    const f = effortMismatchFor(e.name);
+    if(f) out.push(f);
+  }));
+  return out.sort((a,b)=> b.avg - a.avg);
+}
+/* AND THE SESSION THAT IS ALREADY OPEN.
+
+   "Let it apply to current users and their current workouts." A load change that only
+   reaches next week is no use to somebody who has the card in front of them, so the
+   rows of a live session for this movement move too.
+
+   Only the rows that have not happened. A set you have already logged is what you did:
+   rewriting it would be the app editing your log to agree with a decision taken after
+   the fact, which is the one thing a training log may never do. Rows carrying the OLD
+   load are retargeted; a row you have already typed something else into is left alone,
+   because it is a number you chose. */
+function effortApplyToActive(name, from, to){
+  const a = S.active;
+  if(!a || !Array.isArray(a.entries)) return false;
+  let moved = 0;
+  a.entries.forEach(en=>{
+    if(!en || nrm(en.name) !== nrm(name)) return;
+    const bw = entryBwOn(en);
+    const want = bw > 0 ? Math.round((bw + to) * 10) / 10 : to;
+    const had  = bw > 0 ? Math.round((bw + from) * 10) / 10 : from;
+    (en.sets || []).forEach(st=>{
+      if(!st || st.done) return;                       // already logged: that is what happened
+      const cur = parseFloat(st.weight);
+      if(!isFinite(cur) || cur === 0){ return; }       // blank rows follow the plan on their own
+      if(Math.abs(cur - had) > 0.01) return;           // a number you chose, not the plan's
+      st.weight = String(want);
+      moved++;
+    });
+  });
+  if(moved) save();
+  return moved > 0;
+}
+/* The Body-tab block. Silent where there is nothing to say, which is most of the time:
+   it takes two sessions of the same movement reading the same way before it speaks. */
+function effortBlockHTML(){
+  let list = [];
+  try{ list = effortMismatches(); }catch(e){ return ""; }
+  if(!list.length) return "";
+  return `<div class="nb-fix nb-in" style="--d:340ms">
+    <div class="nb-sec-k">The weight, not the reps<span class="nb-count">${list.length}</span></div>
+    ${list.slice(0, 4).map(f=>{
+      const down = f.dir === "down";
+      const band = down ? "harder" : "easier";
+      return `<div class="ef-row sev${down ? 2 : 1}">
+        <div class="ef-b">
+          <div class="ef-t">${esc(f.name)}: ${down ? "take" : "put"} ${esc(fmtLoad(f.step))}
+            ${down ? "off" : "on"}</div>
+          <div class="ef-s">Your reps are landing inside the range, but ${
+            f.hits.length === f.n
+              ? "every one of the last " + f.n + " sessions"
+              : f.hits.length + " of the last " + f.n + " sessions"} came in about
+            ${esc(r1(f.avg))} RPE ${esc(band)} than this lift asks for.
+            ${esc(fmtLoad(f.from))} → ${esc(fmtLoad(f.to))}.</div>
+        </div>
+        <button type="button" class="btn ghost small" data-effortfix="${esc(f.name)}">Apply</button>
+      </div>`;
+    }).join("")}
+    <div class="ef-why">Reps say whether the set happened; effort says whether the load was
+      right for it. ${list.some(f=> f.dir === "down")
+        ? "Hitting the range at an effort well past the target is fatigue the plan has not budgeted for — and it is what blocks the weight going up at all."
+        : "Hitting the range well short of the target means the load is light, and waiting for reps to catch up takes weeks."}</div>
+  </div>`;
+}
 /* One exercise's verdict after a session.
      up      every set at the top load is within a rep of the range, last one at it
      hold    still working up the range, says what is left to do
@@ -56908,7 +57149,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "60.3";
+const NEWS_FOR = "60.4";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56993,6 +57234,26 @@ const NEWS = [
   /* 60.3. "If a user switched exercise order in a workout the warm-up sets are all over
      the place — it should reapply to the right order, also make it work for current
      users." */
+  /* 60.4. Asked for after the question "does the app ask if you want to go down in
+     weight when reps are in range but the RPE is not". It did not. */
+  {k: "The weight, not the reps",
+   s: ["Everything in Element 26 earned a load change off REPS: clear the top of the "
+     + "range and the weight goes up, and effort was only a gate on that. Which left one "
+     + "state with no way out — hit 8-12 at RPE 10 every week and the raise is blocked "
+     + "forever, nothing says the load is the reason, and <b>hold this load one more "
+     + "session</b> repeats indefinitely.",
+       "There is a new block on the <b>Body</b> tab for it. Where your reps land inside "
+     + "the range but the effort sits well outside what the lift asks for, it says so and "
+     + "offers the one step — <b>185 lb → 180 lb</b> — in a tap. It works the other way "
+     + "too: reps in range at an effort well short of the target is a weight that is too "
+     + "light, and waiting for the reps to catch up takes weeks.",
+       "It needs two of the last three sessions to agree before it says anything, because "
+     + "a single RPE is an estimate and usually an under-estimate. It is quiet on a "
+     + "movement with a niggle logged, during a deload, and wherever your reps are already "
+     + "about to earn the raise on their own. Applying it writes your plan, lands in "
+     + "<b>What changed</b> with the reasoning, and moves the sets you have not done yet "
+     + "in a session you are in the middle of — never one you have already logged."]},
+
   {k: "Warm-ups follow the order you train in",
    s: ["Which ramp a movement earns is a question about where it SITS: the first lift of "
      + "the day is the one you do cold. The Program tab asked that fresh every time it "
