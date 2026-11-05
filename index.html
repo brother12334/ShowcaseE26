@@ -7117,7 +7117,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "60.2";
+const APP_VERSION = "60.3";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -32719,6 +32719,9 @@ function render(){
      re-renders, so this is the one place it has to be read from, and it returns on a string
      compare when nothing has moved — which is every render but the handful that matter. */
   try{ syncActivePlan(); }catch(e){}
+  /* And which ramp each movement has earned, which is a question about ORDER and was
+     answered once, at Start, and then never again. See syncWarmKinds(). */
+  try{ syncWarmKinds(); }catch(e){}
   if(TAB !== "sync"){ ADV_OPEN = false; SET_PAGE = null; }
   if(TAB !== "program") DAY_EDIT = null;
   if(TAB !== "history"){ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; HIST_SHOW = 20; }
@@ -49149,6 +49152,52 @@ function planOrderFix(a, now, news, catchUp){
   if(a.restTimer && a.restTimer.e != null) a.restTimer.e = Math.max(0, moved(a.restTimer.e));
   return true;
 }
+/* =====================================================================
+   THE WARM-UP BELONGS TO THE POSITION, NOT TO THE ROW
+
+   Reported: "if a user switched exercise order in a workout, the warm-up sets are all
+   over the place."
+
+   warmupKindFor() is a question about where a movement sits in the session — the first
+   lift of the day gets the full ramp, the second compound gets a light one, everything
+   after that gets none, because that is what a warm-up is FOR. The Program tab asks it
+   live every time it draws, so the plan preview was always right. The session asked it
+   once, at Start, wrote the answer onto each row and never asked again.
+
+   So every way of changing the order moved the rows and left the ramps behind: reorder
+   your session and the full ramp stays on whatever is now third, while the lift you are
+   about to open cold has none. The arrows are only the commonest way in — a swap, a
+   skip, an added movement and the superset builder all rearrange the same list.
+
+   Derived rather than maintained, for the same reason the cycle pointer is: there is no
+   number of call sites you can patch that is as reliable as not storing the answer. This
+   runs on every render of a live session, costs a scan of the entries, and writes only
+   when something actually moved.
+
+   WHAT IT DOES NOT TOUCH. A ramp the plan itself prescribed is not positional and is
+   left exactly as written (warmupKindFor returns "plan" from the row's own warmups). A
+   finished session is history and is never rewritten. And ticks are cleared on a row
+   whose ramp has CHANGED, because a tick means "I did that rung" and the rungs are not
+   the same rungs any more. */
+function syncWarmKinds(){
+  const a = (typeof S !== "undefined" && S) ? S.active : null;
+  if(!a || !Array.isArray(a.entries) || !a.entries.length) return false;
+  let moved = false;
+  const list = a.entries;
+  list.forEach((en, i)=>{
+    if(!en) return;
+    const want = warmupKindFor(list, i) || undefined;
+    if((en.warm || undefined) === want) return;
+    en.warm = want;
+    /* A half-ticked ramp that is now a different ramp. Two rungs ticked out of three
+       means nothing once the row has one rung, and leaving them would show a warm-up as
+       done that nobody did. */
+    if(Array.isArray(en.warmDone) && en.warmDone.some(Boolean)) en.warmDone = [];
+    moved = true;
+  });
+  if(moved) saveQuiet();
+  return moved;
+}
 function syncActivePlan(){
   const a = (typeof S !== "undefined" && S) ? S.active : null;
   if(!a || !a.workoutId || !Array.isArray(a.entries)) return;
@@ -56859,7 +56908,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "60.2";
+const NEWS_FOR = "60.3";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56941,6 +56990,24 @@ const NEWS = [
      you back to the exercise you are on. */
   /* 60.2. "Make it show ALL of the changes it has done, even before the feature was
      added, also let you export the changes it made and it shows dates." */
+  /* 60.3. "If a user switched exercise order in a workout the warm-up sets are all over
+     the place — it should reapply to the right order, also make it work for current
+     users." */
+  {k: "Warm-ups follow the order you train in",
+   s: ["Which ramp a movement earns is a question about where it SITS: the first lift of "
+     + "the day is the one you do cold. The Program tab asked that fresh every time it "
+     + "drew; a running session asked it once, at Start, and never again — so reordering "
+     + "your session moved the rows and left the ramps behind, on whatever happened to be "
+     + "in that slot before.",
+       "It is worked out from the order now rather than remembered, every time the "
+     + "session is drawn. Reorder, swap, skip or add a movement and the ramps land where "
+     + "they belong. A session that is already wrong fixes itself the moment this version "
+     + "loads — there is nothing to tap.",
+       "A ramp your own programme prescribed is not positional and stays with its "
+     + "movement wherever you put it. Ticks on a ramp that has changed are cleared, since "
+     + "they described rungs that are no longer there, and a session you have already "
+     + "finished is history and is never rewritten."]},
+
   {k: "What changed your plan, all of it",
    s: ["<b>Program \u203a What changed</b> showed the structural edits and hid every load "
      + "change, which is a fair default and was the only option. It opens on "
