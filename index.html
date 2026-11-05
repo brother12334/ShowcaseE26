@@ -7127,7 +7127,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "60.4";
+const APP_VERSION = "60.5";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -53585,20 +53585,41 @@ function effortMismatchFor(name){
     if(read) hist.push(Object.assign({date: S.sessions[i].date}, read));
   }
   if(hist.length < EFFORT_MIN_HITS) return null;
-  /* Only sessions worked at the load the plan currently asks for. A card that proposes
-     cutting 155 because 185 felt hard is reading the wrong number. */
-  const atPlan = hist.filter(h=> Math.abs(h.load - planW) <= 0.01 + planW * 0.02);
-  if(atPlan.length < EFFORT_MIN_HITS) return null;
+  const near = (a2, b2)=> Math.abs(a2 - b2) <= 0.01 + Math.max(a2, b2) * 0.02;
+  /* NEVER READ A SET HEAVIER THAN THE PRESCRIPTION. "Cut 155 because 185 felt hard" is
+     reading the wrong number: going over the plan on the day is a different fact. */
+  const upto = hist.filter(h=> h.load <= planW + 0.01 + planW * 0.02);
+  const atPlan = hist.filter(h=> near(h.load, planW));
   const step = progressionStep(e);
   const amt = step && step.amount > 0 ? step.amount : 0;
   if(!(amt > 0)) return null;                          // nothing loadable to move by
-  const hard = atPlan.filter(h=> h.inRange && h.over >= h.overNeed);
+  /* THE EVIDENCE IS WHAT YOU LIFTED, NOT WHAT THE PLAN SAYS YOU WILL.
+
+     This read only sessions at the plan's CURRENT load, and that silenced it in the one
+     case it exists for. Grind out RPE 10 at 144.6, have the plan raised to 149.6 off the
+     reps, and the sessions no longer match the number in the plan — so the card went
+     quiet at exactly the moment the load had just been moved the wrong way.
+
+     The hard sessions are read on their own load instead, as long as they agree with
+     each other and none of them is heavier than the plan. The cut is measured from
+     there, so a plan that has run ahead of you comes back to a weight you have actually
+     been able to move. */
+  const hard = upto.filter(h=> h.inRange && h.over >= h.overNeed);
   if(hard.length >= EFFORT_MIN_HITS){
-    const to = roundLoadableOn(e, planW - amt, name);
-    if(!(to > 0) || to >= planW) return null;
-    return {name: e.name, dir: "down", from: planW, to, step: amt, hits: hard, n: atPlan.length,
-            avg: hard.reduce((t,h)=> t + h.over, 0) / hard.length};
+    const base = hard[0].load;
+    if(hard.every(h=> near(h.load, base))){
+      const to = roundLoadableOn(e, base - amt, name);
+      if(to > 0 && to < planW){
+        return {name: e.name, dir: "down", from: planW, to, step: amt, hits: hard,
+                n: upto.length, worked: near(base, planW) ? null : base,
+                avg: hard.reduce((t,h)=> t + h.over, 0) / hard.length};
+      }
+    }
   }
+  /* Upward is still judged at the plan's own load. "This is too light" has to be about
+     the weight you are being asked to lift, and a run of easy sessions UNDER the
+     prescription is the plan being behind, which the catch-up verdict already owns. */
+  if(atPlan.length < EFFORT_MIN_HITS) return null;
   /* Nothing is offered upward while a deload is running, or on a movement carrying a
      niggle: both are states where "add weight" is the wrong sentence whatever the RPE
      says. A cut is still offered in both, because a load that is too heavy is too heavy. */
@@ -53611,6 +53632,27 @@ function effortMismatchFor(name){
             avg: easy.reduce((t,h)=> t + h.under, 0) / easy.length};
   }
   return null;
+}
+/* HOW MANY MOVEMENTS THIS COULD EVEN SPEAK ABOUT.
+
+   A block that only appears when something is wrong is indistinguishable from a block
+   that is not there — which is exactly how it was reported: "I don't see it." So when
+   there is enough to read and nothing to say, it says that instead of nothing, and when
+   the one thing it needs is missing it says which thing. */
+function effortReadable(){
+  let n = 0;
+  const seen = {};
+  DAYS.forEach(wid=> (S.program[wid] || []).forEach(e=>{
+    if(!e || !e.name || seen[nrm(e.name)]) return;
+    seen[nrm(e.name)] = 1;
+    let hits = 0;
+    for(let i = S.sessions.length - 1; i >= 0 && hits < EFFORT_SESSIONS; i--){
+      const hit = (S.sessions[i].entries || []).find(en=> nrm(en.name) === nrm(e.name));
+      if(hit && effortReadOf(hit)) hits++;
+    }
+    if(hits >= EFFORT_MIN_HITS) n++;
+  }));
+  return n;
 }
 /* Every movement in the plan that reads this way, worst first. */
 function effortMismatches(){
@@ -53660,7 +53702,27 @@ function effortApplyToActive(name, from, to){
 function effortBlockHTML(){
   let list = [];
   try{ list = effortMismatches(); }catch(e){ return ""; }
-  if(!list.length) return "";
+  if(!list.length){
+    /* Nothing wrong is worth one line; nothing READABLE is worth one line only when the
+       reason is something you can do something about. */
+    if(!rpeTracked()){
+      return `<div class="nb-fix nb-in" style="--d:340ms">
+        <div class="nb-sec-k">The weight, not the reps</div>
+        <div class="nb-none">This watches for a load that is wrong for the effort it is
+          asking — reps landing inside the range at an RPE well outside it. It needs your
+          sets rated to see that, and rating is off, so it has nothing to read.</div></div>`;
+    }
+    let n = 0;
+    try{ n = effortReadable(); }catch(e){ return ""; }
+    if(!n) return "";
+    return `<div class="nb-fix nb-in" style="--d:340ms">
+      <div class="nb-sec-k">The weight, not the reps</div>
+      <div class="nb-none nb-ok">Nothing to change. Across the ${n} movement${n===1?"":"s"}
+        with enough rated sessions to read, your effort is landing where the plan asks for
+        it. If a load were wrong for the effort it wants — your reps inside the range but
+        the RPE well outside it — it would say so here, with the change in a tap.</div>
+      </div>`;
+  }
   return `<div class="nb-fix nb-in" style="--d:340ms">
     <div class="nb-sec-k">The weight, not the reps<span class="nb-count">${list.length}</span></div>
     ${list.slice(0, 4).map(f=>{
@@ -53674,7 +53736,9 @@ function effortBlockHTML(){
             f.hits.length === f.n
               ? "every one of the last " + f.n + " sessions"
               : f.hits.length + " of the last " + f.n + " sessions"} came in about
-            ${esc(r1(f.avg))} RPE ${esc(band)} than this lift asks for.
+            ${esc(r1(f.avg))} RPE ${esc(band)} than this lift asks for.${
+            f.worked ? " Your plan has moved on to " + esc(fmtLoad(f.from))
+                     + " since; you have been working at " + esc(fmtLoad(f.worked)) + "." : ""}
             ${esc(fmtLoad(f.from))} → ${esc(fmtLoad(f.to))}.</div>
         </div>
         <button type="button" class="btn ghost small" data-effortfix="${esc(f.name)}">Apply</button>
@@ -57149,7 +57213,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "60.4";
+const NEWS_FOR = "60.5";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -57237,7 +57301,11 @@ const NEWS = [
   /* 60.4. Asked for after the question "does the app ask if you want to go down in
      weight when reps are in range but the RPE is not". It did not. */
   {k: "The weight, not the reps",
-   s: ["Everything in Element 26 earned a load change off REPS: clear the top of the "
+   s: ["<b>60.5:</b> it now shows up on the Body tab even when there is nothing to "
+     + "change, so you can see it is there and what it is watching — and it reads a "
+     + "movement whose plan has since been raised past the weight you were actually "
+     + "grinding, which is the case it was silent for.",
+       "Everything in Element 26 earned a load change off REPS: clear the top of the "
      + "range and the weight goes up, and effort was only a gate on that. Which left one "
      + "state with no way out — hit 8-12 at RPE 10 every week and the raise is blocked "
      + "forever, nothing says the load is the reason, and <b>hold this load one more "

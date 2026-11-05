@@ -195,6 +195,59 @@ console.log("10 - IT STAYS QUIET WHERE IT SHOULD");
      quiet.otherLoad === null, JSON.stringify(quiet.otherLoad));
 }
 
+console.log("11 - A PLAN THAT HAS RUN AHEAD OF YOU STILL GETS READ");
+/* Reported as "I don't see it". Grind RPE 10 at 144.6, have the reps earn a raise to
+   149.6, and the sessions no longer match the number in the plan - so the card went
+   quiet at exactly the moment the load had just been moved the wrong way. The hard
+   sessions are read on their OWN load now, as long as none is heavier than the plan. */
+{
+  await seed([[10,10],[10,10]], {load: 185});
+  const r = await ev(()=>{
+    findProgramEntry("Barbell Bench Press").weight = 190;   // the raise that outran you
+    save();
+    return effortMismatchFor("Barbell Bench Press");
+  });
+  console.log("   ", JSON.stringify(r && {dir:r.dir, from:r.from, to:r.to, worked:r.worked}));
+  ck("it still speaks", !!r, String(!!r));
+  ck("the cut is measured from what you actually lifted", r && r.to === 180, r && String(r.to));
+  ck("and it says the plan had moved past it", r && r.worked === 185, r && String(r.worked));
+}
+
+console.log("12 - BUT A SET HEAVIER THAN THE PLAN IS A DIFFERENT FACT");
+{
+  await seed([[10,10],[10,10]], {load: 225});
+  const r = await ev(()=>{
+    findProgramEntry("Barbell Bench Press").weight = 185; save();
+    return effortMismatchFor("Barbell Bench Press");
+  });
+  ck("going over the plan on the day does not cut the plan", r === null, JSON.stringify(r));
+}
+
+console.log("13 - AND SILENCE SAYS SO, RATHER THAN LOOKING LIKE NOTHING IS THERE");
+{
+  const r = await ev(()=>{
+    const wid=ROTATION[0], d=86400000, now=Date.now();
+    S.program[wid]=[{name:"Barbell Bench Press", sets:3, reps:"8-12", weight:185, rpes:[8,8,8]}];
+    S.sessions=[0,1].map(i=>({id:"n"+i, workoutId:wid, date:dayStr(now-(2-i)*7*d),
+      startedAt:now-(2-i)*7*d, finishedAt:now-(2-i)*7*d+3600e3,
+      entries:[{name:"Barbell Bench Press", reps:"8-12", rpes:[8,8,8],
+        sets:[0,1,2].map(()=>({weight:"185", reps:"10", rpe:"8", done:true}))}]}));
+    save(); TAB="body"; render();
+    const ok = document.body.innerText.replace(/\s+/g," ");
+    const hasBlock = /The weight, not the reps/i.test(ok);
+    S.prefs.rpe = false; save(); render();
+    const off = document.body.innerText.replace(/\s+/g," ");
+    S.prefs.rpe = true; save();
+    return {hasBlock, nothing: /Nothing to change/i.test(ok), readable: effortReadable(),
+            offSays: /rating is off/i.test(off)};
+  });
+  console.log("   ", JSON.stringify(r));
+  ck("the block is on the tab even with nothing wrong", r.hasBlock, String(r.hasBlock));
+  ck("and says so in as many words", r.nothing, String(r.nothing));
+  ck("counting what it could read", r.readable === 1, String(r.readable));
+  ck("with RPE off it says that is why", r.offSays, String(r.offSays));
+}
+
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");
