@@ -4825,6 +4825,10 @@ body.cele-open{overflow:hidden}
 }
 .ex-po .ins-tag{background:var(--acc-soft, rgba(201,138,75,.12));color:var(--acc)}
 .po-sub{display:block;margin-top:3px;color:var(--faint);font-size:var(--fs-1)}
+/* "from your log" — a change read back from the sessions rather than recorded when it
+   happened. Quiet, because it is a footnote about provenance and not a warning. */
+.ph-src{font:var(--fs-1) var(--mono);color:var(--faint);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:1px 6px;white-space:nowrap;align-self:flex-start}
 .rest-aim-l b{color:var(--dim);font-weight:400}
 .rest-x{
   position:absolute;top:calc(16px + env(safe-area-inset-top));right:16px;
@@ -7113,7 +7117,7 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "60.1";
+const APP_VERSION = "60.2";
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -50124,7 +50128,26 @@ function planChangeSentence(c){
    are shown too, because "what has happened to my plan" is one question, and answering
    half of it would be its own kind of lie. Only the ones carrying a snapshot can be
    undone; the rest are simply rows without a button. */
-const PLAN_HIST_MAX = 40;
+/* 60.2 — ALL OF IT, AND THE PART THAT PREDATES THE RECORD.
+
+   Asked for: "make it show ALL of the changes it has done, even before the feature was
+   added, also let you export the changes it made and it shows dates."
+
+   Two separate problems behind that.
+
+   The first is a filter: this screen deliberately hid every load change, on the argument
+   below, which is a good argument for a DEFAULT and a bad one for the only option. Both
+   views are here now and the screen opens on everything.
+
+   The second cannot be solved by a filter, because the record does not go back far
+   enough: S.planLog began the day it was written, and every change before that was never
+   recorded anywhere. What DOES go back is the log of sessions, and a plan change leaves
+   its fingerprints in it — a movement that appears or stops appearing on a day, a rep
+   range that reads differently, a working load that moved. planLogDerived() reads those
+   back and is careful to say that is what they are: no reason, no way back, and never
+   over a period the real log already covers. */
+let PLAN_HIST_ALL = true;
+const PLAN_HIST_MAX = 400;
 /* WHICH CHANGES ARE WORTH A SCREEN.
 
    The log records everything, including every load the double-progression rule nudges up
@@ -50150,13 +50173,83 @@ function planChangeLine(c){
   if(strs.length) return strs;
   return [planChangeSentence(c).replace(/<[^>]+>/g, "")];
 }
+/* WHAT THE SESSIONS THEMSELVES SAY CHANGED.
+
+   The only honest source for a period with no log. For each day of the rotation its
+   sessions are walked oldest first and each is compared with the one before it: a
+   movement that was not there and now is, one that has stopped appearing, a rep range
+   that reads differently, a different number of sets, a different working load. Those
+   are facts about what you did, not records of a decision, so they carry no reason and
+   no way back and they say where they came from.
+
+   It stops where the real log starts. Running both over the same week would report every
+   change twice, once as a decision and once as its own shadow. */
+function planLogDerived(){
+  const log = (S.planLog || []);
+  const firstLogged = log.length ? Math.min.apply(null, log.map(c=> c.at || 0).filter(Boolean)) : Infinity;
+  const out = [];
+  const byDay = {};
+  (S.sessions || []).slice().sort((a,b)=> (a.startedAt||0) - (b.startedAt||0)).forEach(sess=>{
+    const wid = sess.workoutId;
+    if(!wid) return;
+    const at = sess.startedAt || Date.parse((sess.date || todayStr()) + "T12:00:00");
+    if(!(at < firstLogged)) return;
+    const now = {};
+    (sess.entries || []).forEach(en=>{
+      if(!en || !en.name) return;
+      const k = nrm(en.name);
+      const ws = (en.sets || []).filter(st=> st && (parseFloat(st.reps) || 0) > 0);
+      let top = 0;
+      ws.forEach(st=>{ const w = parseFloat(st.weight) || 0; if(w > top) top = w; });
+      now[k] = {name: en.name, reps: String(en.reps == null ? "" : en.reps),
+                sets: ws.length, top, en};
+    });
+    const was = byDay[wid];
+    byDay[wid] = now;
+    if(!was) return;                     // nothing to compare the first one with
+    const push = (name, changes, extra)=> out.push(Object.assign({
+      at, date: sess.date || todayStr(), day: wid, name, derived: true, changes
+    }, extra || {}));
+    Object.keys(now).forEach(k=>{
+      const a = was[k], b = now[k];
+      if(!a){ push(b.name, ["Appears on this day for the first time"], {kind: "add"}); return; }
+      const ch = [];
+      if(a.reps !== b.reps && a.reps && b.reps) ch.push("reps " + a.reps + " \u2192 " + b.reps);
+      /* NOT THE NUMBER OF SETS. It is the one figure here that is a fact about the
+         SESSION rather than about the plan: rows are added and dropped while you train,
+         and a day you stopped after one set would be reported as the plan losing two.
+         The rep range and the name come off the plan at the moment the session starts
+         and are safe to read back; this one would invent history. */
+      if(a.top > 0 && b.top > 0 && Math.abs(a.top - b.top) > 0.05){
+        const sayA = bwSay(b.en, a.top, true) || fmtLoad(a.top);
+        const sayB = bwSay(b.en, b.top, true) || fmtLoad(b.top);
+        ch.push("top set " + sayA + " \u2192 " + sayB);
+      }
+      if(ch.length) push(b.name, ch, {kind: ch.length === 1 && /^top set/.test(ch[0]) ? "weight" : "edit"});
+    });
+    Object.keys(was).forEach(k=>{
+      if(!now[k]) push(was[k].name, ["Stopped appearing on this day"], {kind: "remove"});
+    });
+  });
+  return out;
+}
+/* Everything there is to show, in one list: what was recorded, and what can be read back
+   from before anything was. */
+function planHistoryRows(all){
+  const logged = (S.planLog || []).filter(c=> all || planChangeBig(c));
+  const derived = planLogDerived().filter(c=> all || planChangeBig(c));
+  return logged.concat(derived).sort((a,b)=> b.at - a.at);
+}
 function planHistoryHTML(){
-  const all = (S.planLog || []).filter(planChangeBig)
-    .sort((a,b)=> b.at - a.at).slice(0, PLAN_HIST_MAX);
+  const rows = planHistoryRows(PLAN_HIST_ALL);
+  const all = rows.slice(0, PLAN_HIST_MAX);
   if(!all.length){
-    return `<div class="wd-none">Nothing has restructured your programme yet. Movements
+    return `<div class="wd-none">${PLAN_HIST_ALL
+      ? `Nothing has changed your programme yet. Everything Element 26 writes into your
+         plan lands here — and so does every edit you make yourself.`
+      : `Nothing has restructured your programme yet. Movements
       added, swapped or removed, rep ranges changed, volume spread across days — those
-      land here, with a way back.</div>`;
+      land here, with a way back.`}</div>`;
   }
   let h = "", day = null;
   all.forEach(c=>{
@@ -50172,6 +50265,7 @@ function planHistoryHTML(){
           `<div>${esc(x)}</div>`).join("")}</div>
         ${c.note ? `<div class="ph-why">${esc(c.note)}</div>` : ""}
       </div>
+      ${c.derived ? `<span class="ph-src" title="Read back from your logged sessions — this change happened before Element 26 kept a record of plan changes">from your log</span>` : ""}
       ${/* NOTHING WHERE THERE IS NOTHING TO OFFER. This said "no way back", which is a
             verdict on the entry rather than a fact about it — true of every edit made
             before snapshots existed, and of the ones you typed yourself in the day
@@ -50185,14 +50279,83 @@ function planHistoryHTML(){
   });
   return h;
 }
+/* THE WHOLE RECORD AS A FILE, WITH THE DATES ON IT.
+
+   Asked for alongside the rest of it, and the reason is the same reason the screen
+   exists: a plan drifts over months and the questions people ask of it — when did this
+   movement arrive, how long have I been at this weight, what did the app change while I
+   was not looking — are the kind you answer in a spreadsheet, not by scrolling.
+
+   CSV rather than JSON: this one is for reading. Every row carries the date it happened,
+   which day of the rotation it was on, the movement, what kind of change it was, what
+   actually changed, why where a reason was recorded, and whether it came from the log
+   Element 26 keeps or was read back from your sessions. */
+function planHistoryCSV(all){
+  const rows = planHistoryRows(all !== false);
+  const q = v=>{
+    const t = String(v == null ? "" : v);
+    return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  const head = ["date","time","day","exercise","kind","change","why","source","undone"];
+  const body = rows.map(c=>{
+    const when = new Date(c.at || Date.parse((c.date || todayStr()) + "T12:00:00"));
+    return [
+      c.date || todayStr(),
+      isFinite(when.getTime()) ? when.toTimeString().slice(0, 5) : "",
+      c.day === "finisher" ? "finisher" : (widName(c.day) || c.day || ""),
+      c.name || "",
+      c.kind || "",
+      planChangeLine(c).join(" \u00b7 "),
+      c.note || "",
+      c.derived ? "read back from your sessions" : "recorded",
+      c.reverted ? "put back" : ""
+    ].map(q).join(",");
+  });
+  return head.join(",") + "\n" + body.join("\n") + "\n";
+}
+function downloadPlanHistory(){
+  const blob = new Blob([planHistoryCSV(PLAN_HIST_ALL)], {type: "text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "element26-plan-changes-" + profSlug() + "-" + todayStr() + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 function openPlanHistory(){
+  const rows = planHistoryRows(PLAN_HIST_ALL);
+  const nDer = rows.filter(c=> c.derived).length;
   showModal(`<h3>What changed your plan</h3>
-    <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">Newest
-      first. Anything Element 26 wrote from a finding can be put back exactly as it was.
-      Ordinary load changes are left out \u2014 this is the structural stuff.</div>
+    <div class="sub" style="margin:6px 0 10px;text-transform:none;letter-spacing:0">Newest
+      first. Anything Element 26 wrote from a finding can be put back exactly as it was.${
+      PLAN_HIST_ALL
+        ? " Everything is here, loads included."
+        : " Ordinary load changes are left out \u2014 this is the structural stuff."}${
+      nDer ? " The ones marked <b>from your log</b> are read back from your sessions: they"
+           + " happened before Element 26 kept this record, so there is no reason written"
+           + " down and no way back." : ""}</div>
+    <div class="seg ph-seg" style="margin:0 0 12px">
+      <button type="button" data-phall="1"${PLAN_HIST_ALL ? ' class="on"' : ""}>Everything</button>
+      <button type="button" data-phall="0"${PLAN_HIST_ALL ? "" : ' class="on"'}>Structural only</button>
+    </div>
     ${planHistoryHTML()}
-    <button class="btn ghost small" id="closeModal" style="margin-top:14px">Done</button>`);
+    ${rows.length > PLAN_HIST_MAX
+      ? `<div class="sub" style="margin-top:10px;text-transform:none;letter-spacing:0">Showing
+         the newest ${PLAN_HIST_MAX} of ${rows.length}. The export has all of them.</div>` : ""}
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn ghost" id="phCopy" style="flex:1">Copy ${esc(String(rows.length))}</button>
+      <button class="btn ghost" id="phFile" style="flex:1">Export CSV</button>
+    </div>
+    <button class="btn ghost small" id="closeModal" style="margin-top:8px">Done</button>`);
   const m = $("#modal");
+  m.querySelectorAll("[data-phall]").forEach(b=> b.onclick = ()=>{
+    PLAN_HIST_ALL = b.dataset.phall === "1";
+    openPlanHistory();
+  });
+  const pc = m.querySelector("#phCopy");
+  if(pc) pc.onclick = ()=> copyText(planHistoryCSV(PLAN_HIST_ALL))
+    .then(ok=> toast(ok ? "Plan changes copied" : "Could not copy \u2014 use Export", ok ? "good" : "warn"));
+  const pf = m.querySelector("#phFile");
+  if(pf) pf.onclick = ()=>{ downloadPlanHistory(); toast("Saved", "good"); };
   m.querySelectorAll("[data-planrevert]").forEach(b=> b.onclick = ()=>{
     const r = planRevert(parseFloat(b.dataset.planrevert));
     if(!r.ok){
@@ -56696,7 +56859,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "60.1";
+const NEWS_FOR = "60.2";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -56776,6 +56939,22 @@ const NEWS = [
      +you." */
   /* 60.1. Asked for: an arrow at the bottom of the screen during a session that takes
      you back to the exercise you are on. */
+  /* 60.2. "Make it show ALL of the changes it has done, even before the feature was
+     added, also let you export the changes it made and it shows dates." */
+  {k: "What changed your plan, all of it",
+   s: ["<b>Program \u203a What changed</b> showed the structural edits and hid every load "
+     + "change, which is a fair default and was the only option. It opens on "
+     + "<b>Everything</b> now, loads included, with <b>Structural only</b> one tap away.",
+       "It also goes back further than the record does. Element 26 only started keeping "
+     + "this log the day the screen was built; everything before that was never written "
+     + "down anywhere. Your sessions remember, though — a movement that starts or stops "
+     + "appearing on a day, a rep range that reads differently, a working load that moved "
+     + "— so those are read back and marked <b>from your log</b>. They carry no reason "
+     + "and no way back, because nobody recorded one.",
+       "And the whole thing exports: <b>Copy</b> or <b>Export CSV</b>, a row per change "
+     + "with the date, the day of your rotation, the movement, what changed, why, and "
+     + "whether it was recorded at the time or read back afterwards."]},
+
   {k: "Back to the set you are on",
    s: ["A session is a long page, and every reason to leave the set you are on sends you "
      + "up it — what you did last time, what is coming, how far through you are. Coming "
