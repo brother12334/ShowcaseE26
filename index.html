@@ -7168,7 +7168,7 @@ body.news-open{overflow:hidden}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.06.2";
+const APP_VERSION = "2026.11.06.3";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -16217,6 +16217,24 @@ function askSetReason(entry, st, miss){
       resolve(v);
     };
     const setTxt = (st.weight!=null && st.weight!=="" ? st.weight+" "+unitWord() : "bodyweight")+" × "+miss.reps+" reps";
+    /* THE SIZE OF A SHEET IS THE SHEET'S OWN BUSINESS, and this one never said.
+
+       Reported with a photograph: this sheet opening with its heading and its first
+       option cut off above the top of the screen, and no way to scroll up to them.
+
+       There are two sheets in this app that write #modal themselves rather than going
+       through showModal(), and showModal() is where the size class is set. askConfirm()
+       sets its own \u2014 .mo-prompt, which is max-height:none because a one-question
+       prompt is never tall enough to need a cap \u2014 and nothing takes it off again. So
+       any confirm anywhere in the session left mo-prompt on the element, and the next
+       time THIS sheet opened it inherited "no maximum height" while being a list of five
+       options, a text field and a button. The backdrop aligns to the bottom edge, so
+       everything past the screen height went off the TOP, and max-height:none means
+       there is no overflow to scroll either.
+
+       It says which kind of sheet it is now. hideModal() also clears the class, so a
+       size cannot outlive the sheet that asked for it whatever opens next. */
+    $("#modal").className = "modal";
     $("#modal").innerHTML = `
       <h3>What happened there?</h3>
       <div class="sub" style="margin:-4px 0 4px">
@@ -57277,7 +57295,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.06.2";
+const NEWS_FOR = "2026.11.06.3";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -57369,6 +57387,21 @@ const NEWS = [
      "v2026.11.06" after "v60.6" will otherwise think they have been downgraded. */
   /* 2026.11.06.2. "Sometimes it just sends me to the bottom of the screen in the workout
      tab when filling in the exercises." */
+  /* 2026.11.06.3. Photographed: the "What happened there?" sheet opening with its
+     heading and first option above the top of the screen. */
+  {k: "A sheet that opens with its head cut off",
+   s: ["The <b>What happened there?</b> question — the one that asks why a set came in "
+     + "under its target — could open with its heading and first option above the top of "
+     + "the screen, and nothing would scroll up to them.",
+       "Sheets come in three sizes here, and the size is a class on the sheet. A yes/no "
+     + "prompt is deliberately uncapped, because one question is never tall enough to "
+     + "need a limit — but it was leaving that setting behind when it closed. Any confirm "
+     + "anywhere in a session meant the next sheet opened uncapped too, and this one is "
+     + "five options, a text box and a button. Sheets sit against the bottom of the "
+     + "screen, so everything past the top simply went off it.",
+       "Each sheet says which size it is now, and the size comes off when the sheet "
+     + "closes, whichever way it closes."]},
+
   {k: "Logging a set leaves the page where it is",
    s: ["Beating a previous best opens a little celebration, and that used to note where "
      + "you were on the page, send it to the top, and put it back when the overlay left. "
@@ -61767,6 +61800,12 @@ function hideModal(){
      of a workout, where closing the sheet is closing the only copy of the session. */
   if(MODAL_STICKY) return;
   $("#modalBg").classList.remove("show");
+  /* AND THE SIZE CLASS GOES WITH IT. Same reasoning as MODAL_STICKY above: a variant
+     that outlives its sheet is a sheet that opens wearing somebody else's shape. The
+     backdrop is display:none without .show, so there is no fade for this to flicker in
+     the middle of. */
+  const m = $("#modal");
+  if(m) m.className = "modal";
   document.body.classList.remove("modal-live");
   const d = MODAL_DISMISS;
   MODAL_DISMISS = null;
@@ -61802,6 +61841,12 @@ function askConfirm(opts){
       settled = true;
       MODAL_DISMISS = null;
       $("#modalBg").classList.remove("show");
+      /* AND THE SHAPE COMES OFF WITH IT. This sheet is the only one that asks to be
+         uncapped, and it closes through its own `done` rather than hideModal() — so
+         leaving mo-prompt on the element was leaving "no maximum height" lying about for
+         whatever opened next. See the note on askSetReason(), which is what inherited it
+         and opened with its heading above the top of the screen. */
+      $("#modal").className = "modal";
       document.body.classList.remove("modal-live");   // see askSetReason()
       resolve(v);
     };
