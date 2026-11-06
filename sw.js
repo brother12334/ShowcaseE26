@@ -28,7 +28,11 @@
  * the background for next time. The cost is that an update lands one launch late, which
  * is why the page is told when that happens instead of being left to wonder.
  */
-const VERSION = "53.6";
+/* THE SAME STRING AS THE APP'S APP_VERSION, and it did not use to be: this was its own
+   count and had reached 53.6 while the app was on 60.6, so neither number could be read
+   against the other. See the note on APP_VERSION in index.html for the scheme. The cache
+   names below are compared with !== and swept by prefix, so nothing here parses it. */
+const VERSION = "2026.11.06.1";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 

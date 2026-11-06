@@ -213,8 +213,20 @@ html,body{margin:0;padding:0}
 
    This is a floor, not a fix: it stops one bad element from rescaling the app, and the
    spec that sweeps every tab for overflow is what keeps the bad element from existing. */
-html{scrollbar-width:none;-ms-overflow-style:none;overflow-x:clip}
-body{overflow-x:clip}
+/* AND NOT ON THE ROOT, WHICH IS WHAT PUT THE TAB BAR IN THE MIDDLE OF THE SCREEN.
+
+   59.2 put `overflow-x: clip` on html and body to stop one too-wide element rescaling
+   the whole app. The protection is right and the place was wrong: setting overflow on
+   the root or on body is the classic way to break `position: fixed` on iOS Safari, where
+   fixed children intermittently stop being fixed and scroll with the document. Reported
+   exactly that way — the tab bar sitting halfway up the page over the card you were
+   reading, and "sometimes it goes back to the bottom", which is the intermittence.
+
+   The nav is a child of BODY, not of #app, so clipping #app cannot contain it however
+   the engine treats the rule. Same floor against a stray wide element, nothing touching
+   the element whose whole job is to stay put. overflow-clip-margin keeps the small
+   deliberate bleeds inside cards from being shaved. */
+html{scrollbar-width:none;-ms-overflow-style:none}
 *{scrollbar-width:none}
 ::-webkit-scrollbar{width:0;height:0}
 ::-webkit-scrollbar-thumb,::-webkit-scrollbar-track{background:transparent}
@@ -262,7 +274,8 @@ body{
    other full-screen surface here reserves the top one (onboarding, the importer, the
    report, the cycle review). The main app never did, so on any phone with a notch the
    header ran underneath the clock and the battery. */
-#app{max-width:600px;margin:0 auto;padding:calc(16px + env(safe-area-inset-top)) 14px 20px}
+#app{max-width:600px;margin:0 auto;padding:calc(16px + env(safe-area-inset-top)) 14px 20px;
+  overflow-x:clip;overflow-clip-margin:12px}
 /* Mono headings need less weight and more air than a condensed face did: bold mono at
    the old tracking reads as a shout. 600 with wide tracking reads as a label. */
 h1,h2,h3{font-family:var(--disp);font-weight:600;text-transform:uppercase;letter-spacing:.11em;margin:0}
@@ -7127,7 +7140,33 @@ body.news-open{overflow:hidden}
 /* Bumped by 0.1 on every round of edits to this file. It is shown on the splash, in
    Setup, and on the printed programme, so a report you handed to someone last month can
    be matched against the build that produced it. */
-const APP_VERSION = "60.6";
+/* =====================================================================
+   THE VERSION, AND WHY IT IS A DATE
+
+   It used to be a count: 1.0 up to 60.6, a tenth per release. Nothing was wrong with it
+   except that it had stopped meaning anything — "60.6" says which release this is out of
+   however many there have been, and nobody has that number memorised. The one question
+   anybody actually asks of a version here is "is my phone running the build you just
+   shipped", and a count cannot answer it without a changelog in the other hand.
+
+   A date can. YYYY.MM.DD.N: the day the build went out, and which build of that day it
+   is, starting at 1. Reading it tells you how old what you are holding is.
+
+   HOW TO BUMP IT. Set it to today, build 1; if you ship again the same day, build 2.
+   Never reuse a string, and never go backwards — the same rule the count had. The
+   service worker's VERSION is the same string now rather than a second count that drifted
+   out of step with this one (it had reached 53.6 against this 60.6), and NEWS_FOR stays
+   equal to this, which is what makes What's New open once per release.
+
+   NOTHING ORDERS THESE. Every reader is a display or an equality — S.seenNews === NEWS_FOR,
+   and the service worker's cache names, which are compared with !== and swept by prefix.
+   That is what makes changing the scheme safe: no code has to understand both. Anything
+   that ever DOES need to order them must compare the four numbers, not the strings, or
+   build 10 of a day will sort below build 2. */
+const APP_VERSION = "2026.11.06.1";
+/* The version as a person reads it: the same string, minus a build number of 1, which is
+   every release except the second and later of a single day. */
+function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
 
 /* =====================================================================
    HOW THE PLAN READER REACHES GEMINI
@@ -26587,7 +26626,7 @@ function openReportSheet(){
           style="width:100%;padding:13px;border-radius:var(--r);border:1px solid var(--line);background:var(--card2);color:var(--text);font:inherit;font-size:var(--fs-5);resize:vertical"></textarea></div>
       <div class="rep-diag">
         <div class="rep-diag-h">Sent with it</div>
-        <div class="rep-diag-b">v${esc(APP_VERSION)} \u00b7 ${esc(d.units)} \u00b7 ${esc(String(d.sessions))} sessions
+        <div class="rep-diag-b">v${esc(verLabel())} \u00b7 ${esc(d.units)} \u00b7 ${esc(String(d.sessions))} sessions
           \u00b7 ${esc(d.split || "no split")} \u00b7 ${d.cloud ? "cloud account" : "device account"}
           ${errs.length ? " \u00b7 " + errs.length + " recent error" + (errs.length>1?"s":"") : ""}</div>
         <div class="rep-diag-b" style="color:var(--faint)">Your Element 26 ID, so a reply can reach you.
@@ -44500,7 +44539,7 @@ function setGroups(){
      val: S.sessions.length + (S.sessions.length === 1 ? " session" : " sessions"),
      body: settingsDataHTML},
     {k:"help", icon:"life", title:"Help", sub:"The tour, and telling somebody when the app misbehaves.",
-     val: "v" + APP_VERSION,
+     val: "v" + verLabel(),
      body: settingsHelpHTML},
     /* ITS OWN ROW, because a licence is a term of use and not a caption. The anatomy
        credit used to be six words under the body diagram; the MIT licence it is granted
@@ -44612,7 +44651,7 @@ function viewSync(){
      specifically rather than "back" in history, because the only way in is from Today. */
   let h = `<div class="hdr"><button type="button" class="fx-back hdr-back" id="setToToday"
       aria-label="Back to Today">\u2039</button><h1>SETTINGS</h1>${
-      hdrRight(`<span class="date num">v${APP_VERSION}</span>`)}</div>` + LIVE;
+      hdrRight(`<span class="date num">v${verLabel()}</span>`)}</div>` + LIVE;
   const by = {};
   groups.forEach(g=>{ by[g.k] = g; });
   SET_SECTIONS.forEach(sec=>{
@@ -44695,7 +44734,7 @@ function settingsHelpHTML(){
         Element 26 with the version you're on and any errors the app caught — never your workouts.</div>
       <div class="btn-row" style="margin-top:0"><button class="btn ghost small" id="repOpen" style="flex:1">Report a problem</button></div>
     </div>
-    <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:var(--fs-3)">Element 26 v${APP_VERSION}</div>`;
+    <div class="sub" style="margin:2px 0 0;color:var(--faint);font-size:var(--fs-3)">Element 26 v${verLabel()}</div>`;
 }
 // The account group's body: the identity, the key, the cloud state, and the way out.
 function settingsAccountHTML(){
@@ -57223,7 +57262,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "60.6";
+const NEWS_FOR = "2026.11.06.1";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -57311,6 +57350,17 @@ const NEWS = [
   /* 60.4. Asked for after the question "does the app ask if you want to go down in
      weight when reps are in range but the RPE is not". It did not. */
   /* 60.6. Read off a screenshot: "LAST 149.8×7@7.5" on weighted dips. */
+  /* The version scheme changed here, and the entry says so because somebody looking at
+     "v2026.11.06" after "v60.6" will otherwise think they have been downgraded. */
+  {k: "The version is a date now",
+   s: ["Element 26 counted its releases — 1.0 up to <b>60.6</b> — and that number had "
+     + "stopped meaning anything. The only question anybody asks of a version here is "
+     + "whether the app on their phone is the build that was just shipped, and a count "
+     + "cannot answer it without a changelog in the other hand.",
+       "So it is the date instead: <b>v2026.11.06</b> is the build from the 6th of "
+     + "November, and a second build on the same day reads <b>v2026.11.06.2</b>. You have "
+     + "not been moved backwards — this is the release after 60.6."]},
+
   {k: "Last time's sets speak bw+ too now",
    s: ["The <b>LAST</b> chip on a movement that counts you was still printing the whole "
      + "load — <b>149.8×7</b> on weighted dips, which is ten pounds on a belt written as "
@@ -62259,7 +62309,7 @@ function buildPlanInner(){
   ROTATION.forEach(w=>{ dayCounts[w] = (dayCounts[w]||0)+1; });
 
   let body = `<h1>Training Programme</h1>
-  <p class="meta">${esc(who)} · prepared ${new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"})} · Element 26 v${APP_VERSION}</p>
+  <p class="meta">${esc(who)} · prepared ${new Date().toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"})} · Element 26 v${verLabel()}</p>
 
   <h2>The rotation</h2>
   <p>The programme runs as a <b>${ROTATION.length}-workout cycle</b>, taken in this order and repeated:</p>
@@ -63436,7 +63486,7 @@ function selfTestOpen(){
 (function(){
   const sp = document.getElementById("splash");
   const vEl = sp && sp.querySelector(".splash-ver");
-  if(vEl) vEl.textContent = "v" + APP_VERSION;
+  if(vEl) vEl.textContent = "v" + verLabel();
   const qEl = sp && sp.querySelector("#splashQuote");
   if(qEl){
     const q = quoteOfTheDay();

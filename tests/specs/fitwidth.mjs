@@ -92,14 +92,20 @@ console.log("\nAND THE PAGE CANNOT BE MADE TO SCROLL SIDEWAYS");
     const after = {scrollW: document.documentElement.scrollWidth,
                    vw: document.documentElement.clientWidth,
                    htmlClip: getComputedStyle(document.documentElement).overflowX,
-                   bodyClip: getComputedStyle(document.body).overflowX};
+                   appClip: getComputedStyle(app).overflowX};
     bad2.remove();
     return after;
   });
   console.log("   ", JSON.stringify(r));
   ck("a 900px element does not widen the document", r.scrollW <= r.vw + 1, r.scrollW + " vs " + r.vw);
-  ck("because the page clips rather than scrolling", /clip|hidden/.test(r.htmlClip), r.htmlClip);
-  ck("and it is clip, which keeps sticky headers working", r.htmlClip === "clip", r.htmlClip);
+  /* WHERE the clipping lives is the point, not just that it happens. Setting overflow on
+     the ROOT is the classic way to break position:fixed on iOS Safari — fixed children
+     intermittently stop being fixed and scroll with the document, which is how the tab
+     bar came to be sitting halfway up the page. #app is a sibling of the nav, so clipping
+     it cannot contain the one element whose whole job is to stay put. */
+  ck("because the content column clips", /clip|hidden/.test(r.appClip), r.appClip);
+  ck("AND THE ROOT IS LEFT ALONE, so the tab bar stays fixed",
+     r.htmlClip === "visible", r.htmlClip);
   await p.close();
 }
 
