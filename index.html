@@ -7168,7 +7168,7 @@ body.news-open{overflow:hidden}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.06.3";
+const APP_VERSION = "2026.11.06.4";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -38332,11 +38332,24 @@ function viewBody(){
           ${optHTML("rest", "Rest longer",
             `<span class="pg-to"><input inputmode="numeric" data-faderest="${esc(f.id)}"
               value="${f.restAdd == null ? 30 : f.restAdd}" aria-label="Extra seconds of rest"><i>s more</i></span>`)}
-          ${optHTML("load", "Start lighter",
+          ${optHTML("load", (()=>{
+            /* "START LIGHTER" DESCRIBED A WARM-UP STRATEGY AND DID SOMETHING ELSE: it
+               writes a lower weight into the programme. Reported as "I don't really
+               like it and I don't use it ever, I feel like you should just do lower
+               weight" — which is what it had been doing all along, under a name that
+               said otherwise. It says the number now. */
+            /* The flag record files the movement under `ex`; `name` is the finding's
+               field and does not survive into it. */
+            const cur = findProgramEntry(f.ex || f.name);
+            const from = cur && cur.weight != null ? parseFloat(cur.weight) : NaN;
+            const off = isFinite(from) && f.to != null ? Math.round((from - f.to) * 10) / 10 : 0;
+            return off > 0 ? "Take " + fmtLoad(off) + " off" : "Lower the weight";
+          })(),
             `<span class="pg-to"><input inputmode="decimal" data-fadeload="${esc(f.id)}"
               value="${f.to == null ? "" : f.to}" aria-label="Opening weight"><i>${esc(unitWord())}</i></span>`)}
         </div>
-        <div class="flag-pick-n">Both are worth doing, and you can take one, the other, or both.</div>
+        <div class="flag-pick-n">Rest is the one to try first — it keeps the load and buys
+          the reps back. Take both if the rest was already long.</div>
         <div class="btn-row" style="margin-top:9px">
           <button class="btn ghost small" data-flagno="${esc(f.id)}" style="flex:1">${
             left > 1 ? "Dismiss both" : "Dismiss"}</button>
@@ -52393,7 +52406,7 @@ function scoreWorkout(sess){
   (()=>{
     /* Computed by repDropOffs(), which the Body tab's flag also reads — one finding,
        one implementation, so the card and the flag can never disagree about it. */
-    const {drops, avgDrop, bad} = repDropOffs(sess);
+    const {drops, avgDrop, steep, bad} = repDropOffs(sess);
     const why = [];
     if(!drops.length){
       add("fatigue","Fatigue management",10,0,
@@ -52405,12 +52418,23 @@ function scoreWorkout(sess){
     // later sets run on empty and contribute mostly fatigue rather than stimulus.
     const earned = 10 * Math.max(0, Math.min(1, 1 - Math.max(0, avgDrop - 0.25)/0.35));
     why.push("Reps fell "+Math.round(avgDrop*100)+"% on average from first set to last at the same load. Up to about 25% is normal.");
-    if(bad.length) why.push("Steep drop-off on "+bad.slice(0,3).map(d=>d.name+" ("+d.first+"→"+d.last+")").join(", ")+".");
+    if(steep.length) why.push("Steep drop-off on "+steep.slice(0,3).map(d=>d.name+" ("+d.first+"→"+d.last+")").join(", ")+".");
     else why.push("Performance held well across sets, so rest and load were matched to the work.");
+    /* A STEEP DROP IS ONLY ADVICE WHEN IT COST A SET. The score is read off the average
+       either way — that is what the number measures — but telling somebody to change
+       something because their reps fell from 20 to 12 inside a 10-20 range would be
+       advice to fix a session that did its job. */
+    const costly = bad.length ? bad[0] : null;
     add("fatigue","Fatigue management",10,earned,why,
-      bad.length ? "A collapse like that is nearly always too little rest or too heavy an opening set. Rest longer, or start about " + stepInUnits(5) + " " + unitWord() + " lighter and hold the reps."
+      costly
+        ? "On " + costly.name + " the last set came in under the " + costly.range[0]
+          + " reps it asks for. More rest is the usual fix — it buys the reps back at the "
+          + "same load; taking the weight down does it the other way round."
+      : steep.length
+        ? "Every set still landed inside its rep range, so there is nothing to fix here — "
+          + "a first set taken close to failure is supposed to be followed by smaller ones."
       : null,
-      {ex: bad.length ? bad[0].name : null});
+      {ex: costly ? costly.name : (steep.length ? steep[0].name : null)});
   })();
 
   /* 7, SESSION EFFICIENCY ----------------------------------------------------- */
@@ -54380,10 +54404,25 @@ function repDropOffs(sess){
     const first = parseFloat(same[0].reps) || 0;
     const last  = parseFloat(same[same.length - 1].reps) || 0;
     if(!first) return;
-    drops.push({name:e.name, drop:(first-last)/first, first, last, weight: top || (parseFloat(ws[0].weight) || 0)});
+    /* AND WHETHER IT COST ANYTHING. A rep drop across sets is the ordinary signature of
+       fatigue, not a fault: with two to three minutes between sets, 20-30% off the first
+       set is typical, and a first set taken genuinely close to failure SHOULD be followed
+       by smaller ones. What makes a drop worth raising is not its size, it is the last
+       set falling out of the range the exercise was prescribed in — that is the point at
+       which it stopped being a working set and became a set you did.
+       No range written down means there is no answer to that question, so there is no
+       finding either. */
+    const range = repRange(e.reps);
+    drops.push({name:e.name, drop:(first-last)/first, first, last, range,
+                lastShort: !!range && last < range[0],
+                weight: top || (parseFloat(ws[0].weight) || 0)});
   });
   const avgDrop = drops.length ? drops.reduce((t,d)=>t+d.drop,0)/drops.length : 0;
-  return {drops, avgDrop, bad: drops.filter(d=>d.drop > FADE_BAD).sort((a,b)=>b.drop-a.drop)};
+  /* Two lists, because two questions are being asked of the same numbers. `steep` is
+     "did the reps fall a long way", which the grade narrates. `bad` is "and did that
+     cost a set", which is the only one worth putting a button under. */
+  const steep = drops.filter(d=> d.drop > FADE_BAD).sort((a,b)=> b.drop - a.drop);
+  return {drops, avgDrop, steep, bad: steep.filter(d=> d.lastShort)};
 }
 /* How much longer to rest, and how much lighter to start, for a collapse. Both are
    suggestions with a box next to them — see the flag row. */
@@ -54453,10 +54492,15 @@ function fadeFindings(sess){
     const fix = fadeFixFor(d);
     return {
       kind: "fade", name: d.name,
-      msg: "Reps went " + d.first + " \u2192 " + d.last + " at the same load, "
-         + Math.round(d.drop*100) + "% off the first set.",
-      sub: "A collapse like that is nearly always too little rest or too heavy an opening set. "
-         + "Rest longer, or start lighter and hold the reps.",
+      msg: "Reps went " + d.first + " \u2192 " + d.last + " at the same load"
+         + (d.range ? ", under the " + d.range[0] + " this asks for" : "") + ".",
+      /* REST FIRST, AND IT IS NOT A COIN FLIP. Longer rest is the better-supported of
+         the two: it buys the reps back at the same load, and the load is not what needs
+         fixing. Taking weight off also holds the reps, and trades away the load to do
+         it — worth having, second. */
+      sub: "The last set fell out of its rep range. More rest is the usual fix: it buys "
+         + "the reps back without changing the weight. Taking the load down does the same "
+         + "job the other way round, if the rest is already long.",
       to: fix.to, restAdd: fix.restAdd
     };
   });
@@ -57295,7 +57339,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.06.3";
+const NEWS_FOR = "2026.11.06.4";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -57389,6 +57433,24 @@ const NEWS = [
      tab when filling in the exercises." */
   /* 2026.11.06.3. Photographed: the "What happened there?" sheet opening with its
      heading and first option above the top of the screen. */
+  /* 2026.11.06.4. "Is the start lighter flag a good feature? I don't use it ever, I feel
+     like you should just do lower weight." Three things were wrong with it. */
+  {k: "The rep drop-off flag only speaks when it cost you something",
+   s: ["Reps falling across sets is what fatigue looks like, not a fault. At two to three "
+     + "minutes' rest, 20-30% off the first set is ordinary, and a first set taken close "
+     + "to failure is <i>supposed</i> to be followed by smaller ones. This flag fired on "
+     + "the size of the fall alone, so going <b>20 \u2192 12</b> inside a 10-20 range — every "
+     + "set doing its job — got you a card asking you to change something.",
+       "It now raises only when the last set falls <b>out of its rep range</b>. That is "
+     + "the point where the drop stopped being fatigue and started costing you a working "
+     + "set. Your grade still reads the fall itself, because that is what the number "
+     + "measures; it just stops giving advice about a session that went fine.",
+       "<b>Start lighter</b> is gone as a name — it described a warm-up and did something "
+     + "else. The button writes a lower weight into your plan, so it says <b>Take 5 lb "
+     + "off</b>. And the two fixes are no longer offered as equals: more rest buys the "
+     + "reps back at the same load, which is the better trade, so it is named as the one "
+     + "to try first."]},
+
   {k: "A sheet that opens with its head cut off",
    s: ["The <b>What happened there?</b> question — the one that asks why a set came in "
      + "under its target — could open with its heading and first option above the top of "
