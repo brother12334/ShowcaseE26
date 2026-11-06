@@ -4584,7 +4584,12 @@ button:disabled:active, button[aria-disabled="true"]:active,
    waits before removing the node — a fade that outlives its own element just gets cut
    off at the end. */
 #celebrate.out{opacity:0;transition:opacity var(--t-slow) var(--ease)}
-body.cele-open{overflow:hidden}
+/* AND THE LOCK IS NOT A ROOT OVERFLOW ANY MORE. overflow:hidden on body is the same
+   rule that was taking position:fixed off the tab bar on iOS, and a celebration that
+   leaves the page in that state for five seconds is five seconds of it. The overlay is
+   fixed over the whole screen and swallows the gesture itself. */
+body.cele-open{overscroll-behavior:contain}
+#celebrate{touch-action:none;overscroll-behavior:contain}
 
 /* ===== THE QUIET FINISH =====
    What a normal workout ends on. Everything here is one colour, one number and one
@@ -7163,7 +7168,7 @@ body.news-open{overflow:hidden}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.06.1";
+const APP_VERSION = "2026.11.06.2";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -14744,9 +14749,17 @@ function quietFinish(wid, volume, onDone, sess){
             : "Logged."}</div>`}
     </div>
     <div class="cele-hint">tap to continue</div>`;
-  const scrollY = window.pageYOffset || 0;
+  /* THE PAGE STAYS WHERE YOU LEFT IT. This used to note the scroll position, send the
+     page to the top, and put it back on dismiss — and that round trip is what sometimes
+     dropped somebody at the bottom of the session while they were filling it in. The
+     restore is a scrollTo against a document that has been re-rendered in the meantime:
+     if it is shorter than it was, the browser clamps the old offset to the new maximum,
+     which IS the bottom. Reported as "sometimes it just sends me to the bottom of the
+     screen in the workout tab when filling in the exercises."
+
+     Nothing needs the trip. The overlay is position:fixed inset:0, so it covers the
+     screen from wherever the page happens to be sitting. */
   document.body.classList.add("cele-open");
-  window.scrollTo(0, 0);
   document.body.appendChild(el);
 
   /* The count-up is the whole animation, so it is the one thing that must not silently
@@ -14783,7 +14796,6 @@ function quietFinish(wid, volume, onDone, sess){
     if(!el.isConnected || el.classList.contains("out")) return;
     el.classList.add("out");
     document.body.classList.remove("cele-open");
-    window.scrollTo(0, scrollY);
     setTimeout(()=>{
       el.remove();
       if(onDone && !fired){ fired = true; onDone(); }
@@ -14831,12 +14843,16 @@ function celebrate(kind, wid, volume, onDone, sess){
     </div>
     <div class="cele-hint">tap to continue</div>`;
 
-  /* Lock the page and put it back to the top BEFORE the overlay goes in. A fixed
-     element inserted mid-reflow resolves against the layout that is on its way out,
-     which is what made the plate appear at the bottom and then jump. */
-  const scrollY = window.pageYOffset || 0;
+  /* Lock the page BEFORE the overlay goes in. A fixed element inserted mid-reflow
+     resolves against the layout that is on its way out, which is what made the plate
+     appear at the bottom and then jump.
+
+     It used to send the page to the top as part of that and put it back on dismiss. See
+     the note on the quick-fire overlay: the trip back is a scrollTo against a document
+     that may have been re-rendered since, and a shorter one clamps the old offset to its
+     new maximum — which is how somebody filling in a session ended up at the bottom of
+     it. The overlay is fixed and covers the screen from wherever the page is. */
   document.body.classList.add("cele-open");
-  window.scrollTo(0, 0);
   document.body.appendChild(el);
 
   // confetti only once the spotlight is open and the plate has landed
@@ -14890,7 +14906,6 @@ function celebrate(kind, wid, volume, onDone, sess){
     if(!el.isConnected || el.classList.contains("out")) return;
     el.classList.add("out");
     document.body.classList.remove("cele-open");
-    window.scrollTo(0, scrollY);
     /* THE HANDOFF USED TO OVERLAP. The overlay sits at z-index 100 and the modal at 50,
        so a score card opened while this was still fading in front of it appeared behind
        a black wash, half-visible, with its own entrance already part-way through — which
@@ -57262,7 +57277,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.06.1";
+const NEWS_FOR = "2026.11.06.2";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -57352,6 +57367,17 @@ const NEWS = [
   /* 60.6. Read off a screenshot: "LAST 149.8×7@7.5" on weighted dips. */
   /* The version scheme changed here, and the entry says so because somebody looking at
      "v2026.11.06" after "v60.6" will otherwise think they have been downgraded. */
+  /* 2026.11.06.2. "Sometimes it just sends me to the bottom of the screen in the workout
+     tab when filling in the exercises." */
+  {k: "Logging a set leaves the page where it is",
+   s: ["Beating a previous best opens a little celebration, and that used to note where "
+     + "you were on the page, send it to the top, and put it back when the overlay left. "
+     + "Putting it back is the part that could go wrong: the session has usually been "
+     + "redrawn by then, and if it is shorter than it was, the browser pins the old "
+     + "position to the new end of the page — which is the bottom of your workout.",
+       "There was never anything to put back. The overlay covers the screen from "
+     + "wherever the page happens to be sitting, so it stays sitting there."]},
+
   {k: "The version is a date now",
    s: ["Element 26 counted its releases — 1.0 up to <b>60.6</b> — and that number had "
      + "stopped meaning anything. The only question anybody asks of a version here is "
