@@ -2068,9 +2068,14 @@ button.side-chip.sc-set::after{
    appear from off-screen and pop in at random" — you were watching a sheet arrive
    through a black wash. It also meant tapping the note button while a rest was running
    opened a sheet nobody could see. Toasts and PR floats stay above it. */
-.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:flex-end;justify-content:center;z-index:160}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:flex-end;justify-content:center;z-index:160;
+  /* The backdrop is the only part of a sheet you can touch that is not the sheet, so it
+     is where a drag would otherwise scroll the page behind. touch-action is not
+     inherited, so the sheet below keeps its own scrolling. */
+  touch-action:none;overscroll-behavior:contain}
 .modal-bg.show{display:flex;animation:fadeIn .18s ease both}
-.modal{background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl) var(--r-xl) 0 0;padding:20px;width:100%;max-width:600px;max-height:88vh;overflow-y:auto}
+.modal{background:var(--card);border:1px solid var(--line);border-radius:var(--r-xl) var(--r-xl) 0 0;padding:20px;width:100%;max-width:600px;max-height:88vh;overflow-y:auto;
+  touch-action:pan-y;overscroll-behavior:contain}
 /* ===================================================================================
    H — THREE SIZES OF SHEET, AND THE SIZE IS INFORMATION.
 
@@ -2907,8 +2912,29 @@ body.onboarding #app{padding:0}
 /* A sheet is up: the page behind it holds still. Without this the grade card and the
    page under it both scrolled, which on a phone is two scrollbars and a card that slides
    away when you meant to read it. */
-body.modal-live{overflow:hidden}
-body.tour-live{overflow:hidden}
+/* =====================================================================
+   SCROLL LOCKS THAT DO NOT TAKE THE TAB BAR WITH THEM
+
+   Reported three times, and the third time with a video: the tab bar frozen halfway up
+   the screen with the page carrying on underneath it, sometimes righting itself.
+
+   overflow:hidden on BODY is the cause. On iOS Safari it is the classic way to break
+   position:fixed — fixed children stop tracking the viewport and are left where the
+   document had them. 2026.11.06.1 took it off html and body for the width guard, which
+   was one of four places setting it; these are the other three, and they are worse,
+   because a class that is added when a sheet opens can outlive the sheet. The app has
+   form here: the preflight class survives its own element on more than one path.
+
+   None of the three needs body overflow. Each one is a full-screen overlay:
+     .modal-bg   fixed inset:0, and its backdrop is touchable, so it swallows the
+                 gesture itself. The sheet inside keeps its own scrolling, because
+                 touch-action is not inherited.
+     #preflight  fixed inset:0, opaque, scrolls itself. Nothing behind is reachable.
+     the tour    same shape.
+   overscroll-behavior stops a scroll inside one of them chaining to the page behind,
+   which is the only part body overflow was really buying. */
+body.modal-live{overscroll-behavior:contain}
+body.tour-live{overscroll-behavior:contain}
 /* THE SPOTLIGHT IS ONE ELEMENT NOW, NOT FIVE.
 
    It used to be four opaque rectangles arranged around the target plus a ring drawn on
@@ -3027,6 +3053,7 @@ body.tour-live{overflow:hidden}
 .ob-first .ob-card{text-align:left}
 .ai-full{
   position:fixed;inset:0;z-index:45;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
   animation:aiFullIn .28s cubic-bezier(.2,.8,.3,1) both;
 }
 .ai-full[hidden]{display:none}
@@ -3367,12 +3394,13 @@ nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px #141417}
 #preflight{
   position:fixed;inset:0;z-index:120;background:var(--bg);
   display:flex;align-items:stretch;justify-content:center;overflow-y:auto;
+  overscroll-behavior:contain;
   animation:pfIn .32s cubic-bezier(.2,.9,.28,1.05) both;
 }
 #preflight.out{animation:pfOut .24s ease-in forwards}
 @keyframes pfIn{from{opacity:0;transform:scale(1.02)}to{opacity:1;transform:none}}
 @keyframes pfOut{to{opacity:0;transform:scale(.99)}}
-body.pfl-open{overflow:hidden}
+body.pfl-open{overscroll-behavior:contain}
 /* the day, as light */
 .pfl-glow{
   position:absolute;inset:0;pointer-events:none;
@@ -5559,9 +5587,12 @@ body.cele-open{overscroll-behavior:contain}
 /* The block's own full page. Reuses the importer's surface so a full-screen flow looks
    and behaves the same wherever it appears. */
 .spec-full{z-index:46}
-body.spec-open{overflow:hidden}
-body.build-open{overflow:hidden}
-body.news-open{overflow:hidden}
+/* The three full-screen panels, for the same reason as the sheets above: each is a
+   fixed, opaque, inset:0 page that scrolls itself, so locking the body behind it bought
+   nothing and cost position:fixed on iOS. See the note on body.modal-live. */
+body.spec-open{overscroll-behavior:contain}
+body.build-open{overscroll-behavior:contain}
+body.news-open{overscroll-behavior:contain}
 /* WHAT CHANGED. A page of reading, so it is set as one: a numbered section per thing, a
    generous measure, and the app's own accent doing the numbering rather than any new
    colour. Nothing here is a new visual idea — it is the full-page surface the importer,
@@ -7168,7 +7199,7 @@ body.news-open{overflow:hidden}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.08.1";
+const APP_VERSION = "2026.11.08.2";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -32814,6 +32845,16 @@ function render(){
   /* And which ramp each movement has earned, which is a question about ORDER and was
      answered once, at Start, and then never again. See syncWarmKinds(). */
   try{ syncWarmKinds(); }catch(e){}
+  /* AND NOTHING IS LEFT LOCKED BEHIND A SHEET THAT HAS GONE.
+
+     Each of these is added when an overlay opens and removed when it closes, which is
+     one path too few: the preflight class has been seen outliving its own element, and
+     a lock that outlives what it was locking for is invisible — the app simply behaves
+     slightly wrong from then until a reload. They no longer set overflow, so the damage
+     is smaller than it was, but a stuck class is still a bug and this is the cheapest
+     place to be sure. Asked of the DOM rather than of a flag, because the flag is the
+     thing that goes stale. */
+  try{ sweepStuckLocks(); }catch(e){}
   if(TAB !== "sync"){ ADV_OPEN = false; SET_PAGE = null; }
   if(TAB !== "program") DAY_EDIT = null;
   if(TAB !== "history"){ RECORDS_OPEN = false; RECORDS_Q = ""; RB_EX = null; HIST_SHOW = 20; }
@@ -49313,6 +49354,28 @@ function planOrderFix(a, now, news, catchUp){
    finished session is history and is never rewritten. And ticks are cleared on a row
    whose ramp has CHANGED, because a tick means "I did that rung" and the rungs are not
    the same rungs any more. */
+function sweepStuckLocks(){
+  const bg = document.getElementById("modalBg");
+  const panel = id=>{ const el = document.getElementById(id); return !!el && !el.hidden; };
+  const open = {
+    "modal-live": !!(bg && bg.classList.contains("show")),
+    "pfl-open":   !!document.getElementById("preflight"),
+    /* The tour keeps its state in TOUR rather than in an element with a known id, so
+       that is what it is asked. */
+    "tour-live":  (typeof TOUR !== "undefined" && !!TOUR),
+    "cele-open":  !!document.getElementById("celebrate"),
+    /* The four full-screen panels are shown by clearing `hidden`, so that is the
+       question. ai-open sets no overflow of its own, but a stale one still tells the
+       rest of the app a panel is up — the jump-back arrow hides itself for one. */
+    "ai-open":    panel("aiFull"),
+    "spec-open":  panel("specFull"),
+    "build-open": panel("buildFull"),
+    "news-open":  panel("newsFull")
+  };
+  Object.keys(open).forEach(k=>{
+    if(!open[k] && document.body.classList.contains(k)) document.body.classList.remove(k);
+  });
+}
 function syncWarmKinds(){
   const a = (typeof S !== "undefined" && S) ? S.active : null;
   if(!a || !Array.isArray(a.entries) || !a.entries.length) return false;
@@ -57339,7 +57402,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.08.1";
+const NEWS_FOR = "2026.11.08.2";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -57436,6 +57499,22 @@ const NEWS = [
   /* 2026.11.06.4. "Is the start lighter flag a good feature? I don't use it ever, I feel
      like you should just do lower weight." Three things were wrong with it. */
   /* 2026.11.08.1. "I don't even have 55 lb dumbbell but it keeps saying this." */
+  /* 2026.11.08.2. Third report of the tab bar, this one with a video. */
+  {k: "The tab bar should stop floating now",
+   s: ["The bar freezing halfway up the screen with the page carrying on underneath it "
+     + "comes from <b>overflow:hidden on the body</b>. On iPhone that is the classic way "
+     + "to break a fixed element: it stops tracking the screen and is left wherever the "
+     + "page had it, until something forces a repaint and it snaps back — which is why "
+     + "it sometimes righted itself.",
+       "The last release took that off the page itself. It turned out to be one of eight "
+     + "places setting it: every sheet, every full-screen panel, the tour and the "
+     + "celebration each locked the body while they were open. None of them needed to — "
+     + "each is already a full-screen layer that scrolls itself — so none of them does "
+     + "it any more.",
+       "The other half is that those locks are added when something opens and removed "
+     + "when it closes, and a class can outlive what it was locking for. Any that is "
+     + "still set with nothing open is now cleared on the next redraw."]},
+
   {k: "The box stops offering dumbbells you do not own",
    s: ["If your rack ends at 50 and the set boxes kept suggesting <b>55</b>, that was a "
      + "gap in one path. Element 26 has known where your dumbbells stop for a while, and "
