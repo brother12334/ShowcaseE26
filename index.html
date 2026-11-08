@@ -7168,7 +7168,7 @@ body.news-open{overflow:hidden}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.06.4";
+const APP_VERSION = "2026.11.08.1";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -57339,7 +57339,7 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.06.4";
+const NEWS_FOR = "2026.11.08.1";
 const NEWS = [
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
@@ -57435,6 +57435,19 @@ const NEWS = [
      heading and first option above the top of the screen. */
   /* 2026.11.06.4. "Is the start lighter flag a good feature? I don't use it ever, I feel
      like you should just do lower weight." Three things were wrong with it. */
+  /* 2026.11.08.1. "I don't even have 55 lb dumbbell but it keeps saying this." */
+  {k: "The box stops offering dumbbells you do not own",
+   s: ["If your rack ends at 50 and the set boxes kept suggesting <b>55</b>, that was a "
+     + "gap in one path. Element 26 has known where your dumbbells stop for a while, and "
+     + "every weight it works out — a raise, a warm-up rung, a cut — is held to it. The "
+     + "grey number waiting in the box was not: it is whichever is the better answer of "
+     + "your plan, the raise your last session earned, and what you lifted last time, and "
+     + "none of those three was ever put against the rack.",
+       "It is now. The number only ever comes down, and only to one that exists.",
+       "This needs you to have told it where the rack ends — <b>Settings › Where you "
+     + "train</b>, under the dumbbells. With nothing said it still cannot know, and "
+     + "guessing a ceiling would cap a real increase."]},
+
   {k: "The rep drop-off flag only speaks when it cost you something",
    s: ["Reps falling across sets is what fatigue looks like, not a fault. At two to three "
      + "minutes' rest, 20-30% off the first set is ordinary, and a first set taken close "
@@ -60301,6 +60314,30 @@ function autoProgCardHTML(){
     </div>
   </div>`;
 }
+/* NOTHING THE BOX OFFERS MAY BE A DUMBBELL YOU DO NOT OWN.
+
+   Reported with a photograph: "I don't even have 55 lb dumbbell but it keeps saying
+   this" — the set boxes offering 55 on a rack that ends at 50, with the app's own
+   ceiling set.
+
+   capToRack() has been enforcing that ceiling since it was written, and roundLoadable()
+   calls it, so every load the app PROPOSES through the ordinary path respects it. The
+   placeholder did not go through that path. It returns whichever is the better answer of
+   the plan, the raise the last session earned, and what you lifted last time — and none
+   of the three was ever put against the rack. One tap on an empty row copies the
+   placeholder into the set, so the one number most likely to be lifted was the one
+   number nobody checked.
+
+   It only ever comes DOWN to a weight that exists, and only on the gear that has a
+   ceiling: capToRack() is a no-op for a barbell, and for anybody who has not said where
+   their dumbbells stop. */
+function phCap(en, v){
+  const n = parseFloat(v);
+  if(!isFinite(n) || !(n > 0)) return v;
+  const add = entryBarAdd(en) || 0;
+  const capped = capToRack(n + add, en && en.name) - add;
+  return capped < n - 0.001 ? String(r1(capped)) : v;
+}
 function planLoadPh(en, last, si){
   /* M9 — A WAVED SET'S LOAD IS NOT A SUGGESTION, IT IS THE PRESCRIPTION. 85% of the
      training max is the whole instruction for that set: there is nothing for the "heavier
@@ -60308,25 +60345,25 @@ function planLoadPh(en, last, si){
      would put week three's load in week one's first set. Returned before any of it. */
   if(Array.isArray(en && en.setLoads) && en.setLoads[si] > 0){
     const netW = en.setLoads[si] - entryBarAdd(en);
-    if(netW > 0) return String(r1(netW));
+    if(netW > 0) return phCap(en, String(r1(netW)));
   }
   const plan = planLoadFor(en, si);
   const did = lastWorkedPh(last, si);
   const forced = appSetLoadPending(en && en.name);
   if(forced != null){
     const net = forced - entryBarAdd(en);
-    if(net > 0) return String(r1(net));
+    if(net > 0) return phCap(en, String(r1(net)));
   }
   /* H8. The raise the last session earned and nobody has applied yet \u2014 the same number
      the warm-up above is ramping to. */
   const earned = earnedLoadPending(en && en.name, (en && en.occ) || 0);
   if(earned != null && !(isFinite(parseFloat(plan)) && parseFloat(plan) >= earned)){
     const net = earned - entryBarAdd(en);
-    if(net > 0) return String(r1(net));
+    if(net > 0) return phCap(en, String(r1(net)));
   }
   if(plan !== ""){
     const p = parseFloat(plan);
-    if(isFinite(did) && isFinite(p) && did > p) return String(r1(did));
+    if(isFinite(did) && isFinite(p) && did > p) return phCap(en, String(r1(did)));
     /* A PRESCRIPTION FAR ABOVE ANYTHING YOU HAVE LIFTED IS NOT A SUGGESTION, IT IS A
        HAZARD.
 
@@ -60346,12 +60383,12 @@ function planLoadPh(en, last, si){
     if(isFinite(p) && top > 0){
       const step = progressionStep(findProgramEntry(en.name) || en);
       const room = Math.max((step && step.amount) || 0, top * 0.1);
-      if(p > top + room + 0.01) return String(r1(top));
+      if(p > top + room + 0.01) return phCap(en, String(r1(top)));
     }
-    return plan;
+    return phCap(en, plan);
   }
   const l = last && last[si];
-  return (l && l.weight != null && l.weight !== "") ? l.weight : unitWord();
+  return (l && l.weight != null && l.weight !== "") ? phCap(en, l.weight) : unitWord();
 }
 /* AND IT SAYS SO, rather than quietly showing a number the programme does not contain.
    Only when the gap is real: the last session's top working load above the prescription,
