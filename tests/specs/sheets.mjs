@@ -35,7 +35,17 @@ console.log("1 - THE FOUR CONTAINERS EXIST AND SAY WHAT THEY ARE FOR");
     Array.from(document.styleSheets).forEach(s=>{
       try{ Array.from(s.cssRules).forEach(r2=>{
         if(r2.selectorText === ".e-field") want.field = r2.style.cssText.slice(0,120);
-        if(r2.selectorText === ".e-row")   want.row   = r2.style.cssText;
+        if(r2.selectorText === ".e-row"){
+          want.row = r2.style.cssText;
+          /* READ THE PROPERTY, NOT THE SERIALISATION. cssText is whatever the engine
+             feels like printing: this asked for the substring "border-bottom ... solid"
+             and Chromium now folds that shorthand into `border-style: none none solid`
+             plus a border-color, so a rule that was correct the whole time started
+             failing on a browser upgrade. The longhands are the actual contract. */
+          want.rowEdge = {style: r2.style.borderBottomStyle,
+                          width: r2.style.borderBottomWidth,
+                          radius: r2.style.borderRadius};
+        }
         if(r2.selectorText === ".e-rule")  want.rule  = r2.style.cssText.slice(0,120);
         if(r2.selectorText === ".card")    want.card  = r2.style.cssText.slice(0,120);
       }); }catch(e){}
@@ -47,8 +57,9 @@ console.log("1 - THE FOUR CONTAINERS EXIST AND SAY WHAT THEY ARE FOR");
   ck("a row", !!r.row, String(r.row).slice(0,60));
   ck("and a rule", !!r.rule, String(r.rule).slice(0,60));
   ck("the row has a hairline, not a box",
-     /border-bottom[^;]*solid/.test(r.row || "") && /border-radius: 0/.test(r.row || ""),
-     String(r.row).slice(-120));
+     !!r.rowEdge && r.rowEdge.style === "solid" && parseFloat(r.rowEdge.width) <= 1.5
+     && parseFloat(r.rowEdge.radius || 0) === 0,
+     JSON.stringify(r.rowEdge));
 }
 
 console.log("2 - A TOOLBAR IS NOT A THING YOU ACT ON AS A UNIT");

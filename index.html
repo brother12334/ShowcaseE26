@@ -7199,7 +7199,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.08.2";
+const APP_VERSION = "2026.11.12.1";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -57402,8 +57402,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.08.2";
+const NEWS_FOR = "2026.11.12.1";
 const NEWS = [
+  {k: "A cut the app made no longer argues with itself",
+   s: ["When Element 26 lowers a weight, the card under it could quote your own session "
+     + "back at you \u2014 the same session the cut was made from \u2014 and call the cut wrong. "
+     + "Reported on an overhead cable triceps extension: 90 lb for 8, then 9, then 5 at "
+     + "RPE 10. The reps falling away across the sets is what brought the load down, and "
+     + "then the card cited set one of that session as proof the load should not have "
+     + "come down. Both statements were true. Neither was an argument.",
+       "A cut is now only overturned by what you log AFTER it \u2014 what came before is "
+     + "what the app had already weighed. Until something new happens the card says what "
+     + "was changed, when, and what would bring the weight back up, instead of "
+     + "contradicting itself.",
+       "The button that puts your plan on the load you are actually lifting has not "
+     + "moved. The plan is yours and you are allowed to disagree with the app; what "
+     + "changed is that the app no longer pretends to agree with you when it does not."]},
   /* THE NAVIGATION CHANGE GOES FIRST, because it is the one thing somebody will notice
      before they have read a word of this page: a tab they used is not where it was. */
   {k: "Settings moved, Research took its place",
@@ -60525,7 +60539,21 @@ function planBehindLineHTML(en){
     programme says ${esc(fmtLoad(plan))}; you last worked at <b>${esc(fmtLoad(top))}</b>, so the
     boxes suggest that. ${undoing
       ? "Element 26 cut it to " + esc(fmtLoad(plan)) + " on " + esc(fmtDateShort(dayStr(b.at)))
-        + " for a range you had already hit at this weight, so the cut is the part that is wrong."
+        + ", and you have hit the range at " + esc(fmtLoad(undoing.w)) + " since, so the cut is "
+        + "the part that is wrong."
+      /* THE CUT IS DELIBERATE AND IT STILL STANDS, WHICH IS ITS OWN SENTENCE.
+
+         Between "the cut was wrong" and "the plan is out of date" there is a third case
+         and it is the common one: the app lowered the load on purpose a few days ago and
+         nothing has happened since to change its mind. Calling that out of date is the
+         app forgetting its own decision; calling it wrong is worse. It says what it did,
+         when, and what would overturn it — and still offers the override, because the
+         plan belongs to the person and they are allowed to disagree. */
+      : fromApp
+      ? "Element 26 cut it to " + esc(fmtLoad(plan)) + " on " + esc(fmtDateShort(dayStr(b.at)))
+        + " and nothing logged since has overturned that, so the cut stands — the boxes are "
+        + "just following your last session. Hit the range at " + esc(fmtLoad(top))
+        + " again and the plan will offer to come back up on its own."
       : raiseWaiting
       ? "The grade card has a raise waiting \u2014 or put the plan on what you are already doing."
       : "Nothing has earned a raise yet, so this is just the plan being out of date."}${
@@ -60868,16 +60896,40 @@ function loadCutDisproved(p){
   const rr = repRange(p.reps);
   if(!rr) return null;
   const key = nrm(p.name);
+  /* ONE SESSION CANNOT BOTH PROVE AND DISPROVE THE SAME DECISION.
+
+     This read every set in the log on its own, so a single good set refuted a cut that
+     the rest of its own session had earned. Reported from a real one: overhead cable
+     triceps extension, 3x8-12, Nov 5 logged 90x8 @8, 90x9 @9, 90x5 @10. The reps falling
+     away across the sets is what brought the load down to 85 — and then the card turned
+     round and said "that no longer stands: on Thu, Nov 5 you did 90 lb for 8 reps, inside
+     8-12", quoting set one of the very session that had produced the cut. Two statements
+     about one number, in opposite directions, both true, neither of them an argument.
+
+     So a session speaks as a session. It refutes the cut when EVERY set it ran at the old
+     load or above reached the bottom of the range; if one of them fell short, that session
+     is the thing being argued about and it settles nothing. Sets lighter than the old load
+     are not in the conversation either way — they say nothing about whether the old load
+     is reachable.
+
+     NOT "only sessions logged after the cut", which was the first attempt and was too
+     blunt: a cut made on a premise the log ALREADY contradicted — 45 lb dropped to 40 on
+     the evidence of a 50 lb set, with 45x12 sitting in the log a week earlier — is wrong
+     from the moment it is made, and dating the evidence would have silenced the case this
+     function was originally written for. What disqualifies a session is what is in it, not
+     when it happened. */
   let best = null;
   /* Raw weight against the plan's raw number, the way planBehindLineHTML() compares
      them: both are what you type, in whatever convention the movement is logged in. */
   (S.sessions || []).forEach(sn=>{
     (sn.entries || []).forEach(en=>{
       if(!en || nrm(en.name) !== key) return;
-      (en.sets || []).forEach(st=>{
-        if(!isWorkingSet(st)) return;
+      const atLoad = (en.sets || []).filter(st=> isWorkingSet(st)
+        && (parseFloat(st.weight) || 0) >= from - 0.01);
+      if(!atLoad.length) return;
+      if(!atLoad.every(st=> (parseFloat(st.reps) || 0) >= rr[0])) return;   // it fell short here
+      atLoad.forEach(st=>{
         const r = parseFloat(st.reps) || 0, w = parseFloat(st.weight) || 0;
-        if(!(r >= rr[0]) || !(w >= from - 0.01)) return;
         if(!best || w > best.w || (w === best.w && sn.date > best.date))
           best = {w, reps: r, date: sn.date, lo: rr[0], hi: rr[1]};
       });

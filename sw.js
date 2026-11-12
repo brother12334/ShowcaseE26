@@ -32,7 +32,7 @@
    count and had reached 53.6 while the app was on 60.6, so neither number could be read
    against the other. See the note on APP_VERSION in index.html for the scheme. The cache
    names below are compared with !== and swept by prefix, so nothing here parses it. */
-const VERSION = "2026.11.08.2";
+const VERSION = "2026.11.12.1";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 

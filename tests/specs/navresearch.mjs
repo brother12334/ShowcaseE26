@@ -192,8 +192,12 @@ console.log("7 - THE TOUR AND THE RELEASE NOTE WERE UPDATED");
      JSON.stringify(r.settingsStep));
   ck("and it says where that icon is", !!r.settingsStep && /top right/.test(r.settingsStep.text),
      r.settingsStep && r.settingsStep.text.slice(0, 90));
-  ck("the release note leads with the move",
-     /Settings moved/.test(r.news[0] || ""), r.news.slice(0,2).join(" | "));
+  /* The move still has to be ON the page \u2014 somebody opening the app after a gap needs
+     to be told a tab went somewhere else. It does not have to LEAD any more: the page
+     is a stack, newest first, and pinning this release to the top of it would mean
+     every release after it had to lie about what it changed. */
+  ck("the release note still carries the move",
+     r.news.some(k=> /Settings moved/.test(k || "")), r.news.slice(0,3).join(" | "));
   ck("and the version was bumped for it", r.ver === r.app, r.ver + " vs " + r.app);
 }
 
