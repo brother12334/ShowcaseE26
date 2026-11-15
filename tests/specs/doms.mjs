@@ -3,9 +3,23 @@ const b = await chromium.launch();
 const ctx = await b.newContext({viewport:{width:390,height:1400}});
 const p = await ctx.newPage();
 const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('dialog',d=>d.accept());
+/* THE CLOCK IS FROZEN, because this spec compares dates it computes against the app's
+   own idea of "today" and a run that straddles midnight gets two different answers. It
+   failed exactly once that way in a full-suite run and passed on its own straight
+   afterwards, which is the worst shape a test can have: a real failure would have looked
+   the same. Noon on a fixed Wednesday, well clear of either boundary. */
 await p.addInitScript(()=>{ localStorage.clear();
   localStorage.setItem('e26.account', JSON.stringify({id:'E26-X',key:'k'.repeat(32),name:'Fer',createdAt:1,cloud:true,ns:''}));
-  localStorage.setItem('e26.ns0','E26-X'); });
+  localStorage.setItem('e26.ns0','E26-X');
+  const FIXED = new Date(2026, 5, 17, 12, 0, 0).getTime();     // 17 Jun 2026, 12:00 local
+  const Real = Date;
+  const Frozen = function(...a){ return a.length ? new Real(...a) : new Real(FIXED); };
+  Frozen.prototype = Real.prototype;
+  Frozen.now = ()=> FIXED;
+  Frozen.parse = Real.parse.bind(Real);
+  Frozen.UTC = Real.UTC.bind(Real);
+  window.Date = Frozen;
+});
 await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
 await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
 

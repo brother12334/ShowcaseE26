@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.7";
+const APP_VERSION = "2026.11.15.8";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -8699,6 +8699,9 @@ function invalidateMultiDay(){ MULTI_DAY = null; }
    evaluated. Lazily filled; see entryBwAdd(). */
 let BW_CARRIED = null, BW_ON_DATE = null;
 function bwCachesClear(){ BW_CARRIED = null; BW_ON_DATE = null; }
+/* Bumped by persist() on every write — see the note there. Any memo over stored data
+   keys on this, rather than on a timestamp that an edit does not always move. */
+let DATA_REV = 0;
 function rebuildTableOrigin(){
   const al = USER_ALIASES || {};
   const built = {};
@@ -14296,7 +14299,21 @@ function mergeDiskInto(disk){
     }
   }
 }
+/* A COUNTER THAT ONLY GOES UP, AND NOT BECAUSE OF THE CLOCK.
+
+   The memo below this used to be keyed on the last session's id and finish time, and
+   S.savedAt is Date.now(). Both are stable across an edit that changes what a session
+   CONTAINS: correct the sets on a logged session and neither its id nor its finishedAt
+   moves, so the cached figures stayed behind. In normal use the clock had usually moved
+   on by the next call and hid it; it surfaced as one spec failing in a full-suite run
+   and passing on its own afterwards, which is the worst shape a failure can have.
+
+   A plain revision number, bumped on every write, is what the caches actually want: it
+   says "the data is not what it was" without asking what time it is. Declared up with
+   the other boot-time state, because persist() runs while the file is still evaluating
+   and a `let` down here would still be in its temporal dead zone. */
 function persist(){
+  DATA_REV++;
   const key = dataKey();
   try{
     const raw = localStorage.getItem(key);
@@ -19948,7 +19965,8 @@ let DOMS_EXP = null, DOMS_EXP_SIG = "";
 function domsExposures(){
   const ss = S.sessions || [];
   const lastS = ss.length ? ss[ss.length - 1] : null;
-  const sig = ss.length + "|" + (lastS ? (lastS.id || "") + ":" + (lastS.finishedAt || 0) : "");
+  const sig = DATA_REV + "|" + ss.length + "|"
+            + (lastS ? (lastS.id || "") + ":" + (lastS.finishedAt || 0) : "");
   if(DOMS_EXP && DOMS_EXP_SIG === sig) return DOMS_EXP;
   const out = {};
   let left = MKEYS.length;
@@ -43182,7 +43200,7 @@ function viewHistory(){
       const thisWeek = wk === weekStartStr(todayStr());
       h += `<div class="hw"><span class="hw-k">${thisWeek ? "This week" : "Week of " + esc(fmtDateShort(wk))}</span>
         <span class="hw-n num">${t.n} session${t.n === 1 ? "" : "s"} \u00b7 ${
-          Math.round(t.vol).toLocaleString()} ${esc(unitWord())}</span></div>`;
+          Math.round(t.vol).toLocaleString()} ${esc(unitWord())} moved</span></div>`;
     }
     h += `<div class="card sess" id="sess-${esc(s.id)}" data-sess="${s.id}">
       <div class="row1">
@@ -50001,7 +50019,7 @@ function finishWorkout(){
      is only one of the answers. On "auto" the increases are written into the programme
      here, at the moment they were earned, and the session card reports them as done
      rather than asking again. On "hold" nothing is written and nothing is suggested. */
-  if(trainPrefs().progression === "auto" && !deloadActive()){
+  if(trainPrefs().progression === "auto" && !sessionNotEvidence(sessObj)){
     sessObj.progression.filter(p=> p.kind === "up" && p.to != null).forEach(p=>{
       if(applyProgression(p.name, p.to, null, progReason(p), {wid: sessObj.workoutId})) p.auto = true;
     });
@@ -54684,6 +54702,7 @@ function sleepAvgOver(dates){
 function updateStalls(sess){
   if(!S.stalls || typeof S.stalls !== "object") S.stalls = {};
   const off = layoffBefore(sess);
+  const notEv = sessionNotEvidence(sess);
   (sess.entries || []).forEach(en=>{
     const k = nrm(en.name);
     const prior = priorEntryFor(sess, en.name, 0);
@@ -54692,6 +54711,12 @@ function updateStalls(sess){
     const improved = now.w > was.w || (now.w === was.w && now.reps > was.reps);
     const rec = S.stalls[k] || {n: 0, dates: []};
     if(improved){ S.stalls[k] = {n: 0, dates: [sess.date]}; return; }
+    /* HELD, NOT RESET. A session that was not ordinary training is no evidence that the
+       programme has stopped working — and it is no evidence that it has started again
+       either, so a real run of stalled sessions either side of it survives it. The
+       layoff case below is deliberately different: coming back from two weeks off is a
+       genuine fresh start for the comparison. */
+    if(notEv) return;
     if(off){
       /* Recorded rather than merely skipped, so anything that later asks why the run is
          short has the answer instead of guessing at one. */
@@ -54953,6 +54978,33 @@ function migrateRestCeilings(){
   if(n) save();
   return n;
 }
+/* WAS THIS SESSION ORDINARY TRAINING? If not, it says what it says and the app does
+   nothing about it.
+
+   recordFlags() already made this argument for the deload case and acted on it: a week
+   that is fewer sets at a lower RPE by design cannot be read literally, or the app
+   congratulates you for following its own instruction. What it still allowed through was
+   a rep collapse, reasoning that a collapse is a fact about the session rather than a
+   conclusion about the block.
+
+   That reasoning is right and it is not a licence to act. A collapse in a deload week,
+   in the first session back after a fortnight off, on a day marked ill or a day
+   something hurt is exactly as real and exactly as useless for deciding that a rest
+   window is too short, that a load is too heavy, or that a programme has stalled.
+
+   So the finding stays and every automated consequence stops. This suppresses what the
+   app DOES, never what it tells you. */
+function sessionNotEvidence(sess){
+  if(!sess) return null;
+  if(deloadCovers(sess.date, sess.finishedAt || sess.startedAt)) return "a deload week";
+  if(typeof layoffBefore === "function" && layoffBefore(sess)) return "your first session back after a break";
+  const fl = (S.dayFlags || {})[sess.date] || {};
+  if(fl.ill) return "a day you marked as ill";
+  if(fl.notRep || sess.notRepresentative) return "a session you marked as not representative";
+  const hurt = (S.joint || {})[sess.date];
+  if(hurt && Object.keys(hurt).some(k=> hurt[k] > 0)) return "a day something hurt";
+  return null;
+}
 /* WHY THIS COLLAPSE MUST NOT MOVE THE PLAN, or null if it may.
 
    Every clause is one of the audited increases. `ei` is the entry's index in the
@@ -54979,12 +55031,11 @@ function restLengthenRefusal(sess, ei, d){
     say: "You already said why that set ended — "
        + ((REASON_BY_CODE[code] || {}).short || code)
        + " — so the rest is not what cut it short."};
-  /* A deload is fewer sets at a lower RPE by design, and a week off makes the first
-     session back look like a collapse. Neither is a fact about the rest window. */
-  if(deloadCovers(sess && sess.date, sess && (sess.finishedAt || sess.startedAt))) return {
-    code: "deload", say: "This was a deload session, which is lighter by design."};
-  if(typeof layoffBefore === "function" && layoffBefore(sess)) return {
-    code: "break", say: "This was your first session back after a break."};
+  /* A session that was not ordinary training says nothing about the rest window — see
+     sessionNotEvidence(), which every automated consequence now asks. */
+  const odd = sessionNotEvidence(sess);
+  if(odd) return {code: "notevidence",
+    say: "This was " + odd + ", so it is not what the rest window should be judged on."};
   /* THE ONE THAT EXPLAINS THE TRICEPS WINDOW. If the rest actually taken was under the
      window already prescribed, the window is not the problem — it is being ignored.
      Adding to it changes a number nobody is reading. */
@@ -55046,6 +55097,11 @@ function recordFlags(sess, list){
      conclusions about the block, and they are true whatever week it is. Every flag from
      such a session is stamped so the card can say where it came from. */
   const inDeload = deloadCovers(sess && sess.date, sess && (sess.finishedAt || sess.startedAt));
+  /* And the same argument, widened: see sessionNotEvidence(). A deload was only the
+     first case of it. Stamped onto every flag from such a session so that applyFlag()
+     refuses to act on one however it is reached — one gate rather than a clause in
+     each of the three things that used to act. */
+  const notEv = sessionNotEvidence(sess);
   (list || []).forEach(p=>{
     /* Only the ones worth keeping. A "still working up the range" is the normal state of
        a lift and would bury the log in noise within a fortnight. */
@@ -55053,11 +55109,11 @@ function recordFlags(sess, list){
     if(p.kind === "toohard" && p.detail) kinds.push({
       kind:"load", title:"The load is wrong here", msg:p.detail.msg, fix:p.detail.fix,
       to: toohardTarget(p), sev:3});
-    if(p.stall && !inDeload) kinds.push({
+    if(p.stall && !notEv) kinds.push({
       kind:"stall", title: p.stall.kind === "recovery" ? "Stalled, and it looks like recovery" : "What stalled",
       msg:p.stall.msg, fix:p.stall.sub, sev: p.stall.kind === "recovery" ? 2 : 3,
       stallKind: p.stall.kind});
-    if(p.kind === "up" && p.to != null && !inDeload) kinds.push({
+    if(p.kind === "up" && p.to != null && !notEv) kinds.push({
       kind:"up", title:"Ready for more weight", msg:p.msg, fix:p.sub, to:p.to, sev:1});
     if(p.kind === "fade") kinds.push({
       kind:"fade", title:"Reps fell away across the sets", msg:p.msg, fix:p.sub,
@@ -55071,6 +55127,7 @@ function recordFlags(sess, list){
         sessionId: sess.id, workoutId: sess.workoutId, ex: p.name,
         conf: p.conf ? p.conf.band : null,
         deload: inDeload || undefined,
+        notEvidence: notEv || undefined,
         applied: false, dismissed: false
       }, k);
       if(seen.has(flagKey(f))) return;
@@ -55153,6 +55210,13 @@ function flagRepeat(f){
 function applyFlag(id, choice){
   const f = flagLog().find(x=> x && x.id === id);
   if(!f || f.applied) return false;
+  /* The finding stands; acting on it does not. A collapse in a deload week, on the first
+     session back, on a day you were ill or a day something hurt is real and is not a
+     reason to change a load, a rest window or a set count. */
+  if(f.notEvidence){
+    toast("That was " + f.notEvidence + " — worth knowing, not worth changing the plan over");
+    return false;
+  }
   let ok = false;
   if(f.kind === "fade"){
     /* Each half once. A second tap on a half already applied would add another 30
@@ -58003,8 +58067,36 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.7";
+const NEWS_FOR = "2026.11.15.8";
 const NEWS = [
+  {k: "A session that was not ordinary training changes nothing on its own",
+   s: ["Element 26 already refused to read a deload week literally: fewer sets at a lower "
+     + "RPE is the instruction, so grading it as a result would have the app "
+     + "congratulating you for following it. What it still allowed out of such a week was "
+     + "a rep collapse, on the reasoning that a collapse is a fact about the session "
+     + "rather than a conclusion about the block.",
+       "That reasoning is right and it is not a licence to act. A collapse in a deload "
+     + "week, in your first session back after a fortnight off, on a day you marked ill, "
+     + "on a day something hurt, or in a session you marked not representative is exactly "
+     + "as real \u2014 and exactly as useless for deciding that a rest window is too short, "
+     + "a load too heavy, or a programme stalled.",
+       "So all five now say what they say and do nothing. The finding still appears and "
+     + "still explains itself. No rest window moves, no load is cut, no set is dropped, "
+     + "and the stall count holds where it was rather than advancing \u2014 held rather than "
+     + "reset, so a genuine run of stalled sessions either side of a deload survives it. "
+     + "Automatic progression on \u201cauto\u201d stops for the same five reasons, where before "
+     + "only a deload stopped it.",
+       "This suppresses what the app DOES, never what it tells you."]},
+  {k: "The pounds figure is labelled as weight moved, not volume",
+   s: ["Element 26\u2019s own glossary is explicit that \u201cvolume\u201d in this app means hard "
+     + "sets per week \u2014 and that the pounds figure is tonnage, good for a sense of scale "
+     + "and poor for planning. Three screens then labelled that pounds figure \u201ctotal "
+     + "volume\u201d, which is the one word reserved for the other thing. History, your cycle "
+     + "wrapped and the workout export now all say weight moved.",
+       "It is also the one figure deliberately left on the raw logged number. The "
+     + "strength trend counts your bodyweight on movements that carry it, because that is "
+     + "what you lifted. How much was shifted is a different question, and it is answered "
+     + "with the number you wrote down."]},
   {k: "Rest windows stop growing for reasons that were not rest",
    s: ["Sixteen \u201creps were collapsing, so the rest was lengthened\u201d changes in one "
      + "audited log, and eight of the fifteen increases landed on movements done in "
@@ -62535,7 +62627,7 @@ function openCycleReviewSimple(r){
   const pct = (r.prevVol && r.prevVol>0) ? Math.round((r.cur.vol - r.prevVol)/r.prevVol*100) : null;
   const dayLine = Object.keys(r.cur.perDay||{}).filter(k=>r.cur.perDay[k]).map(k=>dayName(k)+" ×"+r.cur.perDay[k]).join(" · ");
   let h = `<h3>Cycle review</h3>
-  <div class="rev-stat"><span class="num" style="font-size:var(--fs-9);font-weight:600">${r.cur.vol.toLocaleString()} ${unitWord()}</span> total volume
+  <div class="rev-stat"><span class="num" style="font-size:var(--fs-9);font-weight:600">${r.cur.vol.toLocaleString()} ${unitWord()}</span> moved
     ${pct!=null?`<span class="num" style="color:${pct>=0?"var(--ok)":"var(--bad)"};margin-left:8px">${pct>=0?"+":""}${pct}% vs last cycle</span>`:""}</div>
   <div class="rev-stat">${r.cur.n} workouts, ${esc(dayLine)}</div>
   ${r.cur.avgDurMin?`<div class="rev-stat">Average workout: <span class="num">${r.cur.avgDurMin} min</span></div>`:""}
@@ -62665,7 +62757,7 @@ function buildWrappedSlides(r){
       bg:WR_BG,
       html:`<div class="wr-kicker">Your most-worked movement</div>
         <div class="wr-hero" style="font-size:clamp(26px,8.5vw,46px)">${esc(cur.topVolEx.name)}</div>
-        <div class="wr-pill">${Math.round(cur.topVolEx.vol).toLocaleString()} ${unitWord()} of total volume</div>`
+        <div class="wr-pill">${Math.round(cur.topVolEx.vol).toLocaleString()} ${unitWord()} moved</div>`
     });
   }
   // 8, feel + duration + rest
@@ -63819,7 +63911,7 @@ function buildReportInner(){
     });
     body += `</tbody></table>`;
     body += sessionTechLegend(s);
-    if(vol>0) body += `<p class="meta">Total working volume: ${Math.round(vol).toLocaleString()} ${unitWord()}.</p>`;
+    if(vol>0) body += `<p class="meta">Total weight moved: ${Math.round(vol).toLocaleString()} ${unitWord()} (weight \u00d7 reps across every working set). This is how much was shifted, not a measure of strength.</p>`;
     /* A session read cold, months later, needs to know this one followed a break —
        otherwise a run of lighter numbers reads as somebody getting worse. */
     const lay = layoffBefore(s);
