@@ -1887,6 +1887,25 @@ button.side-chip.sc-set::after{
    that means "there is a button here" goes back to the neutral line colour, the panel
    drops to the flat card tone, and the earned-it line loses its green. By colour, not by
    opacity, so the hold notice underneath keeps its own contrast. */
+/* THE OTHER WAYS OUT. A shortlist under the recommendation rather than beside it: they
+   are the same kind of answer as the one above, offered at a lower volume, and every one
+   of them is a button because the point of the block is that it is a choice. */
+.pg-alts{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:9px}
+.pg-alts-k{font:var(--fs-1) var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+.pg-alt{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);
+  color:var(--text);font-size:var(--fs-3);padding:8px 10px;min-height:36px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.pg-alt:active{border-color:var(--acc-line);color:var(--acc)}
+.pg-alt i{font-style:normal;font:var(--fs-1) var(--mono);letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint)}
+/* The ceiling the app had to infer, under a raise it is not withdrawing. Quieter than
+   the row it hangs off: the raise is still the recommendation. */
+.pg-out{margin:9px 0 0;padding:10px 11px;border:1px dashed var(--line);border-radius:var(--r-sm);
+  background:var(--card)}
+.pg-out-k{font:var(--fs-1) var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
+.pg-out-s{font-size:var(--fs-3);color:var(--dim);line-height:1.45;margin-top:5px}
 .pg-row.pg-held{background:var(--card);border-left-color:var(--line)}
 .pg-held .pg-msg{color:var(--faint);font-weight:400}
 .pg-held .pg-main b{color:var(--dim)}
@@ -7199,7 +7218,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.12.1";
+const APP_VERSION = "2026.11.15.1";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -53194,7 +53213,11 @@ function openScoreCard(sess, onDone){
     });
     document.querySelectorAll("#modal [data-proghard]").forEach(btn=> btn.onclick = ()=>{
       const name = btn.dataset.proghard;
-      const p = (sess.progression || []).find(x=> x && x.kind === "harder" && x.name === name);
+      /* An alternative can hang off a raise as well as off a swap verdict \u2014 see
+         outgrownHTML() \u2014 so the finding is found by name and by having something to
+         offer, rather than by being the swap verdict itself. */
+      const p = (sess.progression || []).find(x=> x && x.name === name
+                  && (x.kind === "harder" || (x.outgrown && x.outgrown.opts)));
       if(applyHarderVariation(name, btn.dataset.proghardto, p ? progReason(p) : null)){
         if(p) p.applied = true;
         save(); queueSync();
@@ -53924,6 +53947,137 @@ function effortBlockHTML(){
      hold    still working up the range, says what is left to do
      stall   no improvement in reps or load across 3 sessions
      toohard the prescription itself is impossible at this load                      */
+/* =====================================================================
+   WHEN A MOVEMENT HAS RUN OUT OF ROOM
+
+   Double progression assumes the load can always go up. On a barbell it can: the ceiling
+   is the plates in the building. On the 50 lb dumbbell at the end of the rack, or at the
+   top of a selectorised stack, it cannot — and when you are clearing the top of the rep
+   range there every week, the app's advice collapses to "hold this load and add reps",
+   for ever, on a movement that has stopped being able to challenge you.
+
+   The honest answer at that point is not a number. It is a different exercise.
+
+   TWO WAYS TO KNOW, because the app knows the ceiling for one implement and not the
+   others. For dumbbells and kettlebells the rack max is a figure it holds, so it can say
+   outright that the next step does not exist. For a machine or a cable it has no idea
+   where the stack ends — so it reads your behaviour instead: three sessions at the same
+   load, all of them topping the range, is somebody who would have added weight if there
+   had been weight to add.
+
+   WHAT GETS OFFERED, in the order it is useful:
+
+     1. THE SAME MOVEMENT ON ONE LIMB. The best answer on a machine, and the one most
+        people never think of: a leg press at the top of the stack is a single-leg press
+        at half of it, which gives the stack twice the room. Only for movements whose
+        load is genuinely SHARED between two limbs — going single-arm on a dumbbell
+        press changes nothing, because it is the same dumbbell either way.
+
+     2. THE SAME PATTERN ON AN IMPLEMENT WITH MORE ABOVE IT. A dumbbell bench press at
+        the end of the rack is a barbell bench press with the whole plate tree still to
+        climb. Ranked by how much room the implement has, which is the only thing that
+        matters here.
+
+   Movements already in the same day are excluded — a swap that duplicates a slot you
+   are already training is not a swap. Anything you have logged before is marked, because
+   "you have done this one" is the difference between a suggestion and a homework
+   assignment. */
+const OUTGROWN_SESSIONS = 3;   // sessions at one load before the load is read as the ceiling
+
+/* The single-limb version of a movement whose load is SHARED between two limbs. Not a
+   library slot: these are the same exercise done one side at a time, which is why they
+   are not alternatives to each other anywhere else in the app. */
+const UNILATERAL_UP = [
+  ["leg press",                 "Single-Leg Leg Press"],
+  ["hack squat",                "Single-Leg Hack Squat"],
+  ["leg extension",             "Single-Leg Leg Extension"],
+  ["seated leg curl",           "Single-Leg Seated Leg Curl"],
+  ["lying leg curl",            "Single-Leg Lying Leg Curl"],
+  ["standing calf raise",       "Single-Leg Calf Raise"],
+  ["seated calf raise",         "Single-Leg Seated Calf Raise"],
+  ["chest press machine",       "Single-Arm Chest Press Machine"],
+  ["shoulder press machine",    "Single-Arm Shoulder Press Machine"],
+  ["pec deck",                  "Single-Arm Pec Deck"],
+  ["lat pulldown",              "Single-Arm Lat Pulldown"],
+  ["seated cable row",          "Single-Arm Cable Row"],
+  ["chest supported row machine","Single-Arm Chest Supported Row"],
+  ["tricep pushdown",           "Single-Arm Tricep Pushdown"],
+  ["cable tricep extension",    "Single-Arm Cable Tricep Extension"]
+];
+function unilateralUpFor(name){
+  const n = canonEx(name);
+  /* Already one-sided: there is no half of a half. */
+  if(/\bsingle[- ]?(arm|leg|side)\b|\bone[- ]?(arm|leg|side)\b|\bunilateral\b/i.test(name || "")) return null;
+  for(let i = 0; i < UNILATERAL_UP.length; i++){
+    if(n.indexOf(UNILATERAL_UP[i][0]) > -1) return UNILATERAL_UP[i][1];
+  }
+  return null;
+}
+/* How much is left above the load you are on, by implement. Not a judgement about which
+   is a better exercise — only about which one you can keep adding to. */
+const GEAR_ROOM = {bodyweight:0, band:0, kettlebell:1, dumbbell:1, cable:2, machine:2, smith:3, barbell:3};
+function gearRoomFor(name, libGear){
+  const g = libGear || libraryGearFor(name) || equipmentOf(name);
+  return GEAR_ROOM[g] == null ? 1 : GEAR_ROOM[g];
+}
+/* The shortlist, best first, or [] when the library has nothing better to offer. */
+function outgrownOptions(name){
+  const out = [], seen = {};
+  const here = swapSquash(name);
+  /* The day this movement sits in: a swap into a slot that day already trains is not a
+     swap, it is a duplicate. */
+  const mine = findProgramEntryWhere(name);
+  const dayHas = (nm)=>{
+    if(!mine || !mine.wid) return false;
+    return (S.program[mine.wid] || []).some(e=> e && swapSquash(e.name) === swapSquash(nm));
+  };
+  const push = (nm, why, rank)=>{
+    if(!nm) return;
+    const q = swapSquash(nm);
+    if(!q || q === here || seen[q] || dayHas(nm)) return;
+    seen[q] = 1;
+    let known = false;
+    try{ known = exHistory(nm, 1).length > 0; }catch(e){}
+    out.push({name: nm, why: why, rank: rank, known: known});
+  };
+  push(unilateralUpFor(name),
+       "one limb at a time, so the stack only has to give half as much",
+       0);
+  const hit = exSlotFor(name);
+  if(hit){
+    const roomNow = gearRoomFor(name, hit.gear);
+    (EX_LIBRARY[hit.key] || [])
+      .filter(x=> (GEAR_ROOM[x.gear] == null ? 1 : GEAR_ROOM[x.gear]) > roomNow)
+      .sort((a,b)=> (GEAR_ROOM[b.gear] || 0) - (GEAR_ROOM[a.gear] || 0))
+      .forEach(x=> push(x.name, "the load comes off " +
+        (x.gear === "barbell" || x.gear === "smith" ? "plates rather than a rack" : "a stack with more in it"),
+        1));
+  }
+  /* Among equals, the one you have already done. A movement with a history is one you
+     know how to set up and one the app can already compare you against. */
+  out.sort((a,b)=> (a.rank - b.rank) || ((b.known ? 1 : 0) - (a.known ? 1 : 0)));
+  return out.slice(0, 3);
+}
+/* TRIGGER B — the ceiling the app cannot see, read off what you did about it. Three
+   sessions at one load, every one of them clearing the top of the range. */
+function outgrownStuck(name, range){
+  if(!range) return null;
+  const hist = [];
+  for(let i = (S.sessions || []).length - 1; i >= 0 && hist.length < OUTGROWN_SESSIONS; i--){
+    const en = (S.sessions[i].entries || []).find(e=> e && nrm(e.name) === nrm(name));
+    if(!en) continue;
+    const grp = atTopLoadSets(en);
+    if(!grp || !grp.at.length) return null;            // a session with no working sets breaks the run
+    const last = grp.at[grp.at.length - 1].st;
+    hist.push({load: grp.top, reps: parseFloat(last.reps) || 0});
+  }
+  if(hist.length < OUTGROWN_SESSIONS) return null;
+  const base = hist[0].load;
+  if(!(base > 0)) return null;
+  if(!hist.every(h=> Math.abs(h.load - base) <= 0.01)) return null;   // the load did move
+  if(!hist.every(h=> h.reps >= range[1])) return null;                // not topping it out
+  return {load: base, n: hist.length};
+}
 function progressionFor(sess, entry){
   const range = repRange(entry.reps);
   const ws = (entry.sets || []).filter(isWorkingSet);
@@ -54036,6 +54190,26 @@ function progressionFor(sess, entry){
        for something its own ceiling forbids. */
     if(from != null && to != null && parseFloat(to) <= parseFloat(from) + 0.01){
       const rk = rackMaxSrc(), mx = rk.max;
+      /* AND "HOLD THIS LOAD" IS NOT AN ANSWER FOREVER.
+
+         Reaching the end of the rack while clearing the top of the range every week is
+         not a plateau, it is a movement that has stopped being able to load you. The
+         reps can carry it for a while and then they cannot either. Where the library has
+         somewhere to go, the verdict is the exercise rather than the number — and it is
+         an offer with buttons, not a change, because swapping a movement is the one plan
+         edit nobody should find they have agreed to by accident. */
+      const opts = outgrownOptions(entry.name);
+      if(opts.length) return {
+        name: entry.name, kind: "harder", to: opts[0].name, alts: opts.slice(1), step,
+        outgrownAt: isNaN(load) ? from : load,
+        msg: "Move to " + opts[0].name,
+        sub: "You cleared " + range[1] + " reps at " + fmtLoad(from) + " and there is no "
+           + "heavier one" + (isFinite(mx) && mx > 0
+               ? " — " + (rk.gym ? "the rack at " + rk.gym : "your rack") + " ends at " + fmtLoad(mx)
+               : "")
+           + ". " + opts[0].name + " is the same pattern with room above it: "
+           + opts[0].why + ". Rebuild from " + range[0] + " reps on it."
+      };
       return {
         name: entry.name, kind: "hold",
         msg: "Hold this load — the rack stops here",
@@ -54127,8 +54301,17 @@ function progressionFor(sess, entry){
            + range[0] + "-" + range[1] + "."
       };
     }
+    /* THE RAISE THAT KEEPS BEING OFFERED AND CANNOT BE TAKEN. The app has no idea where
+       a cable stack or a machine ends, so it goes on proposing the next weight — and the
+       only evidence that the weight does not exist is that the load has not moved in
+       three sessions while the top of the range went on being cleared. The raise still
+       leads, because somebody may simply not have got round to it; the way out rides
+       underneath it. */
+    const stuckAt = outgrownStuck(entry.name, range);
+    const stuckOpts = stuckAt ? outgrownOptions(entry.name) : [];
     if(!(isFinite(planW) && to != null && parseFloat(to) <= planW)) return {
       name: entry.name, kind: "up", from, to, step,
+      outgrown: stuckOpts.length ? {load: stuckAt.load, n: stuckAt.n, opts: stuckOpts} : null,
       overCap: over && range[1] >= repExtMaxFor(entry.name) ? Math.round(pctJump * 1000) / 10 : null,
       endsStretch: !!already,
       msg: step.bodyweight && from == null
@@ -55058,6 +55241,27 @@ function waveRowsHTML(waves){
   });
   return h;
 }
+/* A row of other movements that would do the job, each one a button. `name` is the
+   exercise being replaced, which is what applyHarderVariation() keys on. */
+function altsHTML(name, alts){
+  if(!alts || !alts.length) return "";
+  return `<div class="pg-alts"><span class="pg-alts-k">or</span>${alts.map(a=>
+    `<button class="pg-alt" data-proghard="${esc(name)}" data-proghardto="${esc(a.name)}"
+      title="${esc(a.why)}">${esc(a.name)}${a.known ? " <i>done before</i>" : ""}</button>`
+  ).join("")}</div>`;
+}
+/* The ceiling the app could not see, printed under a raise it is still recommending. */
+function outgrownHTML(p){
+  const o = p && p.outgrown;
+  if(!o || !o.opts || !o.opts.length) return "";
+  return `<div class="pg-out">
+    <div class="pg-out-k">If ${esc(fmtLoad(o.load))} is the heaviest you have</div>
+    <div class="pg-out-s">${o.n} sessions at ${esc(fmtLoad(o.load))} and you cleared the top
+      of the range every time. If that is the top of the stack, this movement has stopped
+      being able to load you \u2014 these are the same job with room above them.</div>
+    ${altsHTML(p.name, o.opts).replace('<span class="pg-alts-k">or</span>', "")}
+  </div>`;
+}
 function progressionHTML(list){
   if(!list || !list.length) return "";
   const done = list.filter(p=>p.kind === "up" && progressionApplied(p));
@@ -55153,7 +55357,7 @@ function progressionHTML(list){
           <i>${esc(unitWord())}</i>
         </span>
         <button class="pg-apply" data-progapply="${esc(p.name)}" data-progto="${p.to == null ? "" : p.to}">Apply</button>
-      </div>`;
+      </div>${outgrownHTML(p)}`;
     });
     /* The button counts what it can actually do. All of them held means no button at
        all rather than one that would be refused for every row under it. */
@@ -55203,7 +55407,7 @@ function progressionHTML(list){
         </div>
         <button class="pg-apply" data-proghard="${esc(p.name)}"
           data-proghardto="${esc(p.to)}">Apply</button>
-      </div>`;
+      </div>${altsHTML(p.name, p.alts)}`;
     });
   }
   const harderDone = list.filter(p=> p.kind === "harder" && p.applied);
@@ -57402,8 +57606,26 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.12.1";
+const NEWS_FOR = "2026.11.15.1";
 const NEWS = [
+  {k: "When a movement runs out of weight, it offers you a different one",
+   s: ["Double progression assumes the load can always go up. On a barbell it can \u2014 the "
+     + "ceiling is the plates in the building. On the heaviest dumbbell in the rack, or at "
+     + "the top of a stack, it cannot, and the advice collapsed to \u201chold this load and "
+     + "add reps\u201d for ever on a movement that had stopped being able to challenge you.",
+       "Clear the top of the rep range where there is no heavier weight, and Element 26 now "
+     + "offers somewhere to go instead. For dumbbells it knows your rack and says so "
+     + "outright. For a machine it has no idea where the stack ends, so it reads what you "
+     + "did about it: three sessions at one load, all of them topping the range, is "
+     + "somebody who would have added weight if there had been weight to add \u2014 and there "
+     + "the raise still leads, with the way out underneath it.",
+       "The first thing it offers on a machine is the same movement on one limb: a leg "
+     + "press at the top of the stack is a single-leg press at half of it, which gives the "
+     + "stack twice the room. After that comes the same pattern on something with more "
+     + "above it. Anything already in that day is left out, and anything you have done "
+     + "before is marked.",
+       "It is an offer with buttons and never an automatic change. Swapping a movement is "
+     + "the one plan edit nobody should find they agreed to by accident."]},
   {k: "A cut the app made no longer argues with itself",
    s: ["When Element 26 lowers a weight, the card under it could quote your own session "
      + "back at you \u2014 the same session the cut was made from \u2014 and call the cut wrong. "

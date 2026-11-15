@@ -77,8 +77,35 @@ console.log("3 - A RAISE THE RACK CANNOT DELIVER IS NOT OFFERED AS ONE");
   });
   console.log("     " + (r.kind||"(nothing)") + ": " + (r.msg||""));
   ck("it is not an 'add weight' finding", r.kind !== "up", String(r.kind));
-  ck("it says the rack stops here", /rack stops here/.test(r.msg||""), r.msg);
+  /* It used to say "hold this load, the rack stops here" and point at reps. Holding is
+     not an answer for ever on a movement that has run out of room, so where the library
+     has somewhere to go the verdict is now the exercise \u2014 see outgrown.mjs. The hold
+     survives for movements it has nothing to offer, which is section 3b. */
+  ck("it offers a way out instead", r.kind === "harder", String(r.kind));
   ck("and names the ceiling", /50/.test(r.sub||""), (r.sub||"").slice(0,120));
+  ck("with the reason the new one has room",
+     /room above it/.test(r.sub||""), (r.sub||"").slice(0,200));
+}
+
+console.log("3b - AND WHERE THERE IS NOWHERE TO GO, IT STILL SAYS SO");
+{
+  const r = await p.evaluate(()=>{
+    const wid = ROTATION[0];
+    /* A name the library has never heard of: no slot, so no alternatives to offer. */
+    S.program[wid]=[{name:"Dumbbell Thumb Curl", sets:2, reps:"8-12", weight:50, rpe:"6-7"}];
+    const t = Date.now()-3600e3;
+    const sess = {id:"r2", workoutId:wid, date:new Date(t).toLocaleDateString("en-CA"),
+      startedAt:t, finishedAt:Date.now(), feel:4,
+      entries:[{name:"Dumbbell Thumb Curl", reps:"8-12", rpe:"6-7", sets:[
+        {weight:"50", reps:"12", rpe:"7", done:true},
+        {weight:"50", reps:"12", rpe:"7", done:true}]}]};
+    S.sessions=[sess]; save();
+    trainPrefs().dbMax = 50; save();
+    const row = progressionFor(sess, sess.entries[0]) || {};
+    return {kind: row.kind, msg: row.msg, sub: row.sub};
+  });
+  ck("the hold survives", r.kind === "hold", String(r.kind));
+  ck("it says the rack stops here", /rack stops here/.test(r.msg||""), r.msg);
   ck("and points at reps instead", /reps higher|make the set harder/.test(r.sub||""), (r.sub||"").slice(0,160));
 }
 
@@ -86,6 +113,15 @@ console.log("4 - WITH ROOM ON THE RACK, THE RAISE IS STILL OFFERED");
 {
   const r = await p.evaluate(()=>{
     trainPrefs().dbMax = 80; save();
+    const wid = ROTATION[0];
+    S.program[wid]=[{name:"Single-Arm Dumbbell Row", sets:2, reps:"8-12", weight:50, rpe:"6-7"}];
+    const t = Date.now()-3600e3;
+    S.sessions=[{id:"r1", workoutId:wid, date:new Date(t).toLocaleDateString("en-CA"),
+      startedAt:t, finishedAt:Date.now(), feel:4,
+      entries:[{name:"Single-Arm Dumbbell Row", reps:"8-12", rpe:"6-7", sets:[
+        {weight:"50", reps:"12", rpe:"7", done:true},
+        {weight:"50", reps:"12", rpe:"7", done:true}]}]}];
+    save();
     const sess = S.sessions[0];
     const row = progressionFor(sess, sess.entries[0]) || {};
     return {kind: row.kind, msg: row.msg, to: row.to};
