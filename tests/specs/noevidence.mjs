@@ -120,6 +120,43 @@ for(const [mark, said] of CASES){
      r.stallBefore + " -> " + r.stallAfter);
 }
 
+console.log("\n3 - A STALL COUNT IS WIPED BY TIME OFF, NOT BY TWO MISSED SESSIONS");
+{
+  /* layoffBefore() calls two missed sessions in a row a break, which is right for
+     NARRATING a return and wrong for throwing away a stall count: two missed sessions
+     can be four days. The reset wants real time away from that movement. */
+  const r = await ev(()=>{
+    const DAY = 86400e3, now = Date.now(), wid = DAYS[0], EX = "Cable Triceps Pushdown";
+    const mk = (id, at)=> ({id, workoutId: wid, date: dayStr(at), startedAt: at,
+      finishedAt: at + 3600e3, feel: 4,
+      entries: [{name: EX, reps: "6-12", rpe: "7-9",
+        sets: ["10","10","10"].map(x=> ({weight:"50", reps:x, rpe:"8", done:true}))}]});
+    const out = {};
+    [[4, "short"], [21, "long"]].forEach(([gapDays, tag])=>{
+      S.deload = null; S.dayFlags = {}; S.joint = {}; S.skipLog = [];
+      const prev = mk("a", now - gapDays * DAY - 1000);
+      const sess = mk("b", now - 1000);
+      S.sessions = [prev, sess];
+      /* Two missed sessions in the gap either way, which is what used to decide it. */
+      S.skipLog = [dayStr(now - 1000 - DAY), dayStr(now - 1000 - 2*DAY)];
+      S.program[wid] = [{name: EX, sets: 3, reps: "6-12", weight: 50, rpe: "7-9",
+                         rest: [120,150]}];
+      S.stalls = {}; S.stalls[nrm(EX)] = {n: 2, dates: [dayStr(now - 30*DAY),
+                                                        dayStr(now - gapDays*DAY)]};
+      save();
+      updateStalls(sess);
+      out[tag] = {gapDays, n: (S.stalls[nrm(EX)] || {}).n,
+                  narrated: !!layoffBefore(sess)};
+    });
+    return out;
+  });
+  console.log("    " + JSON.stringify(r));
+  ck("a four-day gap is still narrated as a return", r.short.narrated === true,
+     String(r.short.narrated));
+  ck("but it does NOT wipe the stall count", r.short.n >= 2, String(r.short.n));
+  ck("three weeks away does wipe it", r.long.n === 0, String(r.long.n));
+}
+
 console.log(errs.length ? ("\nPAGE ERRORS: "+errs.join(" | ")) : "\nno page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");

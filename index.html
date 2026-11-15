@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.8";
+const APP_VERSION = "2026.11.15.9";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -34525,10 +34525,13 @@ function asymNote(){
         <b>${esc(e.name)}</b>
         <div class="asym-gap">${esc(asymGapText(st))}</div>
         ${st.ok ? `<div class="asym-sample">${esc(asymSampleText(st))}</div>` : ""}
-        ${st.ok ? `<div class="asym-verdict ${st.gap <= ASYM_CLOSED_GAP ? "ok" : "keep"}">${
-          st.gap <= ASYM_CLOSED_GAP
-            ? "Inside " + ASYM_CLOSED_GAP + " reps &mdash; rule retires for this movement"
-            : "Still outside " + ASYM_CLOSED_GAP + " reps &mdash; keep matching the weaker side"
+        ${st.ok ? `<div class="asym-verdict ${st.closed ? "ok" : "keep"}">${
+          st.closed
+            ? "Inside " + Math.round(ASYM_SMALL * 100) + "% on " + st.smallOf + " of the last "
+              + st.exposures + " &mdash; rule retires for this movement"
+            : st.exposures < ASYM_WINDOW
+              ? st.exposures + " of " + ASYM_WINDOW + " sessions measured &mdash; still counting"
+              : Math.round(st.gapPct * 100) + "% apart &mdash; keep matching the weaker side"
         }</div>` : ""}
       </div>`).join("")}
       <button class="fc-btn" id="asymRetestBtn">Got it</button>`};
@@ -38546,7 +38549,7 @@ function viewBody(){
         ${nRet ? "The rule came off " + esc((r.retired||[]).join(", ")) + "." : "Nothing was retired."}
         ${nKeep ? " Still matching the weaker side on " + esc((r.kept||[]).join(", ")) + "." : ""}
         It measures each movement on a balanced window and retires the rule wherever the gap
-        has closed to within ${ASYM_CLOSED_GAP} rep${ASYM_CLOSED_GAP===1?"":"s"}, and it runs
+        has closed to within ${Math.round(ASYM_SMALL*100)}%, and it runs
         again on its own whenever one of the movements it kept closes.
         ${asymRetestUnseen()
           ? `<button class="btn small" id="nbSideRetest" style="margin-top:10px">Got it</button>`
@@ -54699,6 +54702,16 @@ function sleepAvgOver(dates){
    break, and evidence gathered either side of one is not a run. The cost is a real stall
    taking three more sessions to declare itself; the cost of the alternative is telling
    somebody to cut their volume because they went on holiday. */
+/* REAL TIME AWAY FROM THIS MOVEMENT, which is the only thing that makes the comparison
+   a fresh start rather than a continuation.
+
+   layoffBefore() calls two missed sessions in a row a break. That is the right bar for
+   NARRATING a return — "first session back" is worth saying after a missed week — and
+   the wrong bar for discarding a stall count, because two missed sessions can be four
+   days, and the report in the audit labelled exactly that as returning from a break. A
+   stall is a claim about a run of exposures of one slot, so what resets it is time away
+   from THAT slot. */
+const STALL_RESET_DAYS = 14;
 function updateStalls(sess){
   if(!S.stalls || typeof S.stalls !== "object") S.stalls = {};
   const off = layoffBefore(sess);
@@ -54707,22 +54720,26 @@ function updateStalls(sess){
     const k = nrm(en.name);
     const prior = priorEntryFor(sess, en.name, 0);
     if(!prior){ S.stalls[k] = {n: 0, dates: [sess.date]}; return; }
-    const now = bestOf(en), was = bestOf(prior.entry);
+    const now = bestOf(en, sess.date), was = bestOf(prior.entry, prior.sess && prior.sess.date);
     const improved = now.w > was.w || (now.w === was.w && now.reps > was.reps);
     const rec = S.stalls[k] || {n: 0, dates: []};
     if(improved){ S.stalls[k] = {n: 0, dates: [sess.date]}; return; }
-    /* HELD, NOT RESET. A session that was not ordinary training is no evidence that the
-       programme has stopped working — and it is no evidence that it has started again
-       either, so a real run of stalled sessions either side of it survives it. The
-       layoff case below is deliberately different: coming back from two weeks off is a
-       genuine fresh start for the comparison. */
-    if(notEv) return;
-    if(off){
+    /* THE RESET IS DECIDED BEFORE THE HOLD. A long layoff is both "not ordinary
+       training" and "a genuine fresh start", and those want opposite things — so the
+       fresh start wins, or a fortnight off would merely pause a run it should end. */
+    const away = (prior.sess && prior.sess.startedAt)
+      ? (sess.startedAt - prior.sess.startedAt) / DAY_MS : 0;
+    if(away >= STALL_RESET_DAYS){
       /* Recorded rather than merely skipped, so anything that later asks why the run is
          short has the answer instead of guessing at one. */
-      S.stalls[k] = {n: 0, dates: [sess.date], afterBreak: off.skipped || off.gap || 1};
+      S.stalls[k] = {n: 0, dates: [sess.date],
+                     afterBreak: Math.round(away) || (off && (off.skipped || off.gap)) || 1};
       return;
     }
+    /* HELD, NOT RESET. A session that was not ordinary training is no evidence that the
+       programme has stopped working — and none that it has started again either, so a
+       real run of stalled sessions either side of it survives. */
+    if(notEv) return;
     rec.n = (rec.n || 0) + 1;
     rec.dates = (rec.dates || []).concat(sess.date).slice(-3);
     delete rec.afterBreak;
@@ -58067,8 +58084,41 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.8";
+const NEWS_FOR = "2026.11.15.9";
 const NEWS = [
+  {k: "The side-balance check stops switching itself off while the gap is real",
+   s: ["On one audited log the Preacher Curl\u2019s left arm was weaker in 9 of 9 sessions by "
+     + "about 28%, and stayed weaker whichever arm went first. Element 26 retired the "
+     + "check on 6 October and reported \u201call movements are level\u201d. The Standing Cable "
+     + "Hip Abduction, left weaker in 6 of 7 by about 22%, was retired on 22 September.",
+       "The guard that did it was meant to help. Going first in an alternating set is "
+     + "worth reps, so the rule only compared sessions whose opening sides balanced \u2014 "
+     + "and threw the rest away. On this log it discarded most of the evidence and "
+     + "retired a nine-rep gap. A guard that can do that is worse than the bias it "
+     + "prevents, and the same log shows the gap survives the opening side flipping.",
+       "It now makes one comparison per session, left against right at the same load, as "
+     + "a percentage rather than a count of reps \u2014 a rep is not the same thing at 6 reps "
+     + "and at 20. The median of the last six says how big the gap is and which side it "
+     + "is on. Nothing retires under six sessions, because \u201cfour of the last six\u201d has "
+     + "no answer yet.",
+       "And it now asks whether the gap keeps picking the same side. On that log the "
+     + "Single-Arm Cable Pulldown and the Hammer Curl swing both ways \u2014 the left 30% "
+     + "ahead one week and 30% behind the next \u2014 while the Preacher Curl and the Hip "
+     + "Abduction are reliably one-sided. A limb that is sometimes weaker and sometimes "
+     + "stronger is set order and measurement noise, not an asymmetry to train around. On "
+     + "that user\u2019s data the two real checks stay on and the four noisy ones come off.",
+       "Each movement now shows its own figure \u2014 \u201cyour left is about 28% behind: right "
+     + "10 reps, left 7\u201d, and how many sessions that rests on \u2014 so a check being on or "
+     + "off is something you can check rather than take on trust."]},
+  {k: "A stall count is wiped by time off, not by two missed sessions",
+   s: ["A stall is three exposures of one slot with no improvement, and coming back from "
+     + "a real break should clear it: lifting what you lifted before a fortnight away is "
+     + "not evidence that your programme has stopped working. But the test for \u201ca break\u201d "
+     + "was two missed sessions in a row, which can be four days \u2014 and a report in the "
+     + "audit labelled exactly that as returning from a break.",
+       "What clears the count is now real time away from that movement: about two weeks "
+     + "since it was last trained. A shorter gap is still described as a return where "
+     + "that is worth saying, and it no longer discards the run."]},
   {k: "A session that was not ordinary training changes nothing on its own",
    s: ["Element 26 already refused to read a deload week literally: fewer sets at a lower "
      + "RPE is the instruction, so grading it as a result would have the app "
@@ -60652,16 +60702,72 @@ function sideHistory(exName){
   }
   return out;
 }
-/* The largest RECENT run whose opening sides balance. Walks newest-first and remembers
-   the last point at which the two counts were equal; everything older than that is
-   dropped, because including it would reintroduce exactly the bias this removes. */
-function balancedWindow(hist){
-  let r = 0, l = 0, cut = 0;
-  for(let i=0; i<hist.length; i++){
-    if(hist[i].startSide === "R") r++; else l++;
-    if(r === l) cut = i + 1;                    // balanced as of here
-  }
-  return {window: hist.slice(0, cut), dropped: hist.length - cut, openedR: cut/2, openedL: cut/2};
+/* =====================================================================
+   P1-8 — IS ONE SIDE RELIABLY WEAKER, OR IS THIS JUST NOISE?
+
+   The rule retired checks that were still real. On the audited export the Preacher
+   Curl's left is weaker in 9 of 9 sessions by about 28%, and it stays weaker whichever
+   arm goes first (Oct 7, left first: L 10 vs R 13.5; Oct 17, right first: L 6.5 vs
+   R 11). The app retired that check on Oct 6 and reported "All movements are level". The
+   Standing Cable Hip Abduction, left weaker in 6 of 7 by about 22%, was retired on
+   Sep 22.
+
+   Three things were wrong, and the first is the one that did the damage:
+
+     1. balancedWindow() kept only the newest run of sessions whose OPENING sides balance
+        and discarded the rest. It was guarding against positional bias — going first is
+        worth reps — by throwing away most of the evidence, and this user's own numbers
+        show the gap survives the opening side flipping. A guard that can retire a
+        nine-rep gap for want of a tidy sample is worse than the bias it prevents.
+     2. Every set of every session was pooled into two means, mixing different loads and
+        different sessions into one comparison.
+     3. The gap was an absolute rep difference against a flat two-rep threshold, so it
+        meant different things on a movement done for 6 and one done for 20 — and the
+        DIRECTION of the gap was never checked for consistency at all.
+
+   That last omission is why magnitude alone cannot reach the right answers. On this
+   user's data the Single-Arm Cable Pulldown and Hammer Curl swing both ways between
+   sessions — the left 30% ahead one week and 30% behind the next — while the Preacher
+   Curl and the Hip Abduction are reliably one-sided. A limb that is sometimes weaker and
+   sometimes stronger is set order and measurement noise, not an asymmetry to train
+   around.
+
+   So: one comparison per session, left against right at the same load, as a percentage.
+   The median of the last six says how big the gap is and which side it is on. A check
+   retires when that median is inside 10%, or when the gap in the established direction
+   was inside 10% in four of those six — which is what a side that keeps changing its
+   mind looks like. Under six exposures nothing retires, because "four of the last six"
+   has no answer yet, and the safe direction here is to keep measuring. */
+const ASYM_SMALL = 0.10;          // a gap this size is not worth training around
+const ASYM_SMALL_OF = 4;          // this many of the last six, and the check comes off
+const ASYM_WINDOW = 6;            // exposures compared
+/* One session's left-against-right, at the heaviest load both sides worked. Returns a
+   signed fraction: positive means the LEFT did fewer reps. */
+function sideExposure(h){
+  const by = {};
+  (h.entry.sets || []).forEach((st, i)=>{
+    if(!isWorkingSet(st)) return;
+    const side = setSide(h, i);
+    if(side !== "L" && side !== "R") return;
+    const reps = parseFloat(st.reps);
+    if(!(reps > 0)) return;
+    const w = parseFloat(st.weight) || 0;
+    const slot = by[w] || (by[w] = {L: [], R: []});
+    slot[side].push(reps);
+  });
+  const mean = a => a.reduce((x, y)=> x + y, 0) / a.length;
+  let pick = null;
+  Object.keys(by).forEach(k=>{
+    const slot = by[k];
+    if(!slot.L.length || !slot.R.length) return;       // the same load, on both sides
+    const w = parseFloat(k) || 0;
+    if(!pick || w > pick.w) pick = {w, L: mean(slot.L), R: mean(slot.R)};
+  });
+  if(!pick) return null;
+  const top = Math.max(pick.L, pick.R);
+  return {date: h.date, at: h.at, w: pick.w, L: pick.L, R: pick.R,
+          startSide: h.startSide,
+          gap: top > 0 ? (pick.R - pick.L) / top : 0};
 }
 function sideStats(exName){
   const key = asymCacheKey();
@@ -60669,47 +60775,47 @@ function sideStats(exName){
   const ck = nrm(exName);
   if(ck in ASYM_CACHE.data) return ASYM_CACHE.data[ck];
 
-  const hist = sideHistory(exName);
-  const bal = balancedWindow(hist);
-  const acc = {R:{reps:[], loads:[]}, L:{reps:[], loads:[]}};
-  bal.window.forEach(h=>{
-    h.entry.sets.forEach((st, i)=>{
-      if(!isWorkingSet(st)) return;
-      const side = setSide(h, i);
-      if(!side || !acc[side]) return;
-      const reps = parseFloat(st.reps)||0;
-      const w = parseFloat(st.weight)||0;
-      if(reps > 0) acc[side].reps.push(reps);
-      if(w > 0) acc[side].loads.push(w);
-    });
-  });
-  const avg = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
-  const R = {reps: avg(acc.R.reps), load: avg(acc.R.loads), sets: acc.R.reps.length};
-  const L = {reps: avg(acc.L.reps), load: avg(acc.L.loads), sets: acc.L.reps.length};
-
+  const hist = sideHistory(exName);                    // newest first
+  const all = hist.map(sideExposure).filter(Boolean);
+  const win = all.slice(0, ASYM_WINDOW);
   let out;
-  if(!bal.window.length || R.reps == null || L.reps == null){
-    out = {
-      ok:false, sessions: hist.length, balanced: bal.window.length,
+  if(!win.length){
+    out = {ok: false, sessions: hist.length, exposures: 0, balanced: 0,
       reason: hist.length
-        ? (bal.window.length
-            ? "not enough logged sets on both sides yet"
-            : "only "+hist.length+" session"+(hist.length===1?"":"s")+" logged, and the opening side has not flipped yet")
-        : "no sides logged for this movement yet"
-    };
+        ? "no session yet with both sides logged at the same load"
+        : "no sides logged for this movement yet"};
   } else {
-    const gap = R.reps - L.reps;                 // positive means the right is ahead
+    const gaps = win.map(x=> x.gap).sort((a, b)=> a - b);
+    const mid = gaps.length % 2
+      ? gaps[(gaps.length - 1) / 2]
+      : (gaps[gaps.length / 2 - 1] + gaps[gaps.length / 2]) / 2;
+    const dir = mid >= 0 ? 1 : -1;                     // +1: the left is the weaker one
+    /* Exposures where the gap IN THE ESTABLISHED DIRECTION is inside the threshold. A
+       reversal counts here too, and should: a session where the supposedly weaker side
+       was ahead is evidence against the asymmetry, not for it. */
+    const smallOf = win.filter(x=> x.gap * dir < ASYM_SMALL).length;
+    const enough = win.length >= ASYM_WINDOW;
+    const closed = enough && (Math.abs(mid) < ASYM_SMALL || smallOf >= ASYM_SMALL_OF);
+    const mean = a => a.length ? a.reduce((x, y)=> x + y, 0) / a.length : null;
+    const R = {reps: mean(win.map(x=> x.R)), load: mean(win.map(x=> x.w)), sets: win.length};
+    const L = {reps: mean(win.map(x=> x.L)), load: mean(win.map(x=> x.w)), sets: win.length};
     out = {
-      ok:true,
+      ok: true,
       sessions: hist.length,
-      balanced: bal.window.length,               // sessions actually compared
-      dropped: bal.dropped,                      // trimmed to keep the window balanced
+      exposures: win.length,
+      balanced: win.length,              // kept for callers: what was actually compared
+      dropped: Math.max(0, all.length - win.length),
       R, L,
-      gap: Math.abs(gap),
-      weaker: Math.abs(gap) < 0.05 ? null : (gap > 0 ? "L" : "R"),
-      stronger: Math.abs(gap) < 0.05 ? null : (gap > 0 ? "R" : "L"),
-      // two sessions is the minimum that can cancel the positional bias at all
-      confident: bal.window.length >= 2
+      /* `gap` stays a rep difference, which is what every screen already prints. The
+         DECISION is made on gapPct, because a rep is not the same thing at 6 reps and
+         at 20. */
+      gap: Math.abs(R.reps - L.reps),
+      gapPct: Math.abs(mid),
+      signedPct: mid,
+      weaker: Math.abs(mid) < 0.01 ? null : (mid > 0 ? "L" : "R"),
+      stronger: Math.abs(mid) < 0.01 ? null : (mid > 0 ? "R" : "L"),
+      smallOf, closed, window: win,
+      confident: win.length >= 2
     };
   }
   ASYM_CACHE.data[ck] = out;
@@ -60717,20 +60823,27 @@ function sideStats(exName){
 }
 function sideWordFull(s){ return s === "L" ? "left" : "right"; }
 // The gap in words, with the sample it rests on, so the number is never bare.
+/* P1-8 \u2014 A CHECK BEING ON OR OFF HAS TO BE CHECKABLE. The percentage is what the
+   decision is actually made on, so it is the thing to print; the rep counts behind it
+   follow, because a percentage with no sample is just an assertion. */
 function asymGapText(st){
   if(!st.ok) return st.reason;
-  if(!st.weaker) return "Both sides level at about "+r1(st.R.reps)+" reps.";
+  if(!st.weaker || st.closed) return "Both sides level, within "
+    + Math.round(ASYM_SMALL * 100) + "% across the last " + st.exposures + ".";
   const w = st.weaker === "L" ? st.L : st.R;
   const s = st.weaker === "L" ? st.R : st.L;
-  return "Your "+sideWordFull(st.weaker)+" is "+r1(st.gap)+" rep"+(r1(st.gap)===1?"":"s")+
-    " behind: "+sideWordFull(st.stronger)+" "+r1(s.reps)+", "+sideWordFull(st.weaker)+" "+r1(w.reps)+".";
+  return "Your " + sideWordFull(st.weaker) + " is about " + Math.round(st.gapPct * 100)
+    + "% behind: " + sideWordFull(st.stronger) + " " + r1(s.reps) + " reps, "
+    + sideWordFull(st.weaker) + " " + r1(w.reps) + ".";
 }
 function asymSampleText(st){
   if(!st.ok) return "";
-  const n = st.balanced;
-  return n + " balanced session" + (n===1?"":"s") +
-    (st.dropped ? ", oldest " + st.dropped + " dropped to keep the opening sides even" : "") +
-    (st.confident ? "" : " — too few to cancel the fresh-set bias, treat as provisional");
+  const n = st.exposures;
+  return "Median of " + n + " session" + (n === 1 ? "" : "s") + " with both sides at the same load"
+    + (st.dropped ? ", of " + (n + st.dropped) + " logged" : "")
+    + (n < ASYM_WINDOW
+        ? " \u2014 under " + ASYM_WINDOW + ", so nothing retires yet"
+        : ", gap inside " + Math.round(ASYM_SMALL * 100) + "% in " + st.smallOf + " of them");
 }
 /* THE CAP NUMBER, COMPUTED IN ONE PLACE.
 
@@ -60781,7 +60894,6 @@ function asymActiveFor(e){
      being told whether the gap had closed. */
   return asymRetestDue();
 }
-const ASYM_CLOSED_GAP = 2;      // "within 2 reps" retires the rule, per the plan
 function unilateralInPlan(){
   const out = [], seen = new Set();
   DAYS.forEach(d=>(S.program[d]||[]).forEach(e=>{
@@ -60806,7 +60918,7 @@ function asymRetestDue(){
     return unilateralInPlan().some(e=>{
       if(asymRetiredFor(e.name)) return false;
       const st = sideStats(e.name);
-      return st.ok && st.confident && st.gap <= ASYM_CLOSED_GAP;
+      return st.ok && st.closed;
     });
   }
   return unilateralInPlan().some(e=>sideStats(e.name).ok);
@@ -60819,7 +60931,7 @@ function applyAsymRetest(){
     if(!st.ok) return;
     // never retire on a provisional reading: an unbalanced window is exactly the case
     // where a gap can look closed when it is not
-    if(st.confident && st.gap <= ASYM_CLOSED_GAP){
+    if(st.closed){
       S.asymRetired[nrm(e.name)] = true;
       retired.push(e.name);
     } else kept.push(e.name);
@@ -60828,7 +60940,11 @@ function applyAsymRetest(){
   logPlanChange("rule", null, "Asymmetry rule re-test", [
     retired.length ? "Retired on: "+retired.join(", ") : "Nothing retired yet",
     kept.length ? "Still matching the weaker side on: "+kept.join(", ") : "All movements are level"
-  ], {note:"Gaps measured on balanced windows only, so positional bias from the opening-side flip is cancelled."});
+  ], {note:"One comparison per session, left against right at the same load, as a percentage. "
+       + "A check comes off when the median of the last " + ASYM_WINDOW + " is inside "
+       + Math.round(ASYM_SMALL * 100) + "%, or when the gap was inside it in "
+       + ASYM_SMALL_OF + " of those " + ASYM_WINDOW + " \u2014 which is what a side that keeps "
+       + "changing which one is weaker looks like."});
   save(); queueSync();
   return {retired, kept};
 }

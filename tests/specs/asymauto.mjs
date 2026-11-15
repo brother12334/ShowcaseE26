@@ -36,8 +36,14 @@ const seed = (opts)=> p.evaluate(o=>{
     {name:"Preacher Curl",       sets:2, reps:"8-12",  uni:true, note:"single arm, alternate L/R each set"}];
   S.sessions=[];
   if(!o.noData){
-    /* Four sessions each, opening side flipped, so balancedWindow() has something to read.
-       Lateral raise: both arms level. Preacher curl: the right is miles ahead. */
+    /* Six sessions each, opening side flipped.
+       Lateral raise: both arms level. Preacher curl: the right is miles ahead.
+
+       P1-8 \u2014 six, not four. A check now comes off when the gap was inside 10% in four
+       of the last SIX exposures, so four exposures cannot reach a verdict at all and
+       everything is held. That is the intended safe direction (the bug being fixed was
+       retiring checks too eagerly), and it means a spec about the re-test RUNNING has to
+       give it enough to run on. The two characters are unchanged. */
     const mk=(n, side, ex, r1, r2)=>{
       const t=Date.now()-n*86400e3;
       S.sessions.push({id:ex+n, workoutId:wid, date:new Date(t).toLocaleDateString("en-CA"),
@@ -46,8 +52,10 @@ const seed = (opts)=> p.evaluate(o=>{
           {weight:"20", reps:String(r1), rpe:"8", done:true},
           {weight:"20", reps:String(r2), rpe:"8", done:true}]}]});
     };
+    mk(16,"R","Cable Lateral Raise",15,15); mk(14,"L","Cable Lateral Raise",15,15);
     mk(12,"R","Cable Lateral Raise",15,15); mk(10,"L","Cable Lateral Raise",15,15);
     mk(8, "R","Cable Lateral Raise",14,15); mk(6, "L","Cable Lateral Raise",15,14);
+    mk(15,"R","Preacher Curl",14,6);  mk(13,"L","Preacher Curl",6,14);
     mk(11,"R","Preacher Curl",14,6);  mk(9, "L","Preacher Curl",6,14);
     mk(7, "R","Preacher Curl",15,5);  mk(5, "L","Preacher Curl",5,15);
   }
