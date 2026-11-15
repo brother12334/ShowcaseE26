@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.5";
+const APP_VERSION = "2026.11.15.6";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -19596,7 +19596,7 @@ function windowStats(from, to, opts){
      answer different questions and the app asks both. */
   const out = blankMuscleMap(()=>({sets:0, eff:0, vol:0, best:0, lastMs:0, lastSets:0,
                                    lastEff:0, hardSets:0, warmSets:0, noRpe:0, rpeSets:0,
-                                   nearFail:0, restN:0, restShort:0, exs:{},
+                                   nearFail:0, restN:0, restShort:0, exs:{}, exBest:{},
                                    compound:0, rpeSum:0, rpeN:0, dates:{}, effDates:{},
                                    days:0, rpeAvg:0}));
   /* A LOG THAT IS NOT QUITE THE RIGHT SHAPE MUST NOT TAKE THE APP DOWN. A session with
@@ -19654,6 +19654,10 @@ function windowStats(from, to, opts){
           else o.rpeSets += c;
           o.vol  += (w * reps + subVol) * c;
           o.exs[e.name] = (o.exs[e.name]||0) + c;
+          /* P0-3 — and the best single set per MOVEMENT, because "this muscle got 99%
+             stronger" turned out to mean "one exercise started counting bodyweight". A
+             claim about a muscle has to be visible on more than one of its movements. */
+          if(mm[m] >= 1 && e1 > (o.exBest[e.name] || 0)) o.exBest[e.name] = e1;
           if(rpe >= 7) o.hardSets += c;
           if(rpe >= 9.5) o.nearFail += c;
           if(mm[m] >= 1 && e1 > o.best) o.best = e1;
@@ -45154,6 +45158,81 @@ function tgCommit(pct, was){
    And it never applies anything. It proposes, states its evidence, and waits. */
 const TGS_WEEKS = 6;                  // each half of the comparison
 const TGS_MIN_SESSIONS = 8;           // touching that muscle, across both halves
+/* =====================================================================
+   P0-3 — WHAT A CUT TO A VOLUME FLOOR HAS TO CLEAR FIRST
+
+   Five floor reductions in the audited export were accepted on "estimated strength up
+   X%, so you are growing without the volume". None of the five gains were real:
+
+     Calves      5.4 -> 2    +105%   the Smith calf raise started counting the bar
+     Quads       8.1 -> 5.5   +99%   the split squat started counting bodyweight
+     Side Delts  7.6 -> 5     +33%   a new exercise, and a new rep range six days before
+     Back Thighs 5.2 -> 4.5    +9%   a newer lifter's ordinary early progress
+     Mid Back    6.7 -> 5.5    +5%   the same
+
+   Two weeks later the app's own updated model asked for Calves 8, Quads 8.1, Mid Back 10
+   and Hamstrings 6 — every one above the floor it had just talked itself down to. This
+   is the most expensive kind of bug the app can have: it removed real training, the user
+   agreed because the evidence looked like evidence, and nothing afterwards said so.
+
+   The counting changes are handled upstream now (P0-2 normalises the load and leaves a
+   marker), but a normalised number is not the same as a trustworthy one. So a REDUCTION
+   has to clear all of this. A RAISE deliberately clears none of it: raising is the safe
+   direction, the model itself wanted these floors higher, and a detector that doubts
+   itself in both directions stops saying anything. */
+const FLOOR_MIN_EX = 2;               // movements that must show the gain
+const FLOOR_NEW_WEEKS = 8;            // of an exercise's history that proves nothing
+const FLOOR_MIN_SETS = 4;             // never propose a floor under this, for anything
+const FLOOR_MIN_FRAC = 0.6;           // nor under this fraction of the model's own figure
+const FLOOR_RETEST_WEEKS = 6;         // then ask whether the cut was right
+const FLOOR_RETEST_GAIN = 0.05;       // under this at the lower floor and it goes back
+/* The model's own minimum for this muscle, with anything the user or an earlier proposal
+   wrote deliberately ignored — otherwise each cut becomes the baseline for the next and
+   the floor walks down a ratchet. */
+function floorModelMin(A, g){
+  let L = null;
+  try{ L = adjustedLandmarks(A, g); }catch(e){ L = null; }
+  const v = L && L.mev;
+  if(v > 0) return v;
+  return (GROUPS[g] && GROUPS[g].mev) || 0;
+}
+/* The lowest figure a PROPOSAL may name. Nothing to do with what somebody sets by hand:
+   this is the app's own limit on its own arithmetic. */
+function floorCutBound(A, g){
+  return Math.max(FLOOR_MIN_SETS, Math.round(floorModelMin(A, g) * FLOOR_MIN_FRAC * 10) / 10);
+}
+/* Did anything happen inside this window that makes its two halves incomparable? The
+   movements are passed in because a swap or a rep-range change only matters where it
+   lands on a movement that trains THIS muscle. */
+function floorWindowBroken(from, to, exNames){
+  if(windowCrossesMark(from, to)) return "a change in how loads are counted";
+  const keys = {};
+  (exNames || []).forEach(nm=>{ keys[nrm(nm)] = 1; });
+  const rows = (S.planLog || []).filter(c=> c && c.at > from && c.at < to);
+  if(rows.some(c=> c.kind === "swapped" && (keys[nrm(c.name)] || keys[nrm(c.prevName || "")])))
+    return "an exercise being swapped out";
+  if(rows.some(c=> c.kind === "reps" && keys[nrm(c.name)]))
+    return "a change to the rep range";
+  if((S.sessions || []).some(sn=> sn && sn.startedAt > from && sn.startedAt < to
+       && deloadCovers(sn.date, sn.finishedAt || sn.startedAt))) return "a deload";
+  return null;
+}
+/* When each movement first appears in the log. An exercise's opening weeks are mostly
+   skill — learning the groove, finding the seat height, losing the fear of the load —
+   and reading them as hypertrophy is how +9% on a newer lifter became an argument for
+   less training. */
+function exFirstSeen(){
+  const out = {};
+  (S.sessions || []).forEach(sn=>{
+    if(!sn || !sn.startedAt) return;
+    (sn.entries || []).forEach(en=>{
+      if(!en || !en.name) return;
+      const k = nrm(en.name);
+      if(out[k] == null || sn.startedAt < out[k]) out[k] = sn.startedAt;
+    });
+  });
+  return out;
+}
 function tgEvidence(A, g){
   if(!GROUPS[g] || GROUPS[g].optional) return null;
   if(S.lmFloor && g in S.lmFloor) return null;          // you have already ruled on this one
@@ -45182,14 +45261,39 @@ function tgEvidence(A, g){
 
   // ---- the floor looks high: under it, growing anyway ----
   if(perWeek < L.mev * 0.9 && perWeek >= 1 && strP >= 0.03){
-    const to = Math.max(1, Math.min(R(perWeek), Math.floor(L.mev * 10) / 10 - 0.5));
-    if(to < L.mev - 0.4){
-      return {g, dir:"down", to, perWeek: r1(perWeek), mev: r1(L.mev), strP,
+    /* P0-3 — EVERY ONE OF THESE REFUSALS IS A CUT THAT WAS ACTUALLY MADE. */
+    const exNames = Object.keys(Object.assign({}, a.exs, b.exs));
+    const broken = floorWindowBroken(now - 2*W, now + 1, exNames);
+    if(broken) return null;
+    /* The gain has to be visible on more than one movement, and on movements that have
+       been trained long enough for a gain to mean anything. */
+    const seen = exFirstSeen();
+    const young = now - FLOOR_NEW_WEEKS * 7 * DAY_MS;
+    const drivers = [];
+    exNames.forEach(nm=>{
+      const was = (b.exBest || {})[nm] || 0, is = (a.exBest || {})[nm] || 0;
+      if(!(was > 0) || !(is > 0)) return;
+      if(!((seen[nrm(nm)] || 0) < young)) return;        // too new to be read as growth
+      if(!((is - was) / was >= 0.03)) return;            // this one did not go up
+      drivers.push({nm, was, is, p: (is - was) / was});
+    });
+    if(drivers.length < FLOOR_MIN_EX) return null;
+    const bound = floorCutBound(A, g);
+    const to = Math.max(bound, Math.min(R(perWeek), Math.floor(L.mev * 10) / 10 - 0.5));
+    if(to < L.mev - 0.4 && to >= bound - 0.001){
+      drivers.sort((x, y)=> y.p - x.p);
+      /* WHICH MOVEMENTS AND WHICH NUMBERS. A proposal to train less has to be checkable
+         by the person accepting it, and "+99%" is not checkable. */
+      const said = drivers.slice(0, 3).map(d=> d.nm + " " + Math.round(d.was) + " → "
+                     + Math.round(d.is) + " (+" + Math.round(d.p * 100) + "%)").join(", ");
+      return {g, dir:"down", to, perWeek: r1(perWeek), mev: r1(L.mev), strP, drivers, bound,
+        evidence: said,
         title: name + (GROUPS[g].pl ? " grow" : " grows") + " on less than the target asks",
         why: "About " + r1(perWeek) + " sets a week against a " + r1(L.mev) + " floor, and estimated "
            + "strength on your " + name.toLowerCase() + " work is up " + pc(strP) + "% over the last "
-           + TGS_WEEKS + " weeks versus the " + TGS_WEEKS + " before. The number is asking for volume "
-           + "you are evidently growing without.",
+           + TGS_WEEKS + " weeks versus the " + TGS_WEEKS + " before, on " + drivers.length
+           + " separate movements: " + said + ". The number is asking for volume you are "
+           + "evidently growing without.",
         does: "Sets the " + name.toLowerCase() + " floor to " + to + " sets — what you have actually "
            + "been doing while getting stronger. It stops being reported as behind, and nothing about "
            + "your plan changes."};
@@ -45227,6 +45331,11 @@ function tgEvidence(A, g){
 function tgSuggestion(A){
   if((S.sessions || []).length < 10) return null;
   const dis = (S.lmSuggest && S.lmSuggest.no) || {};
+  /* P0-3 — a cut whose six weeks are up and whose prediction failed comes first. It is
+     a question this detector already asked and answered wrongly, and the five audited
+     cuts stood precisely because nothing ever came back to them. */
+  const due = floorRetests().filter(r=> !dis[r.g]);
+  if(due.length) return Object.assign({weight: 99}, floorRetestEvidence(due[0]));
   let best = null;
   GKEYS.forEach(g=>{
     if(dis[g]) return;
@@ -45236,6 +45345,74 @@ function tgSuggestion(A){
     if(!best || weight > best.weight) best = Object.assign({weight}, e);
   });
   return best;
+}
+/* P0-3 — A CUT IS A PROPOSAL WITH AN EXPIRY, NOT A VERDICT.
+
+   The five audited cuts were accepted and then simply stood. Nothing re-examined them,
+   and the user had no way to know the app's own model had moved above them a fortnight
+   later. The argument for a cut is "you are growing on less than the floor asks" — which
+   is a prediction, and a prediction that can be checked by waiting.
+
+   So accepting one records when, and from what. Six weeks on, if the muscle is NOT still
+   growing at the reduced floor, the cut failed its own test and the old figure is offered
+   back. Shared with the click handler so the two cannot drift. */
+function acceptFloorProposal(g, e){
+  if(!g || !e) return false;
+  if(!S.lmFloor) S.lmFloor = {};
+  if(!S.lmFloorAt || typeof S.lmFloorAt !== "object") S.lmFloorAt = {};
+  const from = e.mev;
+  S.lmFloor[g] = e.to;
+  if(e.dir === "down"){
+    S.lmFloorAt[g] = {at: Date.now(), from, to: e.to, why: e.evidence || null};
+  } else {
+    delete S.lmFloorAt[g];          // a raise is not a cut waiting to be re-tested
+  }
+  /* Recorded as yours, with the app named as having proposed it. Both halves matter:
+     it is your number now and can be cleared like any other, and six weeks from now the
+     history says where it came from rather than leaving you to wonder why the Body tab
+     changed its mind about a muscle. */
+  logPlanChange("rule", null, gName(g),
+    [gName(g) + " floor " + from + " → " + e.to + " sets"],
+    {note: "Element 26 proposed this from your log and you accepted it. " + e.why});
+  save(); queueSync();
+  return true;
+}
+/* Reduced floors whose six weeks are up and whose prediction did not come true. */
+function floorRetests(){
+  const recs = S.lmFloorAt || {};
+  const out = [];
+  const A = (typeof bodyAnalysis === "function") ? bodyAnalysis() : null;
+  const now = Date.now(), W = TGS_WEEKS * 7 * DAY_MS;
+  Object.keys(recs).forEach(g=>{
+    const rec = recs[g];
+    if(!rec || !rec.at || !GROUPS[g]) return;
+    if(now - rec.at < FLOOR_RETEST_WEEKS * 7 * DAY_MS) return;
+    if((S.lmFloor || {})[g] !== rec.to) return;      // changed since; not ours to re-test
+    const a = windowStats(now - W, now + 1)[g];
+    const b = windowStats(now - 2*W, now - W)[g];
+    if(!a || !b || !(b.best > 0) || !(a.sets > 0)) return;
+    const strP = (a.best - b.best) / b.best;
+    if(strP >= FLOOR_RETEST_GAIN) return;            // still growing: the cut was right
+    out.push({g, back: rec.from, at: rec.at, to: rec.to, strP, retest: true, A});
+  });
+  return out;
+}
+/* The same card the proposals use, because it is the same kind of question. */
+function floorRetestEvidence(r){
+  if(!r) return null;
+  const name = GROUPS[r.g].name;
+  const pc = v => Math.round(Math.abs(v) * 100);
+  const weeks = Math.round((Date.now() - r.at) / (7 * DAY_MS));
+  return {g: r.g, dir: "up", to: r.back, mev: r.to, strP: r.strP, retest: true,
+    title: name + " did not keep growing on less",
+    why: "The " + name.toLowerCase() + " floor came down to " + r.to + " sets " + weeks
+       + " weeks ago, because your log said you were growing without the volume. Since "
+       + "then estimated strength is " + (r.strP < -0.005 ? "down " + pc(r.strP) + "%"
+       : r.strP > 0.005 ? "up " + pc(r.strP) + "%, which is not growth"
+       : "flat") + ". That was the prediction and it did not hold.",
+    does: "Puts the " + name.toLowerCase() + " floor back to " + r.back + " sets. Nothing about "
+       + "your programme changes on its own — the Body tab goes back to reporting this muscle "
+       + "against the higher figure."};
 }
 function tgSuggestHTML(A){
   const e = tgSuggestion(A);
@@ -47145,18 +47322,11 @@ function bind(){
   document.querySelectorAll("[data-tgsyes]").forEach(b=> b.onclick = ()=>{
     const g = b.dataset.tgsyes;
     const A = bodyAnalysis();
-    const e = tgEvidence(A, g);
+    const rt = floorRetests().find(x=> x.g === g);
+    const e = rt ? floorRetestEvidence(rt) : tgEvidence(A, g);
     if(!e) return;
-    if(!S.lmFloor) S.lmFloor = {};
-    S.lmFloor[g] = e.to;
-    /* Recorded as yours, with the app named as having proposed it. Both halves matter:
-       it is your number now and can be cleared like any other, and six weeks from now the
-       history says where it came from rather than leaving you to wonder why the Body tab
-       changed its mind about a muscle. */
-    logPlanChange("rule", null, gName(g),
-      [gName(g) + " floor " + e.mev + " \u2192 " + e.to + " sets"],
-      {note: "Element 26 proposed this from your log and you accepted it. " + e.why});
-    save(); queueSync(); render();
+    acceptFloorProposal(g, e);
+    render();
     toast(gName(g) + " floor is now " + e.to);
   });
   document.querySelectorAll("[data-tgsno]").forEach(b=> b.onclick = ()=>{
@@ -57648,8 +57818,36 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.5";
+const NEWS_FOR = "2026.11.15.6";
 const NEWS = [
+  {k: "A volume floor is no longer cut on a gain that did not happen",
+   s: ["Five volume floors were talked down in one audited log, each on the same "
+     + "argument: estimated strength is up, so you are growing without the volume. "
+     + "Calves 5.4 \u2192 2 sets a week on \u201cup 105%\u201d. Quads 8.1 \u2192 5.5 on \u201cup 99%\u201d. "
+     + "Side delts 7.6 \u2192 5 on \u201cup 33%\u201d. Two more at +9% and +5%.",
+       "Not one of those gains was real. Two were counting changes \u2014 a calf raise that "
+     + "started counting the bar, a split squat that started counting the lifter. One was "
+     + "a new exercise on a new rep range six days earlier. The last two were an ordinary "
+     + "beginner's first weeks, which is skill arriving, not muscle. A fortnight later "
+     + "the app\u2019s own model asked for calves 8, quads 8.1 and mid back 10 \u2014 every one "
+     + "above the floor it had just argued down.",
+       "A reduction now has to clear all of it. The window may not straddle a change in "
+     + "how loads are counted, an exercise being swapped out, a change to the rep range "
+     + "or a deload. The gain has to show on at least two separate movements, and on "
+     + "movements trained longer than eight weeks. And there is a hard bound: no proposal "
+     + "may name a figure under four sets a week, or under 60% of the model\u2019s own "
+     + "minimum, whichever is higher. The calves cut to 2 is not a number the app can "
+     + "reach any more.",
+       "The proposal also has to show its work. It now names the movements and their "
+     + "figures \u2014 \u201cLeg Press 273 \u2192 342 (+25%), Leg Extension 273 \u2192 342 (+25%)\u201d \u2014 "
+     + "because \u201c+99%\u201d is not something anybody can check.",
+       "And a cut is now a prediction with a date on it. It says you will keep growing on "
+     + "less; six weeks later the app checks. If the muscle has gone flat at the lower "
+     + "floor, the old figure is offered back, with what was predicted and what happened. "
+     + "The five cuts in that log simply stood, and nothing ever went back to them.",
+       "Raising a floor clears none of these checks, deliberately. Raising is the safe "
+     + "direction, it is the direction the model itself wanted, and a detector that "
+     + "second-guesses itself both ways stops saying anything useful."]},
   {k: "Starting to count your own weight is not getting stronger",
    s: ["A weighted dip done with 25 lb on the belt by somebody who weighs 139.6 is a "
      + "164.6 lb lift. For months it was written down as \u201c25\u201d. When the app started "
@@ -62627,7 +62825,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmFloorAt","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* P0-2 \u2014 where the log changed convention. A fact about how the numbers in
      `sessions` are to be READ, so a backup carrying the sessions without it restores a

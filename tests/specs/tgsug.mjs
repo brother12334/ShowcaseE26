@@ -18,12 +18,21 @@ await p.evaluate(()=>{
   save();
 });
 
-/* 12 weeks of sessions for one exercise that is ~100% one muscle, with a controllable
-   weekly set count and a controllable strength trend. */
-const seed = (opts) => p.evaluate(({name, setsPerWeek, gainPct, weeks})=>{
+/* 12 weeks of sessions for exercises that are ~100% one muscle, with a controllable
+   weekly set count and a controllable strength trend.
+
+   P0-3 \u2014 `also` adds a SECOND movement for the same muscle, sharing the same weekly
+   set count rather than adding to it. A cut to a volume floor now requires the gain to
+   show on at least two movements, because in the audited export "this muscle got 99%
+   stronger" meant "one exercise started counting bodyweight". The cases below that
+   expect a LOWERING therefore seed two; a raise is not guarded this way and the rest are
+   left exactly as they were. */
+const seed = (opts) => p.evaluate(({name, also, setsPerWeek, gainPct, weeks})=>{
   S.sessions = []; S.exNotes=[]; S.planLog=[]; delete S.lmFloor; delete S.lmSuggest; delete S.lmScale;
   const wid = ROTATION[0];
+  const names = also ? [name, also] : [name];
   const perSession = 2;
+  const perEx = Math.max(1, Math.round(perSession / names.length));
   const sessionsPerWeek = Math.max(1, Math.round(setsPerWeek / perSession));
   const total = weeks * sessionsPerWeek;
   for(let i = 0; i < total; i++){
@@ -32,7 +41,7 @@ const seed = (opts) => p.evaluate(({name, setsPerWeek, gainPct, weeks})=>{
     const frac = i / Math.max(1, total - 1);
     const w = Math.round(100 * (1 + gainPct*frac));
     S.sessions.push({id:"s"+i, date:dayStr(t), workoutId:wid, startedAt:t, finishedAt:t+3e6, feel:3,
-      entries:[{name, sets:Array.from({length:perSession},()=>({weight:String(w), reps:"8", rpe:"8", done:true, rest:120}))}]});
+      entries:names.map(nm=>({name:nm, sets:Array.from({length:perEx},()=>({weight:String(w), reps:"8", rpe:"8", done:true, rest:120}))}))});
   }
   save();
   const A=bodyAnalysis();
@@ -51,7 +60,7 @@ const look = () => p.evaluate(()=>{
 });
 
 console.log('A · UNDER THE FLOOR AND GETTING STRONGER — should propose LOWERING');
-console.log('  ', await seed({name:"Barbell Bench Press", setsPerWeek:6, gainPct:0.10, weeks:12}));
+console.log('  ', await seed({name:"Barbell Bench Press", also:"Dumbbell Bench Press", setsPerWeek:6, gainPct:0.10, weeks:12}));
 console.log('  ', await look());
 
 console.log('\nB · UNDER THE FLOOR AND GOING NOWHERE — must say NOTHING');
@@ -77,7 +86,7 @@ console.log('  ', await seed({name:"Barbell Bench Press", setsPerWeek:6, gainPct
 console.log('  ', await look());
 
 console.log('\nF · ACCEPTING IT');
-await seed({name:"Barbell Bench Press", setsPerWeek:6, gainPct:0.10, weeks:12});
+await seed({name:"Barbell Bench Press", also:"Dumbbell Bench Press", setsPerWeek:6, gainPct:0.10, weeks:12});
 console.log('  ', await p.evaluate(()=>{
   goTab('body'); render();
   const g=document.querySelector('[data-tgsyes]').dataset.tgsyes;
@@ -91,7 +100,7 @@ console.log('  ', await p.evaluate(()=>{
 }));
 
 console.log('\nG · TURNING IT DOWN');
-await seed({name:"Barbell Bench Press", setsPerWeek:6, gainPct:0.10, weeks:12});
+await seed({name:"Barbell Bench Press", also:"Dumbbell Bench Press", setsPerWeek:6, gainPct:0.10, weeks:12});
 console.log('  ', await p.evaluate(()=>{
   goTab('body'); render();
   const g=document.querySelector('[data-tgsno]').dataset.tgsno;
