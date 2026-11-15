@@ -7218,7 +7218,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.1";
+const APP_VERSION = "2026.11.15.2";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -17911,8 +17911,35 @@ function overloadTarget(workoutId, en, anyDay, occ){
        exercise and the load is what changes. With no range written down there is no "top"
        to be at, so reps it is. */
     const atCap = !!rr && top.r >= rr[1];
+    /* THE TIP HAS TO BE ABOUT THE WEIGHT YOU ARE GOING TO LIFT.
+
+       Reported: "Beat flag doesn't match weight". Lat pulldown, 3x8-12. Last session's
+       top set was 140 x 11, the Nov 7 grade raised the plan to 145, the boxes were
+       prefilled with 145 — and the tip said "one more rep at the same load clears it:
+       140 lb x 12". It read last session's sets and only last session's sets, so it
+       quoted a load the plan had already moved off, directly above a line announcing
+       "145 lb is new". Four statements about one number, one of them a session out of
+       date.
+
+       When the prescribed load differs from the one the tip would quote, the tip is
+       restated at TODAY's load, and the number it names is the rep count that actually
+       passes last time's best on estimated 1RM. At 140 x 11 that is 145 x 10 — not
+       145 x 8, which is a worse set than the one it is supposed to beat.
+
+       Which also makes it agree with the rebuild line instead of fighting it: the
+       rebuild says what the plan does (restart at the bottom of the range and climb),
+       this says where you are genuinely ahead. Both true, neither quoting a load you
+       are not using. */
+    const planW = prescribedLoadFor(en);
+    const moved = planW != null && planW > 0 && top.w > 0 && Math.abs(planW - top.w) > 0.01;
     let way;
-    if(top.w > 0 && atCap && step > 0) way = {kind:"load", w: Math.round((top.w + step) * 10) / 10, r: rr[0]};
+    if(moved){
+      const beatThis = est1RM(top.w, top.r);
+      let r = null;
+      for(let i = 1; i <= 40 && r == null; i++) if(est1RM(planW, i) > beatThis) r = i;
+      way = {kind:"newload", w: planW, r: r, up: planW > top.w};
+    }
+    else if(top.w > 0 && atCap && step > 0) way = {kind:"load", w: Math.round((top.w + step) * 10) / 10, r: rr[0]};
     else if(top.w > 0 && atCap)       way = {kind:"anyload", w: top.w, r: rr[0]};
     else                              way = {kind:"reps", w: top.w, r: top.r + 1};
     return {top, vol: Math.round(vol), reps, way, range: rr, step, date: l.date, entry: l};
@@ -17932,6 +17959,20 @@ function overloadTipHTML(workoutId, en, anyDay, occ){
     how = t.top.w > 0
       ? "one more rep at the same load clears it \u2014 <b>" + esc(say(t.way.w)) + " \u00d7 " + t.way.r + "</b>"
       : "one more rep clears it \u2014 <b>" + t.way.r + " reps</b>";
+  }else if(t.way.kind === "newload"){
+    /* A target outside the prescribed range is not a target: naming 18 reps on a 8-12
+       movement is an instruction nobody is going to follow. Where it does not fit, the
+       tip says the load moved and stops, rather than inventing a number. */
+    const r = t.way.r;
+    const fits = r != null && (!t.range || (r >= 1 && r <= t.range[1]));
+    const at = esc(say(t.way.w));
+    how = t.way.up
+      ? (fits
+          ? "you are on " + at + " now, so <b>" + at + " \u00d7 " + r + "</b> is where you pass it"
+          : "you are on " + at + " now \u2014 clear the range at this load and the next step passes it")
+      : (fits
+          ? "the plan has you on " + at + " now, so <b>" + at + " \u00d7 " + r + "</b> matches it"
+          : "the plan has you on " + at + " now, so the job here is the range rather than last time's number");
   }else if(t.way.kind === "load"){
     how = "that is the top of your rep range, so the load goes up: <b>" + esc(say(t.way.w))
         + " \u00d7 " + t.way.r + "</b>";
@@ -17939,9 +17980,14 @@ function overloadTipHTML(workoutId, en, anyDay, occ){
     how = "that is the top of your rep range, so the next move is heavier \u2014 the smallest "
         + "step your gear has. Tell the app what you can load in Settings and it will name it.";
   }
+  /* "Matching the top set and adding a rep anywhere beats that too" is only true while
+     the load is the same one. On a load that has moved it is arithmetic about a weight
+     nobody is lifting today. */
   const totals = t.top.w > 0
     ? "Last time's total work was " + Math.round(t.vol).toLocaleString() + " " + unitWord()
-      + "\u00d7reps across " + t.reps + " reps; matching the top set and adding a rep anywhere beats that too."
+      + "\u00d7reps across " + t.reps + " reps"
+      + (t.way.kind === "newload" ? "."
+         : "; matching the top set and adding a rep anywhere beats that too.")
     : t.reps + " reps in total last time.";
   return `<div class="ex-insight ex-po"><span class="ins-tag">Beat</span><span>Last time's best was <b>${
     esc(was)}</b> \u2014 ${how} <span class="po-sub">${esc(totals)}</span></span></div>`;
@@ -55765,6 +55811,19 @@ function closeLoadFlagsFor(name, to){
    six weeks passed (the reps are wherever they are by now), or the top of the range
    came back at that load, which is the flag's whole purpose being served. */
 const REBUILD_MAX_DAYS = 42;
+/* THE LOAD THIS SESSION IS ACTUALLY GOING TO USE, from the three places a prescribed
+   load can live: what the programme entry says, what this session froze at Start (a LIVE
+   entry has no `weight` — that field holds the loads you type per set), and the
+   programme's own row when neither is to hand. Same order as planLoadFor(). */
+function prescribedLoadFor(entry){
+  if(!entry) return null;
+  const src = (entry.weight != null && entry.weight !== "") ? entry.weight
+            : (entry.planWeight != null && entry.planWeight !== "") ? entry.planWeight
+            : (findProgramEntry(entry.name) || {}).weight;
+  if(src == null || src === "") return null;
+  const w = parseFloat(src);
+  return isNaN(w) ? null : w;
+}
 function rebuildFor(entry){
   if(!entry) return null;
   const src = entry.rebuild ? entry : findProgramEntry(entry.name);
@@ -57606,8 +57665,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.1";
+const NEWS_FOR = "2026.11.15.2";
 const NEWS = [
+  {k: "The Beat tip is about the weight you are going to lift",
+   s: ["It read last session's sets and only last session's sets, so a movement whose load "
+     + "had just been raised got a target at the old one: \u201clast time's best was 140 lb "
+     + "\u00d7 11, one more rep at the same load clears it, 140 lb \u00d7 12\u201d \u2014 above boxes "
+     + "prefilled with 145 and a line announcing that 145 lb is new.",
+       "It is now stated at the load the session is actually going to use, and the number "
+     + "it names is the rep count that genuinely passes last time rather than the next one "
+     + "up. On 140 lb \u00d7 11 that is 145 lb \u00d7 10: eight reps at the heavier weight is a "
+     + "worse set than the one it is supposed to beat, so saying \u201c145 \u00d7 8\u201d would have "
+     + "been wrong in the other direction.",
+       "A load Element 26 has CUT gets the same treatment \u2014 it will not ask you to beat a "
+     + "heavier number it deliberately moved you off \u2014 and where the rep count that would "
+     + "pass sits outside your range, it names none rather than inventing one."]},
   {k: "When a movement runs out of weight, it offers you a different one",
    s: ["Double progression assumes the load can always go up. On a barbell it can \u2014 the "
      + "ceiling is the plates in the building. On the heaviest dumbbell in the rack, or at "
