@@ -152,7 +152,13 @@ console.log("3 - IT IS ON THE BOTTOM IN EVERY STATE THE APP HAS");
   ck("no page errors", errs.length===0, errs.join(" | "));
 }
 
-console.log("4 - THE AUTO-HIDE STILL WORKS");
+console.log("4 - THE BAR DOES NOT MOVE ON SCROLL, EVER");
+/* It used to retract on the way down and come back on the way up, to save a long Body
+   tab from a 78px letterbox. Three bug reports later \u2014 "nav bar floating mid-screen",
+   twice, then a screenshot of a session with no tab bar on it at all \u2014 the 78px was
+   not worth it. A navigation bar that is sometimes not there is one you have to think
+   about, and the only way to find out whether it is gone on purpose is to scroll and
+   see. The browser-chrome correction below is a correction, not a movement, and stays. */
 {
   const {p, errs} = await open(ANDROID);
   const r = await p.evaluate(async ()=>{
@@ -162,18 +168,19 @@ console.log("4 - THE AUTO-HIDE STILL WORKS");
     document.getElementById("app").appendChild(pad);
     refreshNavBounds();
     const wait = ()=> new Promise(r2=> setTimeout(r2, 120));
-    const gy = ()=> document.querySelector("nav").style.getPropertyValue("--navY").trim();
-    window.scrollTo(0, 60);  await wait(); const near = gy();
-    window.scrollTo(0, 700); await wait(); const down = gy();
-    window.scrollTo(0, 400); await wait(); const up   = gy();
-    window.scrollTo(0, 0);   await wait(); const top  = gy();
-    return {near, down, up, top};
+    const at = ()=>{
+      const n = document.querySelector("nav");
+      return {y: n.style.getPropertyValue("--navY").trim(),
+              off: Math.round(n.getBoundingClientRect().bottom - window.innerHeight)};
+    };
+    const out = [];
+    for(const to of [60, 700, 1800, 400, 0]){ window.scrollTo(0, to); await wait(); out.push(at()); }
+    return out;
   });
-  // unset is the same as 0px: the property is only written when the bar actually moves
-  ck("it stays put near the top", r.near === "0px" || r.near === "", "["+r.near+"]");
-  ck("it retracts on the way down", /100%/.test(r.down), r.down);
-  ck("it comes back on the way up", r.up === "0px", r.up);
-  ck("and it is up at the top of the page", r.top === "0px", r.top);
+  console.log("    " + JSON.stringify(r));
+  ck("nothing ever writes the slide variable", r.every(x=> x.y === ""), JSON.stringify(r.map(x=>x.y)));
+  ck("and the bar is flush with the bottom at every scroll position",
+     r.every(x=> Math.abs(x.off) <= 1), JSON.stringify(r.map(x=>x.off)));
   ck("no page errors", errs.length===0, errs.join(" | "));
 }
 
@@ -194,7 +201,7 @@ console.log("5 - THE BAR HOLDS STILL UNDER A FINGER, SO THE TAP LANDS WHERE IT W
   await p.waitForTimeout(120);
   ck("and it is applied the moment the finger lifts", (await gap()) === "72px", await gap());
 
-  console.log("5b - NOR DOES THE AUTO-HIDE PULL IT OUT FROM UNDER THE FINGER");
+  console.log("5b - AND SCROLLING UNDER THE FINGER DOES NOT MOVE IT EITHER");
   await p.evaluate(()=>{ window.__setStrip(0); TAB="body"; render();
     const pad=document.createElement("div"); pad.style.height="3000px";
     document.getElementById("app").appendChild(pad); refreshNavBounds(); window.scrollTo(0,0); showNav(); });
@@ -206,7 +213,7 @@ console.log("5 - THE BAR HOLDS STILL UNDER A FINGER, SO THE TAP LANDS WHERE IT W
   ck("it stays put while held", heldY === "0px" || heldY === "", heldY || "(unset)");
   await up();
   await p.waitForTimeout(120);
-  ck("and retracts once released", /100%/.test(await y()), await y());
+  ck("and after the finger lifts, still", (await y()) === "" || (await y()) === "0px", await y());
 
   console.log("5c - A TAP DURING ALL THAT STILL SWITCHES TABS");
   await p.evaluate(()=>{ window.scrollTo(0,0); showNav(); });

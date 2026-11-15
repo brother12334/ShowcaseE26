@@ -3328,8 +3328,19 @@ body.tour-live{overscroll-behavior:contain}
    looked like: the bar lagging a few frames behind the content. A solid background
    plus translateZ(0) keeps it on the GPU and pinned.
 
-   It also retracts on the way down and comes back the moment you scroll up, so a long
-   Body tab isn't read through a 78px letterbox. `--navY` is driven from JS. */
+   IT USED TO RETRACT ON THE WAY DOWN and come back when you scrolled up, to save a
+   long Body tab from being read through a 78px letterbox. That cost three separate bug
+   reports — "nav bar floating mid-screen", twice, and then a screenshot of a session
+   with no tab bar on it at all — and what it bought was 78px. A navigation bar that is
+   sometimes not there is a navigation bar you have to think about, and the only way to
+   find out whether it is gone on purpose is to scroll and see.
+
+   So it does not move any more. The bar is where it is, always, and the only thing that
+   shifts it is the browser-chrome correction below, which is a correction and not a
+   movement. Two latent faults went with it: the rest pill and the back-to-your-set pill
+   are pinned at 86px + the correction and never knew about the slide, so both hung over
+   empty space whenever the bar was away; and `--navHidden` was being written on every
+   hide for a reader that was never built. */
 nav{
   /* --navGap is the strip of layout viewport hidden behind Safari's own bottom toolbar.
      Without it the bar anchors to the layout bottom, which during and after a toolbar
@@ -3344,22 +3355,17 @@ nav{
      the slack the buttons already carry, and max() keeps the plain 7px on hardware with
      no inset at all. */
   padding:7px 0 max(7px, calc(var(--sab) - 12px));z-index:40;
-  /* THE TWO OFFSETS ARE NOT THE SAME KIND OF THING AND MUST NOT SHARE A TRANSITION.
+  /* THE CORRECTION IS NOT A MOVEMENT, AND IT IS NEVER ANIMATED.
 
-     --navY is the auto-hide, and it SHOULD slide: it is a deliberate movement you can see
-     coming. --navGap is a correction for browser chrome, and it should never animate at
-     all — it is not a movement, it is the bar being told where the bottom of the screen
-     actually is. Sharing one transform meant a one-pixel correction started a 260ms
-     animation of the whole bar, and a tap that lands during an animation lands where the
-     button WAS. On a phone that reads as the nav ignoring you, intermittently, for no
-     reason you could ever reproduce on demand.
+     --navGap tells the bar where the bottom of the screen actually is. It rides on
+     `bottom`, which nothing transitions: when the auto-hide shared a transform with it,
+     a one-pixel correction started a 260ms animation of the whole bar, and a tap landing
+     during an animation lands where the button WAS. On a phone that read as the nav
+     ignoring you, intermittently, for no reason anybody could reproduce on demand.
 
-     So the correction moved to `bottom`, which nothing transitions, and the transform
-     carries only the slide. */
+     translateZ(0) and nothing else: the layer is for the compositor, not for motion. */
   bottom:var(--navGap, 0px);
-  transform:translate3d(0,var(--navY,0px),0);
-  transition:transform .26s cubic-bezier(.4,0,.2,1);
-  will-change:transform;
+  transform:translateZ(0);
   /* No double-tap-to-zoom delay on the one control people hit fastest. */
   touch-action:manipulation;
 }
@@ -7218,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.2";
+const APP_VERSION = "2026.11.15.3";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -25395,12 +25401,12 @@ document.querySelectorAll("nav button").forEach(b=>{
      • `backdrop-filter: blur()` on a fixed element forces Safari to re-rasterise the
        blur against whatever is behind it on every scroll frame, so the bar visibly
        lagged the content. It's now a solid colour on its own compositor layer.
-     • This handler never reads layout. `pageYOffset` is free; `scrollHeight` is not,
-       and reading it inside a scroll handler forces a synchronous reflow on every
-       event. The document height is cached and refreshed on render and resize instead.
-     • The only write is a custom property that flips at most twice per gesture, because
-       setHidden() returns early when nothing changed, and it animates a transform,
-       which the compositor handles without touching layout at all.                  */
+     • Nothing here reads layout on scroll. `pageYOffset` is free; `scrollHeight` is
+       not, and reading it inside a scroll handler forces a synchronous reflow on every
+       event. The document height is cached and refreshed by a ResizeObserver instead.
+     • The bar itself no longer moves on scroll at all — see the TAB BAR block — so the
+       only writes left are the browser-chrome correction, which is throttled to one
+       measurement per gesture and rejects anything that looks like a keyboard.      */
 /* WHERE THE BAR SHOULD SIT, AS ARITHMETIC ON SIX NUMBERS.
 
    Pulled out of the DOM so that it can be reasoned about, and tested, without an iPhone
@@ -25439,11 +25445,6 @@ function navGapFor(m){
      acted on it and had no way back. Overscrolled at either end, the reading is thrown
      away and the bar is left where it is until the page is still again. */
   if(m.overscrolled) return m.gapNow;
-  /* A BAR THAT IS SLIDING AWAY IS NOT WHERE IT LOOKS. --navY translates it a full height
-     down; measured mid-slide its bottom edge is far below the screen and the residual
-     would read as "hidden behind a 90px toolbar". The auto-hide and the correction never
-     measure each other. */
-  if(m.hidden) return m.gapNow;
   const residual = m.navBottom - m.visibleBottom;
   if(!isFinite(residual)) return m.gapNow;
   const want = Math.round(m.gapNow + residual);
@@ -25461,83 +25462,20 @@ let refreshNavBounds = ()=>{};
 (function(){
   const nav = document.querySelector("nav");
   if(!nav) return;
-  const HIDE_AFTER = 90;   // stay put until you're properly into the page
-  const DEADZONE   = 8;    // ignore jitter and iOS rubber-banding
-  let lastY = 0, hidden = false, docH = 0;
-  /* DECLARED HERE, NOT WHERE THEY ARE USED. refreshNavBounds() runs the moment it is
-     defined, a dozen lines below, and it calls setHidden() — which reads navHeld. A `let`
-     further down would still be in its temporal dead zone at that point, and `typeof` does
-     NOT save you from one: it throws like any other read. That trap has taken this file
-     down before. */
-  let navHeld = false, navPend = null, gapNow = 0, heldHide = null,
-      navConfirm = null, navBack = null;
-  const setHidden = v=>{
-    if(v === hidden) return;
-    /* Same rule as the correction: not while a finger is on it. Sliding the bar away from
-       under a thumb mid-press is the most direct way there is to lose a tap. */
-    if(navHeld){ heldHide = v; return; }
-    hidden = v;
-    nav.style.setProperty("--navY", v ? "calc(100% + 2px)" : "0px");
-    /* MIRRORED ONTO THE ROOT, because the tab bar is not the only thing anchored to the
-       bottom of the screen and the others were guessing. The rest pill sat on a hard 86px
-       while the bar moved underneath it for two separate reasons — Safari's toolbar
-       correction and the auto-hide — so scrolling with a rest running had the two drift
-       apart and overlap. One source of truth, read by both. */
-    document.documentElement.style.setProperty("--navHidden", v ? "1" : "0");
-    /* Coming back, it has to be re-measured: the correction skips a bar that is moving,
-       so the one that slid away while the chrome changed would otherwise arrive anchored
-       to where the bottom of the screen used to be. 300ms is the 260ms slide and a frame. */
-    if(!v){ clearTimeout(navBack); navBack = setTimeout(()=> anchorNav(), 300); }
-  };
-  /* THE CACHED HEIGHT WAS THE BUG. docH was read on render and on resize and trusted in
-     between, and a page changes height without either: a card expands, an image or a
-     web font lands, the rest clock appears, a notice stacks. Whenever the cache was
-     SHORTER than the real page, `y + innerHeight >= docH` came true somewhere in the
-     middle of the document — so the bar slid back up halfway down the Today tab, which
-     is exactly where it should have stayed gone. Whenever it was LONGER, the bottom was
-     never reached and the bar could not come back at all.
-
-     Two fixes, and neither puts a layout read in the scroll path:
-       • a ResizeObserver refreshes the figure whenever the page actually changes size,
-         which is the event that was missing;
-       • and the one moment being wrong matters — the instant we are about to call it
-         the bottom — the height is re-read to confirm. That is one measurement per
-         gesture, not one per frame. */
-  refreshNavBounds = ()=>{
-    docH = document.documentElement.scrollHeight;
-    // a page that cannot scroll can never scroll the bar back into view
-    if(docH <= window.innerHeight + 4) setHidden(false);
-    /* AND NEITHER CAN A PAGE YOU ARE ALREADY AT THE TOP OF. The bar hides on the way
-       down and comes back on the way up, which needs a scroll to happen — so a view that
-       replaces the page and jumps to the top while the bar is retracted left it retracted
-       with nothing left to scroll back up through. goTab() knew to call showNav(); the
-       half-dozen in-page destinations that re-render and scrollTo(0,0) themselves did not
-       — the record book, the day editor, the set page, going back out of any of them.
-
-       Rather than finding every one of those call sites and hoping the next one remembers,
-       the rule is stated where the bounds are taken: at the top of a page the bar is up.
-       This already runs on every content change through the ResizeObserver below, which
-       is precisely when a view has been replaced. */
-    const y = Math.max(0, window.pageYOffset || 0);
-    if(y < HIDE_AFTER){
-      lastY = y;                  // and no stale delta from wherever the last page was
-      setHidden(false);
-    }
-  };
+  let docH = 0;
+  /* DECLARED HERE, NOT WHERE THEY ARE USED. anchorNav() can run before the lines below
+     it have been reached, and a `let` further down would still be in its temporal dead
+     zone at that point — `typeof` does NOT save you from one, it throws like any other
+     read. That trap has taken this file down before. */
+  let navHeld = false, navPend = null, gapNow = 0, navConfirm = null;
+  /* The page height, kept current for the one thing that still reads it: whether the
+     document is overscrolled, which decides whether a browser-chrome measurement is a
+     measurement or a rubber band. It is refreshed by a ResizeObserver rather than on a
+     timer, because a page changes height without a resize event — a card expands, a web
+     font lands, the rest clock appears, a notice stacks. No layout read sits in the
+     scroll path. */
+  refreshNavBounds = ()=>{ docH = document.documentElement.scrollHeight; };
   refreshNavBounds();
-  const atBottomNow = y=>{
-    if(y + window.innerHeight < docH - 4) return false;
-    docH = document.documentElement.scrollHeight;      // confirm before acting on it
-    return y + window.innerHeight >= docH - 4;
-  };
-  window.addEventListener("scroll", ()=>{
-    const y = Math.max(0, window.pageYOffset || 0);
-    const dy = y - lastY;
-    if(Math.abs(dy) <= DEADZONE) return;
-    if(y < HIDE_AFTER || atBottomNow(y)) setHidden(false);
-    else setHidden(dy > 0);
-    lastY = y;
-  }, {passive:true});
   window.addEventListener("resize", refreshNavBounds, {passive:true});
   window.addEventListener("orientationchange", refreshNavBounds, {passive:true});
   window.addEventListener("load", refreshNavBounds, {passive:true});
@@ -25600,7 +25538,7 @@ let refreshNavBounds = ()=>{};
     const maxY = Math.max(0, docH - window.innerHeight);
     const raw = window.pageYOffset || 0;
     const gap = navGapFor({
-      gapNow, typing, hidden,
+      gapNow, typing,
       navBottom: rect.bottom,
       visibleBottom: vv.offsetTop + vv.height,
       overscrolled: raw < -0.5 || raw > maxY + 1 || vv.offsetTop > 0.5
@@ -25624,7 +25562,6 @@ let refreshNavBounds = ()=>{};
     if(!navHeld) return;
     navHeld = false;
     if(navPend != null){ putGap(navPend); navPend = null; }
-    if(heldHide != null){ const v = heldHide; heldHide = null; setHidden(v); }
   };
   nav.addEventListener("pointerup", navRelease, {passive:true});
   nav.addEventListener("pointercancel", navRelease, {passive:true});
@@ -25661,7 +25598,10 @@ let refreshNavBounds = ()=>{};
     if(document.visibilityState === "visible"){ anchorNav(); refreshNavBounds(); }
   });
   window.addEventListener("pageshow", ()=>{ anchorNav(); refreshNavBounds(); }, {passive:true});
-  showNav = ()=>{ lastY = Math.max(0, window.pageYOffset || 0); setHidden(false); refreshNavBounds(); anchorNav(); };
+  /* Kept, and kept doing something: goTab() and half a dozen in-page destinations call
+     it after replacing the page, and the chrome correction wants re-measuring when they
+     do. It no longer has a bar to bring back. */
+  showNav = ()=>{ refreshNavBounds(); anchorNav(); };
 })();
 
 /* =====================================================================
@@ -57665,8 +57605,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.2";
+const NEWS_FOR = "2026.11.15.3";
 const NEWS = [
+  {k: "The tab bar stays where it is",
+   s: ["It used to slide away when you scrolled down and come back when you scrolled up, "
+     + "so a long Body tab was not read through a letterbox. That is gone. It cost three "
+     + "separate reports of the bar behaving oddly, and what it bought was about 78 "
+     + "pixels. A navigation bar that is sometimes not there is one you have to think "
+     + "about, and the only way to find out whether it has gone on purpose is to scroll "
+     + "and see.",
+       "Two quieter faults went with it. The rest clock and the back-to-your-set arrow "
+     + "both sit a fixed distance above the bar and neither knew about the slide, so both "
+     + "hung over empty space every time it retracted.",
+       "What has NOT changed is the correction that keeps the bar off the bottom edge on "
+     + "iPhone, where Safari's own toolbar collapses and expands as you scroll. That is "
+     + "the thing that stopped the bar floating an inch up the screen, it is a correction "
+     + "rather than a movement, and it stays."]},
   {k: "The Beat tip is about the weight you are going to lift",
    s: ["It read last session's sets and only last session's sets, so a movement whose load "
      + "had just been raised got a target at the old one: \u201clast time's best was 140 lb "
