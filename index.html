@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.6";
+const APP_VERSION = "2026.11.15.7";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -14164,6 +14164,12 @@ function migrate(){
     S.fixSpiderV1 = true;
     if(touched) save(); else saveQuiet();
   }
+
+  /* P1-4 \u2014 every rest window the old rule already pushed past its ceiling, brought
+     back inside it once. A limit that only applies to future changes leaves the audited
+     3:30-5:30 squat exactly where it was. Each clamp writes its own change row, so the
+     history says what moved and why. */
+  try{ migrateRestCeilings(); }catch(e){}
 
   /* Fill in the days you did not train before the cycle is recomputed, so everything
      downstream reads a history with no unexplained holes in it. */
@@ -54837,8 +54843,33 @@ function repDropOffs(sess){
        load. */
     const loads = ws.map(x=> parseFloat(x.weight) || 0);
     const top = Math.max.apply(null, loads);
-    const same = top > 0 ? ws.filter((x, i)=> Math.abs(loads[i] - top) <= top * 0.02) : ws;
-    if(same.length < 2) return;
+    let same = top > 0 ? ws.filter((x, i)=> Math.abs(loads[i] - top) <= top * 0.02) : ws;
+    /* P1-4 — AND THE SAME SIDE, NOT JUST THE SAME WEIGHT.
+
+       One limb at a time is logged one side per set: L, R, L, R. The audited preacher
+       curl has a left side reliably about 28% weaker than the right, so that log reads
+       13, 18, 13, 18 — which compared end to end is a 28% "collapse" and back again,
+       every session, for ever. It is not a collapse, it is two different limbs. Each
+       side is compared with itself and the worse of the two is what counts. */
+    if(e.startSide){
+      const by = {L: [], R: []};
+      same.forEach(st=>{
+        const sd = setSide(e, (e.sets || []).indexOf(st));
+        if(sd === "L" || sd === "R") by[sd].push(st);
+      });
+      const runs = [by.L, by.R].filter(x=> x.length >= 2);
+      if(!runs.length) return;
+      let worst = null;
+      runs.forEach(run=>{
+        const f = parseFloat(run[0].reps) || 0;
+        const l = parseFloat(run[run.length - 1].reps) || 0;
+        if(!f) return;
+        const dp = (f - l) / f;
+        if(!worst || dp > worst.dp) worst = {dp, run};
+      });
+      if(!worst) return;
+      same = worst.run;
+    }
     const first = parseFloat(same[0].reps) || 0;
     const last  = parseFloat(same[same.length - 1].reps) || 0;
     if(!first) return;
@@ -54861,6 +54892,131 @@ function repDropOffs(sess){
      cost a set", which is the only one worth putting a button under. */
   const steep = drops.filter(d=> d.drop > FADE_BAD).sort((a,b)=> b.drop - a.drop);
   return {drops, avgDrop, steep, bad: steep.filter(d=> d.lastShort)};
+}
+/* =====================================================================
+   P1-4 — WHAT THE REST-LENGTHENING RULE IS ALLOWED TO DO
+
+   Sixteen "reps were collapsing, rest lengthened" changes in the audited export, and
+   eight of the fifteen increases landed on movements performed in supersets or as
+   alternating one-arm sets. In a superset the drop belongs to the partner exercise; in
+   an alternating set it belongs to the weaker side. Neither is evidence that the rest
+   was too short, and the rule had no way to tell.
+
+   The clearest sign it was answering the wrong question: the triceps window was pushed
+   to 3:30-4:30 while the median rest actually taken on that movement was 1:52. The user
+   was nowhere near the window they already had. Adding thirty seconds to a number
+   somebody is ignoring changes nothing except the number. Meanwhile the squat window
+   reached 3:30-5:30, past the app's own stated 4:00 maximum, because nothing enforced it.
+
+   A ceiling, first, with no exceptions: four minutes on a multi-joint lift, three on an
+   isolation. Longer than that is not a rest window, it is a different workout. */
+const REST_CEIL_COMPOUND = 240;
+const REST_CEIL_ISOLATION = 180;
+function restCeilingFor(entry){
+  const pr = trainPrefs();
+  const own = isCompound(entry && entry.name) ? pr.restCeilCompound : pr.restCeilIsolation;
+  if(own > 0) return own;
+  return isCompound(entry && entry.name) ? REST_CEIL_COMPOUND : REST_CEIL_ISOLATION;
+}
+/* A window clamped to it, keeping the bottom under the top. */
+function clampRestWindow(entry, lo, hi){
+  const cap = restCeilingFor(entry);
+  const h = Math.min(Math.round(hi), cap);
+  const l = Math.min(Math.round(lo), h);
+  return [l, h];
+}
+/* The audited squat window is 3:30-5:30 in a plan that is already written. A rule that
+   only applies to future changes leaves every window the old rule already pushed over
+   the line, so the existing ones are brought down once. */
+function migrateRestCeilings(){
+  if(S.restCeilV1) return 0;
+  let n = 0;
+  DAYS.concat(["finisher"]).forEach(wid=> (S.program[wid] || []).forEach(e=>{
+    [e, e && e.alt].forEach(t=>{
+      if(!t || !Array.isArray(t.rest) || t.rest.length !== 2) return;
+      const was = t.rest.slice();
+      const now = clampRestWindow(t, was[0], was[1]);
+      if(now[0] !== was[0] || now[1] !== was[1]){
+        t.rest = now;
+        logPlanChange("rest", wid, t.name,
+          [fmtClock(was[0]) + "–" + fmtClock(was[1]) + " → "
+           + fmtClock(now[0]) + "–" + fmtClock(now[1])],
+          {note: "Brought inside the "
+             + fmtClock(restCeilingFor(t)) + " ceiling for "
+             + (isCompound(t.name) ? "a multi-joint lift" : "an isolation lift")
+             + ". A window longer than that is a different workout, not a rest."});
+        n++;
+      }
+    });
+  }));
+  S.restCeilV1 = 1;
+  if(n) save();
+  return n;
+}
+/* WHY THIS COLLAPSE MUST NOT MOVE THE PLAN, or null if it may.
+
+   Every clause is one of the audited increases. `ei` is the entry's index in the
+   session, because superset membership is positional. */
+function restLengthenRefusal(sess, ei, d){
+  const entries = (sess && sess.entries) || [];
+  const en = entries[ei];
+  if(!en) return null;
+  /* A superset's whole point is that there IS no rest between its parts. The "→" is
+     not a short rest and must never be read as one; the rest that belongs to the pair is
+     the one after the round. A drop inside one is the partner's work showing up. */
+  if(typeof supersetInfo === "function" && supersetInfo(entries, ei)) return {
+    code: "superset",
+    say: "This is done as a superset, so the gap between these sets is not rest — the "
+       + "drop is the work either side of it. Lengthening the window would not describe "
+       + "what happened here."};
+  /* A set somebody stopped on purpose, or stopped because the weight was wrong, did not
+     end because the rest was short. */
+  const ws = (en.sets || []).filter(isWorkingSet);
+  const last = ws[ws.length - 1];
+  const code = last && last.why && last.why.code;
+  if(code === "deliberate" || code === "heavy") return {
+    code: "answered",
+    say: "You already said why that set ended — "
+       + ((REASON_BY_CODE[code] || {}).short || code)
+       + " — so the rest is not what cut it short."};
+  /* A deload is fewer sets at a lower RPE by design, and a week off makes the first
+     session back look like a collapse. Neither is a fact about the rest window. */
+  if(deloadCovers(sess && sess.date, sess && (sess.finishedAt || sess.startedAt))) return {
+    code: "deload", say: "This was a deload session, which is lighter by design."};
+  if(typeof layoffBefore === "function" && layoffBefore(sess)) return {
+    code: "break", say: "This was your first session back after a break."};
+  /* THE ONE THAT EXPLAINS THE TRICEPS WINDOW. If the rest actually taken was under the
+     window already prescribed, the window is not the problem — it is being ignored.
+     Adding to it changes a number nobody is reading. */
+  const tgt = restTargetFor(en, last);
+  const lo = tgt && tgt.ideal && tgt.ideal[0];
+  const rests = ws.map(st=> parseFloat(st && st.rest) || 0).filter(v=> v > 0);
+  if(lo > 0 && rests.length){
+    rests.sort((a, b)=> a - b);
+    const med = rests[Math.floor(rests.length / 2)];
+    if(med < lo) return {
+      code: "underrested", med, lo,
+      say: "Your rest between these sets was about " + fmtClock(med) + ", and this movement "
+         + "already asks for " + fmtClock(lo) + ". The window is not what is short here. Take "
+         + "the rest it already prescribes before changing it."};
+  }
+  /* And one session is one session. Two of the last three exposures of this slot, or the
+     plan does not move — a single bad day is the most ordinary thing in a log. */
+  const k = nrm(d && d.name);
+  const wid = sess && sess.workoutId;
+  const prior = (S.sessions || [])
+    .filter(sn=> sn && sn.id !== sess.id && sn.workoutId === wid
+             && (sn.entries || []).some(x=> x && nrm(x.name) === k)
+             && (sn.startedAt || 0) <= (sess.startedAt || 0))
+    .sort((a, b)=> (b.startedAt || 0) - (a.startedAt || 0))
+    .slice(0, 2);
+  const alsoBad = prior.filter(sn=>
+    repDropOffs(sn).bad.some(x=> nrm(x.name) === k)).length;
+  if(alsoBad < 1) return {
+    code: "once",
+    say: "This is the first of the last three times here that the reps fell out of range. "
+       + "One session is not a pattern — if it happens again the window is worth changing."};
+  return null;
 }
 /* How much longer to rest, and how much lighter to start, for a collapse. Both are
    suggestions with a box next to them — see the flag row. */
@@ -54905,7 +55061,10 @@ function recordFlags(sess, list){
       kind:"up", title:"Ready for more weight", msg:p.msg, fix:p.sub, to:p.to, sev:1});
     if(p.kind === "fade") kinds.push({
       kind:"fade", title:"Reps fell away across the sets", msg:p.msg, fix:p.sub,
-      to:p.to, restAdd:p.restAdd, sev:2});
+      /* P1-4 — `noRest` travels with the flag. Without it the grade declined to
+         lengthen the window and the Body tab's own button went ahead and did it, which
+         is how eight superset and one-arm collapses became rest increases. */
+      to:p.to, restAdd:p.restAdd, noRest:p.noRest || undefined, sev:2});
     kinds.forEach(k=>{
       const f = Object.assign({
         id: uid(), at: sess.finishedAt || Date.now(), date: sess.date || todayStr(),
@@ -54928,6 +55087,18 @@ function recordFlags(sess, list){
 function fadeFindings(sess){
   return repDropOffs(sess).bad.slice(0, 3).map(d=>{
     const fix = fadeFixFor(d);
+    /* P1-4 — the collapse is still reported, because it happened. What it may not do is
+       move the rest window when the drop was not about rest. The load half stands: a
+       load the prescription cannot hold is wrong whatever caused the reps to fall. */
+    const no = restLengthenRefusal(sess, (sess.entries || []).findIndex(x=>
+      x && nrm(x.name) === nrm(d.name)), d);
+    if(no) return {
+      kind: "fade", name: d.name,
+      msg: "Reps went " + d.first + " → " + d.last + " at the same load"
+         + (d.range ? ", under the " + d.range[0] + " this asks for" : "") + ".",
+      sub: no.say + " Taking the load down is the other way to hold the reps, if you want it.",
+      to: fix.to, restAdd: null, noRest: no.code
+    };
     return {
       kind: "fade", name: d.name,
       msg: "Reps went " + d.first + " \u2192 " + d.last + " at the same load"
@@ -54987,6 +55158,10 @@ function applyFlag(id, choice){
     /* Each half once. A second tap on a half already applied would add another 30
        seconds of rest to a window that has already been lengthened. */
     if(fadePartState(f, choice) !== "open") return false;
+    if(choice === "rest" && f.noRest){
+      toast("The rest window is not what went wrong here");
+      return false;
+    }
     if(choice === "rest"){
       ok = addRestToExercise(f.ex, f.restAdd == null ? FADE_REST_ADD : f.restAdd, f.workoutId);
     } else if(choice === "load" && f.to != null){
@@ -55722,7 +55897,17 @@ function addRestToExercise(name, seconds, wid){
   const cur = Array.isArray(e.rest) && e.rest.length === 2
     ? e.rest.slice()
     : (restTargetFor(e, null).ideal || [90, 150]).slice();
-  const next = [Math.round(cur[0]) + add, Math.round(cur[1]) + add];
+  /* P1-4 — THE CEILING HAS NO EXCEPTIONS, and this is the one place a window grows.
+     The audited squat reached 3:30-5:30 because the only limit was how often the rule
+     fired. A window already at its ceiling simply says so rather than silently not
+     moving. */
+  const cap = restCeilingFor(e);
+  if(Math.round(cur[1]) >= cap){
+    toast(e.name + " is already at the " + fmtClock(cap) + " ceiling for "
+          + (isCompound(e.name) ? "a compound" : "an isolation lift"));
+    return false;
+  }
+  const next = clampRestWindow(e, Math.round(cur[0]) + add, Math.round(cur[1]) + add);
   e.rest = next;
   logPlanChange("rest", where.wid, e.name,
     [fmtClock(cur[0]) + "\u2013" + fmtClock(cur[1]) + " \u2192 " + fmtClock(next[0]) + "\u2013" + fmtClock(next[1])],
@@ -57818,8 +58003,38 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.6";
+const NEWS_FOR = "2026.11.15.7";
 const NEWS = [
+  {k: "Rest windows stop growing for reasons that were not rest",
+   s: ["Sixteen \u201creps were collapsing, so the rest was lengthened\u201d changes in one "
+     + "audited log, and eight of the fifteen increases landed on movements done in "
+     + "supersets or as alternating one-arm sets. In a superset the drop is the partner "
+     + "exercise. In an alternating set it is the weaker side. Neither is the rest being "
+     + "too short, and the rule had no way to tell.",
+       "The clearest sign it was answering the wrong question: the triceps window was "
+     + "pushed to 3:30\u20134:30 while the median rest actually taken on that movement was "
+     + "1:52. Thirty seconds was being added to a number nobody was reading. Across 449 "
+     + "set pairs, rest length barely predicted the next set\u2019s reps for that user at "
+     + "all.",
+       "Six reasons the window now stays where it is. The movement is in a superset, "
+     + "where the gap between sets is not rest and the \u201c\u2192\u201d must never be read as "
+     + "one. You already said why the set ended \u2014 too heavy, or stopped on purpose. It "
+     + "was a deload session, or your first one back after a break. The rest you actually "
+     + "took was under what the movement already asks for, in which case the answer is to "
+     + "use the window you have rather than to widen it. Or it has only happened once: "
+     + "two of the last three times at that slot, or the plan does not move.",
+       "The collapse is still reported in every one of those cases, and taking the load "
+     + "down is still offered. What changed is that the window is left alone and the card "
+     + "says which of the six it was.",
+       "There is also a ceiling now, and it has no exceptions: four minutes on a "
+     + "multi-joint lift, three on an isolation. One squat window had reached 3:30\u20135:30, "
+     + "past the app\u2019s own stated maximum, because nothing enforced it. Windows already "
+     + "over the line are brought back inside it once, each with its own line in the "
+     + "change log.",
+       "And a drop-off now compares a side with itself. One limb at a time is logged one "
+     + "side per set \u2014 L, R, L, R \u2014 and on a preacher curl whose left is reliably 28% "
+     + "weaker that reads as reps collapsing and recovering every single session, for "
+     + "ever. It was never a collapse. It was two different arms."]},
   {k: "A volume floor is no longer cut on a gain that did not happen",
    s: ["Five volume floors were talked down in one audited log, each on the same "
      + "argument: estimated strength is up, so you are growing without the volume. "
@@ -62825,7 +63040,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmFloorAt","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmFloorAt","restCeilV1","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* P0-2 \u2014 where the log changed convention. A fact about how the numbers in
      `sessions` are to be READ, so a backup carrying the sessions without it restores a

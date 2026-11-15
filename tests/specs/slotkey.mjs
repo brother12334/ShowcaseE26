@@ -39,13 +39,20 @@ const run = (exercise, loadA, loadB, rows, choice)=> ev(a=>{
   S.prefs=Object.assign({}, S.prefs, {sleepPrompt:false, rpe:true});
   S.splitId=DEFAULT_SPLIT; applySplit(); S.active=null; S.flags=[]; S.planLog=[];
   const A = DAYS[0], B = DAYS[2];                 // first and third day of the rotation
-  S.program[A] = [{name:a.exercise, sets:3, reps:"8-12", weight:a.loadA, rpe:"7-9", rest:[180,240]}];
-  S.program[B] = [{name:a.exercise, sets:3, reps:"8-12", weight:a.loadB, rpe:"7-9", rest:[180,240]}];
+  S.program[A] = [{name:a.exercise, sets:3, reps:"8-12", weight:a.loadA, rpe:"7-9", rest:[150,210]}];
+  S.program[B] = [{name:a.exercise, sets:3, reps:"8-12", weight:a.loadB, rpe:"7-9", rest:[150,210]}];
   const t = Date.now() - 86400e3;
-  const sess = {id:"s-b", workoutId: B, date: dayStr(t), startedAt:t, finishedAt:t+3600e3, feel:4,
+  const mk = (id, at)=> ({id, workoutId: B, date: dayStr(at), startedAt:at,
+    finishedAt:at+3600e3, feel:4,
     entries:[{name:a.exercise, reps:"8-12", rpe:"7-9",
-      sets: a.rows.map(r=> ({weight:String(r[0]), reps:String(r[1]), rpe:String(r[2]), done:true}))}]};
-  S.sessions = [sess];
+      sets: a.rows.map(r=> ({weight:String(r[0]), reps:String(r[1]), rpe:String(r[2]),
+                             done:true, rest:210}))}]});
+  /* P1-4 \u2014 the rest window no longer moves on a single collapsing session: two of the
+     last three exposures of the slot have to show it. This spec is about WHICH DAY a
+     change lands on, so the history has to get far enough for one to land at all. */
+  const prior = mk("s-b0", t - 4*86400e3);
+  const sess = mk("s-b", t);
+  S.sessions = [prior, sess];
   save();
   /* Drive the real path: grade the session, record its flags, apply the fade. */
   const list = (sess.entries || []).map(en=> progressionFor(sess, en)).filter(Boolean)
@@ -74,8 +81,8 @@ console.log("2 - AND NEITHER DOES THE REST WINDOW");
 {
   const r = await run("Smith Machine Squat", 80, 80, [[80,10,8],[80,9,9],[80,5,10]], "rest");
   console.log("    A " + JSON.stringify(r.A) + "  B " + JSON.stringify(r.B));
-  ck("the first day's rest window is untouched", r.A.rest === "180-240", String(r.A.rest));
-  ck("and the second day's is the one that grew", r.B.rest !== "180-240", String(r.B.rest));
+  ck("the first day's rest window is untouched", r.A.rest === "150-210", String(r.A.rest));
+  ck("and the second day's is the one that grew", r.B.rest !== "150-210", String(r.B.rest));
 }
 
 console.log("3 - EVERY ROW THE RULES WRITE NAMES A DAY");

@@ -37,14 +37,23 @@ await ev(()=>{
   S.program[ROTATION[0]]=[{name:"Barbell Bench Press", sets:3, reps:"10-20", weight:135}];
   save();
 });
-/* One session, one exercise, three sets at the same load. */
+/* One session, one exercise, three sets at the same load.
+
+   P1-4 \u2014 plus the SAME collapse one session earlier on the same day. The rest window
+   is no longer moved on a single bad session: two of the last three exposures of the
+   slot have to show it, because one bad day is the most ordinary thing in a log. This
+   spec is about which fix the finding names and in what order, so the fixture has to
+   get far enough to name one. */
 const run = (reps, range)=> ev(a=>{
   const wid=ROTATION[0];
   findProgramEntry("Barbell Bench Press").reps = a.range;
-  const sess = {id:"s1", workoutId:wid, date:todayStr(), startedAt:Date.now()-3600e3,
-    finishedAt:Date.now(),
+  const mk = (id, at)=> ({id, workoutId:wid, date:dayStr(at), startedAt:at,
+    finishedAt:at+3600e3,
     entries:[{name:"Barbell Bench Press", reps:a.range,
-      sets:a.reps.map(r=>({weight:"135", reps:String(r), rpe:"9", done:true}))}]};
+      sets:a.reps.map(r=>({weight:"135", reps:String(r), rpe:"9", done:true, rest:210}))}]});
+  const prior = mk("s0", Date.now() - 4*86400e3);
+  const sess = mk("s1", Date.now() - 3600e3);
+  S.sessions = [prior, sess];
   const d = repDropOffs(sess);
   return {steep: d.steep.length, bad: d.bad.length,
           drop: d.drops[0] ? Math.round(d.drops[0].drop*100) : null,
@@ -120,9 +129,14 @@ console.log("6 - THE BUTTON SAYS WHAT IT DOES");
       finishedAt:Date.now(),
       entries:[{name:"Barbell Bench Press", reps:"9-13",
         sets:[13,10,7].map(x=>({weight:"135", reps:String(x), rpe:"9", done:true}))}]};
+    /* The earlier exposure the rest rule now requires \u2014 see run() above. */
+    const prior = {id:"s2", workoutId:wid, date:dayStr(Date.now()-4*86400e3),
+      startedAt:Date.now()-4*86400e3, finishedAt:Date.now()-4*86400e3+3600e3,
+      entries:[{name:"Barbell Bench Press", reps:"9-13",
+        sets:[13,10,7].map(x=>({weight:"135", reps:String(x), rpe:"9", done:true, rest:210}))}]};
+    S.sessions=[prior, sess];
     S.flags=[]; recordFlags(sess, fadeFindings(sess));
-    /* The Body tab has nothing to draw without a log, so the session goes in it. */
-    S.sessions=[sess]; save();
+    save();
     TAB="body"; render();
     const card=[...document.querySelectorAll('.nb-flag')].find(c=> /fell away/i.test(c.innerText));
     return {card: !!card, txt: card ? card.innerText.replace(/\s+/g," ") : null};
