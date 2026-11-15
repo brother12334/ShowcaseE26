@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.3";
+const APP_VERSION = "2026.11.15.4";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -49813,7 +49813,7 @@ function finishWorkout(){
      rather than asking again. On "hold" nothing is written and nothing is suggested. */
   if(trainPrefs().progression === "auto" && !deloadActive()){
     sessObj.progression.filter(p=> p.kind === "up" && p.to != null).forEach(p=>{
-      if(applyProgression(p.name, p.to, null, progReason(p))) p.auto = true;
+      if(applyProgression(p.name, p.to, null, progReason(p), {wid: sessObj.workoutId})) p.auto = true;
     });
     /* H3/L4 \u2014 A REP STRETCH IS THE SAME DECISION AS A LOAD STEP, so "auto" writes it
        too: it is double progression choosing its other variable, and refusing to apply it
@@ -49823,7 +49823,7 @@ function finishWorkout(){
        MOVING UP A LADDER IS NOT. That changes which exercise you do, and nothing about
        "add the weight I earned" implies consent to that. It stays a button. */
     sessObj.progression.filter(p=> p.kind === "stretch" && p.newReps).forEach(p=>{
-      if(applyRepStretch(p.name, p.newReps, progReason(p))){ p.auto = true; p.applied = true; }
+      if(applyRepStretch(p.name, p.newReps, progReason(p), sessObj.workoutId)){ p.auto = true; p.applied = true; }
     });
   }
   /* AFTER the auto-progression pass, so a session that earned another increase keeps
@@ -53178,7 +53178,7 @@ function openScoreCard(sess, onDone){
          programme — and it used to refuse in silence on this screen, leaving somebody
          certain they had pressed it and no way to tell that they had. */
       if(applyProgression(name, to, null, progReason(
-          (sess.progression || []).find(x=> x && x.name === name)))){
+          (sess.progression || []).find(x=> x && x.name === name)), {wid: sess.workoutId})){
         markApplied(name);
         toast(esc(name) + " set to " + fmtLoad(to) + " in your programme", "good");
         redrawProgression();
@@ -53190,7 +53190,7 @@ function openScoreCard(sess, onDone){
     document.querySelectorAll("#modal [data-progstretch]").forEach(btn=> btn.onclick = ()=>{
       const name = btn.dataset.progstretch;
       const p = (sess.progression || []).find(x=> x && x.kind === "stretch" && x.name === name);
-      if(applyRepStretch(name, btn.dataset.progreps, p ? progReason(p) : null)){
+      if(applyRepStretch(name, btn.dataset.progreps, p ? progReason(p) : null, sess.workoutId)){
         if(p) p.applied = true;
         save(); queueSync();
         toast(esc(name) + " now runs to " + esc(btn.dataset.progreps) + " reps", "good");
@@ -53204,7 +53204,7 @@ function openScoreCard(sess, onDone){
          offer, rather than by being the swap verdict itself. */
       const p = (sess.progression || []).find(x=> x && x.name === name
                   && (x.kind === "harder" || (x.outgrown && x.outgrown.opts)));
-      if(applyHarderVariation(name, btn.dataset.proghardto, p ? progReason(p) : null)){
+      if(applyHarderVariation(name, btn.dataset.proghardto, p ? progReason(p) : null, sess.workoutId)){
         if(p) p.applied = true;
         save(); queueSync();
         toast(esc(name) + " \u2192 " + esc(btn.dataset.proghardto) + " in your programme", "good");
@@ -53215,7 +53215,8 @@ function openScoreCard(sess, onDone){
     if(all) all.onclick = ()=>{
       let n = 0;
       (sess.progression || []).filter(p=>p.kind === "up" && !progressionApplied(p)).forEach(p=>{
-        if(applyProgression(p.name, typedTo(p.name, p.to), null, progReason(p))){ p.applied = true; n++; }
+        if(applyProgression(p.name, typedTo(p.name, p.to), null, progReason(p),
+                             {wid: sess.workoutId})){ p.applied = true; n++; }
       });
       if(n){ save(); queueSync(); }
       toast(n ? n + " load" + (n === 1 ? "" : "s") + " updated in your programme" : "Nothing to apply");
@@ -54068,7 +54069,7 @@ function progressionFor(sess, entry){
   const range = repRange(entry.reps);
   const ws = (entry.sets || []).filter(isWorkingSet);
   if(!ws.length) return null;
-  const planned = findProgramEntry(entry.name);
+  const planned = findProgramEntry(entry.name, sess && sess.workoutId);
   const target = planned || entry;
 
   /* M9 — A LIFT ON A WAVE DOES NOT PROGRESS BY DOUBLE PROGRESSION. The load is a
@@ -54407,8 +54408,8 @@ function progressionFor(sess, entry){
 
    The alt partner is returned as itself, because that object carries the prescription
    the caller means to edit. */
-function findProgramEntry(name){
-  const hit = findProgramEntryWhere(name);
+function findProgramEntry(name, wid){
+  const hit = findProgramEntryWhere(name, wid);
   return hit ? hit.e : null;
 }
 /* H8 \u2014 THE SAME LOOKUP, PLUS WHICH DAY IT WAS FOUND ON.
@@ -54417,9 +54418,27 @@ function findProgramEntry(name){
    list it belongs to. findProgramEntry() returns the entry alone, which was enough while
    every load change went through a button somebody pressed and could be typed back by
    hand. It is not enough for a change the app makes on its own. */
-function findProgramEntryWhere(name){
+/* P0-1 — AND WHICH DAY THE CALLER MEANT, when it knows.
+
+   The same movement sits in more than one day of a split, with its own load, its own
+   place in the order and its own history in each. Push A opens with a straight-bar
+   overhead extension; Push B does the V-bar one later in the session. Legs A squats
+   first, fresh; Legs B squats third, after RDLs and hip thrusts.
+
+   This function walked DAYS in order and returned the FIRST day carrying the name, which
+   is the right answer to "where is this exercise" and the wrong answer to "where is THIS
+   one". Every automatic change therefore landed on the earliest day in the rotation
+   whatever day had earned it: a collapse on the Push B extension cut Push A's load, and
+   a Legs B squat cut on the third exercise of the day came off the Legs A squat that is
+   done first and had just been the user's best. Both were reversed by hand.
+
+   The day was never missing. recordFlags() stamps sess.workoutId onto every flag and
+   always has; the apply path simply threw it away. So callers that know the day say so,
+   and when one does the search stays inside it — no falling back to another day's slot,
+   because "not in that day" is a true answer and a change to a different day is not. */
+function findProgramEntryWhere(name, wid){
   const k = nrm(name);
-  const wids = DAYS.concat(["finisher"]);
+  const wids = (wid && (S.program || {})[wid]) ? [wid] : DAYS.concat(["finisher"]);
   for(const wid of wids){
     const list = S.program[wid] || [];
     for(const e of list){ if(nrm(e.name) === k) return {e, wid}; }
@@ -54782,11 +54801,11 @@ function applyFlag(id, choice){
        seconds of rest to a window that has already been lengthened. */
     if(fadePartState(f, choice) !== "open") return false;
     if(choice === "rest"){
-      ok = addRestToExercise(f.ex, f.restAdd == null ? FADE_REST_ADD : f.restAdd);
+      ok = addRestToExercise(f.ex, f.restAdd == null ? FADE_REST_ADD : f.restAdd, f.workoutId);
     } else if(choice === "load" && f.to != null){
       ok = applyProgression(f.ex, f.to,
         "Applied from the Body tab: reps collapsed across the sets, so the opening load comes down.",
-        f.msg);
+        f.msg, {wid: f.workoutId});
     }
     if(ok){
       if(!f.did) f.did = {};
@@ -54801,7 +54820,7 @@ function applyFlag(id, choice){
        standing at this figure the increase happened — on the grade card, or here on an
        earlier tap — and running it again would write the same number while the change
        log gained a second entry claiming the load moved twice. */
-    const cur = findProgramEntry(f.ex);
+    const cur = findProgramEntry(f.ex, f.workoutId);
     if(cur && cur.weight != null && parseFloat(cur.weight) === parseFloat(f.to)){
       f.applied = true; f.appliedAt = Date.now(); save(); queueSync();
       toast(esc(f.ex) + " is already at " + fmtLoad(f.to));
@@ -54810,7 +54829,7 @@ function applyFlag(id, choice){
     ok = applyProgression(f.ex, f.to, f.kind === "load"
       ? "Applied from the Body tab: the prescribed range was not reachable at the old load."
       : "Applied from the Body tab: the last set cleared the top of the range at target RPE.",
-      f.msg);
+      f.msg, {wid: f.workoutId});
   } else if(f.kind === "stall"){
     /* The stall protocol, which is a set cut and not a load cut: dropping the weight is
        what costs you the strength you built getting there.
@@ -54823,7 +54842,8 @@ function applyFlag(id, choice){
 
        So the cut carries its own expiry. The plan shows what it was, what it is, and the
        date it goes back, and it restores itself on that date with no tap needed. */
-    const e = findProgramEntry(f.ex);
+    const stallAt = findProgramEntryWhere(f.ex, f.workoutId);
+    const e = stallAt && stallAt.e;
     const cur = parseInt(e && e.sets, 10);
     if(e && cur > 1){
       const to = Math.max(1, cur - 1);
@@ -54833,7 +54853,7 @@ function applyFlag(id, choice){
       e.setsCut.reason = f.msg || null;
       e.byApp = {at: Date.now(), what: "cut to " + to + " set" + (to === 1 ? "" : "s"),
                  why: f.msg || null};
-      logPlanChange("programme", null, e.name, [cur + " → " + to + " sets"],
+      logPlanChange("programme", stallAt.wid, e.name, [cur + " → " + to + " sets"],
         {note: "Stall protocol, applied from the Body tab. Temporary: back to " + cur
              + " sets on " + fmtDate(dayStr(Date.now() + SET_CUT_DAYS * DAY_MS)) + "."});
       save(); queueSync();
@@ -54858,15 +54878,20 @@ const SET_CUT_DAYS = 14;
    case the person's own edit wins and the cut just lapses. */
 function restoreSetCuts(){
   let n = 0;
-  const lists = DAYS.map(d=> S.program[d] || []).concat([S.program.finisher || []]);
   const all = [];
-  lists.forEach(l=> l.forEach(e=>{ all.push(e); if(e && e.alt) all.push(e.alt); }));
-  all.forEach(e=>{
+  DAYS.concat(["finisher"]).forEach(wid=>{
+    (S.program[wid] || []).forEach(e=>{
+      if(!e) return;
+      all.push({e, wid});
+      if(e.alt) all.push({e: e.alt, wid});
+    });
+  });
+  all.forEach(({e, wid})=>{
     const c = e && e.setsCut;
     if(!c || !c.until || Date.now() < c.until) return;
     if(parseInt(e.sets, 10) === c.to){
       e.sets = c.from;
-      logPlanChange("programme", null, e.name, [c.to + " → " + c.from + " sets"],
+      logPlanChange("programme", wid, e.name, [c.to + " → " + c.from + " sets"],
         {note: "The two-week set cut is up, so the volume goes back on its own."});
       n++;
     }
@@ -55502,16 +55527,17 @@ function progressionHTML(list){
    plan would have carried if it had said so. Where the plan never prescribed one, the
    band the app was already judging against becomes the starting point — otherwise "rest
    30 seconds longer" would have nothing to be longer THAN. */
-function addRestToExercise(name, seconds){
+function addRestToExercise(name, seconds, wid){
   const add = Math.max(5, Math.min(300, Math.round(Number(seconds) || 0)));
-  const e = findProgramEntry(name);
+  const where = findProgramEntryWhere(name, wid);
+  const e = where && where.e;
   if(!e){ toast("That exercise is not in the current programme"); return false; }
   const cur = Array.isArray(e.rest) && e.rest.length === 2
     ? e.rest.slice()
     : (restTargetFor(e, null).ideal || [90, 150]).slice();
   const next = [Math.round(cur[0]) + add, Math.round(cur[1]) + add];
   e.rest = next;
-  logPlanChange("rest", null, e.name,
+  logPlanChange("rest", where.wid, e.name,
     [fmtClock(cur[0]) + "\u2013" + fmtClock(cur[1]) + " \u2192 " + fmtClock(next[0]) + "\u2013" + fmtClock(next[1])],
     {note:"Reps were collapsing across the sets, so the rest window was lengthened."});
   save(); queueSync();
@@ -55595,8 +55621,8 @@ function topLoggedLoad(name, days){
 /* H3 \u2014 WRITING A REP STRETCH INTO THE PLAN. The load does not move; the top of the
    range does, and the entry remembers what the range was so the next raise can put it
    back. */
-function applyRepStretch(name, newReps, reason){
-  const where = findProgramEntryWhere(name);
+function applyRepStretch(name, newReps, reason, wid){
+  const where = findProgramEntryWhere(name, wid);
   const e = where && where.e;
   if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
   const rr = repRange(newReps);
@@ -55617,8 +55643,8 @@ function applyRepStretch(name, newReps, reason){
 /* L4 \u2014 MOVING UP A RUNG. The slot keeps its sets, reps, rest and its place in the day;
    the movement changes and the loads, which belonged to the old one, go. Same shape as
    the Body tab's swap, which is the other place in the app that does this. */
-function applyHarderVariation(name, toName, reason){
-  const where = findProgramEntryWhere(name);
+function applyHarderVariation(name, toName, reason, wid){
+  const where = findProgramEntryWhere(name, wid);
   const e = where && where.e;
   if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
   if(!toName) return false;
@@ -55637,7 +55663,7 @@ function applyHarderVariation(name, toName, reason){
   return true;
 }
 function applyProgression(name, to, why, reason, opts){
-  const where = findProgramEntryWhere(name);
+  const where = findProgramEntryWhere(name, opts && opts.wid);
   const e = where && where.e;
   if(!e){ toast("Couldn't find " + name + " in your programme to change", "warn"); return false; }
   /* H8 \u2014 A CHANGE THE APP MAKES ON ITS OWN HAS TO BE UNDOABLE, and the plan history's
@@ -55683,7 +55709,7 @@ function applyProgression(name, to, why, reason, opts){
   if(e.repExt && from != null && v > from){
     const base = e.repExt.base;
     if(base){
-      logPlanChange("reps", null, e.name, [String(e.reps) + " \u2192 " + String(base)],
+      logPlanChange("reps", where.wid, e.name, [String(e.reps) + " \u2192 " + String(base)],
         {note: "The extended range has done its job: the load has gone up, so the reps go "
              + "back to the prescription."});
       e.reps = base;
@@ -57605,8 +57631,28 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.3";
+const NEWS_FOR = "2026.11.15.4";
 const NEWS = [
+  {k: "An automatic change lands on the day that earned it",
+   s: ["The same movement sits in more than one day of a split, with its own load, its own "
+     + "place in the order and its own history in each. Push A opens with a straight-bar "
+     + "overhead extension; Push B does the V-bar one later on. Legs A squats first, "
+     + "fresh; Legs B squats third, after RDLs and hip thrusts. They are not the same "
+     + "slot and they should never move together.",
+       "They did. When a rule fired it looked the exercise up by name and took the first "
+     + "day of the rotation that carried it, so a collapse logged on the Push B extension "
+     + "cut PUSH A\u2019s load, and a cut earned by the Legs B squat \u2014 third exercise, "
+     + "pre-fatigued \u2014 came off the Legs A squat that is done first and had just been a "
+     + "personal best. Both had to be reversed by hand, and reversing them is the easy "
+     + "part: the change log said the right reason against the wrong day.",
+       "The day was never missing. Every finding has carried the session\u2019s day since "
+     + "the day findings existed; the part that applied them threw it away. Loads, rest "
+     + "windows, rep ranges, set cuts and movement swaps now all change the slot the "
+     + "finding came from, and if that movement is not in that day any more the app says "
+     + "so rather than changing a different one.",
+       "The change log follows. A weight, rest or stall row now names the day it fired "
+     + "on \u2014 those rows used to read simply \u201cWorkout\u201d, which was not a day and could "
+     + "not be checked against anything."]},
   {k: "The tab bar stays where it is",
    s: ["It used to slide away when you scrolled down and come back when you scrolled up, "
      + "so a long Body tab was not read through a letterbox. That is gone. It cost three "
