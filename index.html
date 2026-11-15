@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.4";
+const APP_VERSION = "2026.11.15.5";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -8687,13 +8687,18 @@ function canonIndex(o){
    Built lazily, because the tables it reads are declared much further down the file
    while renames are loaded during migrate(), long before those tables exist. */
 let TABLE_ORIGIN = null;
-function invalidateTableOrigin(){ TABLE_ORIGIN = null; invalidateCanon(); }
+function invalidateTableOrigin(){ TABLE_ORIGIN = null; invalidateCanon(); bwCachesClear(); }
 /* Which exercises the program runs on more than one day, cached. Declared up here with
    the other boot-time state for the same reason TABLE_ORIGIN is: migrate() runs while
    the file is still evaluating and clears this cache, and a `let` further down the file
    would still be in its temporal dead zone at that point. */
 let MULTI_DAY = null;
 function invalidateMultiDay(){ MULTI_DAY = null; }
+/* P0-2 — and the two lookups the normalised strength load needs, up here for the same
+   reason: invalidateTableOrigin() clears them and runs while the file is still being
+   evaluated. Lazily filled; see entryBwAdd(). */
+let BW_CARRIED = null, BW_ON_DATE = null;
+function bwCachesClear(){ BW_CARRIED = null; BW_ON_DATE = null; }
 function rebuildTableOrigin(){
   const al = USER_ALIASES || {};
   const built = {};
@@ -15070,7 +15075,7 @@ function bestEverFor(exName, upToEntry, upToSet){
   // capitalisation can't hide your own history from the comparison
   (S.sessions || []).forEach(s=> (s && s.entries || []).forEach(en=>{
     if(nrm(en.name)!==key) return;
-    const add = entryBarAdd(en);
+    const add = entryTrendAdd(en, s && s.date);
     en.sets.forEach(st=> consider(st, add));
   }));
   /* WHAT THE HISTORY ALONE HELD, remembered before today's sets are folded in. `seen`
@@ -19612,6 +19617,7 @@ function windowStats(from, to, opts){
          undercounts every barbell and Smith set by the weight of the empty bar, and two
          gyms whose carriages differ are compared as though they did not. */
       const eAdd = entryBarAdd(e);
+      const eTrend = entryTrendAdd(e, s.date);
       const warms = entryWarmups(e);
       e.sets.forEach((st, si)=>{
         if(!isWorkingSet(st)) return;
@@ -19621,7 +19627,12 @@ function windowStats(from, to, opts){
         const rpe = effRpe(st);
         // L1: reps to failure, like everywhere else — the trend and the records agree
         const rtf = repsToFailure(st);
-        const e1 = w > 0 ? est1RM(w, rtf) : rtf;   // bodyweight → reps stand in for load
+        /* P0-2 — and the STRENGTH figure is the one that has to survive a change in how
+           the load is written down, because every floor proposal is justified by it.
+           Tonnage above stays on the raw number plus the implement: it answers how much
+           was moved, which is a different question from how strong you were. */
+        const wTrend = setLoad(st, eTrend);
+        const e1 = wTrend > 0 ? est1RM(wTrend, rtf) : rtf;   // no load → reps stand in
         const tgt = restTargetFor(e, st);
         /* Drops, mini-sets and bursts are real work and belong in tonnage. They are NOT
            extra sets: one drop set is one hard set however many drops it has, which is
@@ -42036,11 +42047,13 @@ function openBodyLog(dateStr){
     if(w != null && tEl && hmToMin(tEl.value) != null) out.t = tEl.value;
     if(!Object.keys(out).length){
       delete bodyLog()[d];
+      bwCachesClear();
       save(); queueSync(); hideModal(); render();
       toast("Nothing to save");
       return;
     }
     bodyLog()[d] = out;
+    bwCachesClear();
     WEIGH_SNOOZE = null;
     save(); queueSync(); hideModal(); render();
     toast(out.w != null ? fmtLoad(out.w) + " logged" : "Measurements logged", "good");
@@ -42049,6 +42062,7 @@ function openBodyLog(dateStr){
   if(del) del.onclick = ()=>{
     if(!confirm("Delete the entry for " + fmtDate(d) + "?")) return;
     delete bodyLog()[d];
+    bwCachesClear();
     save(); queueSync(); hideModal(); render();
     toast("Entry deleted");
   };
@@ -54459,9 +54473,12 @@ function findProgramEntryWhere(name, wid){
    treats the symptom and removes the training at the same time. */
 /* The top working set, as a TRUE load. Callers compare one entry against another, and
    two entries can come from gyms whose Smiths differ by ten pounds. */
-function bestOf(entry){
+function bestOf(entry, dateStr){
   let w = 0, reps = 0;
-  const add = entryBarAdd(entry);
+  /* P0-2 — "did this session beat the last one" is a comparison across sessions, so it
+     is asked on the normalised load. Written on the raw number, a dip that started
+     counting the lifter read as a 140 lb improvement and silently reset a real stall. */
+  const add = entryTrendAdd(entry, dateStr);
   (entry.sets || []).forEach(st=>{
     if(!isWorkingSet(st)) return;
     const sw = setLoad(st, add), sr = parseFloat(st.reps) || 0;
@@ -57631,8 +57648,35 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.4";
+const NEWS_FOR = "2026.11.15.5";
 const NEWS = [
+  {k: "Starting to count your own weight is not getting stronger",
+   s: ["A weighted dip done with 25 lb on the belt by somebody who weighs 139.6 is a "
+     + "164.6 lb lift. For months it was written down as \u201c25\u201d. When the app started "
+     + "counting the lifter, the same set was written as \u201c164.6\u201d \u2014 and every reader "
+     + "comparing across that day saw estimated strength rise 558% for a session that "
+     + "was physically identical to the one before it.",
+       "That was not a cosmetic fault. Those gains are what the volume floors were cut "
+     + "on: quads 8.1 \u2192 5.5 sets a week on \u201cstrength up 99%\u201d, calves 5.4 \u2192 2 on "
+     + "\u201cup 105%\u201d. Real training was removed on the strength of arithmetic about a "
+     + "change in notation.",
+       "The strength trend, the records and the stall check now put both sides of such a "
+     + "change on one basis \u2014 the true total, every set, whichever convention the number "
+     + "was written in. A set logged as the belt alone is read as the belt plus you, at "
+     + "what you weighed on the day rather than what you weigh now. Tonnage is "
+     + "deliberately left on the raw number plus the implement: how much was moved is a "
+     + "different question from how strong you were.",
+       "The bar half of this was already right, and two cases now hold it there: a Smith "
+     + "lift logged as plates and the same lift logged as bar + plates read as the same "
+     + "strength, whether or not the app has been told what the carriage weighs.",
+       "A switch of convention also leaves a marker on the log now, so anything that "
+     + "proposes a change to your programme off a percentage can find out that the window "
+     + "it is reading straddles one.",
+       "And one decision is one line. \u201cBarbell loads\u201d was switched three times in "
+     + "eleven minutes in one log, writing three change rows describing states that no "
+     + "longer existed. Switches inside a quarter of an hour now collapse to the move "
+     + "that actually happened, and a switch that ends up back where it started leaves "
+     + "no row at all."]},
   {k: "An automatic change lands on the day that earned it",
    s: ["The same movement sits in more than one day of a split, with its own load, its own "
      + "place in the order and its own history in each. Push A opens with a straight-bar "
@@ -58823,7 +58867,83 @@ function barModeConvertPlan(to){
   }));
   return out;
 }
-function barModeConvertApply(pl, to){
+/* P0-2 — WHERE THE LOG CHANGES CONVENTION, WRITTEN DOWN.
+
+   The normalisation above puts both sides of a counting change on one basis, which is
+   what makes the strength trend honest. It cannot make every question answerable: a
+   window that straddles the switch is still a window whose two halves were recorded
+   differently, and a reader that draws a strong conclusion from it — above all the
+   volume-floor proposals, which cut real training on the strength of a percentage —
+   should be able to find that out and decline.
+
+   So the switch leaves a marker. Readers that merely display a number can ignore it;
+   readers that propose a change to the programme are expected to ask. */
+function countMarks(){
+  if(!Array.isArray(S.marks)) S.marks = [];
+  return S.marks;
+}
+/* Does this window contain a point where the convention changed? */
+function windowCrossesMark(from, to){
+  return countMarks().some(m=> m && m.at > from && m.at < to);
+}
+/* Recorded the same way the change row is: one decision is one marker, and a switch
+   that nets back to where it started leaves none, because the log it describes ended up
+   unchanged. */
+function markCountChange(what, from, to){
+  const list = countMarks();
+  const now = Date.now();
+  for(let i = list.length - 1; i >= 0; i--){
+    const m = list[i];
+    if(!m || m.what !== what) continue;
+    if(!(now - (m.at || 0) < BAR_MODE_COALESCE_MS)) break;
+    const start = m.from != null ? m.from : from;
+    if(start === to){ list.splice(i, 1); return null; }
+    m.at = now; m.date = todayStr(); m.from = start; m.to = to;
+    return m;
+  }
+  const mk = {kind: "units", what, from, to, at: now, date: todayStr()};
+  list.push(mk);
+  if(list.length > 200) S.marks = list.slice(-200);
+  return mk;
+}
+/* P0-2 — ONE DECISION ABOUT THE CONVENTION IS ONE LINE IN THE HISTORY.
+
+   The audited log has "Barbell loads" switched three times inside eleven minutes, each
+   switch rewriting 112 logged sets and each one writing its own change row. Read back,
+   that is three decisions about the user's data. It was one decision being arrived at,
+   and the first two rows describe states that no longer existed by the time anybody
+   looked.
+
+   The conversion itself still runs each time — it is a modal somebody confirms, and the
+   arithmetic is its own undo — but the rows coalesce: a switch inside the window rewrites
+   the row before it to the NET move, and a net move back to where it started removes the
+   row altogether, because nothing ended up changed. */
+const BAR_MODE_COALESCE_MS = 15 * 60 * 1000;
+function barModeLogCoalesce(from, to, sets, plans){
+  if(!Array.isArray(S.planLog)) S.planLog = [];
+  const word = m => m === "total" ? "bar + plates" : "plates only";
+  const note = m => "Switched to " + word(m) + ". The loads themselves are unchanged.";
+  const line = (ns, np) => ns + " logged sets and " + np + " prescribed loads rewritten";
+  const now = Date.now();
+  for(let i = S.planLog.length - 1; i >= 0; i--){
+    const r = S.planLog[i];
+    if(!r || r.kind !== "weight" || r.name !== "Barbell loads") continue;
+    if(!(now - (r.at || 0) < BAR_MODE_COALESCE_MS)) break;
+    const start = r.barFrom || from;
+    if(start === to){ S.planLog.splice(i, 1); return 0; }   // net: nothing changed
+    r.at = now; r.date = todayStr();
+    r.barFrom = start; r.barTo = to;
+    r.changes = [line((r.barSets || 0) + sets, (r.barPlans || 0) + plans)];
+    r.barSets = (r.barSets || 0) + sets;
+    r.barPlans = (r.barPlans || 0) + plans;
+    r.note = note(to);
+    return 1;
+  }
+  logPlanChange("weight", null, "Barbell loads", [line(sets, plans)],
+    {note: note(to), barFrom: from, barTo: to, barSets: sets, barPlans: plans});
+  return 1;
+}
+function barModeConvertApply(pl, to, from){
   if(!pl) return 0;
   pl.sets.forEach(r=>{ r.st.weight = String(r.to); });
   pl.entries.forEach(r=>{ if(r.stamp > 0) r.en.barAdd = r.stamp; else delete r.en.barAdd; });
@@ -58833,10 +58953,9 @@ function barModeConvertApply(pl, to){
   (S.sessions || []).forEach(sess=> (sess.entries || []).forEach(en=>
     (en.sets || []).forEach(st=>{ if(st) delete st.pr; })));
   invalidateTableOrigin();
-  logPlanChange("weight", null, "Barbell loads",
-    [pl.sets.length + " logged sets and " + pl.plan.length + " prescribed loads rewritten"],
-    {note: "Switched to " + (to === "total" ? "bar + plates" : "plates only") +
-           ". The loads themselves are unchanged."});
+  const fromMode = from || (to === "total" ? "plates" : "total");
+  markCountChange("barMode", fromMode, to);
+  barModeLogCoalesce(fromMode, to, pl.sets.length, pl.plan.length);
   save(); queueSync();
   return pl.sets.length;
 }
@@ -58869,7 +58988,7 @@ function openBarModeConvert(to, from){
   const m = $("#modal");
   m.querySelector("#bmNo").onclick = ()=>{ hideModal(); toast("Left as it was \u2014 new sessions use the new convention"); };
   m.querySelector("#bmGo").onclick = ()=>{
-    const n = barModeConvertApply(pl, to);
+    const n = barModeConvertApply(pl, to, from);
     hideModal(); render();
     toast(n + " set" + (n === 1 ? "" : "s") + " rewritten as " + word, "good");
   };
@@ -59329,6 +59448,79 @@ function isBodyweightMove(name){
   }catch(e){}
   return false;
 }
+/* WHAT YOU WEIGHED THEN, not what you weigh now.
+
+   A trend that spans months cannot read every session against today's figure: the
+   movements that carry you are exactly the ones where that difference lands directly in
+   the load. The nearest weigh-in at or before the date, and failing that the earliest
+   one there is — a session logged before the first weigh-in is still better served by
+   a real figure from a fortnight later than by nothing at all. */
+function bodyWeightOn(dateStr){
+  const list = (typeof bodyLogList === "function") ? bodyLogList() : [];
+  if(!list.length) return null;
+  if(dateStr){
+    for(const r of list) if(r && r.w > 0 && r.d <= dateStr) return r.w;
+  }
+  for(let i = list.length - 1; i >= 0; i--) if(list[i] && list[i].w > 0) return list[i].w;
+  return null;
+}
+/* P0-2 — THE PART OF THIS ENTRY'S LOAD THAT IS YOU AND IS NOT IN THE NUMBER.
+
+   A weighted dip at a belt of 25 lb, logged by somebody who weighs 139.6, is a 164.6 lb
+   lift written down as "25". Once the app started counting the lifter the same set was
+   written as "164.6" — and every reader comparing across that switch saw a 558% gain in
+   estimated strength for a session that was physically identical to the one before it.
+   Those are the gains the volume floors of P0-3 were cut on.
+
+   So the comparison is put on one basis: the true total, for every set of a movement
+   that carries you, on both sides of the switch. `bwOn` is stamped on an entry performed
+   under the counting, so that one needs nothing added. An entry with no stamp is read
+   the way bwTotalOf() already reads a plan figure — a number at or above bodyweight is
+   a total, a number below it is the part that was added, because nothing else is
+   possible.
+
+   Assisted work is excluded: its machine takes weight OFF, so adding you and subtracting
+   is the wrong shape for it. */
+function bwCarriedMove(name){
+  const k = String(name || "");
+  if(!BW_CARRIED) BW_CARRIED = new Map();
+  if(BW_CARRIED.has(k)) return BW_CARRIED.get(k);
+  let v = false;
+  try{ v = isBodyweightMove(k) && !/\bassist/i.test(nrm(k)); }catch(e){ v = false; }
+  BW_CARRIED.set(k, v);
+  return v;
+}
+function bwOnDateCached(dateStr){
+  const k = dateStr || "";
+  if(!BW_ON_DATE) BW_ON_DATE = new Map();
+  if(BW_ON_DATE.has(k)) return BW_ON_DATE.get(k);
+  const v = bodyWeightOn(dateStr) || 0;
+  BW_ON_DATE.set(k, v);
+  return v;
+}
+/* Both caches are keyed on facts that only change when the library or the weigh-ins do,
+   and both of those already invalidate the table origin — see bwCachesClear(). */
+function entryBwAdd(entry, dateStr){
+  if(!entry || !entry.name) return 0;
+  if(entryBwOn(entry) > 0) return 0;              // the written number already counts you
+  if(!bwCarriedMove(entry.name)) return 0;
+  const bw = bwOnDateCached(dateStr);
+  if(!(bw > 0)) return 0;
+  let top = 0;
+  (entry.sets || []).forEach(st=>{
+    const w = parseFloat(st && st.weight);
+    if(isFinite(w) && w > top) top = w;
+  });
+  return top >= bw ? 0 : bw;
+}
+/* WHAT TO ADD BACK BEFORE COMPARING TWO SESSIONS. The implement this one was performed
+   with, plus you where you are carried and not counted. Deliberately separate from
+   entryBarAdd(), which answers the narrower question every load DISPLAY asks: this one
+   is for the readers that put two different sessions side by side and need them written
+   in the same convention first. */
+function entryTrendAdd(entry, dateStr){
+  return entryBarAdd(entry) + entryBwAdd(entry, dateStr);
+}
 /* The newest weigh-in, in the units the weight boxes are already in. */
 function bodyWeightNow(){
   const list = (typeof bodyLogList === "function") ? bodyLogList() : [];
@@ -59436,7 +59628,14 @@ function bwRemembered(name){
 }
 function bwRemember(name, on){
   if(!S.bwEx || typeof S.bwEx !== "object") S.bwEx = {};
-  S.bwEx[nrm(name)] = on ? 1 : 0;
+  const k = nrm(name);
+  const was = S.bwEx[k];
+  S.bwEx[k] = on ? 1 : 0;
+  /* P0-2 — the other half of the counting question, and the half that produced the
+     558% jump in the audited export. Marked only when the answer actually moved. */
+  if(was !== S.bwEx[k]) markCountChange("bw:" + k, was === 1 ? "on" : was === 0 ? "off" : null,
+                                        on ? "on" : "off");
+  bwCachesClear();
 }
 /* Turning it on adds your bodyweight to every set; turning it off takes back exactly what
    was added. A set left blank becomes your bodyweight on its own, and goes back to blank.
@@ -62430,6 +62629,11 @@ const BACKUP_FIELDS = [
   "exAliases","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   "asymRetired","asymRetest","askWhy","lmFloor","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
+  /* P0-2 \u2014 where the log changed convention. A fact about how the numbers in
+     `sessions` are to be READ, so a backup carrying the sessions without it restores a
+     log whose loads can no longer be compared with each other. bwEx, just below, learned
+     this same lesson the hard way. */
+  "marks",
   /* SETTINGS AND ANSWERS, WHICH A BACKUP WAS DROPPING.
 
      pushOn is whether you have reminders turned on. It was not carried, so a restore in
