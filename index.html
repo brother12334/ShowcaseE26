@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.1";
+const APP_VERSION = "2026.11.16.2";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -19342,6 +19342,91 @@ function muscleSourceOf(name){
 // No RPE logged? Assume a normal hard working set rather than throwing the set away.
 function effRpe(st){ const r = parseFloat(st && st.rpe); return r > 0 ? r : 8; }
 function isWorkingSet(st){ return (parseFloat(st && st.reps)||0) > 0; }
+/* =====================================================================
+   P1-7 — ONE SET OF A ONE-LIMB MOVEMENT IS A PAIR, AND THERE IS ONE WAY TO READ IT
+
+   The audit found unilateral work counted as whole sets: "2 sets" of a single-arm
+   pulldown is one set per side, and the volume landmarks were counting it double. Then
+   the user described how they actually train it, which is worse than a counting error —
+   left, then right straight away, then rest. The app starts a rest clock after every
+   logged row, so it recorded a fake ten-to-twenty-second "rest" between the two sides of
+   one set, and fed those to the rule that lengthens rest windows.
+
+   So a set can hold two sides: `st.sides = {L, R}`, each with its own weight, reps and
+   RPE, either of which may be absent. A left-only set at the end is a legitimate half
+   set. The rest belongs to the PAIR and is stored on the set, not on a side.
+
+   NOT as a superset, which was the obvious reuse and does not work: superset membership
+   here is positional adjacency between two DIFFERENT entries, so a movement paired with
+   itself would have to appear twice — in the plan, in every volume count and in the
+   report. The one piece of that machinery worth reusing is the rest suppression, and
+   endsRound() is where that lives.
+
+   TWO SHAPES, ONE READER. Sessions logged before this exist in their thousands and are
+   not rewritten: they alternate one side per set, L, R, L, R. sideSets() turns either
+   shape into the same canonical list, and every rule, the report and the CSV go through
+   it rather than reading `sides` or calling setSide() for themselves. */
+function entryPerSide(en){
+  if(!en) return false;
+  if(en.perSide) return true;
+  return (en.sets || []).some(st=> st && st.sides && (st.sides.L || st.sides.R));
+}
+/* One entry as a flat list of side-sets, newest-last, in the order performed.
+
+     pair   which set of the exercise this belongs to; the two sides of one pair share it
+     side   "L", "R", or null for a movement done with both limbs at once
+     count  what this contributes to a set count: half for a side, one for a whole set
+     rest   the rest that FOLLOWED this side-set, which for a pair is on its second side
+     ref    the object to write to, so a caller that edits reads and writes the same place */
+function sideSets(en){
+  const out = [];
+  if(!en || !Array.isArray(en.sets)) return out;
+  const paired = entryPerSide(en);
+  en.sets.forEach((st, si)=>{
+    if(!st) return;
+    if(paired && st.sides){
+      const order = (en.startSide === "R") ? ["R", "L"] : ["L", "R"];
+      const present = order.filter(sd=> st.sides[sd]);
+      present.forEach((sd, k)=>{
+        const v = st.sides[sd];
+        const lastOfPair = k === present.length - 1;
+        out.push({pair: si, si, side: sd, count: 0.5, ref: v, set: st,
+          weight: v.weight, reps: v.reps, rpe: v.rpe, done: !!v.done,
+          /* The rest is the pair's, so it is reported against the side that ended it and
+             nothing at all against the first. That is the whole fix: the gap between the
+             sides was never a rest. */
+          rest: lastOfPair ? st.rest : null});
+      });
+      return;
+    }
+    /* Legacy, or a two-handed movement. setSide() returns null when the entry tracks no
+       sides, which is exactly a whole set. */
+    const sd = en.startSide ? setSide(en, si) : null;
+    out.push({pair: si, si, side: sd || null, count: sd ? 0.5 : 1, ref: st, set: st,
+      weight: st.weight, reps: st.reps, rpe: st.rpe, done: !!st.done, rest: st.rest});
+  });
+  return out;
+}
+/* The working side-sets only, which is what every rule wants. */
+function sideSetsWorking(en){
+  return sideSets(en).filter(x=> (parseFloat(x.reps) || 0) > 0);
+}
+/* One side's run across an entry, in order, for the comparisons that must never put the
+   left against the right: drop-off and rest both ask "did THIS side fade". */
+function sideRun(en, side){
+  return sideSetsWorking(en).filter(x=> x.side === side);
+}
+/* Is this pair finished? Used by endsRound(): the rest starts when the pair is done, not
+   when its first side is. A set with only one side logged and nothing prescribed for the
+   other is complete as it stands. */
+function pairDone(en, si){
+  const st = (en && en.sets) ? en.sets[si] : null;
+  if(!st) return true;
+  if(!entryPerSide(en) || !st.sides) return true;
+  const have = ["L", "R"].filter(sd=> st.sides[sd]);
+  if(!have.length) return true;
+  return have.every(sd=> st.sides[sd].done);
+}
 
 /* =====================================================================
    EFFECTIVE SETS
@@ -19505,8 +19590,12 @@ function setTypeValue(e, si){
    often done for conditioning rather than near failure. With an effort rating it counts
    like anything else; without one it is credited at half rather than assumed hard. */
 function entryIsCircuit(e){ return !!(e && e.circuit); }
-function setEffective(e, si, warms){
-  const st = (e && e.sets) ? e.sets[si] : null;
+function setEffective(e, si, warms, stOverride){
+  /* P1-7 — `stOverride` is one SIDE of a paired set. Warm-up, set type and set kind are
+     properties of the set as a whole and still read off `si`; the effort credit is the
+     side's own, because the two sides of a pair are not always taken equally hard —
+     which is the entire point of P1-8b. */
+  const st = stOverride || ((e && e.sets) ? e.sets[si] : null);
   if(!st || !isWorkingSet(st)) return {v: 0, unknown: false};
   const w = warms ? warms[si] : setIsWarmup(e, si);
   if(w) return {v: 0, unknown: false, warm: true};
@@ -19642,9 +19731,13 @@ function windowStats(from, to, opts){
       const eAdd = entryBarAdd(e);
       const eTrend = entryTrendAdd(e, s.date);
       const warms = entryWarmups(e);
-      e.sets.forEach((st, si)=>{
-        if(!isWorkingSet(st)) return;
-        const effOne = setEffective(e, si, warms);
+      /* P1-7 — THROUGH THE ADAPTER, so a paired set is two half-sets and a legacy
+         alternating log is the same two half-sets. `x.count` is 0.5 for a side and 1 for
+         a movement done with both limbs at once, and it multiplies every set-count
+         figure below. The volume landmarks were counting a one-arm row as two sets. */
+      sideSetsWorking(e).forEach(x=>{
+        const st = x.ref, si = x.si, half = x.count;
+        const effOne = setEffective(e, si, warms, st);
         const reps = parseFloat(st.reps)||0;
         const w = setLoad(st, eAdd);
         const rpe = effRpe(st);
@@ -19669,7 +19762,7 @@ function windowStats(from, to, opts){
         Object.keys(mm).forEach(m=>{
           const o = out[m];
           if(!o) return;
-          const c = mm[m];
+          const c = mm[m] * half;
           o.sets += c;
           o.eff  += c * effOne.v;
           if(effOne.warm) o.warmSets += c;
@@ -19684,7 +19777,7 @@ function windowStats(from, to, opts){
           if(rpe >= 7) o.hardSets += c;
           if(rpe >= 9.5) o.nearFail += c;
           if(mm[m] >= 1 && e1 > o.best) o.best = e1;
-          if(st.rest != null){ o.restN += 1; if(st.rest < tgt.warn) o.restShort += 1; }
+          if(x.rest != null){ o.restN += 1; if(x.rest < tgt.warn) o.restShort += 1; }
           if(s.startedAt > o.lastMs){ o.lastMs = s.startedAt; o.lastSets = 0; o.lastEff = 0; }
           if(s.startedAt === o.lastMs){ o.lastSets += c; o.lastEff += c * effOne.v; }
           o.effDates[s.date] = (o.effDates[s.date] || 0) + c * effOne.v;
@@ -54867,7 +54960,10 @@ const FADE_BAD = 0.35;
 function repDropOffs(sess){
   const drops = [];
   (sess.entries || []).forEach(e=>{
-    const ws = (e.sets || []).filter(isWorkingSet);
+    /* P1-7 — the adapter, so a paired entry is seen at all: its sets hold no reps of
+       their own. Each item carries the side it belongs to, which the comparison below
+       needs and which must never be read from setSide() directly. */
+    const ws = sideSetsWorking(e).map(x=> Object.assign({__side: x.side || null}, x.ref));
     if(ws.length < 2) return;
     /* LIKE FOR LIKE MEANS THE SAME WEIGHT, NOT "NOT MUCH LIGHTER".
 
@@ -54893,13 +54989,16 @@ function repDropOffs(sess){
        13, 18, 13, 18 — which compared end to end is a 28% "collapse" and back again,
        every session, for ever. It is not a collapse, it is two different limbs. Each
        side is compared with itself and the worse of the two is what counts. */
-    if(e.startSide){
-      const by = {L: [], R: []};
-      same.forEach(st=>{
-        const sd = setSide(e, (e.sets || []).indexOf(st));
-        if(sd === "L" || sd === "R") by[sd].push(st);
-      });
-      const runs = [by.L, by.R].filter(x=> x.length >= 2);
+    /* P1-4 / P1-7 \u2014 AND THE SAME SIDE, NOT JUST THE SAME WEIGHT.
+
+       One limb at a time means a left and a right in every set, logged as a pair in the
+       new shape and one per set in the old. The audited preacher curl's left is reliably
+       about 28% weaker, so either shape read end to end is a 28% "collapse" and a
+       recovery, every session, for ever. It is two different limbs. Each side is
+       compared with itself and the worse of the two is what counts. */
+    if(ws.some(x=> x.__side)){
+      const runs = ["L", "R"].map(sd=> same.filter(x=> x.__side === sd))
+                             .filter(run=> run.length >= 2);
       if(!runs.length) return;
       let worst = null;
       runs.forEach(run=>{
@@ -54912,6 +55011,7 @@ function repDropOffs(sess){
       if(!worst) return;
       same = worst.run;
     }
+    if(same.length < 2) return;
     const first = parseFloat(same[0].reps) || 0;
     const last  = parseFloat(same[same.length - 1].reps) || 0;
     if(!first) return;
@@ -58084,8 +58184,30 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.1";
+const NEWS_FOR = "2026.11.16.2";
 const NEWS = [
+  {k: "A set of a one-limb movement counts as one set, not two",
+   s: ["Two sets of a single-arm cable pulldown is one set per side. Element 26 was "
+     + "counting it as two, so every volume figure, floor and ceiling for a muscle "
+     + "trained one limb at a time was roughly double what it should have been.",
+       "A set can now hold both sides \u2014 a left and a right, each with its own weight, "
+     + "reps and effort \u2014 and each side counts half a set. Three pairs and a left-only "
+     + "set at the end is three and a half sets, not seven.",
+       "The second fault was worse than the counting. Trained properly, one limb at a "
+     + "time means left, then right straight away, then rest. The app started its clock "
+     + "after every logged row, so it recorded a ten- or twenty-second \u201crest\u201d between "
+     + "the two sides of a single set \u2014 filling the rest history with rests that never "
+     + "happened and feeding them to the rule that lengthens rest windows. The gap "
+     + "between the sides of a pair is not a rest and no longer starts a clock. One rest "
+     + "is recorded, after the pair.",
+       "Everything you have already logged stays exactly as it is. Sessions logged one "
+     + "side per set and sessions logged as pairs are read by one adapter into one "
+     + "history, so a movement does not lose its past when it changes shape \u2014 and "
+     + "every rule, drop-off, rest, stall and side balance alike, reads through it.",
+       "Which means the drop-off rule finally compares a side with itself. A left arm "
+     + "reliably 28% weaker than the right read as reps collapsing and recovering every "
+     + "session, for ever, in both shapes. Each side is now compared against its own "
+     + "previous sets, and the worse of the two is what counts."]},
   {k: "Matching the weaker side no longer erases the gap it was matched to",
    s: ["The side-balance rule asks you to go left first and stop the right at the left\u2019s "
      + "rep count. Follow it and the logged reps read dead level from then on \u2014 so the "
@@ -60717,10 +60839,13 @@ function sideHistory(exName){
     const s = S.sessions[i];
     (s.entries||[]).forEach(en=>{
       if(nrm(en.name) !== k) return;
-      if(!en.startSide) return;                 // logged before sides were tracked
-      const sets = (en.sets||[]).filter(isWorkingSet);
-      if(!sets.length) return;
-      out.push({date:s.date, at:s.startedAt, startSide:en.startSide, entry:en, sets});
+      /* P1-7 — through the adapter, so a paired entry counts. Its sets carry no `reps`
+         of their own (the sides do), so the old filter saw an entry with no working sets
+         and skipped every session logged in the new shape. */
+      const sides = sideSetsWorking(en).filter(x=> x.side);
+      if(!sides.length) return;
+      out.push({date:s.date, at:s.startedAt, startSide:en.startSide || sides[0].side,
+                entry:en, sets: sides});
     });
   }
   return out;
@@ -60788,15 +60913,14 @@ const ASYM_WINDOW = 6;            // exposures compared
    the decision rather than read as zero. */
 function sideExposure(h){
   const by = {};
-  (h.entry.sets || []).forEach((st, i)=>{
-    if(!isWorkingSet(st)) return;
-    const side = setSide(h, i);
-    if(side !== "L" && side !== "R") return;
-    const reps = parseFloat(st.reps);
-    if(!(reps > 0)) return;
-    const w = parseFloat(st.weight) || 0;
+  /* P1-7 — one reader for both shapes. A paired set gives L and R at the same set
+     number; a legacy entry gives them on consecutive sets. Either way this is a list of
+     side-sets with a side and a load on each. */
+  sideSetsWorking(h.entry).forEach(x=>{
+    if(x.side !== "L" && x.side !== "R") return;
+    const w = parseFloat(x.weight) || 0;
     const slot = by[w] || (by[w] = {L: [], R: []});
-    slot[side].push(st);
+    slot[x.side].push(x.ref);
   });
   const mean = a => a.reduce((x, y)=> x + y, 0) / a.length;
   let pick = null;
@@ -62528,6 +62652,11 @@ function entryDone(en){
    uneven-pair case: on Legs A the third calf raise has no ab crunch after it, so the
    rest has to start there or the clock never runs for that round at all. */
 function endsRound(entries, ei, si){
+  /* P1-7 — THE FIRST SIDE OF A PAIR ENDS NOTHING. Left then right straight away then
+     rest: the gap between the sides is not a rest and must not start a clock, exactly as
+     the gap inside a superset is not. Same seam, same reason. */
+  const en = entries && entries[ei];
+  if(en && entryPerSide(en) && !pairDone(en, si)) return false;
   const info = supersetInfo(entries, ei);
   if(!info) return true;                       // not in a pair, normal behaviour
   if(info.role === "second") return true;
