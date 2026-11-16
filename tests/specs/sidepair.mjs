@@ -676,6 +676,142 @@ console.log("\n11b - BUT AN ORDINARY SET STILL TAKES LAST TIME'S NUMBERS, VISIBL
      String(r.shown));
 }
 
+console.log("\n12 - THE PLAN SAYS 'PER SIDE', BECAUSE THAT IS WHAT IT MEANS");
+{
+  const r = await ev(()=>{
+    const paired = {name:"Preacher Curl", sets:3, reps:"8-12", weight:25, rpe:"7-9",
+      rest:[120,150], perSide:true, startSide:"L"};
+    const plain  = {name:"Cable Triceps Pushdown", sets:3, reps:"8-12", weight:50,
+      rpe:"7-9", rest:[120,150]};
+    return {paired: exLineHTML(paired), plain: exLineHTML(plain),
+            label: setsLabelFor(paired), plainLabel: setsLabelFor(plain)};
+  });
+  console.log("    paired: " + r.paired);
+  console.log("    plain:  " + r.plain);
+  ck("a paired movement says per side", /per side/i.test(r.paired), r.paired);
+  ck("and still says three", /3\u00d7/.test(r.paired), r.paired);
+  ck("a two-handed one says nothing extra", !/per side/i.test(r.plain), r.plain);
+}
+
+console.log("\n13 - AND AN ACTIVE ASYMMETRY ADDS ONE WEAKER-SIDE SET AT THE END");
+{
+  const r = await ev(()=>{
+    const DAY = 86400e3, now = Date.now(), wid = DAYS[0];
+    /* Six exposures with the left reliably behind, which is what keeps the check on. */
+    S.sessions = [0,1,2,3,4,5].map(i=> ({
+      id:"w"+i, workoutId: wid, date: dayStr(now - (6-i)*4*DAY),
+      startedAt: now - (6-i)*4*DAY, finishedAt: now - (6-i)*4*DAY + 3600e3, feel: 4,
+      entries: [{name:"Preacher Curl", reps:"8-12", rpe:"7-9", perSide:true, startSide:"L",
+        sets: [0,1,2].map(()=> ({rest:150, sides:{
+          L:{weight:"25",reps:"7",rpe:"9",done:true},
+          R:{weight:"25",reps:"11",rpe:"9",done:true}}}))}]}));
+    DAYS.forEach(d=> S.program[d] = []);
+    S.program[wid] = [{name:"Preacher Curl", sets:3, reps:"8-12", weight:25, rpe:"7-9",
+      rest:[150,210], perSide:true, startSide:"L", sideMode:"matchWeaker", uni:true}];
+    S.asymRetired = {}; S.asymRetest = null;
+    S.planStart = Date.parse("2026-07-01T12:00:00");
+    S.pointer = 0; S.active = null; save();
+    const st = sideStats("Preacher Curl");
+    startWorkout(wid);
+    const en = S.active.entries.find(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const shape = (en.sets || []).map((s, i)=> pairSidesOf(en, i).join("") || "-");
+    const extra = en.sets[en.sets.length - 1];
+    return {weaker: st.weaker, active: st.ok && !st.closed,
+            nSets: en.sets.length, shape,
+            extraIsWeakOnly: !!(extra && extra.oneSide), extraSide: extra && extra.oneSide,
+            why: extra && extra.why,
+            /* What the week is actually asked for: three pairs and a half. */
+            prescribed: (()=>{
+              const filled = JSON.parse(JSON.stringify(en));
+              filled.sets.forEach((s, i)=> pairSidesOf(filled, i).forEach(sd=>{
+                s.sides = s.sides || {};
+                s.sides[sd] = {weight:"25", reps:"8", rpe:"9", done:true};
+              }));
+              return sideSetsWorking(filled).reduce((t, x)=> t + x.count, 0);
+            })()};
+  });
+  console.log("    " + JSON.stringify(r));
+  ck("the check is active with the left behind",
+     r.active === true && r.weaker === "L", JSON.stringify(r));
+  ck("the plan's three pairs become four sets", r.nSets === 4, String(r.nSets));
+  ck("the first three are pairs", r.shape.slice(0,3).join(" ") === "LR LR LR",
+     r.shape.join(" "));
+  ck("and the last is the weaker side alone", r.extraIsWeakOnly === true && r.extraSide === "L",
+     JSON.stringify(r));
+  ck("so the movement asks for three and a half sets, not four",
+     r.prescribed === 3.5, String(r.prescribed));
+}
+
+console.log("\n13b - AND IT GOES AWAY WHEN THE CHECK RETIRES");
+{
+  const r = await ev(()=>{
+    const DAY = 86400e3, now = Date.now(), wid = DAYS[0];
+    /* The same movement, level: six exposures with both sides equal at equal effort. */
+    S.sessions = [0,1,2,3,4,5].map(i=> ({
+      id:"e"+i, workoutId: wid, date: dayStr(now - (6-i)*4*DAY),
+      startedAt: now - (6-i)*4*DAY, finishedAt: now - (6-i)*4*DAY + 3600e3, feel: 4,
+      entries: [{name:"Preacher Curl", reps:"8-12", rpe:"7-9", perSide:true, startSide:"L",
+        sets: [0,1,2].map(()=> ({rest:150, sides:{
+          L:{weight:"25",reps:"10",rpe:"8",done:true},
+          R:{weight:"25",reps:"10",rpe:"8",done:true}}}))}]}));
+    S.asymRetired = {}; S.asymRetest = null; S.active = null; save();
+    const st = sideStats("Preacher Curl");
+    startWorkout(wid);
+    const en = S.active.entries.find(x=> nrm(x.name) === nrm("Preacher Curl"));
+    return {retired: st.closed, nSets: en.sets.length,
+            shape: (en.sets || []).map((s, i)=> pairSidesOf(en, i).join("") || "-")};
+  });
+  console.log("    " + JSON.stringify(r));
+  ck("the sides are level, so the check comes off", r.retired === true, String(r.retired));
+  ck("and the extra set is gone", r.nSets === 3, String(r.nSets));
+  ck("three ordinary pairs remain", r.shape.join(" ") === "LR LR LR", r.shape.join(" "));
+}
+
+console.log("\n14 - THE REPORT PRINTS A PAIR AS ONE SET NUMBER, L THEN R");
+{
+  const r = await ev(()=>{
+    const DAY = 86400e3, now = Date.now(), wid = DAYS[0];
+    S.sessions = [{id:"rep1", workoutId: wid, date: dayStr(now - DAY),
+      startedAt: now - DAY, finishedAt: now - DAY + 3600e3, feel: 4,
+      entries: [{name:"Preacher Curl", reps:"8-12", rpe:"7-9", perSide:true,
+        startSide:"L", sideRest:30,
+        sets: [
+          {rest:150, sides:{L:{weight:"25",reps:"8",rpe:"9",done:true,gap:30},
+                            R:{weight:"25",reps:"11",rpe:"9",done:true}}},
+          {rest:150, sides:{L:{weight:"25",reps:"7",rpe:"9",done:true},
+                            R:{weight:"25",reps:"10",rpe:"9",done:true}}},
+          {sides:{L:{weight:"25",reps:"6",rpe:"9",done:true}}}
+        ]}]}];
+    save();
+    const html = buildReportHTML();
+    /* Pull the rows of the sets table back out as plain text. */
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const tbl = [...doc.querySelectorAll("table")].find(t=>
+      /Side/.test(t.querySelector("thead") ? t.querySelector("thead").textContent : ""));
+    const rows = tbl ? [...tbl.querySelectorAll("tbody tr")].map(tr=>
+      [...tr.querySelectorAll("td")].map(td=> td.textContent.replace(/\s+/g," ").trim())) : [];
+    return {rows};
+  });
+  r.rows.forEach(row=> console.log("    " + JSON.stringify(row)));
+  const cells = r.rows.map(x=> x.slice(-6));   // set, side, weight, reps, rpe, rest
+  ck("five rows: two pairs and a left-only set", r.rows.length === 5,
+     String(r.rows.length));
+  ck("set one is numbered once, on the L row",
+     cells[0][0] === "1" && cells[0][1] === "L", JSON.stringify(cells[0]));
+  ck("and its R row carries no number", cells[1][0] === "" && cells[1][1] === "R",
+     JSON.stringify(cells[1]));
+  ck("the L row shows the hand-off, not a rest",
+     /\u2192 R/.test(cells[0][5]), cells[0][5]);
+  ck("naming the pause between the sides", /0:30 between/.test(cells[0][5]),
+     cells[0][5]);
+  ck("and the rest sits on the R row, after the pair",
+     /2:30/.test(cells[1][5]) && /after pair/.test(cells[1][5]), cells[1][5]);
+  ck("set two is numbered 2", cells[2][0] === "2", JSON.stringify(cells[2]));
+  ck("and the left-only set is numbered 3 with no R row",
+     cells[4][0] === "3" && cells[4][1] === "L" && r.rows.length === 5,
+     JSON.stringify(cells[4]));
+}
+
 console.log(errs.length ? ("\nPAGE ERRORS: "+errs.join(" | ")) : "\nno page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");

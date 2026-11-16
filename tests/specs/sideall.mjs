@@ -158,12 +158,10 @@ console.log("\n3 - AND THE DECLARED EXCEPTIONS ARE WHAT THEY CLAIM TO BE");
      String((kinds.display || []).length));
   ck("the side-flip handler is the only hand-written side",
      (kinds.write || []).length === 3, String((kinds.write || []).length));
-  /* The one reader still outside the adapter, named so it cannot be forgotten. When the
-     report half of P1-7 restructures that table this drops to zero and so does the
-     allowance. */
-  ck("exactly one tracked gap remains: the report and CSV row numbering",
-     (kinds.todo || []).length === 1
-       && /setSide\(e, i\)/.test((kinds.todo || [])[0] || ""),
+  /* This was pinned at exactly one while the report and CSV still numbered rows by set.
+     That table now reads through the adapter, so the allowance is gone: any new tracked
+     gap has to be argued for by changing this line. */
+  ck("no tracked gaps remain", (kinds.todo || []).length === 0,
      JSON.stringify(kinds.todo || []));
 }
 

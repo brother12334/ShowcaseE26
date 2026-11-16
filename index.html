@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.6";
+const APP_VERSION = "2026.11.16.7";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -49550,7 +49550,28 @@ function planEntry(e, isFinisher, wi, chosenList, side){
          today's half-logged sets into a different shape under you. */
       perSide: entryPerSideWanted(e) || undefined,
       sideRest: sideRestFor(e) || undefined,
-    sets: Array.from({length:e.sets}, ()=>({weight:"",reps:"",rpe:"",done:false}))
+    sets: (()=>{
+      const base = Array.from({length: e.sets}, ()=> ({weight:"",reps:"",rpe:"",done:false}));
+      /* P1-7 \u2014 ONE EXTRA SET FOR THE SIDE THAT IS BEHIND, while the asymmetry check is
+         active on this movement. Holding the stronger side to the weaker one stops the
+         gap WIDENING; it does nothing to close it, because both sides then get the same
+         work. This extra set is the only part of the protocol that actually gives the
+         weaker side more. It is a single side by design, so it counts as half a set, and
+         it comes and goes with the check: once the sides are level the check retires and
+         the plan returns to plain pairs on its own. */
+      if(!entryPerSideWanted(e)) return base;
+      let weak = null;
+      try{
+        if(asymActiveFor(e)){
+          const st = sideStats(e.name);
+          if(st.ok && !st.closed && st.weaker) weak = st.weaker;
+        }
+      }catch(err){ weak = null; }
+      if(!weak) return base;
+      base.push({weight:"", reps:"", rpe:"", done:false, oneSide: weak,
+                 why: "an extra set for the side that is behind"});
+      return base;
+    })()
   };
 }
 /* Does the plan want this movement logged as pairs? One limb at a time, and not a
@@ -51134,9 +51155,15 @@ function dayEditOpen(wid){ DAY_EDIT = wid; render(); window.scrollTo(0, 0); }
 function dayEditClose(){ DAY_EDIT = null; render(); window.scrollTo(0, 0); }
 
 // The one-line prescription under a name, in the plan's own vocabulary.
+/* P1-7 \u2014 "3 sets" of a one-limb movement means three PER SIDE, and the point of the
+   pairing work is that the app and the lifter now agree on that. Saying so in the plan
+   is the cheapest way to keep them agreeing. */
+function setsLabelFor(e){
+  return entryPerSideWanted(e) ? " per side" : "";
+}
 function exLineHTML(e){
   const bits = [];
-  bits.push(e.sets + "×" + esc(e.reps || "?"));
+  bits.push(e.sets + "×" + esc(e.reps || "?") + setsLabelFor(e));
   // a ramp is shown as the ramp, since "RPE 7-9" is exactly what it was written to replace
   if(Array.isArray(e.rpes) && e.rpes.length) bits.push("RPE " + esc(e.rpes.join(" · ")));
   else if(e.rpe) bits.push("RPE " + esc(String(e.rpe)));
@@ -58385,8 +58412,25 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.6";
+const NEWS_FOR = "2026.11.16.7";
 const NEWS = [
+  {k: "Per side in the plan, an extra set for the weaker one, and a report that reads right",
+   s: ["Your plan now says \u201c3\u00d78-12 per side\u201d on a one-limb movement, because that is "
+     + "what three sets of it has always meant. The number has not changed; the app has "
+     + "stopped being coy about what it counts.",
+       "While a side-balance check is active, the plan adds ONE extra set for the side "
+     + "that is behind, at the end of the exercise. Holding the stronger side to the "
+     + "weaker one stops the gap widening and does nothing to close it, because both "
+     + "sides then get identical work \u2014 this is the only part of the protocol that "
+     + "actually gives the weaker side more. It is a single side, so it counts as half a "
+     + "set: three pairs and the extra is three and a half sets, not four. When the sides "
+     + "come level the check retires and the extra set disappears on its own.",
+       "And the report and CSV finally print a pair as what it is: one set number with an "
+     + "L row and an R row under it, the rest on the second row, and the first row saying "
+     + "\u201c\u2192 R\u201d rather than leaving a blank that reads as no rest taken. Where a "
+     + "movement has a pause between its sides it says so there too \u2014 \u201c\u2192 R, 0:30 "
+     + "between\u201d. An extra left-only set at the end shows its own number and promises no "
+     + "right that is not coming."]},
   {k: "A reps hint is never logged as reps that happened",
    s: ["The second side of a pair shows the first side\u2019s count as a hint, so you can "
      + "match it. Ticking without typing was banking that hint as a real rep count \u2014 "
@@ -64497,23 +64541,33 @@ function buildReportInner(){
     ${metaBits.length?`<p class="meta">${metaBits.join(" · ")}</p>`:""}
     <table><thead><tr><th>Exercise</th><th>Set</th><th>Side</th><th>Weight (${unitWord()})</th><th>Reps</th><th>RPE</th><th>Rest</th></tr></thead><tbody>`;
     s.entries.forEach((e, ei)=>{
-      // keep the original index so the L/R attribution stays correct after filtering
-      const sets = e.sets.map((st,i)=>({st,i})).filter(x=>x.st.reps||x.st.weight);
+      /* P1-7 \u2014 THROUGH THE ADAPTER, which is what makes a pair print as one set
+         number with an L row and an R row under it. Each item is one SIDE-set: `i` is
+         still the set index, so the technique and drop-set lookups below are unchanged,
+         and `first` marks the row that carries the number. A legacy alternating log
+         keeps printing one numbered row per side, because that is what it recorded. */
+      const sets = sideSets(e)
+        .filter(x=> (x.reps != null && x.reps !== "") || (x.weight != null && x.weight !== ""))
+        .map((x, k, all)=> ({st: x.ref, i: x.si, side: x.side, rest: x.rest, gap: x.gap,
+          first: k === 0 || all[k - 1].si !== x.si,
+          /* Whether another side of this same set follows. A left-only set is both the
+             first and the last of its pair, and must not promise a right that is not
+             coming. */
+          last: k === all.length - 1 || all[k + 1].si !== x.si}));
       if(!sets.length) return;
       const pair = ssm[ei];
       const techs = techTextList(e);
       /* The name cell has to span the DROP AND CLUSTER ROWS TOO, not just the sets. Sub
          rows are rows; counting only the parent sets left the rowspan short and the
          table's remaining cells slid up a line each. */
-      const rowCount = sets.reduce((t, x)=> t + 1 + subSetsFor(e, x.i).length, 0);
-      sets.forEach(({st,i}, row)=>{
-        /* P1-7 — sides:todo. The report and CSV still number rows by SET, so a pair
-           prints as two numbered rows rather than one set number with an L row and an R
-           row beneath it. Restructuring this table is the report half of P1-7; until
-           then this is the one reader left outside the adapter, and sideall.mjs counts
-           it so that it cannot be quietly forgotten. */
-        const side = setSide(e, i);                         // sides:todo
-        const onThisSet = techFor(e, i, e.sets.length).map(t=> TECHNIQUES[t.k].badge);
+      const rowCount = sets.reduce((t, x)=> t + 1 + (x.first ? subSetsFor(e, x.i).length : 0), 0);
+      /* The number a row shows: the SET it belongs to, so both sides of a pair share it. */
+      let setNo = 0;
+      sets.forEach((row0, row)=>{
+        const {st, i, side, first} = row0;
+        if(first) setNo++;
+        const onThisSet = first
+          ? techFor(e, i, e.sets.length).map(t=> TECHNIQUES[t.k].badge) : [];
         body += `<tr${pair?` class="ssrow"`:""}>${row===0?`<td rowspan="${rowCount}">${
           pair?`<span class="sstag">${esc(pair.letter + pair.pos)}</span> `:""}<b>${esc(e.name)}</b>${
           pair?`<br><span class="sm">Superset ${esc(pair.letter)}, ${pair.pos} of ${pair.of} \u2014 alternated with ${esc(pair.partner)}; rest only after the pair</span>`:""}${
@@ -64524,7 +64578,9 @@ function buildReportInner(){
                that was actually performed: A1 set 1, A2 set 1, rest. The two movements
                print as separate blocks so each keeps its own loads, and the shared round
                number is what lets them be read back across the gap. */
-            pair ? "Round " + (row+1) : (row+1)
+            /* A pair's two rows carry one number, printed once: one set of a one-limb
+               movement is one set, which is the whole of P1-7 in a table cell. */
+            pair ? (first ? "Round " + setNo : " ") : (first ? setNo : " ")
           }${onThisSet.length?`<br><span class="sm">${esc(onThisSet.join(", "))}</span>`:""}</td>
           <td class="c">${side ? esc((e.altStyle==="cross" ? side+" on top" : side)) : " "}</td>
           <td class="c">${st.weight!=null&&st.weight!==""?esc(st.weight):"bodyweight"}</td>
@@ -64537,13 +64593,21 @@ function buildReportInner(){
                page reads as "no rest was taken here", when what happened is "no rest was
                taken here on purpose, because the next thing was the other exercise". Say
                that, rather than printing a blank and hoping. */
+            /* P1-7 \u2014 and the rest of a SIDE-pair belongs to the pair in exactly the
+               same way: nothing against the first side, the time against the second,
+               and an optional between-sides pause said as what it is rather than
+               printed where a rest would go. */
             pair && pair.pos === 1 ? `<span class="sm">\u2192 ${esc(pair.letter)}2</span>`
-            : st.rest ? esc(fmtClock(st.rest)) + (pair ? `<br><span class="sm">after pair</span>` : "")
+            : (side && !row0.last && !row0.rest)
+              ? `<span class="sm">\u2192 ${esc(side === "L" ? "R" : "L")}${
+                  row0.gap ? ", " + esc(fmtClock(row0.gap)) + " between" : ""}</span>`
+            : row0.rest ? esc(fmtClock(row0.rest))
+                + ((pair || side) ? `<br><span class="sm">after pair</span>` : "")
             : " "}</td></tr>`;
         /* Each drop, mini-set or burst gets its own row under the set it came off, so the
            work is on the page instead of collapsed into a single line that reads lighter
            than the set actually was. */
-        subSetsFor(e, i).forEach(sub=>{
+        (first ? subSetsFor(e, i) : []).forEach(sub=>{
           body += `<tr class="subrow">
             <td class="c setcell sm">\u21b3 ${esc(sub.label)}</td>
             <td class="c"> </td>
