@@ -234,6 +234,66 @@ console.log("\n6 - THE LOAD LOOKUP IS SLOT-SCOPED, AND SEES A PAIRED SET");
   ck("and of the heavier, paired day, 40", r.onB === 40, String(r.onB));
 }
 
+console.log("\n7 - THE PRE-FILLED LOAD IS THIS DAY'S, NOT THE OTHER DAY'S");
+{
+  /* planLoadPh is what an empty weight box suggests, and since the tick now BANKS a
+     shown-but-unstored value it is no longer a display fallback: a wrong suggestion gets
+     written down. The same movement on two days of a split has two loads, so an unscoped
+     lookup offered whichever day came first in the rotation - tick without typing on the
+     other one and that is the load you logged. */
+  const r = await ev(()=>{
+    const A = DAYS[1], B = DAYS[3], EX = "Smith Machine Squat";
+    DAYS.forEach(d=> S.program[d] = []);
+    S.program[A] = [{name: EX, sets: 3, reps: "6-10", weight: 80, rpe: "7-9", rest:[150,210]}];
+    S.program[B] = [{name: EX, sets: 3, reps: "6-10", weight: 60, rpe: "7-9", rest:[150,210]}];
+    S.sessions = []; S.flags = []; S.planLog = []; S.active = null;
+    S.prefs.barMode = "total"; S.prefs.smithWeight = 25;
+    save();
+    const out = {};
+    [["A", A, 80], ["B", B, 60]].forEach(([tag, wid, want])=>{
+      S.active = null;
+      S.pointer = DAYS.indexOf(wid);
+      startWorkout(wid);
+      const en = S.active.entries.find(x=> nrm(x.name) === nrm(EX));
+      out[tag + "ph"] = planLoadPh(en, null, 0);
+      out[tag + "plan"] = planLoadFor(en, 0);
+      TAB = "workout"; render();
+      const ei = S.active.entries.indexOf(en);
+      const rowEl = [...document.querySelectorAll('.set')].find(d=>
+        d.querySelector(`[data-e="${ei}"][data-s="0"]`));
+      /* Reps typed, load left exactly as offered, then ticked - the user's case. */
+      const rIn = rowEl.querySelector('[data-f="reps"]');
+      rIn.value = "8"; rIn.dispatchEvent(new Event("change"));
+      rowEl.querySelector('.chk').click();
+      out[tag + "logged"] = S.active.entries[ei].sets[0].weight;
+      out[tag + "want"] = want;
+      /* AND WITH NO FROZEN PRESCRIPTION, which is the case the programme fallback is
+         actually for: an entry whose plan carried no load at Start, or one added
+         mid-session. That is where the unscoped lookup bit \u2014 measured on a Legs B
+         session, the box offered Legs A's load \u2014 and it is the reachable one, because
+         the snapshot gets there first whenever there is a snapshot. */
+      delete en.planWeight; delete en.weight;
+      out[tag + "bare"] = planLoadPh(en, null, 1);
+      out[tag + "bareFor"] = planLoadFor(en, 1);
+    });
+    return out;
+  });
+  console.log("    " + JSON.stringify(r));
+  ck("day A's box offers 80", String(r.Aph) === "80", String(r.Aph));
+  ck("and day B's offers 60, not A's 80", String(r.Bph) === "60", String(r.Bph));
+  ck("planLoadFor agrees on A", String(r.Aplan) === "80", String(r.Aplan));
+  ck("and on B", String(r.Bplan) === "60", String(r.Bplan));
+  ck("so ticking without typing logs 80 on day A", String(r.Alogged) === "80",
+     String(r.Alogged));
+  ck("and 60 on day B", String(r.Blogged) === "60", String(r.Blogged));
+  ck("with no frozen prescription, day A still offers its own 80",
+     String(r.Abare) === "80" && String(r.AbareFor) === "80",
+     r.Abare + " / " + r.AbareFor);
+  ck("and day B its own 60, not the first day's 80",
+     String(r.Bbare) === "60" && String(r.BbareFor) === "60",
+     r.Bbare + " / " + r.BbareFor);
+}
+
 console.log(errs.length ? ("\nPAGE ERRORS: "+errs.join(" | ")) : "\nno page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");

@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.8";
+const APP_VERSION = "2026.11.16.9";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -58491,8 +58491,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.8";
+const NEWS_FOR = "2026.11.16.9";
 const NEWS = [
+  {k: "The load your box offers is this day's, not the other day's",
+   s: ["The same movement on two days of a split has two loads \u2014 a Legs A squat at 80 "
+     + "and a Legs B squat at 60 \u2014 and the empty weight box is filled from the plan when "
+     + "the session has no frozen figure of its own. Unscoped, that fallback answered with "
+     + "whichever day came first in the rotation, so a Legs B session could be offered "
+     + "Legs A\u2019s 80.",
+       "For a long time that was a wrong suggestion and nothing more, because a load you "
+     + "did not agree with never got stored. That changed when the tick began banking a "
+     + "number the row was showing: a suggestion wrong by a day is now written down as "
+     + "the load you lifted. So the three lookups behind that box read the day the entry "
+     + "actually belongs to.",
+       "Where a session froze its own prescription at Start \u2014 which is most of the time "
+     + "\u2014 nothing changes: that figure was always right and is still read first."]},
   {k: "The plan and the log have to agree, and the log wins",
    s: ["One audited rear delt fly was planned at 30 lb for about three months while every "
      + "single logged session used 32.5. On 14 November the plan went 30 \u2192 35, reasoned "
@@ -62035,6 +62048,29 @@ function pctWords(p){
        + ((p.src === "estimated" || p.tmSrc === "fromEstimate")
             ? ", estimated from your log" : "");
 }
+/* P0-1 / P1-6 \u2014 WHICH DAY THIS ENTRY BELONGS TO.
+
+   The lookups below fall back to the programme when a session entry carries no frozen
+   prescription of its own, and unscoped that fallback answered with the first day of the
+   rotation holding the name. For a long time that was a display fallback and nothing
+   more. It stopped being one when the tick began banking a shown-but-unstored value: a
+   suggestion that is wrong by a day now gets WRITTEN as the load you lifted. Measured on
+   a Legs B session whose entry had no frozen load, the box offered Legs A's 80 instead of
+   its own 60.
+
+   The day is derived from the entry rather than threaded through every caller, because
+   the entry already knows: it is in the open session, or it is in one of the logged ones.
+   The open-session check covers the hot path. */
+function entryDayOf(en){
+  if(!en) return null;
+  if(S.active && (S.active.entries || []).indexOf(en) >= 0) return S.active.workoutId || null;
+  const ss = S.sessions || [];
+  for(let i = ss.length - 1; i >= 0; i--){
+    const s = ss[i];
+    if(s && (s.entries || []).indexOf(en) >= 0) return s.workoutId || null;
+  }
+  return null;
+}
 function planLoadFor(en, si){
   if(!en || !en.name) return "";
   /* M9 — THE SET'S OWN LOAD, WHERE THE PLAN GAVE IT ONE. A wave prescribes three
@@ -62056,14 +62092,14 @@ function planLoadFor(en, si){
      never reached the box. Programme entries do use `weight`, and a load changed after
      Start is only on the programme, so that is the third place to look. */
   // a percentage plan has no number to copy; it has one to work out
-  const pl = pctLoadFor(en) || pctLoadFor(findProgramEntry(en.name) || {name: en.name});   // slot:todo
+  const pl = pctLoadFor(en) || pctLoadFor(findProgramEntry(en.name, entryDayOf(en)) || {name: en.name});
   if(pl && pl.load != null){
     const net = pl.load - entryBarAdd(en);
     return net > 0 ? String(r1(net)) : "";
   }
   const raw = (en.planWeight != null && en.planWeight !== "") ? en.planWeight
             : (en.weight != null && en.weight !== "") ? en.weight
-            : (findProgramEntry(en.name) || {}).weight;   // slot:todo
+            : (findProgramEntry(en.name, entryDayOf(en)) || {}).weight;
   if(raw == null || raw === "") return "";
   const w = parseFloat(raw);
   if(!isFinite(w)) return "";
@@ -62255,7 +62291,7 @@ function planLoadPh(en, last, si){
        name it, in sentences, where it can be read rather than lifted. */
     const top = topWorkedLast(last);
     if(isFinite(p) && top > 0){
-      const step = progressionStep(findProgramEntry(en.name) || en);   // slot:todo
+      const step = progressionStep(findProgramEntry(en.name, entryDayOf(en)) || en);
       const room = Math.max((step && step.amount) || 0, top * 0.1);
       if(p > top + room + 0.01) return phCap(en, String(r1(top)));
     }
