@@ -26403,7 +26403,7 @@ function reminderHook(wid, ex){
   }catch(e){}
   // a load this app moved, on the first day you meet it
   try{
-    const p = findProgramEntry(nm);
+    const p = findProgramEntry(nm);   // slot:display
     const b = p && p.byApp;
     if(b && b.at && Date.now() - b.at < 30*DAY_MS && b.from != null && b.to != null
        && p.weight != null && parseFloat(p.weight) === parseFloat(b.to)){
@@ -38624,7 +38624,7 @@ function viewBody(){
                said otherwise. It says the number now. */
             /* The flag record files the movement under `ex`; `name` is the finding's
                field and does not survive into it. */
-            const cur = findProgramEntry(f.ex || f.name);
+            const cur = findProgramEntry(f.ex || f.name);   // slot:display
             const from = cur && cur.weight != null ? parseFloat(cur.weight) : NaN;
             const off = isFinite(from) && f.to != null ? Math.round((from - f.to) * 10) / 10 : 0;
             return off > 0 ? "Take " + fmtLoad(off) + " off" : "Lower the weight";
@@ -46016,7 +46016,10 @@ function logFixUndoNow(){
     st.weight = c.was; n++;
   });
   (u.plan || []).forEach(c=>{
-    const e = findProgramEntry(c.name);
+    /* P0-1 \u2014 an undo has to put the load back where it was taken from. `c.wid` is
+       recorded when the change is made; older undo records carry none and fall back to
+       the old behaviour, which is what they were written against. */
+    const e = findProgramEntry(c.name, c.wid || null);
     const t = c.which === "alt" ? (e && e.alt) : e;
     if(t) t.weight = c.was;
   });
@@ -52241,7 +52244,9 @@ function renderSessEditor(s){
       /* If the plan asked for something else and you are now naming that something else,
          this was never a substitution — so the "instead of" note goes with it. */
       if(en.swapFrom && nrm(v) === nrm(en.swapFrom)){ delete en.swapFrom; delete en.swapWhy; }
-      else if(!en.swapFrom && findProgramEntry(was)) en.swapFrom = was;
+      /* P0-1 \u2014 scoped to the session being edited: "was this swapped out of the plan"
+         is a question about THIS day's slot. */
+      else if(!en.swapFrom && findProgramEntry(was, sess && sess.workoutId)) en.swapFrom = was;
       en.name = v;
       /* The implement can differ between the two — a pec deck has no bar, a Smith has a
          carriage — so the stamp is re-taken for the exercise it now is. */
@@ -54316,7 +54321,7 @@ function effortReadOf(entry){
    for a while without anybody having to turn anything on. */
 function effortMismatchFor(name){
   if(!rpeTracked()) return null;
-  const where = findProgramEntryWhere(name);
+  const where = findProgramEntryWhere(name);   // slot:todo
   const e = where && where.e;
   if(!e) return null;                                  // not in the plan: nothing to change
   const planW = parseFloat(e.weight);
@@ -54578,7 +54583,7 @@ function outgrownOptions(name){
   const here = swapSquash(name);
   /* The day this movement sits in: a swap into a slot that day already trains is not a
      swap, it is a duplicate. */
-  const mine = findProgramEntryWhere(name);
+  const mine = findProgramEntryWhere(name);   // slot:todo
   const dayHas = (nm)=>{
     if(!mine || !mine.wid) return false;
     return (S.program[mine.wid] || []).some(e=> e && swapSquash(e.name) === swapSquash(nm));
@@ -55483,7 +55488,7 @@ function restLengthenRefusal(sess, ei, d){
    suggestions with a box next to them — see the flag row. */
 const FADE_REST_ADD = 30;                    // seconds
 function fadeFixFor(d){
-  const cur = findProgramEntry(d.name);
+  const cur = findProgramEntry(d.name);   // slot:todo
   const w = cur && cur.weight != null ? cur.weight : d.weight;
   const step = progressionStep(cur || {name:d.name, weight:w}).amount || stepInUnits(5);
   return {
@@ -56008,7 +56013,7 @@ function toohardTarget(p){
   if(isFinite(cited) && cited > 0){
     /* H4 \u2014 the same arithmetic as the card, so the number on the button and the number
        in the sentence cannot disagree. */
-    const prog = findProgramEntry(p.name);
+    const prog = findProgramEntry(p.name);   // slot:todo
     const range = repRange((prog || {}).reps) || repRange(d.reps);
     let suggest = range ? reachableLoadFor(prog || {name: p.name}, d.at && {
       load: parseFloat(d.at.load != null ? d.at.load : d.at.w), raw: parseFloat(d.at.w),
@@ -56032,7 +56037,7 @@ function progressionApplied(p){
   if(p.kind !== "up" && p.kind !== "toohard" && p.kind !== "catchup") return false;
   if(p.applied) return true;
   if(to == null) return false;
-  const e = findProgramEntry(p.name);
+  const e = findProgramEntry(p.name);   // slot:todo
   if(!e || e.weight == null) return false;
   const now = parseFloat(e.weight), t = parseFloat(to);
   return !isNaN(now) && !isNaN(t) && now === t;
@@ -56637,14 +56642,14 @@ function prescribedLoadFor(entry){
   if(!entry) return null;
   const src = (entry.weight != null && entry.weight !== "") ? entry.weight
             : (entry.planWeight != null && entry.planWeight !== "") ? entry.planWeight
-            : (findProgramEntry(entry.name) || {}).weight;
+            : (findProgramEntry(entry.name) || {}).weight;   // slot:todo
   if(src == null || src === "") return null;
   const w = parseFloat(src);
   return isNaN(w) ? null : w;
 }
 function rebuildFor(entry){
   if(!entry) return null;
-  const src = entry.rebuild ? entry : findProgramEntry(entry.name);
+  const src = entry.rebuild ? entry : findProgramEntry(entry.name);   // slot:todo
   const rb = src && src.rebuild;
   if(!rb || !rb.at || rb.from == null) return null;
   if(Date.now() - rb.at > REBUILD_MAX_DAYS * DAY_MS) return null;
@@ -56661,7 +56666,7 @@ function rebuildFor(entry){
      the programme's own row when neither is to hand. */
   const src2 = (entry.weight != null && entry.weight !== "") ? entry.weight
              : (entry.planWeight != null && entry.planWeight !== "") ? entry.planWeight
-             : (src && src !== entry ? src.weight : (findProgramEntry(entry.name) || {}).weight);
+             : (src && src !== entry ? src.weight : (findProgramEntry(entry.name) || {}).weight);   // slot:todo
   const w = (src2 == null || src2 === "") ? null : parseFloat(src2);
   if(w != null && !isNaN(w) && rb.weight != null && Math.abs(w - rb.weight) > 0.01) return null;
   return rb;
@@ -56669,7 +56674,10 @@ function rebuildFor(entry){
 // Called at finish: did this session put the top of the range back at the new load?
 function clearRebuiltEntries(sess){
   (sess.entries || []).forEach(en=>{
-    const e = findProgramEntry(en.name);
+    /* P0-1 \u2014 the slot this session trained, not the first day carrying the name. This
+       clears a rebuild flag off a plan entry, so landing on the wrong day would retire
+       the other day's rebuild and leave this one's standing for ever. */
+    const e = findProgramEntry(en.name, sess && sess.workoutId);
     const rb = e && e.rebuild;
     if(!rb || rb.top == null) return;
     const done = (en.sets || []).filter(st=> st.done || st.reps);
@@ -56739,7 +56747,7 @@ function deloadHoldNote(name, to){
   if(!deloadActive()) return null;
   const v = parseFloat(to);
   if(!isFinite(v)) return null;
-  const pe = findProgramEntry(name);
+  const pe = findProgramEntry(name);   // slot:display
   const from = (pe && pe.weight != null && pe.weight !== "") ? parseFloat(pe.weight) : NaN;
   if(isFinite(from) && v < from) return null;
   const left = deloadDaysLeft();
@@ -57377,7 +57385,7 @@ function setTmFor(name, w, extra){
 /* Does this lift want a training max at all? Only one run on a wave, or one whose plan
    writes its percentages off a TM. Everything else is asking for a one-rep max. */
 function tmWanted(name){
-  const e = findProgramEntry(name);
+  const e = findProgramEntry(name);   // slot:todo
   if(e && waveFor(e)) return true;
   const spec = e ? pctSpecFor(e) : null;
   return !!(spec && spec.of === "tm");
@@ -59714,12 +59722,16 @@ function calibrateHTML(e){
     then log what actually worked. That becomes the starting load.
   </div>`;
 }
-function setCalibratedLoad(name, w){
-  const e = findProgramEntry(name);
+function setCalibratedLoad(name, w, wid){
+  /* P0-1 \u2014 this WRITES a starting load, so it has to write it to the slot that asked
+     for one. The same movement on two days both start at nothing until each is
+     calibrated. */
+  const where = findProgramEntryWhere(name, wid);
+  const e = where && where.e;
   if(!e) return false;
   e.weight = w;
   delete e.calibrate;
-  logPlanChange("weight", null, e.name, ["calibrated to " + fmtLoad(w)],
+  logPlanChange("weight", where.wid, e.name, ["calibrated to " + fmtLoad(w)],
     {note: "First performance: starting load set from a feeler set."});
   save(); queueSync();
   return true;
@@ -62044,14 +62056,14 @@ function planLoadFor(en, si){
      never reached the box. Programme entries do use `weight`, and a load changed after
      Start is only on the programme, so that is the third place to look. */
   // a percentage plan has no number to copy; it has one to work out
-  const pl = pctLoadFor(en) || pctLoadFor(findProgramEntry(en.name) || {name: en.name});
+  const pl = pctLoadFor(en) || pctLoadFor(findProgramEntry(en.name) || {name: en.name});   // slot:todo
   if(pl && pl.load != null){
     const net = pl.load - entryBarAdd(en);
     return net > 0 ? String(r1(net)) : "";
   }
   const raw = (en.planWeight != null && en.planWeight !== "") ? en.planWeight
             : (en.weight != null && en.weight !== "") ? en.weight
-            : (findProgramEntry(en.name) || {}).weight;
+            : (findProgramEntry(en.name) || {}).weight;   // slot:todo
   if(raw == null || raw === "") return "";
   const w = parseFloat(raw);
   if(!isFinite(w)) return "";
@@ -62101,7 +62113,7 @@ function topWorkedLast(last){
    fact and the ordinary rule takes over. A number you typed yourself is untouched: this
    only ever speaks for changes stamped `byApp`. */
 function appSetLoadPending(name){
-  const pe = findProgramEntry(name);
+  const pe = findProgramEntry(name);   // slot:display
   const b = pe && pe.byApp;
   if(!b || !b.at || b.to == null || b.to === "") return null;
   const to = parseFloat(b.to);
@@ -62243,7 +62255,7 @@ function planLoadPh(en, last, si){
        name it, in sentences, where it can be read rather than lifted. */
     const top = topWorkedLast(last);
     if(isFinite(p) && top > 0){
-      const step = progressionStep(findProgramEntry(en.name) || en);
+      const step = progressionStep(findProgramEntry(en.name) || en);   // slot:todo
       const room = Math.max((step && step.amount) || 0, top * 0.1);
       if(p > top + room + 0.01) return phCap(en, String(r1(top)));
     }
