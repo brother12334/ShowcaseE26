@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.2";
+const APP_VERSION = "2026.11.16.3";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -9079,7 +9079,7 @@ function setSide(en, si){
   if(!en || !en.startSide) return null;
   const st = (en.sets || [])[si];
   if(st && (st.side === "L" || st.side === "R")) return st.side;
-  return sideForSet(en.startSide, si);
+  return sideForSet(en.startSide, si);                      // sides:adapter
 }
 // Short tag for the set row: R / L, or R▸ / L▸ for "that arm is the one on top".
 function sideTag(style, side){
@@ -15099,7 +15099,8 @@ function bestEverFor(exName, upToEntry, upToSet){
   (S.sessions || []).forEach(s=> (s && s.entries || []).forEach(en=>{
     if(nrm(en.name)!==key) return;
     const add = entryTrendAdd(en, s && s.date);
-    en.sets.forEach(st=> consider(st, add));
+    // P1-7 - through the adapter, or a paired movement never sets a record
+    sideSetsWorking(en).forEach(x=> consider(x.ref, add));
   }));
   /* WHAT THE HISTORY ALONE HELD, remembered before today's sets are folded in. `seen`
      cannot answer "have you done this before" once the live session has contributed to
@@ -16006,7 +16007,7 @@ function restNextLineHTML(){
   if(!nx) return "";
   const rx = setPrescription(nx.entry, nx.si);
   const target = rx.reps != null ? rx.reps : (repRange(nx.entry.reps) ? nx.entry.reps : null);
-  const side = setSide(nx.entry, nx.si);
+  const side = setSide(nx.entry, nx.si);                    // sides:display
   const en = nx.entry;
   const num = v=>{ const t = String(v == null ? "" : v).trim();
                    return t && isFinite(parseFloat(t)) ? t : ""; };
@@ -19366,6 +19367,9 @@ function isWorkingSet(st){ return (parseFloat(st && st.reps)||0) > 0; }
    not rewritten: they alternate one side per set, L, R, L, R. sideSets() turns either
    shape into the same canonical list, and every rule, the report and the CSV go through
    it rather than reading `sides` or calling setSide() for themselves. */
+/* SIDE-ADAPTER-BEGIN — the only code that may touch a side directly. Everything
+   outside this region goes through sideSets(); see tests/specs/sideall.mjs, which fails
+   if anything reads around it without declaring itself. */
 function entryPerSide(en){
   if(!en) return false;
   if(en.perSide) return true;
@@ -19427,6 +19431,7 @@ function pairDone(en, si){
   if(!have.length) return true;
   return have.every(sd=> st.sides[sd].done);
 }
+/* SIDE-ADAPTER-END. Below here, every rule goes through sideSets(). */
 
 /* =====================================================================
    EFFECTIVE SETS
@@ -35135,7 +35140,7 @@ function setListHTML(e){
   const parts = [];
   (e.sets||[]).forEach((st,i)=>{
     if(!st.reps) return;
-    const side = setSide(e, i);
+    const side = setSide(e, i);                             // sides:display
     const chip = side
       ? `<i class="side-chip ${side==="L"?"sc-l":"sc-r"}" style="margin-right:5px">${esc(sideTag(e.altStyle||"side", side))}</i>`
       : "";
@@ -35612,7 +35617,7 @@ function altHintHTML(style, startSide, nSets, exName){
   const n = Math.max(1, Math.min(8, parseInt(nSets,10) || 3));
   const seq = [];
   for(let i=0;i<n;i++){
-    const s = sideForSet(startSide, i);
+    const s = sideForSet(startSide, i);                     // sides:display
     seq.push(`<i class="side-chip ${s==="L"?"sc-l":"sc-r"}">${esc(sideTag(style, s))}</i>`);
   }
   const lead = style === "cross"
@@ -35639,7 +35644,7 @@ function altHintHTML(style, startSide, nSets, exName){
 function sideChip(en, si){
   if(!en || !en.startSide) return "";
   const style = en.altStyle || "side";
-  const side = setSide(en, si);
+  const side = setSide(en, si);                             // sides:display
   if(!side) return "";
   /* A BUTTON, not a label. It is the only place in a session where "which arm was that"
      can be corrected, and it is on the row you are typing into. */
@@ -35831,11 +35836,14 @@ function weakerSideRepsThisSession(exName, weakSide){
   if(!a || !weakSide) return null;
   let best = null;
   (a.entries || []).forEach(en=>{
-    if(nrm(en.name) !== nrm(exName) || !en.startSide) return;
-    (en.sets || []).forEach((st, i)=>{
-      if(setSide(en, i) !== weakSide) return;
-      const r = parseFloat(st.reps) || 0;
-      if(r > 0 && (st.done || st.reps)) best = r;    // the most recent one wins
+    if(nrm(en.name) !== nrm(exName)) return;
+    /* P1-7 — through the adapter, so the cap works on a paired set as well as on a
+       legacy alternating one. This is a rule, not a label: it is the number the other
+       side is about to be held to. */
+    sideSetsWorking(en).forEach(x=>{
+      if(x.side !== weakSide) return;
+      const r = parseFloat(x.reps) || 0;
+      if(r > 0) best = r;                           // the most recent one wins
     });
   });
   return best;
@@ -35935,7 +35943,11 @@ function setPrescription(entry, si){
   /* Then the weaker-side rule, which overrides both, because it is a cap on the set
      rather than a description of how to take it. */
   if(asymActiveFor(entry) && entry.startSide){
-    const side = setSide(entry, si);
+    /* P1-7 — the side this set belongs to, read through the adapter. On a paired entry
+       one set carries both sides, so a cap applies only where the set is a single side;
+       sideSets() is what knows which. */
+    const mine = sideSets(entry).filter(x=> x.si === si);
+    const side = mine.length === 1 ? mine[0].side : null;
     const st = sideStats(entry.name);
     if(side && st.ok && st.stronger && side === st.stronger){
       const cap = asymCap(entry.name, st);
@@ -46789,12 +46801,12 @@ function bind(){
     const en = S.active && S.active.entries[ei];
     const st = en && en.sets[si];
     if(!st) return;
-    const now = setSide(en, si);
+    const now = setSide(en, si);                            // sides:write
     st.side = now === "L" ? "R" : "L";
     // back to the alternation rather than a hand-set value that agrees with it
-    if(st.side === sideForSet(en.startSide, si)) delete st.side;
+    if(st.side === sideForSet(en.startSide, si)) delete st.side;   // sides:write
     save();
-    const side = setSide(en, si);
+    const side = setSide(en, si);                           // sides:write
     b.textContent = sideTag(en.altStyle || "side", side);
     b.classList.toggle("sc-l", side === "L");
     b.classList.toggle("sc-r", side === "R");
@@ -53958,9 +53970,13 @@ function atTopLoadSets(entry){
   const add = entryBarAdd(entry);
   const warms = entryWarmups(entry);
   const all = [];
-  (entry && entry.sets || []).forEach((st, i)=>{
-    if(!isWorkingSet(st) || warms[i]) return;
-    all.push({st, i, w: setLoad(st, add)});
+  /* P1-7 — through the adapter, so each side of a pair is one entry in the list. This
+     returned null for a paired entry, which threw in its callers and left
+     progressionFor() with no verdict at all: a movement trained one limb at a time could
+     never earn a load increase. `side` is carried so a caller can tell them apart. */
+  sideSetsWorking(entry).forEach(x=>{
+    if(warms[x.si]) return;
+    all.push({st: x.ref, i: x.si, side: x.side || null, w: setLoad(x.ref, add)});
   });
   if(!all.length) return null;
   const top = all.reduce((m, x)=> Math.max(m, x.w), 0);
@@ -54371,7 +54387,10 @@ function outgrownStuck(name, range){
 }
 function progressionFor(sess, entry){
   const range = repRange(entry.reps);
-  const ws = (entry.sets || []).filter(isWorkingSet);
+  /* P1-7 — through the adapter. A paired entry's sets hold no reps of their own, so
+     this filter emptied and the function returned before reaching any verdict: a
+     movement trained one limb at a time could never earn a load increase. */
+  const ws = sideSetsWorking(entry).map(x=> x.ref);
   if(!ws.length) return null;
   const planned = findProgramEntry(entry.name, sess && sess.workoutId);
   const target = planned || entry;
@@ -54769,8 +54788,12 @@ function bestOf(entry, dateStr){
      is asked on the normalised load. Written on the raw number, a dip that started
      counting the lifter read as a 140 lb improvement and silently reset a real stall. */
   const add = entryTrendAdd(entry, dateStr);
-  (entry.sets || []).forEach(st=>{
-    if(!isWorkingSet(st)) return;
+  /* P1-7 — through the adapter. A paired set holds no reps of its own, so filtering raw
+     sets here returned {w:0, reps:0} for every session logged in the new shape — and
+     updateStalls() then compared nothing against nothing, found no improvement, and
+     advanced a stall count on a session that had gone perfectly well. */
+  sideSetsWorking(entry).forEach(x=>{
+    const st = x.ref;
     const sw = setLoad(st, add), sr = parseFloat(st.reps) || 0;
     if(sw > w || (sw === w && sr > reps)){ w = sw; reps = sr; }
   });
@@ -58184,8 +58207,25 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.2";
+const NEWS_FOR = "2026.11.16.3";
 const NEWS = [
+  {k: "A one-limb movement can earn weight, hold a record, and not be read as stalled",
+   s: ["The side-pairing work left five readers looking at raw sets rather than through "
+     + "the one adapter, and the cost of that is not a wrong number \u2014 it is a blind "
+     + "one. A paired set carries no reps of its own; its sides do. So a rule that "
+     + "filtered raw sets saw an entry with nothing in it, and said so confidently.",
+       "What that meant in practice: a movement trained one limb at a time could never "
+     + "earn a load increase, because the progression check found no sets to judge. It "
+     + "could never set a record. And worst, the stall check compared nothing against "
+     + "nothing, found no improvement, and advanced a stall count on a session that had "
+     + "gone perfectly well \u2014 three of those and it would have cut a set from a "
+     + "movement that was progressing.",
+       "All five now read through the adapter, and so does the cap that holds your "
+     + "stronger side to the weaker one. There is also a test that fails if anything "
+     + "else ever reads around it: every direct use has to declare itself as drawing a "
+     + "label or as the one button that sets a side by hand. The report and CSV layout "
+     + "is the one reader still outside, and it is named in that test so it cannot be "
+     + "quietly forgotten."]},
   {k: "A set of a one-limb movement counts as one set, not two",
    s: ["Two sets of a single-arm cable pulldown is one set per side. Element 26 was "
      + "counting it as two, so every volume figure, floor and ceiling for a muscle "
@@ -64208,7 +64248,12 @@ function buildReportInner(){
          table's remaining cells slid up a line each. */
       const rowCount = sets.reduce((t, x)=> t + 1 + subSetsFor(e, x.i).length, 0);
       sets.forEach(({st,i}, row)=>{
-        const side = setSide(e, i);
+        /* P1-7 — sides:todo. The report and CSV still number rows by SET, so a pair
+           prints as two numbered rows rather than one set number with an L row and an R
+           row beneath it. Restructuring this table is the report half of P1-7; until
+           then this is the one reader left outside the adapter, and sideall.mjs counts
+           it so that it cannot be quietly forgotten. */
+        const side = setSide(e, i);                         // sides:todo
         const onThisSet = techFor(e, i, e.sets.length).map(t=> TECHNIQUES[t.k].badge);
         body += `<tr${pair?` class="ssrow"`:""}>${row===0?`<td rowspan="${rowCount}">${
           pair?`<span class="sstag">${esc(pair.letter + pair.pos)}</span> `:""}<b>${esc(e.name)}</b>${
