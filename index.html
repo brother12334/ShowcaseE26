@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.7";
+const APP_VERSION = "2026.11.16.8";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -50705,8 +50705,39 @@ function planRevertable(c){
 }
 /* `name` is always the name the exercise ends up with, so a renamed movement's changes
    still come back from planChangesFor() under the name you look it up by. */
+/* P1-6 — A ROW THAT CHANGED NOTHING IS NOT A CHANGE.
+
+   The audited change log carries "145 → 145", "90 → 90", "45 → 45", and Aug 4 holds the
+   same 145 → 145 twice. Rows like that are not merely untidy: the history is what
+   anybody reads to find out why a weight moved, and a file where most entries describe
+   nothing teaches people to stop reading it. Both are refused at the door, so no caller
+   has to remember. */
+const PLAN_DUPE_MS = 10 * 60 * 1000;
+function planChangeIsNoOp(changes){
+  const list = (changes || []).map(c=> String(c == null ? "" : c));
+  if(!list.length) return false;
+  return list.every(c=>{
+    const m = c.match(/^\s*(.+?)\s*(?:\u2192|->)\s*(.+?)\s*$/);
+    if(!m) return false;                      // not a "from to" row at all; keep it
+    const a = m[1].trim(), b = m[2].trim();
+    if(a === b) return true;
+    const na = parseFloat(a), nb = parseFloat(b);
+    return isFinite(na) && isFinite(nb) && Math.abs(na - nb) < 0.0001;
+  });
+}
 function logPlanChange(kind, wid, name, changes, extra){
   if(!Array.isArray(S.planLog)) S.planLog = [];
+  if(planChangeIsNoOp(changes)) return;
+  /* The same row again, within the window a double tap or a re-run lives in. */
+  const sig = kind + "|" + (wid || "") + "|" + String(name || "") + "|"
+            + JSON.stringify(changes || []);
+  const now0 = Date.now();
+  for(let i = S.planLog.length - 1; i >= 0; i--){
+    const r = S.planLog[i];
+    if(!r || now0 - (r.at || 0) > PLAN_DUPE_MS) break;
+    if((r.kind + "|" + (r.wid || r.day || "") + "|" + String(r.name || "") + "|"
+        + JSON.stringify(r.changes || [])) === sig) return;
+  }
   S.planLog.push(Object.assign({
     at: Date.now(), date: todayStr(), day: wid, kind,
     name: String(name||""), changes: changes || []
@@ -53861,16 +53892,25 @@ function loggedLoadRecently(name, days){
       (en.sets || []).some(st=> (parseFloat(st && st.weight) || 0) > 0));
   });
 }
-function lastLoggedLoad(name){
+/* P1-6 — THE LAST LOAD ACTUALLY LIFTED, for a slot when one is named.
+
+   Progression is supposed to start from what you lifted, not from what the plan says you
+   lift. The audited rear delt was planned at 30 for three months while every session
+   used 32.5, and the same movement on two days of a split has two different loads — so
+   "the last load" without a day is a question with two right answers. Through the
+   adapter, because a paired set holds its loads on its sides. */
+function lastLoggedLoad(name, wid){
   const key = nrm(name);
   if(!key) return null;
   for(let i = (S.sessions || []).length - 1; i >= 0; i--){
     const s = S.sessions[i];
+    if(!s) continue;
+    if(wid && s.workoutId !== wid) continue;
     let found = null;
-    (s && s.entries || []).forEach(en=>{
+    (s.entries || []).forEach(en=>{
       if(nrm(en.name) !== key) return;
-      (en.sets || []).forEach(st=>{
-        const w = parseFloat(st && st.weight) || 0;
+      sideSetsWorking(en).forEach(x=>{
+        const w = parseFloat(x.weight) || 0;
         if(w > 0 && (found == null || w > found)) found = w;
       });
     });
@@ -54659,13 +54699,36 @@ function progressionFor(sess, entry){
     return (t == null || !e) ? true : e <= t + RPE_TOL;
   });
   /* The last set at the load is at the top of the range, and none of the ones before it
-     is more than a rep short of it. */
-  const clearedTop = reps >= range[1] && atSets.every(x=> (parseFloat(x.st.reps) || 0) >= range[1] - 1);
+     is more than a rep short of it.
+
+     P1-6 — AND OF THE RANGE THE SLOT PRESCRIBES NOW, not only the one this session was
+     frozen with. A session is a snapshot and that is right: a range that got harder
+     mid-block must not retroactively fail sets already done against the old one. But a
+     verdict that CHANGES THE PLAN has to be justified against the plan's own numbers, and
+     on Nov 14 in the audited log it was not: the rear delt slot asked 12-15, the session
+     carried an older 10-12, twelve reps cleared the stale top, and the plan went 30 -> 35
+     citing a range the log had never reached. Both have to be satisfied, so the snapshot
+     still protects you and a stale top can no longer buy a raise. */
+  const planRange = repRange(planned && planned.reps);
+  const clearsRange = rr2 => reps >= rr2[1] && atSets.every(x=> (parseFloat(x.st.reps) || 0) >= rr2[1] - 1);
+  const clearedTop = clearsRange(range) && (!planRange || clearsRange(planRange));
   /* L3. What to call these sets in a sentence, so the message is about the sets the
      verdict was actually read off. */
   const atWord = atSets.length > 1
     ? "every set at " + fmtLoad(isNaN(load) ? null : load)
     : "the set at " + fmtLoad(isNaN(load) ? null : load);
+  /* P1-6 — WHICH SET THIS WAS READ OFF. A change row that says "last set cleared the top
+     of the range" and cannot name the set is unauditable, which is how the Nov 14 row
+     survived three months of disagreement between the plan and the log. */
+  const trigger = (()=>{
+    const lastAt = atSets[atSets.length - 1];
+    if(!lastAt) return null;
+    return {sessionId: sess && sess.id, date: sess && sess.date,
+            set: (lastAt.i == null ? 0 : lastAt.i) + 1,
+            side: lastAt.side || null,
+            weight: lastAt.w, reps: parseFloat(lastAt.st.reps) || 0,
+            rpe: parseFloat(lastAt.st.rpe) || null};
+  })();
   const shortOf = atSets.filter(x=> (parseFloat(x.st.reps) || 0) < range[1] - 1).length;
 
   /* A NIGGLE HOLDS THE WEIGHT. You cleared the top of the range and you did it at the
@@ -54826,6 +54889,8 @@ function progressionFor(sess, entry){
     const stuckOpts = stuckAt ? outgrownOptions(entry.name) : [];
     if(!(isFinite(planW) && to != null && parseFloat(to) <= planW)) return {
       name: entry.name, kind: "up", from, to, step,
+      /* P1-6 \u2014 the set this was read off, so the change row can name it. */
+      trigger,
       outgrown: stuckOpts.length ? {load: stuckAt.load, n: stuckAt.n, opts: stuckOpts} : null,
       overCap: over && range[1] >= repExtMaxFor(entry.name) ? Math.round(pctJump * 1000) / 10 : null,
       endsStretch: !!already,
@@ -56515,7 +56580,13 @@ function applyProgression(name, to, why, reason, opts){
              from: from, to: v, why: reason ? String(reason) : null};
   logPlanChange("weight", where.wid, e.name,
     [fmtLoad(from) + " → " + fmtLoad(v)],
-    {undo: undo, note: why ? why
+    {undo: undo,
+     /* P1-6 — WHICH SET EARNED THIS, carried from the verdict. A row that says the top
+        of the range was cleared and cannot name the set is unauditable, which is how a
+        rear delt raise citing a range the log had never reached went unnoticed for
+        three months. */
+     trigger: (opts && opts.trigger) || undefined,
+     note: why ? why
       : down ? "Load reduced to a reachable one for the prescribed rep range."
       : "Double progression: last set cleared the top of the rep range at target RPE."
         + (rr ? " Rebuild from " + rr[0] + " reps at the new load." : "")});
@@ -58412,8 +58483,35 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.7";
+const NEWS_FOR = "2026.11.16.8";
 const NEWS = [
+  {k: "The plan and the log have to agree, and the log wins",
+   s: ["One audited rear delt fly was planned at 30 lb for about three months while every "
+     + "single logged session used 32.5. On 14 November the plan went 30 \u2192 35, reasoned "
+     + "\u201clast set cleared the top of the range\u201d \u2014 and that set was 12 reps against a "
+     + "range topping out at 15. The trigger was not supported by the log it claimed to "
+     + "be reading.",
+       "The session had been frozen with an older range of 10\u201312, and twelve reps clears "
+     + "that. Freezing is right: a range that gets harder mid-block must not retroactively "
+     + "fail sets already done against the old one. But a verdict that CHANGES your plan "
+     + "has to be justified against the plan\u2019s own numbers, so now it has to clear both. "
+     + "Replaying that day, the answer becomes \u201cyour plan should say 32.5\u201d \u2014 catching up "
+     + "to what you lift \u2014 rather than a raise to 35 nobody earned.",
+       "Every progression row now records WHICH set earned it: the session, the set "
+     + "number, its load, reps and effort. A row that claims the top of a range was "
+     + "cleared and cannot name the set is unauditable, which is how that one went "
+     + "unnoticed for three months.",
+       "A plan that has merely drifted is raised once, after two sessions above it in a "
+     + "row \u2014 one heavier day is not a drifted plan \u2014 and answering it stops the asking "
+     + "until the figure changes. A load Element 26 itself cut is explained on the first "
+     + "session instead: you are working above a number the app chose, and you already "
+     + "have a reason to ask why.",
+       "And a change that changed nothing is no longer written down. The audited log is "
+     + "full of \u201c145 \u2192 145\u201d, \u201c90 \u2192 90\u201d, \u201c45 \u2192 45\u201d, with one day carrying the same "
+     + "no-op twice. Those are refused at the door now, along with the identical row "
+     + "written twice inside a quarter of an hour. The history is what anybody reads to "
+     + "find out why a weight moved, and a file where most entries describe nothing "
+     + "teaches people to stop reading it."]},
   {k: "Per side in the plan, an extra set for the weaker one, and a report that reads right",
    s: ["Your plan now says \u201c3\u00d78-12 per side\u201d on a one-limb movement, because that is "
      + "what three sets of it has always meant. The number has not changed; the app has "
@@ -60013,6 +60111,23 @@ function openBarModeConvert(to, from){
     toast(n + " set" + (n === 1 ? "" : "s") + " rewritten as " + word, "good");
   };
   return true;
+}
+/* P1-6 — WHAT THE PLAN SHOWS YOU, AND WHAT IT MEANS ON THE BAR.
+
+   In the audited log several Smith prescriptions sat exactly 25 lb — one carriage — away
+   from what was logged: flat bench planned 230 against 105 logged, shoulder press cut to
+   60 against 75. A prescription and a log written in different conventions describe
+   different lifts, and the gap being exactly a bar is the signature of it. These two say
+   which is which, so a screen can print the number somebody will actually dial in and a
+   rule can compare like with like. */
+function prescribedLoadShown(e){
+  const w = parseFloat(e && e.weight);
+  return isFinite(w) ? w : null;
+}
+function prescribedTrueLoad(e){
+  const w = prescribedLoadShown(e);
+  if(w == null) return null;
+  return Math.round((w + barAddendFor(e && e.name)) * 10) / 10;
 }
 function barAddendFor(name){
   return trainPrefs().barMode === "total" ? 0 : implementWeight(name);
@@ -62141,25 +62256,72 @@ function planLoadPh(en, last, si){
    Only when the gap is real: the last session's top working load above the prescription,
    with reps that reached the bottom of the range, so one mistyped set cannot make the
    app announce a raise nobody earned. */
+/* P1-6 — WHAT THIS SLOT HAS ACTUALLY BEEN LIFTING, over its last few sessions.
+
+   One session above the plan is a heavier day. Two in a row is a plan that has stopped
+   describing what you lift — the audited rear delt sat at 30 for about three months
+   while every single session used 32.5 — and that is the point at which saying so is
+   worth a line on the screen. Returns the load only when the most recent runs agree. */
+const PLAN_DRIFT_SESSIONS = 2;
+function planDriftLoad(name, wid, plan, rr, runs){
+  const need = runs || PLAN_DRIFT_SESSIONS;
+  const key = nrm(name);
+  const tops = [];
+  for(let i = (S.sessions || []).length - 1; i >= 0 && tops.length < need; i--){
+    const s = S.sessions[i];
+    if(!s || (wid && s.workoutId !== wid && !sharedAcrossDays(name))) continue;
+    let top = 0, seen = false;
+    (s.entries || []).forEach(en2=>{
+      if(nrm(en2.name) !== key) return;
+      seen = true;
+      sideSetsWorking(en2).forEach(x=>{
+        const w = parseFloat(x.weight) || 0, r = parseFloat(x.reps) || 0;
+        if(!(w > 0) || !(r > 0)) return;
+        if(rr && r < rr[0]) return;        // it did not reach the range, so it proves nothing
+        if(w > top) top = w;
+      });
+    });
+    if(seen) tops.push(top);
+  }
+  if(tops.length < need) return 0;
+  if(!tops.every(t=> t > plan + 0.01)) return 0;
+  return tops[0];
+}
+/* Said once per slot per figure. "Your plan should say 32.5" is worth one line, not one
+   every session for three months, and a NEW figure is a new thing to say. */
+function planDriftKey(name, wid, w){
+  return nrm(name) + "|" + (wid || "") + "|" + (Math.round(Number(w) * 10) / 10);
+}
+function planDriftAcked(name, wid, w){
+  return !!(S.planAck && S.planAck[planDriftKey(name, wid, w)]);
+}
+function planDriftAck(name, wid, w){
+  if(!S.planAck || typeof S.planAck !== "object") S.planAck = {};
+  S.planAck[planDriftKey(name, wid, w)] = Date.now();
+  save();
+}
 function planBehindLineHTML(en){
   if(!en || !en.name) return "";
-  const p = findProgramEntry(en.name);
+  const wid = (S.active && S.active.workoutId) || null;
+  const p = findProgramEntry(en.name, wid);
   if(!p || p.weight == null || p.weight === "") return "";
   const plan = parseFloat(p.weight);
   if(!isFinite(plan) || plan <= 0) return "";
-  const l = lastEntryFor((S.active && S.active.workoutId) || null, en.name,
-                         sharedAcrossDays(en.name), null);
-  if(!l || !Array.isArray(l.sets)) return "";
   const rr = repRange(p.reps);
-  let top = 0;
-  l.sets.forEach(st=>{
-    if(!isWorkingSet(st)) return;
-    const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
-    if(!(w > 0) || !(r > 0)) return;
-    if(rr && r < rr[0]) return;            // it did not reach the range, so it proves nothing
-    if(w > top) top = w;
-  });
+  /* P1-6 \u2014 TWO SESSIONS FOR ORDINARY DRIFT, ONE WHEN THE APP ITSELF CUT THE LOAD.
+
+     "Your plan should say what you lift" is a suggestion, and one heavier day is not
+     evidence for it: that is why the audited rear delt needed two sessions in a row
+     before this line would appear. A load the APP lowered is a different statement. You
+     are working above a number Element 26 chose for you and you already have a reason to
+     ask why, so making you train another session before being told would be withholding
+     the answer rather than waiting for evidence. */
+  const appCut = !!(p.byApp && isFinite(parseFloat(p.byApp.to))
+                    && isFinite(parseFloat(p.byApp.from))
+                    && parseFloat(p.byApp.to) < parseFloat(p.byApp.from));
+  const top = planDriftLoad(en.name, wid, plan, rr, appCut ? 1 : PLAN_DRIFT_SESSIONS);
   if(!(top > plan + 0.01)) return "";
+  if(planDriftAcked(en.name, wid, top)) return "";
   /* IS THERE ACTUALLY A RAISE WAITING? The first version of this line said "the grade
      card offers the raise" unconditionally, and that is only true when the last session
      EARNED one. Work above your plan without clearing the top of the rep range — which

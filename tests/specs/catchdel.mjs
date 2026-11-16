@@ -22,12 +22,18 @@ const setup = ()=> p.evaluate(()=>{
   S.splitId=DEFAULT_SPLIT; applySplit();
   const wid=ROTATION[0];
   S.program[wid]=[{name:"Incline Smith Machine Bench Press", sets:2, reps:"9-13", weight:85}];
-  const t=Date.now()-9*86400e3;
-  S.sessions=[{id:"s1", workoutId:wid, date:new Date(t).toLocaleDateString("en-CA"),
-    startedAt:t, finishedAt:t+3600e3, feel:4,
+  /* P1-6 \u2014 TWO sessions above the plan, not one. One heavier day is not evidence that
+     the plan has drifted, so the "plan is behind" line now waits for a second (an app-made
+     cut is the exception and this is not one). This spec is about what the line and its
+     button do DURING A DELOAD, so the fixture has to get far enough for the line to
+     appear at all; both sessions are the same lift at the same loads. */
+  const t=Date.now()-9*86400e3, t0=Date.now()-13*86400e3;
+  const mk=(id, at)=>({id, workoutId:wid, date:new Date(at).toLocaleDateString("en-CA"),
+    startedAt:at, finishedAt:at+3600e3, feel:4,
     entries:[{name:"Incline Smith Machine Bench Press", barAdd:0, sets:[
       {weight:"90", reps:"10", rpe:"7", done:true},
-      {weight:"95", reps:"11", rpe:"8", done:true}]}]}];
+      {weight:"95", reps:"11", rpe:"8", done:true}]}]});
+  S.sessions=[mk("s0", t0), mk("s1", t)];
   S.deload={startedAt:Date.now()-2*86400e3, endedAt:null, reason:"manual"};
   S.active=null; save();
   return {planned: findProgramEntry("Incline Smith Machine Bench Press").weight,
