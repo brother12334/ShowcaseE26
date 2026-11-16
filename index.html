@@ -2069,6 +2069,7 @@ button.side-chip.sc-set::after{
 .hn-pr{color:var(--acc);border-color:var(--acc-line);background:var(--acc-soft)}
 .hn-best{color:var(--ok);border-color:rgba(74,147,88,.4);background:rgba(74,147,88,.09)}
 .hn-plain,.hn-top{color:var(--faint)}
+.hn-off{color:var(--faint);border-style:dashed}
 .sess .detail .exline{margin-bottom:8px;font-size:var(--fs-4)}
 .sess .detail .exline .num{color:var(--dim);font-size:var(--fs-3)}
 
@@ -7224,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.14";
+const APP_VERSION = "2026.11.16.15";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -43190,6 +43191,12 @@ function weekStartStr(dstr){
    when there is genuinely nothing to say, which on a new profile is most of them. */
 function sessNotables(s, ctx){
   const out = [];
+  /* P2-11 \u2014 SAID ON THE ROW, because a session Element 26 has stopped learning from
+     should not be a session you have to open the editor to recognise. It leads, so the
+     badge that says the app is ignoring this one is read before the ones that describe
+     it; the performance badges stay, because they are still true and the session is
+     still yours. */
+  if(s && s.notRepresentative) out.push({k:"off", t:"not learned from"});
   const vol = ctx.vol.get(s.id) || 0;
   const bb = ctx.before.get(s.id) || {n:0, best:0, avg:0};
   const pr = (()=>{ try{ return sessionPRs(s).length; }catch(e){ return 0; } })();
@@ -52284,6 +52291,29 @@ function renderSessEditor(s){
   <div class="field"><label>Session note</label><input id="sessNoteEdit" value="${esc(s.note||"")}" placeholder="optional"></div>
   <div class="field"><label>How did it feel?</label>
     <div class="feel-row" style="margin-top:2px">${FEELS.map((f,i)=>`<button class="feel-btn f${i+1} ${s.feel===i+1?"on":""}" data-feele="${i+1}" aria-label="${esc(FEEL_WORDS[i])}" title="${esc(FEEL_WORDS[i])}">${faceIcon(i+1)}</button>`).join("")}</div>
+  </div>
+  ${/* P2-11 \u2014 THE MARK YOU CAN ONLY MAKE AFTERWARDS.
+
+        The day flags are asked on the way in, which is the right place for "am I ill" and
+        the wrong place for a toe you hurt in the middle of the third set. The audit names
+        exactly that case \u2014 Nov 9, toe injury \u2014 and it was the one thing that could not be
+        recorded: sessionNotEvidence() and exposureSkip() both read
+        sess.notRepresentative, and nothing in the app had ever written it.
+
+        On the SESSION rather than on the day, because two sessions on one date are two
+        different afternoons and a day flag cannot tell them apart. It suppresses what the
+        app DOES with the session and nothing about what it shows you: the session stays
+        in the history, in the totals, and on every screen it was on before. */""}
+  <div class="field"><label>Was this a normal session?</label>
+    <button type="button" class="btn ghost small sess-notrep${s.notRepresentative ? " on" : ""}"
+      data-sessnotrep="1" aria-pressed="${!!s.notRepresentative}">${
+      s.notRepresentative ? "Marked: do not learn from this one" : "Not a normal day"}</button>
+    <div class="set-says">${s.notRepresentative
+      ? `Element 26 will keep showing this session and will stop acting on it \u2014 no
+         progression, no stall, no rest or volume change will be decided from it.`
+      : `Injury, illness, or anything that makes this session a poor guide to your
+         training. It stays in your history either way; Element 26 just stops learning
+         from it.`}</div>
   </div>`;
   if(s.entries.length){
     h += `<div class="sub" style="margin:2px 0 6px">Use ↑ ↓ to put the exercises back in the order you actually did them.</div>`;
@@ -52368,6 +52398,15 @@ function renderSessEditor(s){
 
   const ne = $("#sessNoteEdit");
   if(ne) ne.onchange = ()=>{ s.note = ne.value.trim(); s.edited = Date.now(); save(); queueSync(); };
+  const nr = $("#modal [data-sessnotrep]");
+  if(nr) nr.onclick = ()=>{
+    if(s.notRepresentative) delete s.notRepresentative; else s.notRepresentative = true;
+    s.edited = Date.now();
+    save(); queueSync();
+    /* Redrawn rather than patched in place: the button's own words and the sentence under
+       it both change, and two places saying it is the sentence that gets forgotten. */
+    renderSessEditor(s);
+  };
   document.querySelectorAll("#modal [data-feele]").forEach(b=> b.onclick=()=>{
     const v = parseInt(b.dataset.feele,10);
     s.feel = s.feel===v ? null : v;
@@ -58874,8 +58913,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.14";
+const NEWS_FOR = "2026.11.16.15";
 const NEWS = [
+  {k: "The session you can only mark afterwards",
+   s: ["Element 26 asks whether you are ill, stressed or eating less on the way INTO a "
+     + "session, and stops learning from the ones you flag. That is the right place for "
+     + "“am I ill” and the wrong place for a toe you hurt in the middle of the third set "
+     + "— which is exactly the case in the audited log, Nov 9, and the one thing that "
+     + "could not be recorded.",
+     "The session editor now has it: “Not a normal day”, on the session rather than on "
+     + "the date, because two sessions on one day are two different afternoons and a day "
+     + "flag cannot tell them apart. Mark one and every automatic consequence stops for "
+     + "it — no progression written, no stall counted, no rest window widened, no flag "
+     + "acted on, and the performance read leaves it out of the calibration.",
+     "It stays in your history, in your totals and on every screen it was on before, and "
+     + "the row says “not learned from” so a session the app is ignoring is not one you "
+     + "have to open the editor to recognise. Tapping it again puts it back."]},
   {k: "A load that is not in the building",
    s: ["Your heaviest dumbbells are 50 lb, and the log carries Single-Arm DB Row at 55 on "
      + "Oct 17. Element 26 held both facts and said nothing about the pair of them.",
