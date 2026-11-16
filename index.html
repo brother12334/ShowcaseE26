@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.10";
+const APP_VERSION = "2026.11.16.11";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -50728,6 +50728,102 @@ function planChangeIsNoOp(changes){
     return isFinite(na) && isFinite(nb) && Math.abs(na - nb) < 0.0001;
   });
 }
+/* P2-9 — THE REASON IS DERIVED FROM WHAT HAPPENED, NOT QUOTED FROM WHAT WAS MEANT.
+
+   From the Nov 15 2026 audit: six rows in the exported change history, all carrying
+   "Double progression: last set cleared the top of the rep range at target RPE." Four
+   of them are load CUTS — squat 75 → 27.5, DB row 50 → 40, RDL 50 → 45, Smith hip
+   thrust 115 → 35 — and two are jumps no progression rule would ever prescribe, face
+   pull 20 → 95 and leg curl 100 → 160, which are the bodyweight convention moving
+   underneath the number rather than the number moving.
+
+   The sentence was being quoted from whatever the writing code believed at the time, and
+   a stored sentence cannot be corrected later. So the row is read rather than quoted:
+   which way its own numbers moved, and where it came from, decide what it says. A note
+   that contradicts the row is dropped in favour of one that does not, whenever it was
+   written. And every row carries a rule_id, so the reason can be traced to the rule that
+   produced it instead of being matched by its prose. */
+const PLAN_RULES = {
+  "load.up":    "Double progression: the top of the rep range was cleared at target RPE.",
+  "load.down":  "Load reduced to a reachable one for the prescribed rep range.",
+  "load.units": "How this load is counted changed. The weight itself is the same.",
+  "load.flat":  "",
+  "log.derived":"Read back from your sessions: this happened before Element 26 kept a"
+              + " record of plan changes, so no reason was written down."
+};
+/* One side of a "from → to" pair as a number that can be compared with the other.
+   Bodyweight loads are their own scale — "bw+10" against a plain 30 is not a comparison
+   anybody can make — so the scale travels with the number and a mismatch reads as
+   unknown rather than as a direction. */
+function planLoadNum(s){
+  const t = String(s == null ? "" : s).trim();
+  if(/^bodyweight$/i.test(t)) return {bw: true, n: 0};
+  const m = t.match(/^bw\s*([+−-]\s*\d+(?:\.\d+)?)?/i);
+  if(m) return {bw: true,
+    n: m[1] ? parseFloat(m[1].replace(/−/g, "-").replace(/\s+/g, "")) : 0};
+  const num = t.match(/-?\d+(?:\.\d+)?/);
+  return num ? {bw: false, n: parseFloat(num[0])} : null;
+}
+/* Which way the row's own numbers moved: +1, -1, or 0 for flat, unreadable, or a row
+   whose several lines disagree with each other. */
+function planChangeDir(c){
+  const dirs = [];
+  ((c && c.changes) || []).forEach(x=>{
+    let a = null, b = null;
+    if(typeof x === "string"){
+      const m = x.match(/^([\s\S]*?)\s*(?:→|->)\s*([\s\S]*)$/);
+      if(!m) return;
+      a = planLoadNum(m[1]); b = planLoadNum(m[2]);
+    } else if(x && x.key === "weight"){
+      a = planLoadNum(x.from); b = planLoadNum(x.to);
+    } else return;
+    if(!a || !b || a.bw !== b.bw) return;
+    dirs.push(b.n > a.n + 0.001 ? 1 : b.n < a.n - 0.001 ? -1 : 0);
+  });
+  const moved = dirs.filter(Boolean);
+  if(!moved.length) return 0;
+  return moved.every(d=> d === moved[0]) ? moved[0] : 0;
+}
+/* Did the convention change at about the moment this row was written? A load that moves
+   because the bodyweight part started being counted is not a load that moved. */
+const PLAN_MARK_NEAR_MS = 6 * 60 * 60 * 1000;
+function planChangeCrossedMark(c){
+  const at = c && c.at;
+  if(!at) return false;
+  return countMarks().some(m=> m && Math.abs((m.at || 0) - at) < PLAN_MARK_NEAR_MS);
+}
+function planChangeRule(c){
+  if(!c) return "";
+  if(c.rule) return String(c.rule);
+  if(c.derived) return "log.derived";
+  if(c.kind === "weight"){
+    if(c.barFrom || c.barTo) return "load.units";
+    if(planChangeCrossedMark(c)) return "load.units";
+    const d = planChangeDir(c);
+    return d > 0 ? "load.up" : d < 0 ? "load.down" : "load.flat";
+  }
+  return "plan." + (c.kind || "other");
+}
+/* A note is kept unless it asserts the opposite of what the row shows. The test is
+   deliberately about the CLAIM and not about the wording: a sentence that says the top of
+   the range was cleared is a claim about an increase, and on a row whose load went down it
+   is wrong however it is phrased. */
+const PLAN_CLAIM_UP = /cleared the top|double progression|raised|a raise|increase/i;
+const PLAN_CLAIM_DOWN = /reduc|cut to|lighter|ease[ds]? off/i;
+function planNoteContradicts(note, rule){
+  if(!note) return false;
+  if(rule === "load.down" || rule === "load.units") return PLAN_CLAIM_UP.test(note);
+  if(rule === "load.up") return PLAN_CLAIM_DOWN.test(note);
+  return false;
+}
+function planChangeWhy(c){
+  if(!c) return "";
+  const rule = planChangeRule(c);
+  const note = c.note ? String(c.note) : "";
+  if(note && !planNoteContradicts(note, rule)) return note;
+  const made = PLAN_RULES[rule];
+  return made == null ? note : made;
+}
 function logPlanChange(kind, wid, name, changes, extra){
   if(!Array.isArray(S.planLog)) S.planLog = [];
   if(planChangeIsNoOp(changes)) return;
@@ -50741,10 +50837,14 @@ function logPlanChange(kind, wid, name, changes, extra){
     if((r.kind + "|" + (r.wid || r.day || "") + "|" + String(r.name || "") + "|"
         + JSON.stringify(r.changes || [])) === sig) return;
   }
-  S.planLog.push(Object.assign({
+  const row = Object.assign({
     at: Date.now(), date: todayStr(), day: wid, kind,
     name: String(name||""), changes: changes || []
-  }, extra || {}));
+  }, extra || {});
+  /* Stamped now, while the rule that wrote it is still known. Rows written before this
+     existed are classified on the way out instead, by planChangeRule(). */
+  if(!row.rule) row.rule = planChangeRule(row);
+  S.planLog.push(row);
   if(S.planLog.length > 500) S.planLog = S.planLog.slice(-500);
 }
 /* Every logged change to one exercise inside a time window. Matched on the canonical
@@ -51063,7 +51163,7 @@ function planHistoryHTML(){
         <b>${esc(c.kind === "revert" ? "Put back" : (c.name || "Programme"))}</b>
         <div class="ph-lines">${planChangeLine(c).slice(0, 4).map(x=>
           `<div>${esc(x)}</div>`).join("")}</div>
-        ${c.note ? `<div class="ph-why">${esc(c.note)}</div>` : ""}
+        ${planChangeWhy(c) ? `<div class="ph-why">${esc(planChangeWhy(c))}</div>` : ""}
       </div>
       ${c.derived ? `<span class="ph-src" title="Read back from your logged sessions — this change happened before Element 26 kept a record of plan changes">from your log</span>` : ""}
       ${/* NOTHING WHERE THERE IS NOTHING TO OFFER. This said "no way back", which is a
@@ -51096,7 +51196,7 @@ function planHistoryCSV(all){
     const t = String(v == null ? "" : v);
     return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
   };
-  const head = ["date","time","day","exercise","kind","change","why","source","undone"];
+  const head = ["date","time","day","exercise","kind","change","why","rule_id","source","undone"];
   const body = rows.map(c=>{
     const when = new Date(c.at || Date.parse((c.date || todayStr()) + "T12:00:00"));
     return [
@@ -51106,7 +51206,8 @@ function planHistoryCSV(all){
       c.name || "",
       c.kind || "",
       planChangeLine(c).join(" \u00b7 "),
-      c.note || "",
+      planChangeWhy(c),
+      planChangeRule(c),
       c.derived ? "read back from your sessions" : "recorded",
       c.reverted ? "put back" : ""
     ].map(q).join(",");
@@ -58678,8 +58779,26 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.10";
+const NEWS_FOR = "2026.11.16.11";
 const NEWS = [
+  {k: "The change log says what actually happened",
+   s: ["Six rows in the audited history all carried the same sentence: “Double "
+     + "progression: last set cleared the top of the rep range at target RPE.” Four of "
+     + "them were load CUTS — squat 75 → 27.5, DB row 50 → 40, RDL 50 → 45, Smith hip "
+     + "thrust 115 → 35 — filed as progression increases. Two were jumps no rule would "
+     + "ever prescribe: face pull 20 → 95 and leg curl 100 → 160, which is the "
+     + "bodyweight convention moving underneath the number rather than the number moving.",
+     "The history is the one place anybody looks to find out why a weight moved, and a "
+     + "row that asserts the opposite of what its numbers show does not merely mislead — "
+     + "it teaches you the record is not worth reading.",
+     "So the reason is now read off the row rather than quoted from whatever the writing "
+     + "code believed at the time: which way the load moved, and where the row came from. "
+     + "A stored sentence that contradicts its own numbers is dropped. A load that moved "
+     + "because the convention changed says so. A row read back from your sessions says "
+     + "that instead of inventing a reason. This applies to rows written months ago too, "
+     + "because the correction happens on the way out.",
+     "And every row now carries a rule_id in the export, so a reason can be traced to "
+     + "the rule that produced it instead of matched by its prose."]},
   {k: "The rules talk to each other now",
    s: ["Four collisions in one audited log, all the same shape: two rules, each right on "
      + "its own, with no way to see the other.",
