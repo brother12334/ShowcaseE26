@@ -580,6 +580,102 @@ console.log("\n10b - AND A GAP NEVER REACHES THE REST-WINDOW RULES");
   ck("while the volume is still three sets", r.sets === 3, String(r.sets));
 }
 
+console.log("\n11 - A REPS HINT IS NEVER BANKED AS REPS THAT HAPPENED");
+{
+  /* The second side's reps box shows the first side's count as a HINT, so the lifter can
+     match it. If ticking without typing committed that hint, the app would log reps
+     nobody counted \u2014 and not just any reps: a MATCHED pair, which is exactly the datum
+     the side-balance check reads. Reps-matching already erases the gap from the rep
+     count (see P1-8b); manufacturing the match on top of that would have the app
+     inventing the evidence for its own conclusion.
+
+     An ordinary set still banks last session's placeholder and writes it into the box as
+     it always has \u2014 that is visible, long-standing, and about a different number. A
+     paired side has to be typed. */
+  const r = await ev(()=>{
+    S.sessions = []; S.flags = []; S.planLog = [];
+    S.program[DAYS[0]] = [{name:"Preacher Curl", sets:3, reps:"8-12", weight:25,
+      rpe:"7-9", rest:[120,150], perSide:true, startSide:"L"}];
+    S.pointer = 0; S.active = null; save();
+    startWorkout(DAYS[0]); TAB = "workout"; render();
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const row = sd => [...document.querySelectorAll('.set')].find(d=>
+      d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="${sd}"]`));
+    const L = row("L");
+    L.querySelector('[data-f="weight"]').value = "30";
+    L.querySelector('[data-f="weight"]').dispatchEvent(new Event("change"));
+    L.querySelector('[data-f="reps"]').value = "8";
+    L.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
+    L.querySelector('[data-f="rpe"]').value = "9";
+    L.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
+    L.querySelector('.chk').click();
+    render();
+    const R = row("R");
+    const rIn = R.querySelector('[data-f="reps"]');
+    const hint = {value: rIn.value, placeholder: rIn.placeholder};
+    /* Effort rated, load pre-filled and visible, reps left as the hint. Tick. */
+    R.querySelector('[data-f="rpe"]').value = "7";
+    R.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
+    R.querySelector('.chk').click();
+    const st = S.active.entries[ei].sets[0];
+    const after = {reps: st.sides.R && st.sides.R.reps,
+                   done: !!(st.sides.R && st.sides.R.done),
+                   weight: st.sides.R && st.sides.R.weight};
+    /* Now type it, and it logs normally. */
+    const rIn2 = row("R").querySelector('[data-f="reps"]');
+    rIn2.value = "11"; rIn2.dispatchEvent(new Event("change"));
+    row("R").querySelector('.chk').click();
+    const st2 = S.active.entries[ei].sets[0];
+    return {hint, after, typed: {reps: st2.sides.R.reps, done: !!st2.sides.R.done},
+            exposure: (()=>{ const e = sideExposure({date: todayStr(), at: Date.now(),
+              startSide: "L", entry: S.active.entries[ei]});
+              return e ? {L: e.L, R: e.R, gap: Math.round(e.gap*100)} : null; })()};
+  });
+  console.log("    the hint: " + JSON.stringify(r.hint));
+  console.log("    after ticking untouched: " + JSON.stringify(r.after));
+  console.log("    after typing 11: " + JSON.stringify(r.typed));
+  ck("the eight is a hint, not a value", r.hint.value === "" && r.hint.placeholder === "8",
+     JSON.stringify(r.hint));
+  ck("ticking without typing logs NO reps", !r.after.reps, String(r.after.reps));
+  ck("and does not log the side at all", r.after.done === false, String(r.after.done));
+  ck("the pre-filled load is untouched by the refusal", r.after.weight === "30",
+     String(r.after.weight));
+  ck("typing the real count logs it", r.typed.reps === "11" && r.typed.done === true,
+     JSON.stringify(r.typed));
+  ck("so the pair is 8 against 11, not a fabricated 8 against 8",
+     !!(r.exposure && r.exposure.gap > 0), JSON.stringify(r.exposure));
+}
+
+console.log("\n11b - BUT AN ORDINARY SET STILL TAKES LAST TIME'S NUMBERS, VISIBLY");
+{
+  const r = await ev(()=>{
+    const DAY = 86400e3, now = Date.now(), wid = DAYS[2];
+    S.sessions = [{id:"o1", workoutId: wid, date: dayStr(now - 4*DAY),
+      startedAt: now - 4*DAY, finishedAt: now - 4*DAY + 3600e3, feel: 4,
+      entries: [{name:"Cable Triceps Pushdown", reps:"8-12", rpe:"7-9",
+        sets: [{weight:"50", reps:"12", rpe:"8", done:true, rest:120}]}]}];
+    S.program[wid] = [{name:"Cable Triceps Pushdown", sets:2, reps:"8-12", weight:50,
+      rpe:"7-9", rest:[120,150]}];
+    S.pointer = 2; S.active = null; save();
+    startWorkout(wid); TAB = "workout"; render();
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Cable Triceps Pushdown"));
+    const rowEl = [...document.querySelectorAll('.set')].find(d=>
+      d.querySelector(`[data-e="${ei}"][data-s="0"]`));
+    const rIn = rowEl.querySelector('[data-f="reps"]');
+    const hint = {value: rIn.value, placeholder: rIn.placeholder};
+    rowEl.querySelector('.chk').click();
+    const st = S.active.entries[ei].sets[0];
+    const shown = rowEl.querySelector('[data-f="reps"]').value;
+    return {hint, reps: st.reps, done: !!st.done, shown};
+  });
+  console.log("    " + JSON.stringify(r));
+  ck("it offered last time's twelve as a hint", r.hint.placeholder === "12",
+     JSON.stringify(r.hint));
+  ck("the tick takes it", r.reps === "12" && r.done === true, JSON.stringify(r));
+  ck("and writes it into the box, so it is not a silent save", r.shown === "12",
+     String(r.shown));
+}
+
 console.log(errs.length ? ("\nPAGE ERRORS: "+errs.join(" | ")) : "\nno page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");

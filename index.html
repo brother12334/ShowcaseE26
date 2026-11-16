@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.5";
+const APP_VERSION = "2026.11.16.6";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -47017,8 +47017,31 @@ function bind(){
           const held = String(st[f2] == null ? "" : st[f2]).trim();
           if(shown && !held) st[f2] = (f2 === "weight") ? bwBoxStore(inp) : shown;
         });
+        /* P1-7 — A HINT IS NOT A REP COUNT, ON A PAIRED SIDE.
+
+           An ordinary set may be ticked on its placeholder: that is last session's
+           number, it is written into the box when the tick takes it, and it has worked
+           that way for a long time. A paired side is different in kind. Its reps hint is
+           THE OTHER SIDE'S COUNT FROM THIS SESSION, offered so the lifter can match it —
+           so committing it would not merely guess at a rep count, it would manufacture a
+           MATCHED PAIR. Matched pairs are exactly what the side-balance check reads, and
+           reps-matching has already emptied the rep count of information about the gap
+           (see sideExposure). Inventing the match on top of that would have the app
+           fabricating the evidence for its own conclusion.
+
+           So a paired side's reps have to be typed. The load is not affected: that is a
+           real pre-filled value, visible in the box, and agreeing with it is a decision
+           somebody can see themselves making. */
+        const hintOnly = sd
+          ? String((rIn0 && rIn0.placeholder !== "reps" && rIn0.placeholder) || "").trim()
+          : "";
         const repsNow = String((rIn0 && rIn0.value) || st.reps || "").trim()
-          || String((rIn0 && rIn0.placeholder !== "reps" && rIn0.placeholder) || "").trim();
+          || (sd ? "" : String((rIn0 && rIn0.placeholder !== "reps" && rIn0.placeholder) || "").trim());
+        if(!repsNow && hintOnly){
+          nudge("How many reps on this side? The " + (hintOnly) + " is what the other side did");
+          if(rIn0) rIn0.focus();
+          return;
+        }
         if(!repsNow){
           nudge("How many reps? Put the number in and the \u2713 will take it");
           if(rIn0) rIn0.focus();
@@ -47072,7 +47095,9 @@ function bind(){
         const wIn = row.querySelector('[data-f="weight"]');
         const rIn = row.querySelector('[data-f="reps"]');
         if(!st.weight && wIn.placeholder && wIn.placeholder!==unitWord()){ st.weight=wIn.placeholder; wIn.value=wIn.placeholder; }
-        if(!st.reps && rIn.placeholder && rIn.placeholder!=="reps"){ st.reps=rIn.placeholder; rIn.value=rIn.placeholder; }
+        /* P1-7 — never for a paired side; see the hint note above. The check before
+           this one already refuses the tick, so this is the second line of defence. */
+        if(!sd && !st.reps && rIn.placeholder && rIn.placeholder!=="reps"){ st.reps=rIn.placeholder; rIn.value=rIn.placeholder; }
         // PR spark, compared against your ALL-TIME best for this exercise, and now
         // recorded on the set so it also shows as a badge and in the session summary.
         checkPR(ei, si, el);
@@ -58360,8 +58385,24 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.5";
+const NEWS_FOR = "2026.11.16.6";
 const NEWS = [
+  {k: "A reps hint is never logged as reps that happened",
+   s: ["The second side of a pair shows the first side\u2019s count as a hint, so you can "
+     + "match it. Ticking without typing was banking that hint as a real rep count \u2014 "
+     + "and not just any count. It manufactured a MATCHED pair, which is precisely what "
+     + "the side-balance check reads.",
+       "That matters more than an ordinary wrong number. Holding the weaker side\u2019s "
+     + "count already empties the rep figures of information about the gap, which is why "
+     + "the check now measures reps plus reserve. Inventing the match on top of that "
+     + "would have had the app fabricating the evidence for its own conclusion \u2014 a "
+     + "gap of zero on a movement whose sides had never converged.",
+       "A paired side\u2019s reps now have to be typed. The tick says what the other side "
+     + "did rather than assuming you matched it. The load is unaffected: that is a real "
+     + "pre-filled value sitting visibly in the box, and agreeing with it is a decision "
+     + "you can see yourself making.",
+       "Ordinary sets are untouched. Ticking one with an empty box still takes last "
+     + "session\u2019s number and writes it into the field, as it always has."]},
   {k: "The second side opens with the first side's load, and may have a pause before it",
    s: ["Both sides of a pair use the same weight almost every time, so the second row now "
      + "opens with the first one\u2019s load already in the box. It is an ordinary editable "
