@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.4";
+const APP_VERSION = "2026.11.16.5";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -15356,6 +15356,13 @@ function fmtClockSigned(sec){
    becomes short enough to query. 90s when there is no set to ask about, which only
    happens if a timer outlives its entry. */
 function restTargetSec(){
+  /* P1-7 — a between-sides pause counts down to its own figure, not to the set's. */
+  const rtg = S.active && S.active.restTimer;
+  if(rtg && rtg.gap){
+    const en = S.active.entries[rtg.e];
+    const v = sideRestFor(en);
+    if(v > 0) return v;
+  }
   /* AN OVERRIDE FOR THIS REST ONLY. ±30s on the dial sets rt.target, and everything
      that reads the clock reads it through here — the dial, the pill, the alert, the
      rest-discipline grade — so a rest you extended by hand is the rest the whole app
@@ -15919,8 +15926,15 @@ function recordRestIfRunning(){
   const rt = S.active && S.active.restTimer;
   if(!rt) return;
   const sec = Math.floor((Date.now()-rt.start)/1000);
-  const set = S.active.entries[rt.e] && S.active.entries[rt.e].sets[rt.s];
-  if(set && sec >= 3) set.rest = sec;
+  const entry = S.active.entries[rt.e];
+  const set = entry && entry.sets[rt.s];
+  /* P1-7 — a between-sides pause belongs to the SIDE as a gap, never to the set as a
+     rest. The rest-window rules read the set's rest, so a 45-second pause between legs
+     must not land there: that is precisely the fake short rest this work removed. */
+  if(set && sec >= 3){
+    if(rt.sd) sideTarget(entry, rt.s, rt.sd).gap = sec;
+    else set.rest = sec;
+  }
   S.active.restTimer = null;
   save();
   pushSyncSchedule();          // and take the phone alert back off the schedule
@@ -15937,6 +15951,20 @@ function recordRestIfRunning(){
    the clock it already had instead of starting a new one. Only that set, and only while
    the clock would still be plausible — past that it is a new rest and starts as one. */
 const REST_RESUME_MAX = 2 * 60 * 60 * 1000;      // beyond this it is a new rest, not a resume
+/* P1-7 — the clock between the two sides of a pair. Deliberately the same machinery as
+   a set rest, because it is the same thing on screen — a countdown you are waiting out —
+   and deliberately a different FIELD, because it is not what the rest-window rules
+   measure. `sd` on the timer is what keeps them apart. */
+function startSideGap(e, s, sd){
+  recordRestIfRunning();
+  S.active.restTimer = {start: Date.now(), e, s, sd, gap: true, min: true};
+  save();
+  scheduleRestAlert();
+  pushSyncSchedule();
+  showRestUI(true);
+  applyRestLocks();
+  voiceSync();
+}
 function startRest(e, s){
   recordRestIfRunning();
   const st = ((S.active.entries[e] || {}).sets || [])[s];
@@ -19396,6 +19424,9 @@ function sideSets(en){
         const lastOfPair = k === present.length - 1;
         out.push({pair: si, si, side: sd, count: 0.5, ref: v, set: st,
           weight: v.weight, reps: v.reps, rpe: v.rpe, done: !!v.done,
+          /* A pause taken between the sides, which is NOT this side's rest and is never
+             reported as one — see sideRestFor(). */
+          gap: v.gap == null ? null : v.gap,
           /* The rest is the pair's, so it is reported against the side that ended it and
              nothing at all against the first. That is the whole fix: the gap between the
              sides was never a rest. */
@@ -19461,6 +19492,21 @@ function pairSidesOf(en, si){
   }
   if(st && st.oneSide) return [st.oneSide];
   return [first, other];
+}
+/* P1-7 — AN OPTIONAL PAUSE BETWEEN THE SIDES OF A PAIR.
+
+   Left then right straight away is the default and the reason the pair exists. Heavy
+   one-leg work is the exception: a Bulgarian split squat at a real load often needs half
+   a minute before the second leg, and forcing it back to back would make the protocol
+   unusable on exactly the lifts it matters most for.
+
+   It is NOT the pair's rest, and keeping those apart is the whole point. The pair's rest
+   is what the rest-window rules read; a between-sides gap is stored on the side as `gap`
+   and the adapter never reports it as rest. Otherwise this would recreate, deliberately,
+   the fake short-rest history that P1-7 was written to remove. */
+function sideRestFor(en){
+  const v = Number(en && en.sideRest);
+  return isFinite(v) && v > 0 ? Math.min(180, Math.round(v)) : 0;
 }
 /* SIDE-ADAPTER-END. Below here, every rule goes through sideSets(). */
 
@@ -46959,6 +47005,18 @@ function bind(){
         const row0 = el.parentElement;
         const wIn0 = row0.querySelector('[data-f="weight"]');
         const rIn0 = row0.querySelector('[data-f="reps"]');
+        /* P1-7 — A NUMBER THE ROW IS SHOWING AND THE SET DOES NOT HOLD IS BANKED HERE.
+           The second side of a pair opens with the first side's load already in the box;
+           agree with it, tick, and nothing ever fired a change event, so the load would
+           have been lost. The same applies to anything typed and ticked without blurring
+           first. Only where the stored value is empty, so this can never overwrite a
+           correction. */
+        [[wIn0, "weight"], [rIn0, "reps"]].forEach(([inp, f2])=>{
+          if(!inp) return;
+          const shown = String(inp.value == null ? "" : inp.value).trim();
+          const held = String(st[f2] == null ? "" : st[f2]).trim();
+          if(shown && !held) st[f2] = (f2 === "weight") ? bwBoxStore(inp) : shown;
+        });
         const repsNow = String((rIn0 && rIn0.value) || st.reps || "").trim()
           || String((rIn0 && rIn0.placeholder !== "reps" && rIn0.placeholder) || "").trim();
         if(!repsNow){
@@ -47057,6 +47115,11 @@ function bind(){
         if(endsRound(S.active.entries, ei, si) && setsRemainAfter(S.active.entries, ei, si)
            && !doneAfter(S.active.entries, ei, si)){
           startRest(ei, si);
+        } else if(sd && sideRestFor(entry) > 0 && !pairDone(entry, si)){
+          /* The first side of a pair on a movement that asks for a pause between them.
+             endsRound() is false here, so no set rest has started and none will until
+             the pair is finished. */
+          startSideGap(ei, si, sd);
         }
       } else {
         // unchecking: cancel its running timer and clear its recorded rest
@@ -49461,6 +49524,7 @@ function planEntry(e, isFinisher, wi, chosenList, side){
          with the rest of the prescription, so changing the plan mid-workout cannot turn
          today's half-logged sets into a different shape under you. */
       perSide: entryPerSideWanted(e) || undefined,
+      sideRest: sideRestFor(e) || undefined,
     sets: Array.from({length:e.sets}, ()=>({weight:"",reps:"",rpe:"",done:false}))
   };
 }
@@ -58296,8 +58360,27 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.4";
+const NEWS_FOR = "2026.11.16.5";
 const NEWS = [
+  {k: "The second side opens with the first side's load, and may have a pause before it",
+   s: ["Both sides of a pair use the same weight almost every time, so the second row now "
+     + "opens with the first one\u2019s load already in the box. It is an ordinary editable "
+     + "number, not a cap \u2014 the second side is exactly where somebody who uses a "
+     + "lighter dumbbell for the weaker arm types it.",
+       "A number the row is showing and the set does not hold is now banked when you "
+     + "tick, rather than lost. Agree with the offered load, tap the tick, and it is "
+     + "stored; the same goes for anything typed and ticked without tapping away first.",
+       "And a movement may ask for a short pause between its sides. Off everywhere by "
+     + "default \u2014 back to back is the point of a pair \u2014 but heavy one-leg work like a "
+     + "Bulgarian split squat often wants thirty to sixty seconds before the second leg, "
+     + "and forcing it back to back would make the protocol unusable on the lifts it "
+     + "matters most for.",
+       "That pause is recorded as a gap between the sides, never as the pair\u2019s rest. "
+     + "The distinction is the whole point: the rest-window rules read the rest after the "
+     + "pair, so three pairs with a pause in each are three rests of three minutes, not "
+     + "six rests of which half are forty-five seconds. Storing it as rest would "
+     + "recreate, on purpose, the fake short-rest history this work was written to "
+     + "remove."]},
   {k: "Logging a one-limb movement: left, right, one rest",
    s: ["A set of a one-limb movement is now two rows under one set number \u2014 the left, "
      + "then the right \u2014 and the rest clock waits for both. Tick the left and nothing "
@@ -62072,8 +62155,16 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
      the row above rather than in last week's log. It is a placeholder, not a cap: a
      left-only set at the end exists precisely because sometimes the weaker side has
      more in it. */
-  const pairFirst = secondOfPair
-    ? (sideTarget(en, si, pairSides[0]) || {}).reps : null;
+  const firstSide = secondOfPair ? (sideTarget(en, si, pairSides[0]) || {}) : {};
+  const pairFirst = secondOfPair ? firstSide.reps : null;
+  /* P1-7 — AND THE LOAD, PRE-FILLED rather than merely suggested. Both sides of a pair
+     use the same weight almost every time, so this is a tap saved on every set; it is an
+     ordinary editable value, and the second side is where somebody who uses a different
+     dumbbell for the weaker arm types it. Only where the side has nothing of its own
+     yet, so a correction is never undone by a redraw. */
+  const pairLoad = (secondOfPair && (st.weight == null || st.weight === "")
+                    && firstSide.weight != null && String(firstSide.weight).trim())
+    ? String(firstSide.weight) : null;
   const repsPh = (pairFirst != null && String(pairFirst).trim()) ? pairFirst
     : rx.reps != null ? rx.reps
     : (last && last[si] && last[si].reps ? last[si].reps : "reps");
@@ -62137,7 +62228,8 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
       const cls = (ph === planLoadFor(en, si) && planLoadFor(en, si) !== "") ? " ph-plan" : "";
       const box = `<input inputmode="decimal" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="weight"${
         bwB ? ` data-bwadd="${esc(String(bwB))}"` : ""} value="${
-        esc(bwB ? bwBoxText(bwB, st.weight) : (st.weight ?? ""))}" placeholder="${
+        esc(bwB ? bwBoxText(bwB, st.weight ?? pairLoad)
+                : (st.weight ?? pairLoad ?? ""))}" placeholder="${
         esc(bwB ? bwBoxText(bwB, bwTotalOf(bwB, ph)) : String(ph))}"${cls ? ` class="${cls.trim()}"` : ""}>`;
       return bwB ? `<span class="wx-wrap"><span class="wx-pre" aria-hidden="true">bw+</span>${box}</span>` : box;
     })()}

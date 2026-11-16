@@ -411,6 +411,175 @@ console.log("\n8 - LOGGING A PAIR FOR REAL: L, R, ONE REST, AND NOTHING IN BETWE
      rec.list.join(" ") === "L:- R:n", rec.list.join(" "));
 }
 
+console.log("\n9 - THE SECOND SIDE STARTS FROM THE FIRST SIDE'S LOAD");
+{
+  const r = await ev(()=>{
+    S.sessions = []; S.flags = []; S.planLog = [];
+    S.program[DAYS[0]] = [{name:"Preacher Curl", sets:3, reps:"8-12", weight:25,
+      rpe:"7-9", rest:[120,150], perSide:true, startSide:"L"}];
+    S.pointer = 0; S.active = null; save();
+    startWorkout(DAYS[0]);
+    TAB = "workout"; render();
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const row = sd => [...document.querySelectorAll('.set')].find(d=>
+      d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="${sd}"]`));
+    /* 30 on the left, which is not what the plan says, so a pre-filled right can only
+       have come from the left. */
+    const L = row("L");
+    const w = L.querySelector('[data-f="weight"]'); w.value = "30";
+    w.dispatchEvent(new Event("change"));
+    const rp = L.querySelector('[data-f="reps"]'); rp.value = "8";
+    rp.dispatchEvent(new Event("change"));
+    const se = L.querySelector('[data-f="rpe"]'); se.value = "9";
+    se.dispatchEvent(new Event("change"));
+    L.querySelector('.chk').click();
+    render();
+    const R = row("R");
+    const rw = R.querySelector('[data-f="weight"]');
+    const before = {value: rw.value, placeholder: rw.placeholder};
+    /* And editable: the right is heavier today. */
+    rw.value = "35"; rw.dispatchEvent(new Event("change"));
+    const rr = R.querySelector('[data-f="reps"]'); rr.value = "11";
+    rr.dispatchEvent(new Event("change"));
+    const rs = R.querySelector('[data-f="rpe"]'); rs.value = "9";
+    rs.dispatchEvent(new Event("change"));
+    R.querySelector('.chk').click();
+    const st = S.active.entries[ei].sets[0];
+    return {before, L: st.sides.L.weight, R: st.sides.R.weight};
+  });
+  console.log("    the right's box shows " + JSON.stringify(r.before)
+              + "  stored L " + r.L + " / R " + r.R);
+  ck("the right's load is pre-filled from the left", r.before.value === "30",
+     JSON.stringify(r.before));
+  ck("and it is still editable", r.R === "35", String(r.R));
+  ck("the left keeps its own", r.L === "30", String(r.L));
+}
+
+console.log("\n9b - A PRE-FILLED LOAD IS STORED EVEN IF IT IS NEVER TOUCHED");
+{
+  const r = await ev(()=>{
+    S.active = null; startWorkout(DAYS[0]);
+    TAB = "workout"; render();
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const row = sd => [...document.querySelectorAll('.set')].find(d=>
+      d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="${sd}"]`));
+    const L = row("L");
+    L.querySelector('[data-f="weight"]').value = "40";
+    L.querySelector('[data-f="weight"]').dispatchEvent(new Event("change"));
+    L.querySelector('[data-f="reps"]').value = "9";
+    L.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
+    L.querySelector('[data-f="rpe"]').value = "9";
+    L.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
+    L.querySelector('.chk').click();
+    render();
+    /* The right: reps and effort typed, the load left exactly as it was offered. */
+    const R = row("R");
+    R.querySelector('[data-f="reps"]').value = "9";
+    R.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
+    R.querySelector('[data-f="rpe"]').value = "9";
+    R.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
+    R.querySelector('.chk').click();
+    const st = S.active.entries[ei].sets[0];
+    return {R: st.sides.R.weight, done: !!st.sides.R.done};
+  });
+  console.log("    " + JSON.stringify(r));
+  ck("the untouched load is banked, not lost", r.R === "40", String(r.R));
+  ck("and the side is logged", r.done === true, String(r.done));
+}
+
+console.log("\n10 - AN OPTIONAL PAUSE BETWEEN SIDES IS A GAP, NOT THE PAIR'S REST");
+{
+  const r = await ev(()=>{
+    S.sessions = []; S.flags = []; S.planLog = [];
+    /* Heavy one-leg work wants half a minute between legs. Off by default; this plan
+       entry asks for it. */
+    S.program[DAYS[1]] = [{name:"Dumbbell Bulgarian Split Squat", sets:3, reps:"6-10",
+      weight:50, rpe:"7-9", rest:[150,210], perSide:true, startSide:"L", sideRest:45}];
+    S.pointer = 1; S.active = null; save();
+    startWorkout(DAYS[1]);
+    const ei = S.active.entries.findIndex(x=>
+      nrm(x.name) === nrm("Dumbbell Bulgarian Split Squat"));
+    const en = S.active.entries[ei];
+    const dflt = sideRestFor({name:"Preacher Curl", perSide:true});
+    TAB = "workout"; render();
+    const row = sd => [...document.querySelectorAll('.set')].find(d=>
+      d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="${sd}"]`));
+    const L = row("L");
+    L.querySelector('[data-f="weight"]').value = "50";
+    L.querySelector('[data-f="weight"]').dispatchEvent(new Event("change"));
+    L.querySelector('[data-f="reps"]').value = "8";
+    L.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
+    L.querySelector('[data-f="rpe"]').value = "9";
+    L.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
+    L.querySelector('.chk').click();
+    const t1 = S.active.restTimer;
+    const afterL = {clock: !!t1, isGap: !!(t1 && t1.gap), side: t1 && t1.sd,
+                    carried: en.sideRest, dflt};
+    /* Serve the gap and log the right. */
+    if(t1) t1.start -= 45e3;
+    recordRestIfRunning();
+    render();
+    const R = row("R");
+    R.querySelector('[data-f="reps"]').value = "8";
+    R.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
+    R.querySelector('[data-f="rpe"]').value = "9";
+    R.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
+    R.querySelector('.chk').click();
+    const t2 = S.active.restTimer;
+    if(t2) t2.start -= 180e3;
+    recordRestIfRunning();
+    const st = S.active.entries[ei].sets[0];
+    const list = sideSets(en).slice(0, 2);
+    return {afterL, pairRest: st.rest, gapL: st.sides.L.gap,
+            sideRestNotRest: st.sides.L.rest == null && st.sides.R.rest == null,
+            adapter: list.map(x=> x.side + " rest=" + (x.rest == null ? "-" : x.rest)
+                                 + " gap=" + (x.gap == null ? "-" : x.gap))};
+  });
+  console.log("    after L: " + JSON.stringify(r.afterL));
+  console.log("    " + JSON.stringify(r.adapter) + "  pair rest " + r.pairRest);
+  ck("it is off unless the exercise asks for it", r.afterL.dflt === 0,
+     String(r.afterL.dflt));
+  ck("the plan's figure is carried into the session", r.afterL.carried === 45,
+     String(r.afterL.carried));
+  ck("ticking the left starts a clock", r.afterL.clock === true, String(r.afterL.clock));
+  ck("and it is a between-sides gap, not the pair's rest", r.afterL.isGap === true,
+     String(r.afterL.isGap));
+  ck("the gap is recorded on the side", r.gapL >= 44, String(r.gapL));
+  ck("and never as that side's rest", r.sideRestNotRest === true,
+     String(r.sideRestNotRest));
+  ck("the pair still records exactly one rest, after it", r.pairRest >= 179,
+     String(r.pairRest));
+  ck("so the adapter reports one rest for the pair",
+     r.adapter.join(" | ") === "L rest=- gap=45 | R rest=180 gap=-",
+     r.adapter.join(" | "));
+}
+
+console.log("\n10b - AND A GAP NEVER REACHES THE REST-WINDOW RULES");
+{
+  const r = await ev(()=>{
+    const DAY = 86400e3, now = Date.now(), wid = DAYS[1];
+    /* Three pairs, each with a 45 second gap between the legs and 180 seconds after.
+       The rest rules must see three rests of three minutes, never six of which half are
+       45 seconds — which is exactly the fake-rest history that started P1-7. */
+    S.sessions = [{id:"g1", workoutId: wid, date: dayStr(now - DAY), startedAt: now - DAY,
+      finishedAt: now - DAY + 3600e3, feel: 4,
+      entries: [{name:"Dumbbell Bulgarian Split Squat", reps:"6-10", rpe:"7-9",
+        perSide:true, startSide:"L", sideRest:45,
+        sets: [0,1,2].map(()=> ({rest:180, sides:{
+          L:{weight:"50",reps:"8",rpe:"9",done:true,gap:45},
+          R:{weight:"50",reps:"8",rpe:"9",done:true}}}))}]}];
+    save();
+    const mm = musclesFor("Dumbbell Bulgarian Split Squat") || {};
+    const g = Object.keys(mm).find(k=> mm[k] >= 1);
+    const w = windowStats(now - 7*DAY, now + DAY)[g];
+    return {restN: w.restN, restShort: w.restShort, sets: w.sets};
+  });
+  console.log("    " + JSON.stringify(r));
+  ck("three rests counted, one per pair", r.restN === 3, String(r.restN));
+  ck("and none of them read as too short", r.restShort === 0, String(r.restShort));
+  ck("while the volume is still three sets", r.sets === 3, String(r.sets));
+}
+
 console.log(errs.length ? ("\nPAGE ERRORS: "+errs.join(" | ")) : "\nno page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");
