@@ -71,6 +71,8 @@ console.log("1 - EVERY READER SEES A PAIRED SET");
     const mm = musclesFor("Preacher Curl") || {};
     const g = Object.keys(mm).find(k=> mm[k] >= 1);
     out.volume = Math.round((windowStats(now-7*DAY, now+DAY)[g] || {}).sets * 100) / 100;
+    out.volumeOneSession = Math.round((windowStats(now-2*DAY, now+DAY)[g] || {}).sets * 100) / 100;
+    out.sideSetsPerSession = sideSetsWorking(en).length;
     return out;
   });
   console.log("    " + JSON.stringify(r));
@@ -81,11 +83,17 @@ console.log("1 - EVERY READER SEES A PAIRED SET");
   ck("progressionFor reaches a verdict", r.prog != null, String(r.prog));
   ck("and it is a raise, since both sides cleared the range at target RPE",
      r.prog === "up", String(r.prog));
-  /* Two sessions of three pairs each: six half-sets a session, three whole sets. */
   ck("a session that improved does NOT advance the stall count", !r.stall, String(r.stall));
   ck("bestEverFor records the lift", r.bestEver.maxW === 25, JSON.stringify(r.bestEver));
-  ck("and weekly volume is three sets a session, not six", r.volume === 6,
-     r.volume + " across two sessions");
+  /* THE ARITHMETIC, STATED IN FULL, because "half-sets" is easy to say and easy to
+     misread. Three pairs a session is SIX side-sets a session, each worth half: three
+     whole sets per session, six across the two sessions in this fixture. Counting each
+     side as a whole set — which is what the app did — gives twelve. */
+  ck("a session is six side-sets", r.sideSetsPerSession === 6, String(r.sideSetsPerSession));
+  ck("which is three whole sets for the muscle", r.volumeOneSession === 3,
+     String(r.volumeOneSession));
+  ck("and six across both sessions, not the twelve it used to be", r.volume === 6,
+     String(r.volume));
 }
 
 console.log("\n2 - NOTHING READS AROUND THE ADAPTER WITHOUT SAYING SO");

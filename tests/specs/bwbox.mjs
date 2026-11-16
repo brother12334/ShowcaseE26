@@ -31,6 +31,16 @@ const boot = (name, weight)=> p.evaluate(a=>{
   const el=document.getElementById('preflight'); if(el) el.remove(); try{PF=null}catch(e){}
   S.active.entries[0].bwOn=139.8; save(); render();
 }, {name, weight});
+/* P1-7 — WHERE THE STORED NUMBER LIVES. The fixture below is a Dumbbell Bulgarian
+   Split Squat, which is one leg at a time and is therefore logged as a pair now: the
+   weight typed into a row belongs to that row's SIDE, not to the set. This spec is about
+   the bw+ box and not about which shape the set is in, so it reads back through the
+   adapter and holds for either. */
+const storedWeight = ()=> p.evaluate(()=>{
+  const inp = document.querySelector('.set input[data-f="weight"]');
+  const t = sideTarget(S.active.entries[0], 0, (inp && inp.dataset.sd) || null);
+  return t ? t.weight : null;
+});
 const box = ()=> p.evaluate(()=>{
   const inp=document.querySelector('.set input[data-f="weight"]');
   const pre=document.querySelector('.set .wx-pre');
@@ -57,8 +67,9 @@ console.log("\n2 - AND WHAT IT STORES IS STILL THE WHOLE LOAD");
     const inp=document.querySelector('.set input[data-f="weight"]');
     inp.value = "30"; inp.dispatchEvent(new Event('change', {bubbles:true}));
     await new Promise(r2=> setTimeout(r2, 150));
-    const st = S.active.entries[0].sets[0];
-    return {stored: st.weight, shown: document.querySelector('.set input[data-f="weight"]').value};
+    const inp2 = document.querySelector('.set input[data-f="weight"]');
+    const st = sideTarget(S.active.entries[0], 0, inp2.dataset.sd || null);
+    return {stored: st.weight, shown: inp2.value};
   });
   console.log("   ", JSON.stringify(r));
   ck("typing 30 stores you plus 30", r.stored === "169.8", String(r.stored));
@@ -69,12 +80,15 @@ console.log("\n3 - A REDRAW PUTS THE SAME NUMBER BACK, NOT THE TOTAL");
 {
   const r = await p.evaluate(()=>{ render();
     const inp=document.querySelector('.set input[data-f="weight"]');
-    return {val: inp.value, stored: S.active.entries[0].sets[0].weight}; });
+    return {val: inp.value,
+            stored: sideTarget(S.active.entries[0], 0, inp.dataset.sd || null).weight}; });
   console.log("   ", JSON.stringify(r));
   ck("the box reads 30 after a redraw", r.val === "30", r.val);
   ck("and the set still holds 169.8", r.stored === "169.8", r.stored);
   const vol = await p.evaluate(()=>{
-    const st=S.active.entries[0].sets[0]; st.reps="10";
+    const inp3 = document.querySelector('.set input[data-f="weight"]');
+    const st = sideTarget(S.active.entries[0], 0, (inp3 && inp3.dataset.sd) || null);
+    st.reps="10";
     return parseFloat(st.weight) * parseFloat(st.reps); });
   ck("so volume is still computed from the whole load", vol === 1698, String(vol));
 }
@@ -85,7 +99,8 @@ console.log("\n4 - AN EMPTY BOX IS STILL AN EMPTY SET");
     const inp=document.querySelector('.set input[data-f="weight"]');
     inp.value = ""; inp.dispatchEvent(new Event('change', {bubbles:true}));
     await new Promise(r2=> setTimeout(r2, 150));
-    return {stored: S.active.entries[0].sets[0].weight};
+    const inp4 = document.querySelector('.set input[data-f="weight"]');
+    return {stored: sideTarget(S.active.entries[0], 0, (inp4 && inp4.dataset.sd) || null).weight};
   });
   ck("blank does not become your bodyweight", r.stored === "", JSON.stringify(r.stored));
 }

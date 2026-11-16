@@ -298,6 +298,119 @@ console.log("\n7 - AND THE REAL EXPORT'S VERDICTS SURVIVE THE ADAPTER");
       "Single-Arm Cable Hammer Curl"].every(n=> r[n] === "RETIRE"), JSON.stringify(r));
 }
 
+console.log("\n8 - LOGGING A PAIR FOR REAL: L, R, ONE REST, AND NOTHING IN BETWEEN");
+{
+  /* The acceptance test as written: "logging L then R creates no rest between them, and
+     one rest after R". Everything above tests the rules; this drives the actual screen,
+     because the seam returning the right verdict and the tick doing the right thing are
+     two different claims. */
+  const r = await ev(()=>{
+    S.sessions = []; S.flags = []; S.planLog = [];
+    S.program[DAYS[0]] = [{name:"Preacher Curl", sets:3, reps:"8-12", weight:25,
+      rpe:"7-9", rest:[120,150], perSide:true, startSide:"L"}];
+    S.pointer = 0; S.active = null; save();
+    startWorkout(DAYS[0]);
+    const en = S.active.entries.find(x=> nrm(x.name) === nrm("Preacher Curl"));
+    return {started: !!en, paired: entryPerSide(en),
+            sides: pairSidesOf(en, 0), sets: (en.sets || []).length};
+  });
+  console.log("    " + JSON.stringify(r));
+  ck("the session starts with the movement paired", r.paired === true, JSON.stringify(r));
+  ck("and its first set is left then right", r.sides.join("") === "LR", r.sides.join(""));
+
+  const rows = await ev(()=>{
+    TAB = "workout"; render();
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const chk = [...document.querySelectorAll('.set .chk')]
+      .filter(b=> Number(b.dataset.e) === ei && Number(b.dataset.s) === 0);
+    return {n: chk.length, sides: chk.map(b=> b.dataset.sd)};
+  });
+  console.log("    set 1 draws " + rows.n + " rows: " + JSON.stringify(rows.sides));
+  ck("set one is drawn as two rows, one per side", rows.n === 2, String(rows.n));
+  ck("left first", rows.sides.join("") === "LR", rows.sides.join(""));
+
+  /* Fill and tick the left, then look at the clock. */
+  const afterL = await p.evaluate(()=>{
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const pick = sd => {
+      const row = [...document.querySelectorAll('.set')].find(d=>
+        d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="${sd}"]`));
+      return row;
+    };
+    const fill = (row, reps, rpe)=>{
+      const w = row.querySelector('[data-f="weight"]'); w.value = "25";
+      w.dispatchEvent(new Event("change"));
+      const rp = row.querySelector('[data-f="reps"]'); rp.value = String(reps);
+      rp.dispatchEvent(new Event("change"));
+      const se = row.querySelector('[data-f="rpe"]'); if(se){ se.value = String(rpe);
+        se.dispatchEvent(new Event("change")); }
+    };
+    const L = pick("L");
+    fill(L, 8, 9);
+    L.querySelector('.chk').click();
+    const st = S.active.entries[ei].sets[0];
+    return {lDone: !!(st.sides && st.sides.L && st.sides.L.done),
+            clock: !!S.active.restTimer,
+            lReps: st.sides && st.sides.L && st.sides.L.reps};
+  });
+  console.log("    after L: " + JSON.stringify(afterL));
+  ck("the left is logged", afterL.lDone === true, JSON.stringify(afterL));
+  ck("and NO rest clock has started", afterL.clock === false, String(afterL.clock));
+
+  const target = await ev(()=>{
+    render();
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const rIn = document.querySelector(
+      `[data-e="${ei}"][data-s="0"][data-sd="R"][data-f="reps"]`);
+    return rIn ? rIn.placeholder : null;
+  });
+  console.log("    the right aims at: " + target);
+  ck("the right side's target is the left's eight reps", String(target) === "8", String(target));
+
+  const afterR = await p.evaluate(()=>{
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const row = [...document.querySelectorAll('.set')].find(d=>
+      d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="R"]`));
+    const rp = row.querySelector('[data-f="reps"]'); rp.value = "11";
+    rp.dispatchEvent(new Event("change"));
+    const w = row.querySelector('[data-f="weight"]'); w.value = "25";
+    w.dispatchEvent(new Event("change"));
+    /* Ticked with no effort rating first, which a pair must refuse. */
+    row.querySelector('.chk').click();
+    const st = S.active.entries[ei].sets[0];
+    const refused = !(st.sides.R && st.sides.R.done);
+    const se = row.querySelector('[data-f="rpe"]');
+    se.value = "9"; se.dispatchEvent(new Event("change"));
+    row.querySelector('.chk').click();
+    return {refused, rDone: !!(st.sides.R && st.sides.R.done),
+            clock: !!S.active.restTimer,
+            restOn: S.active.restTimer ? S.active.restTimer.s : null};
+  });
+  console.log("    after R: " + JSON.stringify(afterR));
+  ck("a side with no effort rating is refused", afterR.refused === true,
+     String(afterR.refused));
+  ck("with one, the right is logged", afterR.rDone === true, String(afterR.rDone));
+  ck("and NOW the rest clock runs, once, for the pair", afterR.clock === true,
+     String(afterR.clock));
+
+  const rec = await ev(()=>{
+    /* Wind the clock back two and a half minutes so there is a rest to record at all:
+       recordRestIfRunning() ignores anything under three seconds, and quite right too. */
+    S.active.restTimer.start -= 150e3;
+    recordRestIfRunning();
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const st = S.active.entries[ei].sets[0];
+    const en = S.active.entries[ei];
+    return {setRest: st.rest, sideRest: !!(st.sides.L.rest || st.sides.R.rest),
+            list: sideSets(en).slice(0, 2).map(x=> x.side + ":" + (x.rest == null ? "-" : "n"))};
+  });
+  console.log("    " + JSON.stringify(rec));
+  ck("the rest is recorded against the pair", rec.setRest >= 149, JSON.stringify(rec));
+  ck("and not against either side", rec.sideRest === false, JSON.stringify(rec));
+  ck("and the adapter reports it on the second side only",
+     rec.list.join(" ") === "L:- R:n", rec.list.join(" "));
+}
+
 console.log(errs.length ? ("\nPAGE ERRORS: "+errs.join(" | ")) : "\nno page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");

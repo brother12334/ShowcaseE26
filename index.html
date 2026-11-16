@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.3";
+const APP_VERSION = "2026.11.16.4";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -19430,6 +19430,37 @@ function pairDone(en, si){
   const have = ["L", "R"].filter(sd=> st.sides[sd]);
   if(!have.length) return true;
   return have.every(sd=> st.sides[sd].done);
+}
+/* WHERE A FIELD WRITES. A paired set's weight, reps and RPE belong to a SIDE; a plain
+   set's belong to the set. The logging handlers ask this rather than indexing `sets`
+   themselves, which is what keeps one row of markup working for both shapes. */
+function sideTarget(en, si, sd){
+  const st = (en && en.sets) ? en.sets[si] : null;
+  if(!st) return null;
+  if(!sd) return st;
+  if(!st.sides || typeof st.sides !== "object") st.sides = {};
+  if(!st.sides[sd] || typeof st.sides[sd] !== "object") st.sides[sd] = {};
+  return st.sides[sd];
+}
+/* The sides this set is to be logged on, in the order performed: the entry's opening
+   side first. Empty for a movement done with both limbs at once.
+
+   NOT sidesOf(), which this was called first and which already exists further down the
+   file for something else entirely — and being a function declaration in the same
+   scope, that one won. */
+function pairSidesOf(en, si){
+  if(!entryPerSide(en)) return [];
+  const first = en.startSide === "R" ? "R" : "L";
+  const other = first === "L" ? "R" : "L";
+  const st = (en.sets || [])[si];
+  /* A set that already holds only one side keeps only that one — the weaker-side extra
+     set at the end of the exercise is a single side by design. */
+  if(st && st.sides && (st.sides.L || st.sides.R)){
+    const have = [first, other].filter(sd=> st.sides[sd]);
+    if(have.length) return have;
+  }
+  if(st && st.oneSide) return [st.oneSide];
+  return [first, other];
 }
 /* SIDE-ADAPTER-END. Below here, every rule goes through sideSets(). */
 
@@ -35512,7 +35543,14 @@ function viewActiveSession(){
        before the first set rather than looked up after it. */
     h += overloadTipHTML(a.workoutId, en, anyDay, occ);
     h += setLabelsHTML();
-    en.sets.forEach((st,si)=>{ h += setRowHTML(en, ei, si, last); });
+    en.sets.forEach((st,si)=>{ h += (()=>{
+      /* P1-7 \u2014 a paired set is two rows sharing one set number: the opening side, then
+         the other with no rest between them. sidesOf() gives the order, and a set that
+         holds only one side (the weaker-side extra at the end) renders as one row. */
+      const sds = pairSidesOf(en, si);
+      if(!sds.length) return setRowHTML(en, ei, si, last);
+      return sds.map((sd, k)=> setRowHTML(en, ei, si, last, k ? "" : (si + 1), sd)).join("");
+    })(); });
     h += rebuildLineHTML(en);
     h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
       <button class="btn ghost small" data-addset="${ei}">+ set</button>
@@ -36678,7 +36716,14 @@ function viewFocusSession(){
   h += exNoteLineHTML(en);
   if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
   h += setLabelsHTML();
-  en.sets.forEach((st,si)=>{ h += setRowHTML(en, ei, si, last); });
+  en.sets.forEach((st,si)=>{ h += (()=>{
+      /* P1-7 \u2014 a paired set is two rows sharing one set number: the opening side, then
+         the other with no rest between them. sidesOf() gives the order, and a set that
+         holds only one side (the weaker-side extra at the end) renders as one row. */
+      const sds = pairSidesOf(en, si);
+      if(!sds.length) return setRowHTML(en, ei, si, last);
+      return sds.map((sd, k)=> setRowHTML(en, ei, si, last, k ? "" : (si + 1), sd)).join("");
+    })(); });
   h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
     <button class="btn ghost small" data-addset="${ei}">+ set</button>
     <button class="btn ghost small" data-rmset="${ei}">− set</button>
@@ -46679,7 +46724,9 @@ function bind(){
     el.onchange = async ()=>{
       const ei = parseInt(el.dataset.e,10), si = parseInt(el.dataset.s,10), f = el.dataset.f;
       const entryS = S.active.entries[ei];
-      const st = entryS.sets[si];
+      /* P1-7 — a paired set's fields belong to one SIDE. data-sd says which; without it
+         this is an ordinary set and sideTarget() hands back the set itself. */
+      const st = sideTarget(entryS, si, el.dataset.sd || null);
       const before = st.pr || null;
       const prev = st[f];
       /* A MISTYPE SHOULD NOT BECOME HISTORY. 1000 lb is a stray zero and 100 reps is a
@@ -46836,7 +46883,11 @@ function bind(){
       const ei = parseInt(el.dataset.e,10), si = parseInt(el.dataset.s,10);
       const entry = S.active.entries[ei];
       const wasComplete = entryDone(entry);
-      const st = entry.sets[si];
+      /* P1-7 — the tick belongs to one SIDE of a paired set. endsRound() then holds the
+         rest clock until the pair is finished, which is the whole reason the sides are
+         one set: left, right, rest, and no ten-second "rest" in between. */
+      const sd = el.dataset.sd || null;
+      const st = sideTarget(entry, si, sd);
       const nudge = (msg)=>{
         el.classList.remove("chk-nudge"); void el.offsetWidth; el.classList.add("chk-nudge");
         toast(msg);
@@ -46914,6 +46965,22 @@ function bind(){
           nudge("How many reps? Put the number in and the \u2713 will take it");
           if(rIn0) rIn0.focus();
           return;
+        }
+        /* P1-7 \u2014 A PAIRED SIDE NEEDS AN EFFORT RATING, and this is the one place in the
+           app that insists on one. Matching the weaker side makes the rep counts equal by
+           construction, so the reps carry no information about the gap any more and the
+           reserve is the only thing left that does \u2014 see sideExposure(). A pair logged
+           without RPE is dropped from the side comparison entirely, so asking for it here
+           is the difference between a check that keeps working and one that quietly
+           retires on a movement whose sides never converged. */
+        if(sd && rpeTracked()){
+          const rSel = row0.querySelector('[data-f="rpe"]');
+          const rpeNow = String((rSel && rSel.value) || st.rpe || "").trim();
+          if(!rpeNow){
+            nudge("How hard was that side? Both sides need an effort rating");
+            if(rSel) rSel.focus();
+            return;
+          }
         }
         if(loadNeededFor(entry) && !st.noWeight && !entry.noWeight){
           const wNow = String((wIn0 && wIn0.value) || st.weight || "").trim()
@@ -49380,9 +49447,31 @@ function planEntry(e, isFinisher, wi, chosenList, side){
       // which alternating scheme this movement uses, and which side it opens on 
       // both frozen at session start so per-set L/R can never drift mid-workout
       altStyle: altStyle(e) || undefined,
-      startSide: altStyle(e) ? side : undefined,
+      /* P1-7 — A PAIR OPENS ON THE LEFT BY DEFAULT, and on whichever side the plan
+         entry names when it names one. `side` above alternates the opening side session
+         by session, which is the right answer when each side is its own SET — going
+         first is worth reps and alternating cancels that out. It is the wrong answer for
+         a pair: both sides happen inside one set, seconds apart, so there is no fresh-set
+         advantage to cancel, and a fixed order is what makes "hold the right to the
+         left's count" a protocol somebody can actually follow. */
+      startSide: altStyle(e)
+        ? (entryPerSideWanted(e) ? ((e.startSide === "R") ? "R" : "L") : side)
+        : undefined,
+      /* P1-7 — and whether a set of this movement is a PAIR. Frozen into the session
+         with the rest of the prescription, so changing the plan mid-workout cannot turn
+         today's half-logged sets into a different shape under you. */
+      perSide: entryPerSideWanted(e) || undefined,
     sets: Array.from({length:e.sets}, ()=>({weight:"",reps:"",rpe:"",done:false}))
   };
+}
+/* Does the plan want this movement logged as pairs? One limb at a time, and not a
+   movement whose sets the person has said cover both limbs at once. The plan entry can
+   say so outright; otherwise it follows from the movement being a one-side alternating
+   one, which is the shape the old log recorded as two separate sets. */
+function entryPerSideWanted(e){
+  if(!e) return false;
+  if(e.perSide != null) return !!e.perSide;
+  return altStyle(e) === "side";
 }
 /* =====================================================================
    THE PLAN CHANGED WHILE YOU WERE TRAINING IT
@@ -58207,8 +58296,31 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.3";
+const NEWS_FOR = "2026.11.16.4";
 const NEWS = [
+  {k: "Logging a one-limb movement: left, right, one rest",
+   s: ["A set of a one-limb movement is now two rows under one set number \u2014 the left, "
+     + "then the right \u2014 and the rest clock waits for both. Tick the left and nothing "
+     + "starts; tick the right and one rest begins, recorded against the pair. The ten- "
+     + "or twenty-second gap between the sides was being stored as a rest and fed to the "
+     + "rule that lengthens rest windows, which is where this started.",
+       "The left goes first by default, and the second row aims at what the first one "
+     + "did: log eight on the left and the right\u2019s box offers eight. It is a suggestion, "
+     + "not a cap \u2014 the extra left-only set exists precisely because sometimes the "
+     + "weaker side has more in it. A plan entry can open on the right instead, per "
+     + "exercise.",
+       "Both sides need an effort rating, and this is the one place in the app that "
+     + "insists. Holding the right to the left\u2019s rep count makes the numbers equal by "
+     + "construction, so the reps stop carrying any information about the gap and the "
+     + "reserve is the only thing that still does. A pair logged without RPE is left out "
+     + "of the side comparison entirely, so asking for it is the difference between a "
+     + "check that keeps working and one that quietly retires on a movement whose sides "
+     + "never converged.",
+       "The opening side is also fixed now rather than alternating session to session. "
+     + "Alternating was right when each side was its own SET \u2014 going first is worth "
+     + "reps, and swapping cancels that out. Inside a pair both sides happen seconds "
+     + "apart, so there is no advantage to cancel, and a fixed order is what makes the "
+     + "protocol followable."]},
   {k: "A one-limb movement can earn weight, hold a record, and not be read as stalled",
    s: ["The side-pairing work left five readers looking at raw sets rather than through "
      + "the one adapter, and the cost of that is not a wrong number \u2014 it is a blind "
@@ -61937,9 +62049,15 @@ function planBehindLineHTML(en){
     <button type="button" class="nb-link ex-catch" data-plancatch="${esc(p.name)}"
       data-plancatchto="${esc(String(top))}">Set my plan to ${esc(fmtLoad(top))}</button></span></div>`;
 }
-function setRowHTML(en, ei, si, last, idxLabel){
-  const st = en.sets[si];
+function setRowHTML(en, ei, si, last, idxLabel, side){
+  /* P1-7 — `side` renders ONE side of a paired set. The whole row is reused rather than
+     restructured: the fields read and write that side's object, the inputs carry it as
+     data-sd, and the set number appears once with the second side labelled by its chip.
+     One set of a one-limb movement is one pair, so both rows share a number. */
+  const pairSides = pairSidesOf(en, si);
+  const st = side ? sideTarget(en, si, side) : en.sets[si];
   if(!st) return "";
+  const secondOfPair = !!side && pairSides.indexOf(side) > 0;
   const idx = (idxLabel != null) ? idxLabel : (si + 1);
   /* Somebody who has said they don't want to rate their sets gets a row with three
      things in it instead of four. The grade still runs — a set logged with no RPE is
@@ -61949,7 +62067,15 @@ function setRowHTML(en, ei, si, last, idxLabel){
      setPrescription(). The reps placeholder follows it, so the number the row suggests is
      the number the rules actually want rather than last week's. */
   const rx = setPrescription(en, si);
-  const repsPh = rx.reps != null ? rx.reps
+  /* P1-7 — THE SECOND SIDE AIMS AT WHAT THE FIRST ONE DID. The protocol is to go left
+     first and hold the right to the left's count, so the number to beat is sitting in
+     the row above rather than in last week's log. It is a placeholder, not a cap: a
+     left-only set at the end exists precisely because sometimes the weaker side has
+     more in it. */
+  const pairFirst = secondOfPair
+    ? (sideTarget(en, si, pairSides[0]) || {}).reps : null;
+  const repsPh = (pairFirst != null && String(pairFirst).trim()) ? pairFirst
+    : rx.reps != null ? rx.reps
     : (last && last[si] && last[si].reps ? last[si].reps : "reps");
   /* REPS AND EFFORT BELONG TO A SET THAT HAS HAPPENED. While the clock is running the
      set in front of you has not, so those two fields are shut on it — typing a rep count
@@ -62009,7 +62135,7 @@ function setRowHTML(en, ei, si, last, idxLabel){
       const bwB = bwBoxOn(en);
       const ph = planLoadPh(en, last, si);
       const cls = (ph === planLoadFor(en, si) && planLoadFor(en, si) !== "") ? " ph-plan" : "";
-      const box = `<input inputmode="decimal" data-e="${ei}" data-s="${si}" data-f="weight"${
+      const box = `<input inputmode="decimal" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="weight"${
         bwB ? ` data-bwadd="${esc(String(bwB))}"` : ""} value="${
         esc(bwB ? bwBoxText(bwB, st.weight) : (st.weight ?? ""))}" placeholder="${
         esc(bwB ? bwBoxText(bwB, bwTotalOf(bwB, ph)) : String(ph))}"${cls ? ` class="${cls.trim()}"` : ""}>`;
@@ -62019,13 +62145,13 @@ function setRowHTML(en, ei, si, last, idxLabel){
       /* THE TARGET, IN THE BOX THAT ASKS FOR IT. "10" alone never said what 10 was for.
          Absolutely positioned so the caption cannot change the row's height — a rep box
          that grows when a load goes up would push every set below it down the screen. */
-      ? `<span class="reps-cell"><input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" class="has-aim${
+      ? `<span class="reps-cell"><input inputmode="numeric" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="reps" class="has-aim${
           lock ? " is-locked" : ""}" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}"${
           lock ? ` readonly title="${esc(LOCK_WHY)}"` : ""}><i class="reps-aim">of ${esc(String(rx.rebuild.top))}</i></span>`
-      : `<input inputmode="numeric" data-e="${ei}" data-s="${si}" data-f="reps" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}"${
+      : `<input inputmode="numeric" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="reps" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}"${
       lock ? ` readonly class="is-locked" title="${esc(LOCK_WHY)}"` : ""}>`}
-    ${rpeOn ? `<span class="rpe-cell${lock?" is-locked":""}"${lock?` title="${esc(LOCK_WHY)}"`:""}>${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-f="rpe"${lock?" disabled":""}>${rpeOptions(st.rpe)}</select></span>` : ""}
-    <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-f="done"
+    ${rpeOn ? `<span class="rpe-cell${lock?" is-locked":""}"${lock?` title="${esc(LOCK_WHY)}"`:""}>${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="rpe"${lock?" disabled":""}>${rpeOptions(st.rpe)}</select></span>` : ""}
+    <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="done"
       aria-label="Mark set ${idx} done">${ICON.check}</button>
   </div>${setNoteHTML(st, en, si)}${prBadgeRow(st, ei, si)}${techRowHTML(en, ei, si)}`;
 }
