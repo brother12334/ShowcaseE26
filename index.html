@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.15";
+const APP_VERSION = "2026.11.16.16";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -51298,7 +51298,17 @@ function planHistoryCSV(all){
     const t = String(v == null ? "" : v);
     return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
   };
-  const head = ["date","time","day","exercise","kind","change","why","rule_id","source","undone"];
+  /* P2-9 \u2014 BOTH SENTENCES, WHERE THEY DIFFER.
+
+     `why` is the reason derived from the row; `why_recorded` is what was actually written
+     down at the time, and it is only filled in when the two disagree. Deriving the reason
+     on the way out means the stored one is never corrected and never needs to be \u2014 it is
+     the only evidence of what the app believed when it acted, which is exactly what
+     somebody auditing the log is looking for. Empty on every ordinary row, so the column
+     is a flag as well as a value: anything in it is a row whose recorded reason did not
+     survive being checked against its own numbers. */
+  const head = ["date","time","day","exercise","kind","change","why","rule_id",
+                "why_recorded","source","undone"];
   const body = rows.map(c=>{
     const when = new Date(c.at || Date.parse((c.date || todayStr()) + "T12:00:00"));
     return [
@@ -51310,6 +51320,7 @@ function planHistoryCSV(all){
       planChangeLine(c).join(" \u00b7 "),
       planChangeWhy(c),
       planChangeRule(c),
+      (c.note && String(c.note) !== planChangeWhy(c)) ? String(c.note) : "",
       c.derived ? "read back from your sessions" : "recorded",
       c.reverted ? "put back" : ""
     ].map(q).join(",");
@@ -58913,8 +58924,17 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.15";
+const NEWS_FOR = "2026.11.16.16";
 const NEWS = [
+  {k: "Both sentences, where they differ",
+   s: ["Element 26 now works out a change’s reason from the row itself rather than "
+     + "quoting what was written down at the time. The sentence that WAS written down is "
+     + "hidden, never deleted: it is still on the row, in your backups, and the plan-change "
+     + "export carries it in a new <b>why_recorded</b> column.",
+     "That column is empty on every ordinary row, so anything in it is a row whose "
+     + "recorded reason did not survive being checked against its own numbers — which "
+     + "makes it a flag as well as a value, and leaves the original evidence intact for "
+     + "anybody auditing the log."]},
   {k: "The session you can only mark afterwards",
    s: ["Element 26 asks whether you are ill, stressed or eating less on the way INTO a "
      + "session, and stops learning from the ones you flag. That is the right place for "

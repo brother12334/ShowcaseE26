@@ -67,24 +67,48 @@ const seeded = await p.evaluate(rows=>{
   };
 }, AUDIT);
 console.log("    header:", seeded.head.join(","));
+/* PARSED, NOT SCANNED. The export carries both sentences now \u2014 `why` is the derived
+   reason and `why_recorded` is what was written down at the time \u2014 so a test that looks
+   for "cleared the top" anywhere in the line finds the audit column and calls it a
+   failure. The claim is about one field, so it is read as one field. */
+const cells = line=>{
+  const out = []; let cur = "", q = false;
+  for(let i = 0; i < line.length; i++){
+    const ch = line[i];
+    if(q){
+      if(ch === '"' && line[i+1] === '"'){ cur += '"'; i++; }
+      else if(ch === '"') q = false;
+      else cur += ch;
+    } else if(ch === '"') q = true;
+    else if(ch === ","){ out.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+};
+const col = (line, name)=> (cells(line)[seeded.head.indexOf(name)] || "");
 /* Four went down. None of them may claim the top of the range was cleared. */
 const downRows = seeded.rows.filter(l=>{
-  const m = l.match(/(\d+(?:\.\d+)?) lb ·? ?→ (\d+(?:\.\d+)?) lb/) ||
-            l.match(/(\d+(?:\.\d+)?) lb → (\d+(?:\.\d+)?) lb/);
+  const m = col(l, "change").match(/(\d+(?:\.\d+)?) lb → (\d+(?:\.\d+)?) lb/);
   return m && parseFloat(m[2]) < parseFloat(m[1]);
 });
 ck("the export still holds the four cuts", downRows.length === 4, String(downRows.length));
 ck("no row whose load went down claims the top of the range was cleared",
-   !downRows.some(l=> CLEARED.test(l)), downRows.filter(l=> CLEARED.test(l)).length + " do");
+   !downRows.some(l=> CLEARED.test(col(l, "why"))),
+   downRows.filter(l=> CLEARED.test(col(l, "why"))).length + " do");
+ck("and each of those keeps what it originally said, for the audit",
+   downRows.every(l=> CLEARED.test(col(l, "why_recorded"))),
+   downRows.map(l=> col(l, "why_recorded").slice(0, 24)).join(" | "));
 ck("and the screen does not either",
    !/went down[\s\S]*cleared the top/.test(seeded.screen) &&
    (seeded.screen.match(/cleared the top/g) || []).length === 2,
    (seeded.screen.match(/cleared the top/g) || []).length + " mentions");
 ck("a cut reads as a reduction instead",
-   downRows.every(l=> /reduc|lighter|cut/i.test(l)), downRows[0]);
+   downRows.every(l=> /reduc|lighter|cut/i.test(col(l, "why"))),
+   downRows.map(l=> col(l, "why")).join(" | "));
 ck("every row carries a rule_id", seeded.ruleIdx > -1, String(seeded.ruleIdx));
 if(seeded.ruleIdx > -1){
-  const ids = seeded.rows.map(l=> (l.split(",")[seeded.ruleIdx] || "").trim());
+  const ids = seeded.rows.map(l=> col(l, "rule_id").trim());
   ck("and none of them is empty", ids.every(x=> x.length > 0), ids.join(" "));
   ck("the cuts and the raises do not share one", new Set(ids).size >= 2, ids.join(" "));
 }
@@ -157,6 +181,40 @@ const bar = await p.evaluate(()=>{
 console.log("   ", JSON.stringify(bar));
 ck("the sentence it was written with is kept", /bar \+ plates/.test(bar.why), bar.why);
 ck("and it is filed as a counting change", /unit/i.test(bar.rule), bar.rule);
+
+console.log("\n7 - THE SENTENCE THAT WAS WRITTEN DOWN IS HIDDEN, NOT DELETED");
+/* Deriving the reason on the way out means the stored one is never corrected and never
+   needs to be. It has to stay exactly as recorded: it is the only evidence of what the
+   app believed at the time, which is the thing an audit is looking for. */
+const keep = await p.evaluate(()=>{
+  const wrong = "Double progression: last set cleared the top of the rep range at target RPE.";
+  S.planLog = [{at: Date.now() - 86400000, date: todayStr(), day: ROTATION[0],
+    kind: "weight", name: "Squat",
+    changes: [fmtLoad(75) + " \u2192 " + fmtLoad(27.5)], note: wrong}];
+  save();
+  const shown = planChangeWhy(S.planLog[0]);
+  /* Everything that reads a change row, run over it, then the row read back. */
+  planHistoryHTML(); planHistoryCSV(true); planChangeRule(S.planLog[0]);
+  try{ buildReportInner(); }catch(e){}
+  const csv = planHistoryCSV(true);
+  const head = csv.split("\n")[0].split(",");
+  const row = csv.split("\n")[1] || "";
+  const back = JSON.parse(localStorage.getItem(dataKey()) || "{}");
+  const stored = ((back.planLog || [])[0] || {}).note;
+  const dump = backupObject();
+  return {shown, note: S.planLog[0].note, wrong, stored,
+          inBackup: ((dump.planLog || [])[0] || {}).note,
+          head, row, recIdx: head.indexOf("why_recorded")};
+});
+console.log("    shown :", keep.shown);
+console.log("    stored:", keep.note);
+ck("the shown reason is the derived one", !CLEARED.test(keep.shown), keep.shown);
+ck("the stored note is untouched in memory", keep.note === keep.wrong, keep.note);
+ck("and on disk", keep.stored === keep.wrong, keep.stored);
+ck("so a backup carries it verbatim", keep.inBackup === keep.wrong, keep.inBackup);
+ck("the export has a field for what was recorded", keep.recIdx > -1, keep.head.join(","));
+if(keep.recIdx > -1)
+  ck("and it holds the original sentence", keep.row.indexOf(keep.wrong) > -1, keep.row);
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;
