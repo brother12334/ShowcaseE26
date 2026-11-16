@@ -223,9 +223,15 @@ console.log("8 - H8: THE BOXES AND THE WARM-UP READ THE SAME LOAD");
                                  {workoutId: WID, anyDay:false, occ:0});
     return {earned, box, warm: warm && warm.w, src: warm && warm.src, plan: pl.weight};
   });
-  ck("the raise the last session earned is found", r.earned === 200, String(r.earned));
-  ck("the set box shows it", parseFloat(r.box) === 200, String(r.box));
-  ck("and the warm-up ramps to the same number", r.warm === 200 && r.src === "next",
+  /* 195, NOT 200. The old expectation was the overshoot stepUpLoad() exists to stop: the
+     step here is 10 lb (a 5 lb plate each side, from plateStep 5), and 185 + 10 is 195.
+     200 was produced by snapping 195 to a grid anchored at ZERO rather than at the bar,
+     which turned a stated 10 lb step into a 15 lb one. Plates are relative - whatever is
+     on the bar, one more plate each side is 10 more - so the offset of the starting load
+     is preserved instead of being rounded away. */
+  ck("the raise the last session earned is found", r.earned === 195, String(r.earned));
+  ck("the set box shows it", parseFloat(r.box) === 195, String(r.box));
+  ck("and the warm-up ramps to the same number", r.warm === 195 && r.src === "next",
      r.warm + " / " + r.src);
   ck("while the plan still says what it said", r.plan === 185, String(r.plan));
 }

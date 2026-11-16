@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.16";
+const APP_VERSION = "2026.11.16.17";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -50739,6 +50739,73 @@ function planRevert(at){
   save(); queueSync();
   return {ok:true, done, missing};
 }
+/* WHICH SESSION A CHANGE CAME FROM, carried onto the change row.
+
+   The grade path has done this since P1-6 \u2014 `trigger` names the set that earned a raise,
+   so a row claiming the top of the range was cleared can be checked against the log. The
+   Body-tab path recorded nothing of the kind, which was fine until a session could be
+   marked as not-evidence AFTER the app had acted on it: with no link from the row back to
+   the session, there is nothing to find and nothing to put back. */
+function flagTrigger(f){
+  if(!f) return undefined;
+  return {sessionId: f.sessionId, date: f.date, flagId: f.id, from: "flag:" + f.kind};
+}
+/* MARKING A SESSION AFTER THE APP HAS ALREADY ACTED ON IT.
+
+   sessionNotEvidence() is read when a consequence is DECIDED, which is the right moment
+   for every case except the one the audit actually names: a toe hurt in the middle of the
+   third set is something you know afterwards, by which time the collapse has been
+   recorded and the load it earned may already be cut.
+
+   So the mark reaches backwards, two ways:
+
+     SUPPRESSED. Every flag still standing from that session is stamped, so applyFlag()
+     refuses it however it is reached \u2014 the same stamp recordFlags() would have written
+     had the mark been there at the time.
+
+     PUT BACK. Every change the app wrote FROM that session is reverted through the
+     ordinary plan-history machinery, which logs the reversal rather than editing the
+     past. Only changes carrying a snapshot can be undone; one that cannot is reported
+     rather than silently left.
+
+   Your own edits are untouched. A change you made by hand is yours whatever the app
+   thinks of the session, and a row with no trigger is not something this can claim. */
+function suppressFromSession(sess){
+  if(!sess || !sess.id) return {flags: 0, reverted: 0, stuck: 0};
+  const why = sessionNotEvidence(sess) || "a session you marked as not representative";
+  let flags = 0, reverted = 0, stuck = 0;
+  (flagLog() || []).forEach(f=>{
+    if(!f || f.sessionId !== sess.id || f.notEvidence) return;
+    f.notEvidence = why;
+    /* Stamped as OURS, so taking the mark off lifts this and leaves alone a flag that was
+       suppressed for some other reason \u2014 a deload week does not stop being a deload
+       week because you decided the session was ordinary after all. */
+    f.notEvidenceFrom = "sessionMark";
+    flags++;
+  });
+  (S.planLog || []).slice().forEach(c=>{
+    if(!c || c.reverted) return;
+    if(!(c.trigger && c.trigger.sessionId === sess.id)) return;
+    if(!planRevertable(c)){ stuck++; return; }
+    const r = planRevert(c.at);
+    if(r && r.ok) reverted++; else stuck++;
+  });
+  return {flags, reverted, stuck};
+}
+/* And lifting it again. The suppression goes; nothing is re-applied. "This was ordinary
+   training after all" makes the session evidence again and puts the finding back in front
+   of you \u2014 it does not hand the app permission to redo a change you have seen undone. */
+function unsuppressFromSession(sess){
+  if(!sess || !sess.id) return 0;
+  let n = 0;
+  (flagLog() || []).forEach(f=>{
+    if(!f || f.sessionId !== sess.id) return;
+    if(f.notEvidenceFrom !== "sessionMark") return;
+    delete f.notEvidence; delete f.notEvidenceFrom;
+    n++;
+  });
+  return n;
+}
 function planRevertable(c){
   return !!c && !c.reverted && c.kind !== "revert" &&
     (!!c.easeKey || (Array.isArray(c.undo) && c.undo.filter(Boolean).length > 0));
@@ -52411,8 +52478,25 @@ function renderSessEditor(s){
   if(ne) ne.onchange = ()=>{ s.note = ne.value.trim(); s.edited = Date.now(); save(); queueSync(); };
   const nr = $("#modal [data-sessnotrep]");
   if(nr) nr.onclick = ()=>{
-    if(s.notRepresentative) delete s.notRepresentative; else s.notRepresentative = true;
+    const marking = !s.notRepresentative;
+    if(marking) s.notRepresentative = true; else delete s.notRepresentative;
     s.edited = Date.now();
+    /* P2-11 \u2014 THE MARK REACHES BACKWARDS. Suppressing what is still standing and putting
+       back what was already written is the whole point of being able to mark a session you
+       have already finished; a mark that only governed future decisions would be no use
+       at all for an injury you noticed on the third set. */
+    if(marking){
+      const r = suppressFromSession(s);
+      if(r.flags || r.reverted || r.stuck){
+        const bits = [];
+        if(r.reverted) bits.push(r.reverted + " change" + (r.reverted === 1 ? "" : "s") + " put back");
+        if(r.flags) bits.push(r.flags + " finding" + (r.flags === 1 ? "" : "s") + " left alone");
+        if(r.stuck) bits.push(r.stuck + " that cannot be undone automatically");
+        toast(joinList(bits));
+      }
+    } else {
+      unsuppressFromSession(s);
+    }
     save(); queueSync();
     /* Redrawn rather than patched in place: the button's own words and the sentence under
        it both change, and two places saying it is the sentence that gets forgotten. */
@@ -54999,7 +55083,7 @@ function progressionFor(sess, entry){
   if(clearedTop && atTarget){
     const from = isNaN(load) ? (target.weight == null ? null : target.weight) : load;
     const to = step.bodyweight && from == null ? step.amount
-             : (from == null ? null : roundLoadableOn(entry, from + step.amount, entry.name));
+             : (from == null ? null : stepUpLoad(entry, from, step.amount, entry.name));
     /* AN INCREASE HAS TO BE AN INCREASE, AND A BACK-OFF SET IS NOT A WORKING SET.
 
        This judges the LAST set, which is right for earning a raise and wrong when the
@@ -55937,11 +56021,12 @@ function applyFlag(id, choice){
       return false;
     }
     if(choice === "rest"){
-      ok = addRestToExercise(f.ex, f.restAdd == null ? FADE_REST_ADD : f.restAdd, f.workoutId);
+      ok = addRestToExercise(f.ex, f.restAdd == null ? FADE_REST_ADD : f.restAdd, f.workoutId,
+                             flagTrigger(f));
     } else if(choice === "load" && f.to != null){
       ok = applyProgression(f.ex, f.to,
         "Applied from the Body tab: reps collapsed across the sets, so the opening load comes down.",
-        f.msg, {wid: f.workoutId});
+        f.msg, {wid: f.workoutId, trigger: flagTrigger(f)});
     }
     if(ok){
       if(!f.did) f.did = {};
@@ -55965,7 +56050,7 @@ function applyFlag(id, choice){
     ok = applyProgression(f.ex, f.to, f.kind === "load"
       ? "Applied from the Body tab: the prescribed range was not reachable at the old load."
       : "Applied from the Body tab: the last set cleared the top of the range at target RPE.",
-      f.msg, {wid: f.workoutId});
+      f.msg, {wid: f.workoutId, trigger: flagTrigger(f)});
   } else if(f.kind === "stall"){
     /* P1-5 — asked again at the moment of acting, not only when the flag was raised: the
        floor, the open proposals and the reversals can all have moved since. */
@@ -56801,7 +56886,7 @@ function progressionHTML(list){
    plan would have carried if it had said so. Where the plan never prescribed one, the
    band the app was already judging against becomes the starting point — otherwise "rest
    30 seconds longer" would have nothing to be longer THAN. */
-function addRestToExercise(name, seconds, wid){
+function addRestToExercise(name, seconds, wid, trigger){
   const add = Math.max(5, Math.min(300, Math.round(Number(seconds) || 0)));
   const where = findProgramEntryWhere(name, wid);
   const e = where && where.e;
@@ -56823,7 +56908,8 @@ function addRestToExercise(name, seconds, wid){
   e.rest = next;
   logPlanChange("rest", where.wid, e.name,
     [fmtClock(cur[0]) + "\u2013" + fmtClock(cur[1]) + " \u2192 " + fmtClock(next[0]) + "\u2013" + fmtClock(next[1])],
-    {note:"Reps were collapsing across the sets, so the rest window was lengthened."});
+    {note:"Reps were collapsing across the sets, so the rest window was lengthened.",
+     trigger: trigger || undefined});
   save(); queueSync();
   toast(e.name + ": rest now " + fmtClock(next[0]) + "\u2013" + fmtClock(next[1]));
   return true;
@@ -58924,8 +59010,36 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.16";
+const NEWS_FOR = "2026.11.16.17";
 const NEWS = [
+  {k: "Marking a session reaches backwards",
+   s: ["“Not a normal day” stopped Element 26 acting on a session from the moment you "
+     + "marked it — which was no use at all for the case it exists for. A toe you hurt on "
+     + "the third set is something you know afterwards, by which time the collapse has "
+     + "been recorded and the load it earned may already be cut.",
+     "Marking a finished session now suppresses every finding still standing from it, so "
+     + "none of them can be acted on however you reach them, AND puts back every change "
+     + "the app already wrote from it. The reversal goes through the ordinary plan "
+     + "history, so it is logged rather than quietly edited out. Your own edits are never "
+     + "touched.",
+     "Taking the mark off lifts the suppression and does not redo anything. “This was "
+     + "ordinary training after all” puts the finding back in front of you; it is not "
+     + "permission to repeat a change you have seen undone.",
+     "Changes made from the Body tab now name the session that earned them, the way the "
+     + "grade card already did — which is what makes finding them later possible."]},
+  {k: "A step is never bigger than the step it says it is",
+   s: ["The rear delt fly earned “32.5 lb → 40 lb” off a session that cleared its rep "
+     + "range, with the step reported as 5 lb, one pin on the stack. 32.5 to 40 is 7.5 — "
+     + "a 23% jump — and 35 is on the grid and is the next pin up.",
+     "It was not a deliberately bigger step for a big overshoot. The target was worked "
+     + "out as the current load plus the step and then snapped to the nearest loadable "
+     + "weight: 37.5 on a 5 lb stack rounds UP to 40. Any load sitting half a step off "
+     + "the grid silently doubled its own progression — 32.5→40, 72.5→80, 152.5→160.",
+     "The rule now: a progression lands on the largest loadable weight no greater than "
+     + "the current load plus the step, as long as that is still an increase. Only when "
+     + "nothing loadable sits in the gap does it take the next one up, because a step of "
+     + "nothing is not a step. Rounding to nearest is right for making an arbitrary "
+     + "number loadable and wrong for a step, where the size is part of the instruction."]},
   {k: "Both sentences, where they differ",
    s: ["Element 26 now works out a change’s reason from the row itself rather than "
      + "quoting what was written down at the time. The sentence that WAS written down is "
@@ -60856,6 +60970,76 @@ function roundLoadableOn(entry, w, name){
     ? capToRack(Math.max(pairStep, Math.round(added / pairStep) * pairStep), nm)
     : roundLoadable(added, nm);
   return Math.round((bw + loadable) * 10) / 10;
+}
+/* A STEP UP, LANDED ON THE GRID WITHOUT GROWING.
+
+   The replay suite caught the rear delt fly earning "32.5 lb → 40 lb" with the step
+   reported as 5 lb, one pin on the stack. The target was computed as from + step and then
+   put through roundLoadableOn(), which rounds to the NEAREST loadable value: 32.5 + 5 is
+   37.5, and 37.5 on a 5 lb stack rounds up to 40. A 23% jump presented as one pin.
+
+   Whenever the current load sits half a step off the grid the step silently doubled —
+   32.5→40, 72.5→80, 152.5→160 — and this user's loads are full of off-grid values
+   because they came in under a different counting convention.
+
+   THE RULE. A progression lands on the largest loadable value no greater than from + step,
+   provided it is still above from. Only when that gap holds no loadable value at all does
+   it take the next one above, because a step of nothing is not a step. So the increase is
+   never bigger than the one the rule said it was, and never zero.
+
+   Rounding to nearest is right for what roundLoadable() is FOR — making an arbitrary
+   number loadable — and wrong for a step, where the size and the direction are both part
+   of the instruction. Reductions have their own rule and are left alone: a cut rounded
+   the safe way is rounded DOWN, and the three call sites that compute one already check
+   that the result came out below where they started. */
+function stepUpLoad(entry, from, amount, name){
+  const f = parseFloat(from), amt = parseFloat(amount);
+  if(!isFinite(f) || !isFinite(amt) || !(amt > 0)) return roundLoadableOn(entry, from, name);
+  const nm = name || (entry && entry.name);
+  const ideal = f + amt;
+  /* PLATES ARE RELATIVE; PINS AND DUMBBELLS ARE ABSOLUTE.
+
+     This is the distinction the first version of the fix missed, and phase3 caught it: a
+     barbell at 185 lb with 5 lb plates can go to 195 by adding one plate each side, and
+     190 is not a weight that bar can hold at all \u2014 it would want a 2.5 a side. Loadable
+     values on a bar are from + k x step, counted from what is ON it. A cable stack and a
+     dumbbell rack are the opposite: the pins and the dumbbells sit at fixed weights, so
+     32.5 lb is not a stack position however you got there and the next real one up is 35.
+
+     roundLoadable() snaps to a grid anchored at zero, which is right for a stack and
+     wrong for a bar \u2014 and is where the audited 32.5\u219240 came from in the other
+     direction. Both get their own arithmetic here. */
+  const eq = equipmentOf(nm);
+  if(eq === "barbell" || eq === "smith"){
+    const grid = loadStepFor(nm);
+    if(grid > 0){
+      /* The most whole steps that fit inside what was asked for, and never none. */
+      const k = Math.max(1, Math.floor((amt + 0.001) / grid));
+      return capToRack(Math.round((f + k * grid) * 10) / 10, nm);
+    }
+    return capToRack(Math.round(ideal * 10) / 10, nm);
+  }
+  /* roundLoadableOn() IS THE ORACLE for everything else, asked at a series of candidate
+     weights rather than having its grid re-derived out here. The dumbbell-pair rule, the
+     bodyweight split and the rack ceiling all live inside it, and a second opinion about
+     what is loadable is how two parts of an app start disagreeing about the same rack.
+
+     Down from the ideal first, for the largest loadable value that is still an increase;
+     the probe is a quarter of a step so it cannot step over one. */
+  for(let i = 0; i <= 8; i++){
+    const v = roundLoadableOn(entry, ideal - i * (amt / 4), nm);
+    if(v > f + 0.001 && v <= ideal + 0.001) return v;
+  }
+  /* Nothing loadable in the gap, which is an intended step smaller than one pin. So the
+     smallest loadable value ABOVE the current load, because a step of nothing is not a
+     step. */
+  for(let i = 1; i <= 24; i++){
+    const v = roundLoadableOn(entry, f + i * (amt / 4), nm);
+    if(v > f + 0.001) return v;
+  }
+  /* Nothing above it either, which means the rack ceiling: there is no increase to be had
+     and the honest answer is the ceiling itself. */
+  return roundLoadableOn(entry, ideal, nm);
 }
 /* WHAT THAT NUMBER IS MADE OF, in a few words, or "" when there is nothing worth saying.
 

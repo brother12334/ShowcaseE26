@@ -382,6 +382,58 @@ ck("it changes the slot it came from instead",
 ck("and every collapse flag names the slot it came from", fade.nameless.length === 0,
    fade.nameless.join(", ") || "all of them");
 
+console.log("\n2c - AND NOV 9 WAS AN INJURY SESSION, MARKED THE WAY A USER WOULD");
+/* The session note for Nov 9 records a toe injury, which makes the collapse it carries
+   the weakest possible ground for cutting a load: the reps fell away because something
+   hurt, not because the weight was wrong. Marked through the session editor - the same
+   button, on a session finished five days ago - the Legs B squat has to hold at 80 as
+   well, and the cut already applied above has to be put back. */
+const hurt = await p.evaluate(()=>{
+  const sess = S.sessions.filter(s=> s.date === "2026-11-09")[0];
+  if(!sess) return {missing: true};
+  const loadOf = (nm, wid)=>{
+    const f = findProgramEntryWhere(nm, wid);
+    if(!f || !f.e || f.wid !== wid) return null;
+    return f.e.weight == null ? null : f.e.weight;
+  };
+  const was = {legsA: loadOf("Smith Machine Squat","legsA"),
+               legsB: loadOf("Smith Machine Squat","legsB")};
+  /* Exactly the user's route: open the session, press the button. */
+  openSessionEditor(sess.id);
+  const btn = document.querySelector("#modal [data-sessnotrep]");
+  const pressed = !!btn;
+  if(btn) btn.click();
+  hideModal();
+  const flags = (flagLog() || []).filter(f=> f && f.sessionId === sess.id);
+  /* And the finding tried again afterwards, which is what a second tap would do. */
+  const sq = flags.filter(f=> f.kind === "fade" && /Smith Machine Squat/.test(f.ex))[0];
+  let retry = null;
+  if(sq){ sq.applied = false; if(sq.did) delete sq.did; retry = applyFlag(sq.id, "load"); }
+  return {pressed, marked: !!sess.notRepresentative, why: sessionNotEvidence(sess),
+          note: sess.note || "(the export carries no note for it)",
+          nFlags: flags.length,
+          suppressed: flags.filter(f=> f.notEvidence).length,
+          retry, was,
+          now: {legsA: loadOf("Smith Machine Squat","legsA"),
+                legsB: loadOf("Smith Machine Squat","legsB")}};
+});
+console.log("    before the mark: " + JSON.stringify(hurt.was));
+console.log("    after  the mark: " + JSON.stringify(hurt.now));
+console.log("    " + hurt.nFlags + " findings from that session, " + hurt.suppressed
+  + " now suppressed; re-applying the squat cut returned " + hurt.retry);
+ck("the editor offered the mark on a finished session", hurt.pressed, String(hurt.pressed));
+ck("the session is marked", hurt.marked, String(hurt.marked));
+ck("and named as not being evidence", /not representative/i.test(hurt.why || ""), hurt.why);
+ck("the cut it had already earned is put back",
+   hurt.now.legsB === hurt.was.legsB + 10 || hurt.now.legsB === 80,
+   hurt.was.legsB + " \u2192 " + hurt.now.legsB);
+ck("so the Legs B squat holds at 80 too", hurt.now.legsB === 80, String(hurt.now.legsB));
+ck("the Legs A squat is still untouched", hurt.now.legsA === 80, String(hurt.now.legsA));
+ck("every finding from that session is suppressed",
+   hurt.nFlags > 0 && hurt.suppressed === hurt.nFlags,
+   hurt.suppressed + "/" + hurt.nFlags);
+ck("and the cut cannot be applied again", hurt.retry === false, String(hurt.retry));
+
 console.log("\n2b - AND NO CHANGE ROW IS FILED UNDER \u201cWORKOUT\u201d  (P0-1, third acceptance test)");
 /* "Every weight, rest and stall row in the change log names a specific day, never
    Workout." The historic log is full of them - that IS the bug - so the test is about
