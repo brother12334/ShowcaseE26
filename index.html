@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.11";
+const APP_VERSION = "2026.11.16.12";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -51010,8 +51010,25 @@ function planChangeSentence(c){
     ". Sessions already logged keep it.";
   if(c.kind === "move")   return "Moved <b>"+esc(c.name)+"</b> "+(c.dir<0?"earlier":"later")+
     " in "+esc(day)+", to position "+c.pos+" of "+c.of+".";
-  const bits = (c.changes||[]).map(d=>
-    esc(d.field)+" "+(d.from ? esc(d.from) : "blank")+" → "+(d.to ? esc(d.to) : "blank"));
+  /* P2-10 \u2014 BOTH SHAPES, BECAUSE THE RECORD HOLDS BOTH.
+
+     The audited report showed "blank \u2192 blank" for most programme edits while the CSV of
+     the same rows carried the real values, and the cause was this line understanding only
+     one of the two shapes `changes` comes in. Every automatic rule writes pre-formatted
+     strings ("75 lb \u2192 27.5 lb"); the Program tab's hand editor writes field objects. The
+     export reads both through planChangeLine(); this read only the objects, so every
+     string row rendered as two blanks \u2014 in the one artefact a person is most likely to
+     send to somebody else.
+
+     `field` is also no longer assumed: a row that carries `key` and no `field` used to
+     lose its label as well. */
+  const bits = (c.changes||[]).map(d=>{
+    if(typeof d === "string") return esc(d);
+    const f = d && (d.field || d.key);
+    return (f ? esc(f) + " " : "")
+      + ((d && d.from) ? esc(d.from) : "blank") + " → "
+      + ((d && d.to) ? esc(d.to) : "blank");
+  });
   return "Changed <b>"+esc(c.prevName || c.name)+"</b> on "+esc(day)+": "+bits.join("; ")+".";
 }
 
@@ -58779,8 +58796,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.11";
+const NEWS_FOR = "2026.11.16.12";
 const NEWS = [
+  {k: "The report stops saying “blank → blank”",
+   s: ["The downloadable Training History Report showed “blank → blank” for most "
+     + "programme edits, while the CSV of the very same change log carried the real "
+     + "values. One record, two readers — and the one that said nothing is the one you "
+     + "are most likely to send to a coach.",
+     "Nothing was missing from the data. A change row stores its detail either as "
+     + "ready-made lines (“75 lb → 27.5 lb”, which is what every automatic rule "
+     + "writes) or as field objects (which is what your own edits in the Program tab "
+     + "write). The export understood both; the report understood only the second kind, "
+     + "so every row of the first kind came out as two blanks. Both read the records the "
+     + "same way now, and a test compares them row by row."]},
   {k: "The change log says what actually happened",
    s: ["Six rows in the audited history all carried the same sentence: “Double "
      + "progression: last set cleared the top of the rep range at target RPE.” Four of "
