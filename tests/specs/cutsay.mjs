@@ -29,6 +29,13 @@ const ck=(what,ok,got)=>{ console.log((ok?"  ok   ":"  BROKEN ")+what+(got===und
 /* ss: paired or not. logged: whether the last row already carries work. */
 const scene = (ss, logged)=> p.evaluate(a=>{
   const wid=ROTATION[0];
+  /* P1-5 \u2014 floors effectively off. A stall cut now has to pass the shared constraint
+     check first, and with this two-movement plan a chest cut lands under the chest floor,
+     so the cut is refused and there is no sentence to read. That refusal is the point of
+     the new rule and is tested in conflict.mjs; THIS spec is about what the cut SAYS once
+     it is allowed, so the constraint is taken out of the way. */
+  S.lmFloor = {}; GKEYS.forEach(gg=> S.lmFloor[gg] = 0.1);
+  S.reversed = {}; S.lmSuggest = {};
   S.program[wid]=[{name:"Cable Fly", sets:4, reps:"8-12", weight:30, superset: a.ss||undefined},
                   {name:"Push-up", sets:3, reps:"10-15", supersetEnd: a.ss||undefined}];
   S.active=null; save(); startWorkout(wid); PF=null; TAB="workout"; save();

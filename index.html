@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.9";
+const APP_VERSION = "2026.11.16.10";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -55103,6 +55103,26 @@ function sleepAvgOver(dates){
    stall is a claim about a run of exposures of one slot, so what resets it is time away
    from THAT slot. */
 const STALL_RESET_DAYS = 14;
+/* P1-5 — how many exposures of a slot have to pass after its load or rep range moved
+   before a flat session counts toward a stall. */
+const STALL_GRACE_EXPOSURES = 2;
+/* Exposures of this slot since its load or rep range last changed, or null when nothing
+   has changed. Counted from the plan history, which is where those changes are written. */
+function exposuresSincePlanChange(name, key, sess){
+  const rows = (S.planLog || []).filter(c=> c && (c.kind === "weight" || c.kind === "reps")
+    && nrm(c.name || "") === key);
+  if(!rows.length) return null;
+  const at = rows.reduce((m, c)=> Math.max(m, c.at || 0), 0);
+  if(!(at > 0)) return null;
+  const upto = (sess && sess.startedAt) || Date.now();
+  if(at > upto) return null;
+  let n = 0;
+  (S.sessions || []).forEach(s=>{
+    if(!s || !(s.startedAt > at) || s.startedAt > upto) return;
+    if((s.entries || []).some(x=> x && nrm(x.name) === key)) n++;
+  });
+  return n;
+}
 function updateStalls(sess){
   if(!S.stalls || typeof S.stalls !== "object") S.stalls = {};
   const off = layoffBefore(sess);
@@ -55131,15 +55151,44 @@ function updateStalls(sess){
        programme has stopped working — and none that it has started again either, so a
        real run of stalled sessions either side of it survives. */
     if(notEv) return;
+    /* P1-5 — NOR IS A SESSION JUST AFTER THE LOAD OR THE RANGE MOVED.
+
+       The audited log cut the Smith squat 4 -> 3 sets on Oct 31, four days after its load
+       went 70 -> 80 on Oct 27, and the next squat session was the user's best. A load
+       increase is the most ordinary reason for a few flat sessions there is: you are
+       learning a heavier weight. Reading that as a stalled programme punishes the
+       progression that caused it.
+
+       Two exposures of grace, counted in sessions of this slot rather than in days, so a
+       movement trained weekly gets the same latitude as one trained three times a week. */
+    const sinceChange = exposuresSincePlanChange(en.name, k, sess);
+    if(sinceChange != null && sinceChange < STALL_GRACE_EXPOSURES){
+      rec.dates = (rec.dates || []).concat(sess.date).slice(-3);
+      rec.afterChange = sinceChange;
+      S.stalls[k] = rec;
+      return;
+    }
+    delete rec.afterChange;
     rec.n = (rec.n || 0) + 1;
     rec.dates = (rec.dates || []).concat(sess.date).slice(-3);
     delete rec.afterBreak;
     S.stalls[k] = rec;
   });
 }
-function stallVerdict(name){
+function stallVerdict(name, wid){
   const rec = (S.stalls || {})[nrm(name)];
   if(!rec || rec.n < 3) return null;
+  /* P1-5 — THE STALL IS REAL AND THE CUT MAY STILL BE WRONG. Whether the programme has
+     stopped working is a question about the log; whether a set may come off this slot is
+     a question about the rest of the app's intentions and about the muscle's floor. The
+     verdict carries the answer so the card can SHOW the conflict rather than offering a
+     button that would do harm. */
+  const blocked = stallCutBlocked(name, wid);
+  if(blocked) return {
+    kind: "conflict", conflict: blocked,
+    msg: "Stalled 3 sessions running, and a set cut is the wrong answer here",
+    sub: blocked.say + " Try a different movement for this slot, or reset the load and "
+       + "build back up."};
   const sleep = sleepAvgOver(rec.dates || []);
   if(sleep != null && sleep < 6.5){
     return {
@@ -55672,6 +55721,13 @@ function applyFlag(id, choice){
       : "Applied from the Body tab: the last set cleared the top of the range at target RPE.",
       f.msg, {wid: f.workoutId});
   } else if(f.kind === "stall"){
+    /* P1-5 — asked again at the moment of acting, not only when the flag was raised: the
+       floor, the open proposals and the reversals can all have moved since. */
+    const stop = stallCutBlocked(f.ex, f.workoutId);
+    if(stop){
+      toast(stop.say);
+      return false;
+    }
     /* The stall protocol, which is a set cut and not a load cut: dropping the weight is
        what costs you the strength you built getting there.
 
@@ -55709,6 +55765,137 @@ function applyFlag(id, choice){
   }
   if(ok){ f.applied = true; f.appliedAt = Date.now(); save(); queueSync(); }
   return ok;
+}
+/* =====================================================================
+   P1-5 — ONE CHECK EVERY SET CHANGE PASSES, AND A MEMORY OF BEING OVERRULED
+
+   Four collisions in the audited log, all the same shape: two rules, each correct on its
+   own, with no way to see the other.
+
+     The stall protocol cut the rear delt fly 3 -> 2 and then 2 -> 1, and seventeen days
+     later the app raised the rear delt FLOOR to 8.5 sets because they were not growing.
+     One rule removed the volume the other was asking for.
+
+     A stall cut the Smith squat 4 -> 3 four days after its load went 70 -> 80, and the
+     next squat session was the user's best. A load increase is the most ordinary reason
+     for a few flat sessions there is.
+
+     The Body tab raised Incline Smith to 5 sets; a week later the plan check cut it 5 ->
+     2 because chest was over its ceiling. Nothing stopped the first proposing what the
+     second would undo.
+
+     The plan check cut squat 4 -> 2 and was reversed in one minute; two days later it
+     proposed 2 -> 3 and was reversed in two. The app had no memory of being overruled.
+
+   So: one function that every automatic and Body-tab set change asks first, a stall
+   definition that excludes the sessions that are not evidence of one, and a record of a
+   reversal that holds for a fortnight. */
+function setChangeConflict(wid, ei, toSets){
+  const e = ((S.program || {})[wid] || [])[ei];
+  if(!e) return null;
+  const was = parseInt(e.sets, 10) || 0;
+  const to = parseInt(toSets, 10) || 0;
+  if(to === was) return null;
+  const A = bodyAnalysis();
+  const mm = musclesFor(e.name) || {};
+  const win = A && A.win;
+  let worst = null;
+  Object.keys(mm).forEach(g=>{
+    if(!GROUPS[g] || GROUPS[g].optional) return;
+    const share = mm[g];
+    if(!(share > 0)) return;
+    const L = (A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g];
+    if(!L) return;
+    /* What this muscle is PLANNED for across the cycle, restated per week, which is the
+       unit the floor and ceiling are written in. */
+    const perCycle = DAYS.concat(["finisher"]).reduce((t, w2)=>
+      t + ((S.program[w2] || []).reduce((u, x)=>
+        u + muscleFrac(x.name, g) * (parseInt(x.sets, 10) || 0), 0)), 0);
+    const days = typicalCycleDays() || 7;
+    const perWeek = v => v * 7 / days;
+    const now = perWeek(perCycle);
+    const next = perWeek(perCycle + share * (to - was));
+    /* THE RESULT is what has to be inside the bounds, not the journey to it. An earlier
+       version only complained when the muscle was currently within range, which excused
+       exactly the audited case: rear delts were ALREADY under their floor when the stall
+       protocol cut them 3 -> 2 and again 2 -> 1. A cut that makes a shortfall worse is
+       the one most worth refusing. A change in the helpful direction is never a
+       conflict, however far out the muscle currently is. */
+    if(to < was && next < L.mev - 0.001){
+      const c = {g, kind: "floor", limit: r1(L.mev), now: r1(now), next: r1(next),
+        say: "That would take " + GROUPS[g].name.toLowerCase() + " to " + r1(next)
+           + " sets a week, below the " + r1(L.mev) + " floor that grows it."};
+      if(!worst || share > worst.share) worst = Object.assign({share}, c);
+    }
+    if(to > was && next > L.mrv + 0.001){
+      const c = {g, kind: "ceiling", limit: r1(L.mrv), now: r1(now), next: r1(next),
+        say: "That would take " + GROUPS[g].name.toLowerCase() + " to " + r1(next)
+           + " sets a week, past the " + r1(L.mrv) + " ceiling it recovers from."};
+      if(!worst || share > worst.share) worst = Object.assign({share}, c);
+    }
+  });
+  return worst;
+}
+/* P1-5 — is a stall cut on this slot allowed to run at all? Separate from whether a
+   stall HAPPENED, which is a question about the log; this is a question about the rest of
+   the app's intentions. */
+function stallCutBlocked(name, wid){
+  const where = findProgramEntryWhere(name, wid);
+  const e = where && where.e;
+  if(!e) return null;
+  const cur = parseInt(e.sets, 10) || 0;
+  /* A floor raise open for a muscle this movement trains. One rule asking for more
+     volume while another takes it away is the collision this exists to stop. */
+  const mm = musclesFor(e.name) || {};
+  const open = (S.lmSuggest && S.lmSuggest.open) || null;
+  if(open && open.dir === "up" && mm[open.g] > 0) return {
+    kind: "floorRaise", g: open.g,
+    say: "Element 26 is asking for MORE " + (GROUPS[open.g] || {}).name
+       + " volume at the moment, so it will not cut a set here in the same breath."};
+  /* And the shared check, against the cut this protocol would make. */
+  const conflict = setChangeConflict(where.wid, (S.program[where.wid] || []).indexOf(e),
+                                     Math.max(1, cur - 1));
+  if(conflict) return Object.assign({kind: "constraint"}, conflict);
+  /* Overruled on this slot recently — see noteChangeReversed(). */
+  const rev = changeReversedRecently("sets", name, where.wid);
+  if(rev) return Object.assign({kind: "reversed"}, rev);
+  return null;
+}
+/* P1-5 — THE APP REMEMBERS BEING OVERRULED.
+
+   The plan check cut squat 4 -> 2 and was reversed inside a minute; two days later it
+   proposed 2 -> 3 and was reversed inside two. Proposing what somebody has just refused
+   is not persistence, it is not listening. A reversal holds for a fortnight, per slot and
+   per kind of change, which is long enough for the evidence to have genuinely moved. */
+const REVERSED_DAYS = 14;
+function reversedKey(kind, name, wid){
+  return kind + "|" + nrm(name) + "|" + (wid || "");
+}
+function noteChangeReversed(kind, name, wid, detail){
+  if(!S.reversed || typeof S.reversed !== "object") S.reversed = {};
+  S.reversed[reversedKey(kind, name, wid)] = Date.now();
+  save();
+}
+function changeReversedRecently(kind, name, wid){
+  const at = (S.reversed || {})[reversedKey(kind, name, wid)];
+  if(!at) return null;
+  const days = (Date.now() - at) / DAY_MS;
+  if(days >= REVERSED_DAYS) return null;
+  const n = Math.round(days);
+  return {at, days: n,
+    say: "You reversed this change " + (n < 1 ? "today" : n === 1 ? "yesterday" : n + " days ago")
+       + ", so Element 26 will not propose it again for a fortnight."};
+}
+/* P1-5 / decision 9 — A FLOOR MAY NOT BE RAISED PAST THE CEILING. A floor above the
+   ceiling is a target that cannot be met without asking for volume the same model says
+   you cannot recover from. */
+function floorRaiseCap(A, g){
+  const L = (A && A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g] || {};
+  const mrv = L.mrv > 0 ? L.mrv : (GROUPS[g] && GROUPS[g].mrv) || 0;
+  const mav = L.mav > 0 ? L.mav : (GROUPS[g] && GROUPS[g].mav) || 0;
+  /* The top of the productive range where there is one, and never past the ceiling. */
+  const cap = mav > 0 ? Math.min(mav, mrv || mav) : mrv;
+  return Math.round(cap * 10) / 10;
 }
 /* Two weeks, which is what the advice says, and long enough for the protocol to be the
    thing being tested rather than a single session's noise. */
@@ -58491,8 +58678,32 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.9";
+const NEWS_FOR = "2026.11.16.10";
 const NEWS = [
+  {k: "The rules talk to each other now",
+   s: ["Four collisions in one audited log, all the same shape: two rules, each right on "
+     + "its own, with no way to see the other.",
+     "The stall protocol cut a rear delt fly 3 \u2192 2 sets and then 2 \u2192 1, and seventeen "
+     + "days later the app raised the rear delt FLOOR to 8.5 sets because they were not "
+     + "growing. One rule was removing the volume the other was asking for. A stall cut "
+     + "now passes a shared check first: if the result would fall below the muscle\u2019s "
+     + "floor, the conflict is shown instead of applied \u2014 with the figure it would land "
+     + "on \u2014 and the card suggests a different movement or a load reset instead. A cut "
+     + "will not run at all while a floor raise is open for a muscle that movement trains.",
+     "A stall cut the Smith squat 4 \u2192 3 four days after its load went 70 \u2192 80, and the "
+     + "next squat session was the user\u2019s best. A load increase is the most ordinary "
+     + "reason for a few flat sessions there is \u2014 you are learning a heavier weight. Flat "
+     + "sessions within two exposures of a load or rep-range change no longer count "
+     + "toward a stall, counted in sessions of that slot rather than in days so a "
+     + "movement trained weekly gets the same latitude as one trained three times a week.",
+     "And the app remembers being overruled. The plan check cut squat 4 \u2192 2 and was "
+     + "reversed inside a minute; two days later it proposed 2 \u2192 3 and was reversed "
+     + "inside two. Reverse a change and Element 26 will not propose that one again for a "
+     + "fortnight. Proposing what you have just refused is not persistence, it is not "
+     + "listening.",
+     "A floor can also no longer be raised past the ceiling. A floor above the ceiling is "
+     + "a target that cannot be met without asking for volume the same model says you "
+     + "cannot recover from."]},
   {k: "The load your box offers is this day's, not the other day's",
    s: ["The same movement on two days of a split has two loads \u2014 a Legs A squat at 80 "
      + "and a Legs B squat at 60 \u2014 and the empty weight box is filled from the plan when "
