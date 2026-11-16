@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.12";
+const APP_VERSION = "2026.11.16.13";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -20654,13 +20654,31 @@ function manualLandmarks(g){
    the app's own figure. Newest first, capped, and shown in full when you open the chain
    for that muscle. */
 const LM_WHY_KEEP = 8;
-function logLandmarkChange(g, which, from, to, src, note){
-  if(from == null && to == null) return;
-  if(from != null && to != null && Math.abs(from - to) < 0.05) return;
+function logLandmarkChange(g, which, from, to, src, note, pinned){
+  if(from == null && to == null) return null;
+  if(from != null && to != null && Math.abs(from - to) < 0.05) return null;
   if(!S.lmWhy || typeof S.lmWhy !== "object") S.lmWhy = {};
   if(!S.lmWhy[g] || typeof S.lmWhy[g] !== "object") S.lmWhy[g] = {};
   const list = S.lmWhy[g][which] || (S.lmWhy[g][which] = []);
-  list.push({at: Date.now(), from, to, src, note: note || ""});
+  /* P2-11 \u2014 and the same for this history, which is the other place the 13 taps landed.
+     Matched on the SOURCE as well as the landmark: a figure you stepped to and then the
+     calibration moving it are two different things however close together they happen. */
+  const last = list[list.length - 1];
+  if(last && last.src === src && Date.now() - (last.at || 0) < SETTING_COALESCE_MS){
+    const a = last.from, b = to;
+    if(a == null ? b == null : (b != null && Math.abs(a - b) < 0.05)){
+      /* Net: nothing changed. Handed back to the caller rather than merely dropped,
+         because a run of taps that LANDS where it started should also leave the figure
+         following Element 26 again rather than silently pinned to a number you did not
+         choose \u2014 and only setManualLandmark() can do that. */
+      return list.pop();
+    }
+    last.at = Date.now(); last.to = to;
+    if(note) last.note = note;
+    return null;
+  }
+  list.push({at: Date.now(), from, to, src, note: note || "", pinned: !!pinned});
+  return null;
   while(list.length > LM_WHY_KEEP) list.shift();
 }
 function landmarkHistory(g, which){
@@ -20672,7 +20690,12 @@ const LM_WHY_WORD = {
   cleared:    "you handed it back to Element 26",
   calibration:"learned from a block of your training"
 };
-function setManualLandmark(g, which, v){
+/* `shown` is the figure that was on SCREEN before this call \u2014 which is not the same as
+   the manual value, because until the first tap there is no manual value and the screen
+   is showing Element 26's own. Without it the first entry of a run reads "set \u2192 10.1"
+   and the run has no starting number to be compared with, so a sequence of taps that
+   lands back where it began cannot be recognised as having changed nothing. */
+function setManualLandmark(g, which, v, shown){
   const key = which === "mev" ? "lmFloor" : which === "mav" ? "lmMav" : "lmMrv";
   const prev = S[key] && S[key][g];
   const was = (typeof prev === "number" && prev > 0) ? prev : null;
@@ -20683,7 +20706,12 @@ function setManualLandmark(g, which, v){
   }
   if(!S[key]) S[key] = {};
   S[key][g] = v;
-  logLandmarkChange(g, which, was, v, "you");
+  const first = was == null;
+  const popped = logLandmarkChange(g, which,
+    first ? (typeof shown === "number" ? shown : null) : was, v, "you", null, first);
+  /* The run ended where it started, and it was this run that pinned the figure. Nothing
+     was decided, so nothing is kept \u2014 including the pin. */
+  if(popped && popped.pinned && S[key]) delete S[key][g];
 }
 /* A9.2: WHEN WHAT YOU SET AND WHAT THE APP WORKED OUT HAVE PARTED COMPANY.
 
@@ -47743,10 +47771,11 @@ function bind(){
   const tgFloorCommit = (g, was, v, which)=>{
     if(v === was) return;
     const k = which || "mev";
-    setManualLandmark(g, k, v);
+    setManualLandmark(g, k, v, was);
     logPlanChange("rule", null, gName(g),
       [gName(g) + " " + TG_WORD[k] + " " + was + " \u2192 " + v + " sets a week"],
-      {note: "You set this " + TG_WORD[k] + " yourself in Settings."});
+      {setting: "lm:" + g + ":" + k,
+       note: "You set this " + TG_WORD[k] + " yourself in Settings."});
     save(); queueSync(); render();
   };
   document.querySelectorAll("[data-tgstep]").forEach(b=>{
@@ -50824,6 +50853,30 @@ function planChangeWhy(c){
   const made = PLAN_RULES[rule];
   return made == null ? note : made;
 }
+/* P2-11 — ONE HAND ON ONE BUTTON IS ONE DECISION.
+
+   From the Nov 15 2026 audit: on Sep 15 the Mid Back floor was changed 13 times in about
+   a minute, ending at 5.3. Thirteen rows in the history, twelve of them describing a
+   number that had stopped existing by the time the finger came off the button — the same
+   fault the barbell-convention switch had, and the same remedy.
+
+   A row carrying a `setting` key is net-coalesced: a change to the SAME setting inside
+   half a minute rewrites the row before it to the whole move, and a run that lands back
+   where it started removes the row, because nothing ended up changed. The arithmetic
+   still runs per tap, because the number on screen has to follow your finger. It is the
+   RECORD that coalesces. */
+const SETTING_COALESCE_MS = 30 * 1000;
+/* The two sides of a "from → to" line, with whatever prose each side carries. */
+function planArrowSides(line){
+  const m = String(line == null ? "" : line).match(/^([\s\S]*?)\s*(?:→|->)\s*([\s\S]*)$/);
+  return m ? {from: m[1].trim(), to: m[2].trim()} : null;
+}
+/* The same line restated as having started somewhere else: the new row's wording, the
+   old row's starting value. */
+function planRestateFrom(line, from){
+  const s = planArrowSides(line);
+  return s ? from + " → " + s.to : line;
+}
 function logPlanChange(kind, wid, name, changes, extra){
   if(!Array.isArray(S.planLog)) S.planLog = [];
   if(planChangeIsNoOp(changes)) return;
@@ -50836,6 +50889,30 @@ function logPlanChange(kind, wid, name, changes, extra){
     if(!r || now0 - (r.at || 0) > PLAN_DUPE_MS) break;
     if((r.kind + "|" + (r.wid || r.day || "") + "|" + String(r.name || "") + "|"
         + JSON.stringify(r.changes || [])) === sig) return;
+  }
+  /* One setting, one row, for as long as the taps keep coming. */
+  const setKey = extra && extra.setting;
+  if(setKey){
+    for(let i = S.planLog.length - 1; i >= 0; i--){
+      const r = S.planLog[i];
+      if(!r || now0 - (r.at || 0) > SETTING_COALESCE_MS) break;
+      if(r.setting !== setKey) continue;
+      const first = (r.changes || [])[0];
+      const start = r.setFrom != null ? r.setFrom
+                  : (planArrowSides(first) || {}).from;
+      const landed = (planArrowSides((changes || [])[0]) || {}).to;
+      if(start == null || landed == null) break;        // not a "from to" setting row
+      const a = planLoadNum(start), b = planLoadNum(landed);
+      if(a && b && a.bw === b.bw && Math.abs(a.n - b.n) < 0.0001){
+        S.planLog.splice(i, 1);                         // net: nothing changed
+        return;
+      }
+      r.at = now0; r.date = todayStr();
+      r.setFrom = start;
+      r.changes = (changes || []).map((x, j)=> j === 0 ? planRestateFrom(x, start) : x);
+      if(extra && extra.note) r.note = extra.note;
+      return;
+    }
   }
   const row = Object.assign({
     at: Date.now(), date: todayStr(), day: wid, kind,
@@ -58796,8 +58873,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.12";
+const NEWS_FOR = "2026.11.16.13";
 const NEWS = [
+  {k: "Thirteen taps are one decision",
+   s: ["On Sep 15 the Mid Back floor was changed 13 times in about a minute, ending at "
+     + "5.3 — and the history kept all thirteen rows, twelve of them describing a number "
+     + "that had stopped existing by the time the finger came off the button.",
+     "A change to the same setting inside half a minute now rewrites the row before it to "
+     + "the whole move, so a run of taps reads as one line from where you started to "
+     + "where you stopped. The number on screen still follows your finger per tap; it is "
+     + "the record that collapses.",
+     "A run that lands back where it began leaves no row at all — and no pin either. "
+     + "Stepping a floor up and then back down used to leave it pinned to a figure you "
+     + "had not chosen, where before the taps it was still following Element 26."]},
   {k: "The report stops saying “blank → blank”",
    s: ["The downloadable Training History Report showed “blank → blank” for most "
      + "programme edits, while the CSV of the very same change log carried the real "

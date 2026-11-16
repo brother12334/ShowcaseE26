@@ -93,6 +93,10 @@ console.log("5 - EVERY CHANGE TO A LANDMARK KEEPS ITS REASON");
   const r = await p.evaluate(()=>{
     S.lmWhy={}; S.lmFloor={}; S.lmMrv={}; save();
     setManualLandmark("chest","mev",12);
+    /* P2-11 \u2014 two taps a second apart are now ONE decision in the record, which is the
+       whole point of the coalescing. This section is about every change keeping its
+       reason, so the two are separated by more than the coalescing window instead. */
+    (((S.lmWhy||{}).chest||{}).mev||[]).forEach(x=> x.at -= 10 * 60 * 1000);
     setManualLandmark("chest","mev",14);
     setManualLandmark("chest","mev",null);
     S.lmCalObs={}; S.lmCal={};
