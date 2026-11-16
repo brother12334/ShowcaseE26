@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.13";
+const APP_VERSION = "2026.11.16.14";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -35609,6 +35609,7 @@ function viewActiveSession(){
        answers. */
     h += restNoteLineHTML(en);
     h += plateLineHTML(en, last);
+    h += impossibleLineHTML(en);
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
     h += asymHintHTML(en);
@@ -58873,8 +58874,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.13";
+const NEWS_FOR = "2026.11.16.14";
 const NEWS = [
+  {k: "A load that is not in the building",
+   s: ["Your heaviest dumbbells are 50 lb, and the log carries Single-Arm DB Row at 55 on "
+     + "Oct 17. Element 26 held both facts and said nothing about the pair of them.",
+     "It has never SUGGESTED a weight past the rack — that ceiling has been enforced "
+     + "since it was written, and a cable has always been rounded to a pin. This is the "
+     + "other direction: a load already written down that the equipment you described "
+     + "cannot produce. A dumbbell heavier than your rack, a cable weight no pin sets, a "
+     + "barbell total lighter than the bar itself.",
+     "Either the number is a typo or the kit Element 26 knows about is out of date, and "
+     + "only you know which — so it says which set and which figure, leaves what you "
+     + "logged exactly as you logged it, and offers to check the kit. Silently correcting "
+     + "a log would be much the worse of the two mistakes.",
+     "It only ever speaks from something you told it. No rack ceiling, no stack size, no "
+     + "bar weight: nothing to be sure about, and nothing said."]},
   {k: "Thirteen taps are one decision",
    s: ["On Sep 15 the Mid Back floor was changed 13 times in about a minute, ending at "
      + "5.3 — and the history kept all thirteen rows, twelve of them describing a number "
@@ -60820,6 +60835,110 @@ function roundLoadable(w, name){
   const plates = w - bar;
   if(plates <= 0) return capToRack(w, name);
   return capToRack(bar + Math.max(st, Math.round(plates / st) * st), name);
+}
+/* P2-11 — A LOAD THAT IS NOT IN THE BUILDING, AFTER THE FACT.
+
+   The user's heaviest dumbbells are 50 lb and the log carries Single-Arm DB Row at 55 on
+   Oct 17. Element 26 held both facts and said nothing about the pair of them.
+
+   The prescribing direction was already handled: capToRack() has refused to suggest past
+   the rack since it was written, and roundLoadable() puts a cable on a pin. This is the
+   other direction — a load already WRITTEN DOWN that the equipment described cannot
+   produce. Either the number is a typo or the equipment profile is out of date, and only
+   the person who was there knows which, so this says so and changes nothing. Silently
+   correcting a log would be the worse of the two mistakes by a long way.
+
+   Everything here speaks only from something you told it. No rack ceiling, no stack size,
+   no bar weight: nothing to be sure about, and nothing said. */
+function loadImpossible(name, w){
+  const v = parseFloat(w);
+  if(!(v > 0)) return null;                      // an empty box is not a claim
+  const p = trainPrefs();
+  const eq = equipmentOf(name);
+  if(eq === "dumbbell" || eq === "kettlebell"){
+    const max = parseFloat(rackMaxNow());
+    if(isFinite(max) && max > 0 && v > max + 0.001)
+      return {kind: "rack", limit: r1(max),
+              why: "Your heaviest dumbbell is " + fmtLoad(max) + "."};
+    return null;
+  }
+  if(eq === "cable" || eq === "machine"){
+    const st = parseFloat(p.stackStep);
+    if(isFinite(st) && st > 0){
+      const off = Math.abs(v / st - Math.round(v / st));
+      if(off > 0.002)
+        return {kind: "stack", limit: r1(st),
+                why: "The stack moves in " + fmtLoad(st) + " steps, so no pin sets this."};
+    }
+    return null;
+  }
+  if(eq === "barbell" || eq === "smith"){
+    /* ONLY WHERE THE NUMBER CLAIMS TO INCLUDE THE BAR. Logging plates only, 35 on a
+       bench press is an ordinary entry and saying otherwise would be nonsense. */
+    if(p.barMode !== "total") return null;
+    const imp = parseFloat(implementWeight(name));
+    if(isFinite(imp) && imp > 0 && v < imp - 0.001)
+      return {kind: "bar", limit: r1(imp),
+              why: "That is less than the " + (eq === "smith" ? "carriage" : "bar")
+                 + " on its own, which is " + fmtLoad(imp) + "."};
+    return null;
+  }
+  return null;
+}
+/* Every logged set of one entry that the equipment profile says could not have happened.
+   Read through the side adapter, so a paired unilateral set is checked a side at a time
+   and the row can be named the way the screen names it. */
+function entryImpossible(en){
+  if(!en || !en.name) return [];
+  const out = [];
+  sideSets(en).forEach(x=>{
+    if(!x) return;
+    /* x.weight, NOT x.set.weight: on a paired entry the weight belongs to the SIDE, and
+       reading the set through the adapter's row was reading the one field the adapter
+       exists to normalise \u2014 it reported both sides of every pair at whatever the set
+       object happened to carry. */
+    const w = x.weight;
+    if(w == null || w === "") return;
+    const bad = loadImpossible(en.name, w);
+    if(bad) out.push(Object.assign({si: x.si, side: x.side, w: parseFloat(w)}, bad));
+  });
+  return out;
+}
+/* Said once per entry, naming the sets rather than decorating each row: the point is to
+   be noticed and resolved, and four identical warnings down one card is how a message
+   gets scrolled past. Quiet, because nothing is wrong with your training — two of the
+   app's own facts disagree. */
+function impossibleLineHTML(en){
+  const bad = entryImpossible(en);
+  if(!bad.length) return "";
+  /* BOTH SIDES OF ONE PAIR AT ONE WEIGHT IS ONE THING TO SAY. "set 2 L at 55 lb and set
+     2 R at 55 lb" is the adapter's view of a unilateral set read out loud; a person did
+     one set with a 55 in each hand. Named per side only where the sides differ, which is
+     the case where the side is the useful part of the answer. */
+  /* How many sides the PAIR holds, which is a fact about the entry rather than about
+     what was flagged: a set logged on one side only is a whole row of the screen, and a
+     pair where only one of two sides is impossible is a case where the side is the
+     whole answer. */
+  const ofPair = {};
+  sideSets(en).forEach(x=> ofPair[x.si] = (ofPair[x.si] || 0) + 1);
+  const byPair = {};
+  bad.forEach(x=>{
+    const k = x.si + "|" + r1(x.w);
+    (byPair[k] || (byPair[k] = [])).push(x);
+  });
+  const sets = joinList(Object.keys(byPair).map(k=>{
+    const g = byPair[k], x = g[0];
+    const whole = !x.side || g.length >= (ofPair[x.si] || 1);
+    return "set " + (x.si + 1)
+      + (whole ? "" : " " + String(x.side).toUpperCase())
+      + " at " + fmtLoad(x.w);
+  }));
+  /* One sentence of reason even where several sets are flagged: they are flagged by the
+     same fact about your kit, and the first one states it. */
+  return `<div class="plate-line plate-gap"><div class="pl-say">Logged ${esc(sets)}
+    — ${esc(bad[0].why)} Element 26 has left what you logged alone; either the number
+    or the kit it knows about needs a look.</div>
+    <button type="button" class="nb-link" data-platefix="1">Check the kit</button></div>`;
 }
 /* WHERE THE RACK STOPS. Suggesting 55 to somebody whose dumbbells end at 50 is an
    instruction they cannot follow, and the app had no idea the ceiling existed. Told, it
