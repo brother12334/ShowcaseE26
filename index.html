@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.17";
+const APP_VERSION = "2026.11.16.18";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -54190,7 +54190,9 @@ function repExtMaxFor(name){ return isCompound(name) ? REP_EXT_MAX_COMPOUND : RE
    per-hand jump on a 30 lb curl is a 17% load increase, and that exact jump is
    documented as the cause of four stalled arm lifts in this log. Anything carrying an
    explicit `incr` (the three curls) overrides the class default. */
-function progressionStep(e){
+/* `from` is the load this step would be added to, where the caller knows it. It is used
+   only for the cap below; without it the behaviour is exactly as it was. */
+function progressionStep(e, from){
   const out = progressionStepRaw(e);
   /* THE JUMP HAS TO EXIST. The class rules below are what the research says; what you
      own is what you can put on the bar. Rounded UP rather than down, because the
@@ -54213,6 +54215,38 @@ function progressionStep(e){
     }
   }
   if(st > 0 && out.alt > 0) out.alt = Math.max(st, Math.ceil((out.alt - 1e-9) / st) * st);
+  /* AND THE GEAR MAY MAKE A STEP SMALLER, WHERE THE STEP IS THE PROBLEM.
+
+     Until now the grid only ever rounded UP: the class rules say what size of step a
+     movement wants, the gear says what you can load, and where the gear is coarser it
+     wins. That is right, and it left one case unserved. The cable stacks at this user's
+     gym reach 2.5 lb, and the rear delt fly steps 5 by the class rule - 15.4% on 32.5,
+     half again past the 10% an isolation should jump by. The equipment could do better
+     and the rule never asked it to.
+
+     So where the class step would breach the movement's own jump cap AND a smaller
+     loadable step exists, the smaller one is taken: the largest whole number of grid
+     steps that stays inside the cap, never fewer than one. The cap is already the app's
+     stated opinion about how big a jump is too big; this lets the gear honour it rather
+     than only ever being blamed for breaking it.
+
+     Nothing else moves. On a 5 lb-only stack there is no smaller step and the figure is
+     unchanged; a heavy cable where 5 lb is a small fraction keeps its 5; a barbell at 185
+     jumping 10 lb is 5.4% and nowhere near its cap. `capFitted` is stamped so a sentence
+     can say the gear made the step SMALLER, which is the opposite of gearForced. */
+  const f = parseFloat(from);
+  if(st > 0 && out.amount > 0 && isFinite(f) && f > 0){
+    const cap = isCompound(e && e.name) ? JUMP_CAP_COMPOUND : JUMP_CAP_ISO;
+    if(out.amount / f > cap + 1e-9){
+      const room = Math.floor((f * cap + 1e-9) / st) * st;
+      if(room >= st && room < out.amount - 1e-9){
+        out.capFitted = true;
+        out.classAmount = out.classAmount == null ? out.amount : out.classAmount;
+        out.amount = Math.round(room * 100) / 100;
+        out.why = (out.why || "") + ", trimmed to what your kit can do without a big jump";
+      }
+    }
+  }
   return out;
 }
 /* H2 \u2014 HAS A LOAD ACTUALLY BEEN LOGGED FOR THIS MOVEMENT LATELY. The log, not the
@@ -54311,7 +54345,10 @@ function progressionStepRaw(e){
   if(equipmentOf(e.name) === "barbell"){
     return st(5, {unit: U + " total", why: "barbell, a small plate each side"});
   }
-  return st(5, {unit: U, why: "one pin on the stack"});
+  /* NOT "one pin on the stack". A 2.5 on a cable can be a 2.5 lb pin or a 5 lb pin with
+     an add-on hung on it, and nothing the app knows distinguishes them. The figure is the
+     smallest change the stack makes, which is true however it is made. */
+  return st(5, {unit: U, why: "the smallest change this stack makes"});
 }
 function fmtLoad(v){
   if(v == null) return "bodyweight";
@@ -55024,7 +55061,10 @@ function progressionFor(sess, entry){
   const rpe = parseFloat(last.rpe) || 0;
   const tRpe = rpeTargetFor(entry, lastAt.i);
   const load = parseFloat(last.weight);
-  const step = progressionStep(target);
+  /* The load is handed over so the step can be trimmed where the class figure would be
+     too big a jump on it and the gear offers something finer. */
+  const step = progressionStep(target, isNaN(load)
+    ? (target && target.weight != null ? parseFloat(target.weight) : NaN) : load);
 
   // "at its target RPE" means EVERY set at this load got there without going past the
   // prescribed effort. No RPE logged is treated as meeting it, rather than silently
@@ -59010,8 +59050,40 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.17";
+const NEWS_FOR = "2026.11.16.18";
 const NEWS = [
+  {k: "Which of the two facts is the wrong one",
+   s: ["The impossible-load warning was built on a real case — a 55 lb dumbbell on a rack "
+     + "that ends at 50 — and on a real log it was also wrong 42 times. Cable stacks that "
+     + "reach 2.5 lb increments against a profile that said 5 made every 2.5 ever logged "
+     + "read as impossible: 22 sets of one rear delt fly, and the same on five other "
+     + "movements across ten months.",
+     "Its whole premise is that two of the app’s facts disagree, and it was settling that "
+     + "against the log every time. But a log is a record of what happened and the kit "
+     + "profile is a description somebody typed once.",
+     "So the evidence decides which one gets doubted. A load used in more than one "
+     + "session is a fact about the building: the warning says your log is almost "
+     + "certainly right and the kit setting is what to put straight. A load used in "
+     + "exactly one session is the typo case it was built for, and it says so. Either way "
+     + "it is shown, and either way your log is left exactly as you wrote it.",
+     "One session against several is not a tuned number — it happens to separate real "
+     + "data cleanly. Every value off both plausible grids in the audited log came from a "
+     + "single day; the one that spans months is the one the gym really makes."]},
+  {k: "The gear can make a step smaller, not just bigger",
+   s: ["The step rules say what size of jump a movement wants and your equipment says "
+     + "what you can load, and until now the gear could only ever round a step UP. That "
+     + "left one case unserved: a stack reaching 2.5 lb, a rear delt fly stepping 5 by "
+     + "the rule — 15.4% on 32.5 lb, half again past the 10% an isolation should jump by. "
+     + "The kit could do better and nothing asked it to.",
+     "Where the rule’s step would breach that cap and your gear offers something finer, "
+     + "the finer step is taken — the largest whole increment that stays inside the cap, "
+     + "never fewer than one. The cap was already Element 26’s opinion about how big a "
+     + "jump is too big; now the equipment can honour it instead of only being blamed for "
+     + "breaking it.",
+     "Nothing else moves. A 5 lb-only stack has no finer step and is unchanged; a heavy "
+     + "cable where 5 lb is a small fraction keeps its 5; a barbell adding 10 lb to 185 "
+     + "is nowhere near its cap. And the reason no longer says “one pin on the stack”, "
+     + "because a 2.5 can be a 2.5 pin or a 5 with an add-on and the app cannot tell."]},
   {k: "Marking a session reaches backwards",
    s: ["“Not a normal day” stopped Element 26 acting on a session from the moment you "
      + "marked it — which was no use at all for the case it exists for. A toe you hurt on "
@@ -61107,25 +61179,73 @@ function roundLoadable(w, name){
 
    Everything here speaks only from something you told it. No rack ceiling, no stack size,
    no bar weight: nothing to be sure about, and nothing said. */
+/* HOW OFTEN THIS LOAD HAS ACTUALLY BEEN USED, counted in SESSIONS rather than sets.
+
+   Three sets of 55 in one session is one decision about one dumbbell, and if the rack
+   stops at 50 it is one mistake repeated twice. Ten sessions at 32.5 across ten months is
+   a fact about the building. That distinction is the whole basis of which of the app's two
+   facts gets doubted below, and it separates this user's data exactly: every load that is
+   off both plausible grids comes from a single day, and the one that spans months is the
+   one the gym really makes. */
+function loadSeenSessions(name, w){
+  const k = nrm(name);
+  const v = parseFloat(w);
+  if(!(v > 0)) return 0;
+  const days = {};
+  (S.sessions || []).forEach(s=>{
+    if(!s) return;
+    (s.entries || []).forEach(en=>{
+      if(!en || nrm(en.name) !== k) return;
+      const hit = sideSets(en).some(x=> Math.abs(parseFloat(x.weight) - v) < 0.001);
+      if(hit) days[s.date || s.id] = 1;
+    });
+  });
+  return Object.keys(days).length;
+}
+/* P2-11 \u2014 AND WHICH OF THE TWO FACTS IS THE ONE TO DOUBT.
+
+   The check below was built on the audited 55 lb dumbbell on a 50 lb rack, and it is right
+   about that. On this user's real log it was also wrong 42 times: their cable stacks reach
+   2.5 lb increments, their profile said 5, and so every 2.5 they had ever logged read as
+   impossible \u2014 22 sets of the rear delt fly at 32.5, and the same on five other
+   movements across ten months.
+
+   The warning's premise is that two of the app's facts disagree, and it was resolving that
+   against the log every time. But the log is a record of what happened and the profile is
+   a description somebody typed once, so the evidence decides: a load used in more than one
+   session is a fact about the building and the profile is what looks out of date; a load
+   used in exactly one session is the typo case this was built for. Shown either way, and
+   the log left alone either way. */
+const LOAD_TRUST_SESSIONS = 2;
 function loadImpossible(name, w){
   const v = parseFloat(w);
   if(!(v > 0)) return null;                      // an empty box is not a claim
   const p = trainPrefs();
   const eq = equipmentOf(name);
+  const seen = loadSeenSessions(name, v);
+  const trusted = seen >= LOAD_TRUST_SESSIONS;
+  const profileSay = what=> ({kind: "profile", seen, limit: null,
+    why: "You have logged this in " + seen + " sessions, so it is a weight you can reach"
+       + " \u2014 but " + what + " Element 26 has the kit down as something else."});
   if(eq === "dumbbell" || eq === "kettlebell"){
     const max = parseFloat(rackMaxNow());
-    if(isFinite(max) && max > 0 && v > max + 0.001)
-      return {kind: "rack", limit: r1(max),
+    if(isFinite(max) && max > 0 && v > max + 0.001){
+      if(trusted) return profileSay("the heaviest dumbbell on file is " + fmtLoad(max) + ", so");
+      return {kind: "rack", limit: r1(max), seen,
               why: "Your heaviest dumbbell is " + fmtLoad(max) + "."};
+    }
     return null;
   }
   if(eq === "cable" || eq === "machine"){
     const st = parseFloat(p.stackStep);
     if(isFinite(st) && st > 0){
       const off = Math.abs(v / st - Math.round(v / st));
-      if(off > 0.002)
-        return {kind: "stack", limit: r1(st),
+      if(off > 0.002){
+        if(trusted) return profileSay("the stack is on file as moving in "
+          + fmtLoad(st) + " steps, so");
+        return {kind: "stack", limit: r1(st), seen,
                 why: "The stack moves in " + fmtLoad(st) + " steps, so no pin sets this."};
+      }
     }
     return null;
   }
@@ -61134,10 +61254,13 @@ function loadImpossible(name, w){
        bench press is an ordinary entry and saying otherwise would be nonsense. */
     if(p.barMode !== "total") return null;
     const imp = parseFloat(implementWeight(name));
-    if(isFinite(imp) && imp > 0 && v < imp - 0.001)
-      return {kind: "bar", limit: r1(imp),
+    if(isFinite(imp) && imp > 0 && v < imp - 0.001){
+      if(trusted) return profileSay("the " + (eq === "smith" ? "carriage" : "bar")
+        + " is on file as " + fmtLoad(imp) + " on its own, so");
+      return {kind: "bar", limit: r1(imp), seen,
               why: "That is less than the " + (eq === "smith" ? "carriage" : "bar")
                  + " on its own, which is " + fmtLoad(imp) + "."};
+    }
     return null;
   }
   return null;
@@ -61192,10 +61315,17 @@ function impossibleLineHTML(en){
   }));
   /* One sentence of reason even where several sets are flagged: they are flagged by the
      same fact about your kit, and the first one states it. */
+  /* The closing sentence follows the accusation. Where the log is the stronger evidence
+     it says so, rather than leaving "one of these two is wrong" hanging over training
+     that actually happened. */
+  const profile = bad[0].kind === "profile";
   return `<div class="plate-line plate-gap"><div class="pl-say">Logged ${esc(sets)}
-    — ${esc(bad[0].why)} Element 26 has left what you logged alone; either the number
-    or the kit it knows about needs a look.</div>
-    <button type="button" class="nb-link" data-platefix="1">Check the kit</button></div>`;
+    \u2014 ${esc(bad[0].why)} ${profile
+      ? "Your log is almost certainly right; the kit setting is what to put straight."
+      : "Element 26 has left what you logged alone; either the number or the kit it knows"
+        + " about needs a look."}</div>
+    <button type="button" class="nb-link" data-platefix="1">${
+      profile ? "Put the kit right" : "Check the kit"}</button></div>`;
 }
 /* WHERE THE RACK STOPS. Suggesting 55 to somebody whose dumbbells end at 50 is an
    instruction they cannot follow, and the app had no idea the ceiling existed. Told, it
