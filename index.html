@@ -7224,7 +7224,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.15.9";
+const APP_VERSION = "2026.11.16.1";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -58084,8 +58084,31 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.15.9";
+const NEWS_FOR = "2026.11.16.1";
 const NEWS = [
+  {k: "Matching the weaker side no longer erases the gap it was matched to",
+   s: ["The side-balance rule asks you to go left first and stop the right at the left\u2019s "
+     + "rep count. Follow it and the logged reps read dead level from then on \u2014 so the "
+     + "measurement that justified the rule was being destroyed by the rule, and after "
+     + "six sessions the check would switch itself off on a movement whose sides had "
+     + "never converged at all.",
+       "The gap had not gone anywhere. It moved into the reserve: ten reps at RPE 9 and "
+     + "ten at RPE 7 are not the same set, they are about two reps apart. Sides are now "
+     + "compared on reps to failure \u2014 reps plus what was left in the tank \u2014 instead of "
+     + "reps logged. A matched pair at RPE 9 against RPE 7 now reads as a 15% gap rather "
+     + "than nothing, and the card says where it is: \u201cthe reps are matched at about 10, "
+     + "but the right has about 2 more in reserve\u201d.",
+       "A matched pair with no RPE on either side is the one case with no information in "
+     + "it at all. Those sessions are left out of the decision rather than counted as "
+     + "level, and the card says how many were left out and why.",
+       "Which side counts as the weaker one is now stated rather than inferred: it has to "
+     + "come out behind in at least four of the last six sessions. Three each way is not a "
+     + "weaker side, however large the individual gaps \u2014 that is set order.",
+       "And a check can come back on. The table of retired movements only ever gained "
+     + "entries, so a movement whose weaker side genuinely swapped would retire during "
+     + "the changeover and then stay retired for ever while the new gap went unmeasured. "
+     + "It is now written both ways: once four of six fall the other way, the check "
+     + "returns with the other side named."]},
   {k: "The side-balance check stops switching itself off while the gap is real",
    s: ["On one audited log the Preacher Curl\u2019s left arm was weaker in 9 of 9 sessions by "
      + "about 28%, and stayed weaker whichever arm went first. Element 26 retired the "
@@ -60740,9 +60763,29 @@ function sideHistory(exName){
    has no answer yet, and the safe direction here is to keep measuring. */
 const ASYM_SMALL = 0.10;          // a gap this size is not worth training around
 const ASYM_SMALL_OF = 4;          // this many of the last six, and the check comes off
+const ASYM_SIDE_OF = 4;           // and this many behind, for a side to be the weaker one
 const ASYM_WINDOW = 6;            // exposures compared
-/* One session's left-against-right, at the heaviest load both sides worked. Returns a
-   signed fraction: positive means the LEFT did fewer reps. */
+/* One session's left-against-right, at the heaviest load both sides worked.
+
+   P1-8b — AND IN REPS TO FAILURE, NOT REPS LOGGED, because the protocol this check
+   drives destroys the evidence for itself otherwise. "Match the weaker side" means going
+   left first and stopping the right at the left's rep count; follow it and the logged
+   reps read dead level from then on, the gap measures zero, and after six exposures the
+   check retires on a movement whose sides never converged at all. The reserve is where
+   the gap went: ten reps at RPE 9 and ten at RPE 7 are not the same set, they are about
+   two reps apart.
+
+   REPS TO FAILURE AND NOT e1RM, which is the other obvious candidate and is wrong here.
+   Both sides are compared at the same load, so e1RM is a monotone function of reps to
+   failure and orders the exposures identically — but it divides by that load, which
+   compresses the scale: the audited Preacher Curl's 28% rep gap becomes about 9% in
+   e1RM terms, under the 10% threshold, and the check retires. That is precisely the bug
+   P1-8 fixed. Reps to failure keeps the threshold meaning what it meant.
+
+   A MATCHED SET WITH NO RPE IS NOT EVIDENCE OF ANYTHING. Equal reps and no effort rating
+   on either side is the one case with no signal at all in it, and counting it as "level"
+   is how reps-matching would retire a check by itself. Such an exposure is left out of
+   the decision rather than read as zero. */
 function sideExposure(h){
   const by = {};
   (h.entry.sets || []).forEach((st, i)=>{
@@ -60753,7 +60796,7 @@ function sideExposure(h){
     if(!(reps > 0)) return;
     const w = parseFloat(st.weight) || 0;
     const slot = by[w] || (by[w] = {L: [], R: []});
-    slot[side].push(reps);
+    slot[side].push(st);
   });
   const mean = a => a.reduce((x, y)=> x + y, 0) / a.length;
   let pick = null;
@@ -60761,13 +60804,24 @@ function sideExposure(h){
     const slot = by[k];
     if(!slot.L.length || !slot.R.length) return;       // the same load, on both sides
     const w = parseFloat(k) || 0;
-    if(!pick || w > pick.w) pick = {w, L: mean(slot.L), R: mean(slot.R)};
+    if(!pick || w > pick.w) pick = {w, L: slot.L, R: slot.R};
   });
   if(!pick) return null;
-  const top = Math.max(pick.L, pick.R);
-  return {date: h.date, at: h.at, w: pick.w, L: pick.L, R: pick.R,
+  const reps = sd => mean(pick[sd].map(st=> parseFloat(st.reps) || 0));
+  const rtf  = sd => mean(pick[sd].map(st=> repsToFailure(st)));
+  const rated = sd => pick[sd].every(st=>{
+    const r = parseFloat(st && st.rpe);
+    return isFinite(r) && r > 0 && r <= 10;
+  });
+  const rL = reps("L"), rR = reps("R");
+  const matched = Math.abs(rR - rL) <= Math.max(rL, rR) * 0.02;
+  if(matched && !(rated("L") && rated("R"))) return {date: h.date, at: h.at, w: pick.w,
+    startSide: h.startSide, excluded: "matched reps with no effort rating"};
+  const L = rtf("L"), R = rtf("R");
+  const top = Math.max(L, R);
+  return {date: h.date, at: h.at, w: pick.w, L, R, repsL: rL, repsR: rR, matched,
           startSide: h.startSide,
-          gap: top > 0 ? (pick.R - pick.L) / top : 0};
+          gap: top > 0 ? (R - L) / top : 0};
 }
 function sideStats(exName){
   const key = asymCacheKey();
@@ -60776,44 +60830,63 @@ function sideStats(exName){
   if(ck in ASYM_CACHE.data) return ASYM_CACHE.data[ck];
 
   const hist = sideHistory(exName);                    // newest first
-  const all = hist.map(sideExposure).filter(Boolean);
-  const win = all.slice(0, ASYM_WINDOW);
+  const scored = hist.map(sideExposure).filter(Boolean);
+  const usable = scored.filter(x=> !x.excluded);
+  const win = usable.slice(0, ASYM_WINDOW);
+  const skipped = scored.length - usable.length;
   let out;
   if(!win.length){
-    out = {ok: false, sessions: hist.length, exposures: 0, balanced: 0,
-      reason: hist.length
-        ? "no session yet with both sides logged at the same load"
-        : "no sides logged for this movement yet"};
+    out = {ok: false, sessions: hist.length, exposures: 0, balanced: 0, excluded: skipped,
+      reason: skipped
+        ? skipped + " session" + (skipped === 1 ? "" : "s") + " left out: the reps were "
+          + "matched on both sides with no RPE, so there is nothing to compare"
+        : hist.length
+          ? "no session yet with both sides logged at the same load"
+          : "no sides logged for this movement yet"};
   } else {
     const gaps = win.map(x=> x.gap).sort((a, b)=> a - b);
     const mid = gaps.length % 2
       ? gaps[(gaps.length - 1) / 2]
       : (gaps[gaps.length / 2 - 1] + gaps[gaps.length / 2]) / 2;
-    const dir = mid >= 0 ? 1 : -1;                     // +1: the left is the weaker one
+    /* P1-8b — WHICH SIDE IS THE WEAKER ONE IS A MAJORITY QUESTION, stated rather than
+       inferred from the sign of a median. A side has to come out behind in at least
+       ASYM_SIDE_OF of the window to be the established weaker side. Below that there is
+       no weaker side to speak of, whatever the individual gaps look like: a movement
+       that is 30% left-weak three times and 30% right-weak three times has no asymmetry,
+       it has set order. */
+    const behindL = win.filter(x=> x.gap > 0).length;  // the left did fewer
+    const behindR = win.filter(x=> x.gap < 0).length;
+    const dir = behindL >= ASYM_SIDE_OF ? 1 : behindR >= ASYM_SIDE_OF ? -1 : 0;
     /* Exposures where the gap IN THE ESTABLISHED DIRECTION is inside the threshold. A
        reversal counts here too, and should: a session where the supposedly weaker side
        was ahead is evidence against the asymmetry, not for it. */
-    const smallOf = win.filter(x=> x.gap * dir < ASYM_SMALL).length;
+    const smallOf = dir ? win.filter(x=> x.gap * dir < ASYM_SMALL).length : win.length;
     const enough = win.length >= ASYM_WINDOW;
-    const closed = enough && (Math.abs(mid) < ASYM_SMALL || smallOf >= ASYM_SMALL_OF);
+    const closed = enough && (!dir || Math.abs(mid) < ASYM_SMALL || smallOf >= ASYM_SMALL_OF);
     const mean = a => a.length ? a.reduce((x, y)=> x + y, 0) / a.length : null;
-    const R = {reps: mean(win.map(x=> x.R)), load: mean(win.map(x=> x.w)), sets: win.length};
-    const L = {reps: mean(win.map(x=> x.L)), load: mean(win.map(x=> x.w)), sets: win.length};
+    /* The rep figures shown are the RAW ones, which is what somebody recognises from
+       their own log; the DECISION above is made on reps to failure. */
+    const R = {reps: mean(win.map(x=> x.repsR)), rtf: mean(win.map(x=> x.R)),
+               load: mean(win.map(x=> x.w)), sets: win.length};
+    const L = {reps: mean(win.map(x=> x.repsL)), rtf: mean(win.map(x=> x.L)),
+               load: mean(win.map(x=> x.w)), sets: win.length};
     out = {
       ok: true,
       sessions: hist.length,
       exposures: win.length,
       balanced: win.length,              // kept for callers: what was actually compared
-      dropped: Math.max(0, all.length - win.length),
+      dropped: Math.max(0, usable.length - win.length),
       R, L,
       /* `gap` stays a rep difference, which is what every screen already prints. The
          DECISION is made on gapPct, because a rep is not the same thing at 6 reps and
          at 20. */
       gap: Math.abs(R.reps - L.reps),
-      gapPct: Math.abs(mid),
+      gapPct: dir ? Math.abs(mid) : 0,
       signedPct: mid,
-      weaker: Math.abs(mid) < 0.01 ? null : (mid > 0 ? "L" : "R"),
-      stronger: Math.abs(mid) < 0.01 ? null : (mid > 0 ? "R" : "L"),
+      behindL, behindR,
+      weaker: dir === 0 ? null : (dir > 0 ? "L" : "R"),
+      stronger: dir === 0 ? null : (dir > 0 ? "R" : "L"),
+      excluded: skipped,
       smallOf, closed, window: win,
       confident: win.length >= 2
     };
@@ -60832,7 +60905,18 @@ function asymGapText(st){
     + Math.round(ASYM_SMALL * 100) + "% across the last " + st.exposures + ".";
   const w = st.weaker === "L" ? st.L : st.R;
   const s = st.weaker === "L" ? st.R : st.L;
-  return "Your " + sideWordFull(st.weaker) + " is about " + Math.round(st.gapPct * 100)
+  const pct = Math.round(st.gapPct * 100);
+  /* WHERE THE GAP IS, when it is not in the rep count. Matching the weaker side makes
+     the reps equal by construction, so "your left is 15% behind: right 10 reps, left 10"
+     reads as a contradiction. On those sessions the gap is in what was left in the tank,
+     and saying so is the difference between a number somebody trusts and one they
+     assume is broken. */
+  const mostlyMatched = (st.window || []).filter(x=> x.matched).length > (st.exposures / 2);
+  if(mostlyMatched) return "Your " + sideWordFull(st.weaker) + " is about " + pct
+    + "% behind on effort: the reps are matched at about " + r1(w.reps) + ", but the "
+    + sideWordFull(st.stronger) + " has about " + r1(Math.abs(s.rtf - w.rtf))
+    + " more in reserve at the end of a set.";
+  return "Your " + sideWordFull(st.weaker) + " is about " + pct
     + "% behind: " + sideWordFull(st.stronger) + " " + r1(s.reps) + " reps, "
     + sideWordFull(st.weaker) + " " + r1(w.reps) + ".";
 }
@@ -60916,37 +61000,49 @@ function asymRetestDue(){
        balanced reading. That makes it self-maintaining without nagging, because it
        cannot reappear while nothing has changed. */
     return unilateralInPlan().some(e=>{
-      if(asymRetiredFor(e.name)) return false;
       const st = sideStats(e.name);
-      return st.ok && st.closed;
+      if(!st.ok) return false;
+      /* Either direction is news: a gap that has closed, or a retired one that has
+         reopened — see applyAsymRetest(). */
+      return asymRetiredFor(e.name) ? !st.closed : st.closed;
     });
   }
   return unilateralInPlan().some(e=>sideStats(e.name).ok);
 }
 function applyAsymRetest(){
   if(!S.asymRetired || typeof S.asymRetired !== "object") S.asymRetired = {};
-  const kept = [], retired = [];
+  const kept = [], retired = [], reopened = [];
   unilateralInPlan().forEach(e=>{
     const st = sideStats(e.name);
     if(!st.ok) return;
     // never retire on a provisional reading: an unbalanced window is exactly the case
     // where a gap can look closed when it is not
+    /* P1-8b — WRITTEN BOTH WAYS, so a gap that reopens brings its own check back. The
+       table only ever gained entries before, which meant a movement whose weaker side
+       genuinely flipped retired during the changeover — no side holding four of six —
+       and then stayed retired for ever while the new asymmetry went unmeasured. */
+    const k = nrm(e.name);
+    const was = !!S.asymRetired[k];
     if(st.closed){
-      S.asymRetired[nrm(e.name)] = true;
+      S.asymRetired[k] = true;
       retired.push(e.name);
-    } else kept.push(e.name);
+    } else {
+      if(was){ delete S.asymRetired[k]; reopened.push(e.name); }
+      kept.push(e.name);
+    }
   });
-  S.asymRetest = {at: Date.now(), retired, kept};
+  S.asymRetest = {at: Date.now(), retired, kept, reopened};
   logPlanChange("rule", null, "Asymmetry rule re-test", [
     retired.length ? "Retired on: "+retired.join(", ") : "Nothing retired yet",
-    kept.length ? "Still matching the weaker side on: "+kept.join(", ") : "All movements are level"
-  ], {note:"One comparison per session, left against right at the same load, as a percentage. "
+    kept.length ? "Still matching the weaker side on: "+kept.join(", ") : "All movements are level",
+    reopened.length ? "Back on, the gap has reopened: "+reopened.join(", ") : null
+  ].filter(Boolean), {note:"One comparison per session, left against right at the same load, as a percentage. "
        + "A check comes off when the median of the last " + ASYM_WINDOW + " is inside "
        + Math.round(ASYM_SMALL * 100) + "%, or when the gap was inside it in "
        + ASYM_SMALL_OF + " of those " + ASYM_WINDOW + " \u2014 which is what a side that keeps "
        + "changing which one is weaker looks like."});
   save(); queueSync();
-  return {retired, kept};
+  return {retired, kept, reopened};
 }
 /* AND IT RUNS ITSELF.
 
