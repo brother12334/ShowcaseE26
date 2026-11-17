@@ -318,44 +318,64 @@ console.log("\n8 - LOGGING A PAIR FOR REAL: L, R, ONE REST, AND NOTHING IN BETWE
   ck("the session starts with the movement paired", r.paired === true, JSON.stringify(r));
   ck("and its first set is left then right", r.sides.join("") === "LR", r.sides.join(""));
 
-  const rows = await ev(()=>{
-    TAB = "workout"; render();
-    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
-    const chk = [...document.querySelectorAll('.set .chk')]
-      .filter(b=> Number(b.dataset.e) === ei && Number(b.dataset.s) === 0);
-    return {n: chk.length, sides: chk.map(b=> b.dataset.sd)};
-  });
-  console.log("    set 1 draws " + rows.n + " rows: " + JSON.stringify(rows.sides));
-  ck("set one is drawn as two rows, one per side", rows.n === 2, String(rows.n));
-  ck("left first", rows.sides.join("") === "LR", rows.sides.join(""));
+  /* THE SEAM IS THE SAME; THE CONTROL IS NOT, AND THAT IS DELIBERATE.
 
-  /* Fill and tick the left, then look at the clock. */
+     This used to tick each side separately: log the left, assert no rest clock, log the
+     right, assert the clock starts once. There is no per-side tick any more. A pair is
+     one set and is finished once, with a gate on it - reps and an effort rating on BOTH
+     sides - so the property this section exists to protect is now structural rather than
+     observed: there is no moment at which half a pair can be banked, because there is no
+     control that would do it.
+
+     What is asserted here instead is stronger. Filling the left and leaving it must start
+     no clock. The tick must REFUSE while anything is missing, naming it. And when it is
+     taken, both sides go down together and exactly one clock starts, for the pair. */
+  const rows = await ev(()=>{
+    TAB = "workout"; PAIR_OPEN = null; render();
+    const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
+    const lines = [...document.querySelectorAll('.set.is-pairline')]
+      .filter(d=> d.querySelector(`[data-e="${ei}"][data-s="0"]`));
+    return {n: lines.length,
+            sides: lines.map(d=> (d.querySelector("[data-sd]") || {}).dataset.sd),
+            ticks: document.querySelectorAll(`[data-pairdone="${ei}:0"]`).length,
+            perSide: document.querySelectorAll('.set.is-pairline .chk').length};
+  });
+  console.log("    set 1 draws " + rows.n + " lines: " + JSON.stringify(rows.sides));
+  ck("set one is drawn as two lines, one per side", rows.n === 2, String(rows.n));
+  ck("left first", rows.sides.join("") === "LR", rows.sides.join(""));
+  ck("with ONE tick, for the pair", rows.ticks === 1, String(rows.ticks));
+  ck("and no per-side tick to bank half of it with", rows.perSide === 0, String(rows.perSide));
+
+  /* The left, filled and left alone. */
   const afterL = await p.evaluate(()=>{
     const ei = S.active.entries.findIndex(x=> nrm(x.name) === nrm("Preacher Curl"));
-    const pick = sd => {
-      const row = [...document.querySelectorAll('.set')].find(d=>
-        d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="${sd}"]`));
-      return row;
-    };
+    const pick = sd => [...document.querySelectorAll('.set')].find(d=>
+      d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="${sd}"]`));
     const fill = (row, reps, rpe)=>{
-      const w = row.querySelector('[data-f="weight"]'); w.value = "25";
-      w.dispatchEvent(new Event("change"));
+      const w = row.querySelector('[data-f="weight"]');
+      if(w){ w.value = "25"; w.dispatchEvent(new Event("change")); }
       const rp = row.querySelector('[data-f="reps"]'); rp.value = String(reps);
       rp.dispatchEvent(new Event("change"));
       const se = row.querySelector('[data-f="rpe"]'); if(se){ se.value = String(rpe);
         se.dispatchEvent(new Event("change")); }
     };
-    const L = pick("L");
-    fill(L, 8, 9);
-    L.querySelector('.chk').click();
+    fill(pick("L"), 8, 9);
+    /* Tapping the pair's tick now, with the right still empty, must be refused. */
+    const btn = document.querySelector(`[data-pairdone="${ei}:0"]`);
+    btn.click();
     const st = S.active.entries[ei].sets[0];
-    return {lDone: !!(st.sides && st.sides.L && st.sides.L.done),
+    return {lReps: st.sides && st.sides.L && st.sides.L.reps,
+            lDone: !!(st.sides && st.sides.L && st.sides.L.done),
+            rDone: !!(st.sides && st.sides.R && st.sides.R.done),
             clock: !!S.active.restTimer,
-            lReps: st.sides && st.sides.L && st.sides.L.reps};
+            need: (document.querySelector(".pair-need") || {}).textContent || null};
   });
   console.log("    after L: " + JSON.stringify(afterL));
-  ck("the left is logged", afterL.lDone === true, JSON.stringify(afterL));
+  ck("the left's reps are stored", String(afterL.lReps) === "8", String(afterL.lReps));
+  ck("the tick is refused with the right still empty", afterL.lDone === false && afterL.rDone === false,
+     "L " + afterL.lDone + " R " + afterL.rDone);
   ck("and NO rest clock has started", afterL.clock === false, String(afterL.clock));
+  ck("the screen says what is missing", /R reps/i.test(afterL.need || ""), afterL.need);
 
   const target = await ev(()=>{
     render();
@@ -373,23 +393,26 @@ console.log("\n8 - LOGGING A PAIR FOR REAL: L, R, ONE REST, AND NOTHING IN BETWE
       d.querySelector(`[data-e="${ei}"][data-s="0"][data-sd="R"]`));
     const rp = row.querySelector('[data-f="reps"]'); rp.value = "11";
     rp.dispatchEvent(new Event("change"));
-    const w = row.querySelector('[data-f="weight"]'); w.value = "25";
-    w.dispatchEvent(new Event("change"));
-    /* Ticked with no effort rating first, which a pair must refuse. */
-    row.querySelector('.chk').click();
+    const btn = ()=> document.querySelector(`[data-pairdone="${ei}:0"]`);
+    /* Both sides have reps now, but the right has no effort rating. Still refused. */
+    btn().click();
     const st = S.active.entries[ei].sets[0];
     const refused = !(st.sides.R && st.sides.R.done);
-    const se = row.querySelector('[data-f="rpe"]');
+    const se = document.querySelector(
+      `[data-e="${ei}"][data-s="0"][data-sd="R"][data-f="rpe"]`);
     se.value = "9"; se.dispatchEvent(new Event("change"));
-    row.querySelector('.chk').click();
-    return {refused, rDone: !!(st.sides.R && st.sides.R.done),
+    btn().click();
+    const st2 = S.active.entries[ei].sets[0];
+    return {refused, rDone: !!(st2.sides.R && st2.sides.R.done),
+            lDone: !!(st2.sides.L && st2.sides.L.done),
             clock: !!S.active.restTimer,
             restOn: S.active.restTimer ? S.active.restTimer.s : null};
   });
   console.log("    after R: " + JSON.stringify(afterR));
-  ck("a side with no effort rating is refused", afterR.refused === true,
+  ck("a pair with no effort rating on a side is refused", afterR.refused === true,
      String(afterR.refused));
-  ck("with one, the right is logged", afterR.rDone === true, String(afterR.rDone));
+  ck("with one, BOTH sides go down together", afterR.rDone === true && afterR.lDone === true,
+     "L " + afterR.lDone + " R " + afterR.rDone);
   ck("and NOW the rest clock runs, once, for the pair", afterR.clock === true,
      String(afterR.clock));
 
@@ -432,7 +455,8 @@ console.log("\n9 - THE SECOND SIDE STARTS FROM THE FIRST SIDE'S LOAD");
     rp.dispatchEvent(new Event("change"));
     const se = L.querySelector('[data-f="rpe"]'); se.value = "9";
     se.dispatchEvent(new Event("change"));
-    L.querySelector('.chk').click();
+    /* No per-side tick any more - a pair is finished once, and the pre-fill this section
+       is about happens on the redraw after the left is typed, not on a tick. */
     render();
     const R = row("R");
     const rw = R.querySelector('[data-f="weight"]');
@@ -443,7 +467,7 @@ console.log("\n9 - THE SECOND SIDE STARTS FROM THE FIRST SIDE'S LOAD");
     rr.dispatchEvent(new Event("change"));
     const rs = R.querySelector('[data-f="rpe"]'); rs.value = "9";
     rs.dispatchEvent(new Event("change"));
-    R.querySelector('.chk').click();
+    document.querySelector(`[data-pairdone="${ei}:0"]`).click();
     const st = S.active.entries[ei].sets[0];
     return {before, L: st.sides.L.weight, R: st.sides.R.weight};
   });
@@ -470,7 +494,6 @@ console.log("\n9b - A PRE-FILLED LOAD IS STORED EVEN IF IT IS NEVER TOUCHED");
     L.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
     L.querySelector('[data-f="rpe"]').value = "9";
     L.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
-    L.querySelector('.chk').click();
     render();
     /* The right: reps and effort typed, the load left exactly as it was offered. */
     const R = row("R");
@@ -478,7 +501,9 @@ console.log("\n9b - A PRE-FILLED LOAD IS STORED EVEN IF IT IS NEVER TOUCHED");
     R.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
     R.querySelector('[data-f="rpe"]').value = "9";
     R.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
-    R.querySelector('.chk').click();
+    /* One tick, for the pair - which is also what banks a load that was offered and
+       agreed with rather than typed. */
+    document.querySelector(`[data-pairdone="${ei}:0"]`).click();
     const st = S.active.entries[ei].sets[0];
     return {R: st.sides.R.weight, done: !!st.sides.R.done};
   });
@@ -511,7 +536,10 @@ console.log("\n10 - AN OPTIONAL PAUSE BETWEEN SIDES IS A GAP, NOT THE PAIR'S RES
     L.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
     L.querySelector('[data-f="rpe"]').value = "9";
     L.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
-    L.querySelector('.chk').click();
+    /* ONE CONTROL, TWO TAPS, where a pause between the arms is configured. There is no
+       per-side tick any more; the pair's tick advances through the pair instead, so the
+       first tap banks the opening side and starts the gap. */
+    document.querySelector(`[data-pairdone="${ei}:0"]`).click();
     const t1 = S.active.restTimer;
     const afterL = {clock: !!t1, isGap: !!(t1 && t1.gap), side: t1 && t1.sd,
                     carried: en.sideRest, dflt};
@@ -524,7 +552,7 @@ console.log("\n10 - AN OPTIONAL PAUSE BETWEEN SIDES IS A GAP, NOT THE PAIR'S RES
     R.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
     R.querySelector('[data-f="rpe"]').value = "9";
     R.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
-    R.querySelector('.chk').click();
+    document.querySelector(`[data-pairdone="${ei}:0"]`).click();
     const t2 = S.active.restTimer;
     if(t2) t2.start -= 180e3;
     recordRestIfRunning();
@@ -608,15 +636,17 @@ console.log("\n11 - A REPS HINT IS NEVER BANKED AS REPS THAT HAPPENED");
     L.querySelector('[data-f="reps"]').dispatchEvent(new Event("change"));
     L.querySelector('[data-f="rpe"]').value = "9";
     L.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
-    L.querySelector('.chk').click();
     render();
     const R = row("R");
     const rIn = R.querySelector('[data-f="reps"]');
     const hint = {value: rIn.value, placeholder: rIn.placeholder};
-    /* Effort rated, load pre-filled and visible, reps left as the hint. Tick. */
+    /* Effort rated, load pre-filled and visible, reps left as the hint. One tick, for
+       the pair - which must refuse, because a paired side's reps have to be typed: the
+       hint is the OTHER side's count, and committing it would manufacture a matched pair
+       and hand the side-balance check evidence nobody produced. */
     R.querySelector('[data-f="rpe"]').value = "7";
     R.querySelector('[data-f="rpe"]').dispatchEvent(new Event("change"));
-    R.querySelector('.chk').click();
+    document.querySelector(`[data-pairdone="${ei}:0"]`).click();
     const st = S.active.entries[ei].sets[0];
     const after = {reps: st.sides.R && st.sides.R.reps,
                    done: !!(st.sides.R && st.sides.R.done),
@@ -624,7 +654,7 @@ console.log("\n11 - A REPS HINT IS NEVER BANKED AS REPS THAT HAPPENED");
     /* Now type it, and it logs normally. */
     const rIn2 = row("R").querySelector('[data-f="reps"]');
     rIn2.value = "11"; rIn2.dispatchEvent(new Event("change"));
-    row("R").querySelector('.chk').click();
+    document.querySelector(`[data-pairdone="${ei}:0"]`).click();
     const st2 = S.active.entries[ei].sets[0];
     return {hint, after, typed: {reps: st2.sides.R.reps, done: !!st2.sides.R.done},
             exposure: (()=>{ const e = sideExposure({date: todayStr(), at: Date.now(),

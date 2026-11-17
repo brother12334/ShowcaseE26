@@ -40,8 +40,26 @@ const boot = (o)=> ev(a=>{
   save(); S.active=null; startWorkout(wid); PF=null; TAB="workout"; save();
   const el=document.getElementById('preflight'); if(el) el.remove(); try{PF=null}catch(e){}
   render();
-  return {boxes: [...document.querySelectorAll('.set input[data-f="weight"]')].map(x=> x.placeholder),
-          rack: rackMaxNow()};
+  /* EVERY SET'S BOX, INCLUDING THE ONES BEHIND A CLOSED PAIR.
+
+     A one-limb movement - and Single-Arm Dumbbell Row is one - now draws as a list of
+     one-line summaries with a single pair open, so only the open pair has inputs. This
+     collected what was on screen and therefore saw two boxes out of six, which is a
+     statement about the layout rather than about the rack ceiling this spec is for. So
+     each pair is opened in turn and its boxes gathered. */
+  const en0 = S.active.entries[0];
+  const boxes = [];
+  const grab = ()=> document.querySelectorAll('.set input[data-f="weight"]')
+    .forEach(x=> boxes.push(x.placeholder));
+  if(entryPerSide(en0)){
+    (en0.sets || []).forEach((st, si)=>{
+      PAIR_OPEN = pairKey(S.active, 0, si);
+      render();
+      grab();
+    });
+    PAIR_OPEN = null; render();
+  } else grab();
+  return {boxes, rack: rackMaxNow()};
 }, {o});
 
 console.log("1 - THE REPORTED CARD: A RACK THAT ENDS AT 50");

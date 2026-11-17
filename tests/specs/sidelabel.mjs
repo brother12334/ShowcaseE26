@@ -43,31 +43,53 @@ const ck=(what,ok,got)=>{ console.log((ok?"  ok   ":"  BROKEN ")+what+(got===und
    cell, the letter on its chip, and the side its INPUTS write to. All three have to agree,
    which is the whole point: the first two are what you read and the third is where the
    reps go. */
+/* THE LAYOUT CHANGED UNDER THIS SPEC, AND THE CLAIM DID NOT.
+
+   A pair used to be two full set rows, so this counted rows. A pair is now ONE thing on
+   the screen: a slim summary line when it is finished or waiting, and an open block with
+   two short lines when it is the set you are on. Counting .set rows would now count only
+   the open pair and report that seven of the eight sides had vanished.
+
+   What the reported bug was about is untouched: every set number must show exactly one
+   left and one right, in that order, and the label must agree with where the reps go. So
+   the sides are collected per PAIR, from whichever form that pair is currently in, and
+   the same assertions are made about them. */
 const rowsOf = (name, sets, startSide)=> p.evaluate(a=>{
   const wid = "pushA";
   S.program[wid] = [{name: a.name, sets: a.sets, reps:"8-21", weight:25, uni:true}];
-  S.active = null; save(); startWorkout(wid); PF = null; TAB = "workout"; save();
+  S.active = null; save(); startWorkout(wid); PF = null; TAB = "workout";
+  PAIR_OPEN = null; save();
   const en = S.active.entries[0];
   if(a.startSide) en.startSide = a.startSide;
   save(); render();
   const out = [];
-  /* The set NUMBER is printed once per pair - the second side's row carries the chip
-     alone, which is the design. So the number is carried forward, and "two rows under
-     one number" is the thing being checked rather than two printed numbers. */
-  let lastNum = "";
-  document.querySelectorAll("#app .set").forEach(row=>{
-    const ix = row.querySelector(".idx");
-    if(!ix) return;
-    const chipEl = ix.querySelector(".side-chip");
-    const printed = (ix.textContent || "").replace(/[^0-9]/g, "");
-    if(printed) lastNum = printed;
-    const sd = Array.from(row.querySelectorAll("[data-sd]"))
-      .map(x=> x.dataset.sd).filter(v=> v === "L" || v === "R");
-    out.push({num: lastNum, printed, chip: chipEl ? chipEl.textContent.trim() : null,
-              sd: sd.length ? sd[0] : null,
-              sdAllSame: sd.every(v=> v === sd[0])});
+  /* Closed pairs first, in document order, then the open one - collected together below
+     by walking the card rather than by querying each kind separately, so the ORDER on the
+     screen is what is reported. */
+  document.querySelectorAll("#app .pair-sum, #app .pair-open").forEach(node=>{
+    const open = node.classList.contains("pair-open");
+    const num = ((node.querySelector(".pr-n") || {}).textContent || "").replace(/[^0-9]/g, "");
+    if(open){
+      node.querySelectorAll(".set.is-pairline").forEach(row=>{
+        const chipEl = row.querySelector(".side-chip");
+        const sd = Array.from(row.querySelectorAll("[data-sd]"))
+          .map(x=> x.dataset.sd).filter(v=> v === "L" || v === "R");
+        out.push({num, open: true, chip: chipEl ? chipEl.textContent.trim() : null,
+                  sd: sd.length ? sd[0] : null, sdAllSame: sd.every(v=> v === sd[0])});
+      });
+    } else {
+      /* A closed pair has no inputs, so there is no data-sd to agree with - the chip and
+         the number beside it are the whole statement, and they are what is checked. */
+      node.querySelectorAll(".pr-side").forEach(sideEl=>{
+        const chipEl = sideEl.querySelector(".side-chip");
+        out.push({num, open: false, chip: chipEl ? chipEl.textContent.trim() : null,
+                  sd: null, sdAllSame: true});
+      });
+    }
   });
   return {rows: out, perSide: entryPerSide(en), startSide: en.startSide,
+          openPairs: document.querySelectorAll("#app .pair-open").length,
+          closedPairs: document.querySelectorAll("#app .pair-sum").length,
           adapter: sideSets(en).map(x=> (x.si + 1) + x.side)};
 }, {name, sets, startSide});
 
@@ -76,10 +98,11 @@ const r = await rowsOf("Cable Lateral Raise", 4, "L");
 console.log("    adapter says:", r.adapter.join(" "));
 console.log("    rows render :", r.rows.map(x=> x.num + (x.chip || "-")).join(" "));
 ck("the entry is paired", r.perSide === true, String(r.perSide));
-ck("eight rows for four sets", r.rows.length === 8, String(r.rows.length));
-ck("with the number printed once per pair",
-   r.rows.filter(x=> x.printed).length === 4,
-   r.rows.map(x=> x.printed || "-").join(" "));
+ck("eight sides across four pairs", r.rows.length === 8, String(r.rows.length));
+/* Exactly one pair is open - the set you are on - and the rest are one line each. That
+   is the whole point of the layout, so it is pinned here rather than assumed. */
+ck("one pair is open, three are closed",
+   r.openPairs === 1 && r.closedPairs === 3, r.openPairs + " open, " + r.closedPairs + " closed");
 /* The claim, stated as the user stated it. */
 const bySet = {};
 r.rows.forEach(x=>{ (bySet[x.num] = bySet[x.num] || []).push(x.chip); });
@@ -98,10 +121,12 @@ console.log("\n2 - AND THE LABEL AGREES WITH WHERE THE REPS GO");
 /* The inputs were always right; this is what makes the chip the same answer. */
 ck("every row's inputs write to one side only",
    r.rows.every(x=> x.sdAllSame), JSON.stringify(r.rows.map(x=> x.sd)));
-ck("and the chip names that side",
-   r.rows.every(x=> x.chip === x.sd),
-   r.rows.map(x=> (x.chip || "-") + "/" + (x.sd || "-")).join(" "));
-ck("which is what the adapter says too",
+/* Only the open pair has inputs to agree with; a closed one is a label and a number. */
+ck("and in the open pair the chip names the side the inputs write to",
+   r.rows.filter(x=> x.open).length === 2
+   && r.rows.filter(x=> x.open).every(x=> x.chip === x.sd),
+   r.rows.filter(x=> x.open).map(x=> (x.chip || "-") + "/" + (x.sd || "-")).join(" "));
+ck("which is what the adapter says too, pair by pair and in order",
    r.rows.map(x=> x.num + x.chip).join(" ") === r.adapter.join(" "),
    r.rows.map(x=> x.num + x.chip).join(" ") + "  vs  " + r.adapter.join(" "));
 
@@ -116,9 +141,9 @@ ck("still one of each under every number",
 ck("and the right leads where that is the setting",
    Object.keys(bySetR).every(k=> bySetR[k][0] === "R"),
    JSON.stringify(Object.keys(bySetR).map(k=> k + ":" + bySetR[k][0])));
-ck("the chip still agrees with the inputs",
-   rr.rows.every(x=> x.chip === x.sd),
-   rr.rows.map(x=> (x.chip || "-") + "/" + (x.sd || "-")).join(" "));
+ck("the chip still agrees with the inputs in the open pair",
+   rr.rows.filter(x=> x.open).every(x=> x.chip === x.sd),
+   rr.rows.filter(x=> x.open).map(x=> (x.chip || "-") + "/" + (x.sd || "-")).join(" "));
 
 console.log("\n4 - A TWO-HANDED MOVEMENT HAS NO SIDES AT ALL");
 const both = await p.evaluate(()=>{

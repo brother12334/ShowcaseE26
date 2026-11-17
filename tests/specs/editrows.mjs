@@ -43,10 +43,31 @@ await p.evaluate(()=>{
 let bad=0;
 const ck=(what,ok,got)=>{ console.log((ok?"  ok   ":"  BROKEN ")+what+(got===undefined?"":"  ["+got+"]")); if(!ok) bad++; };
 
-const openEd = ()=> p.evaluate(()=>{ renderSessEditor(S.sessions[0]); return true; });
+const openEd = ()=> p.evaluate(()=>{ PAIR_OPEN = null; renderSessEditor(S.sessions[0]); return true; });
+/* A PAIRED SET IS CLOSED UNTIL ASKED FOR. That is the layout: a finished session is a
+   list of one-line summaries, and the rows appear when you tap the set you want to
+   correct. So anything here that is about the ROWS has to open the pair first. */
+const openPair = (ei, si)=> p.evaluate(a=>{
+  const b = document.querySelector(`#modal [data-pairopen="${a.ei}:${a.si}"]`);
+  if(b) b.click();
+  return !!b;
+}, {ei, si});
 
-console.log("\n1. the editor draws real rows, and they are the live builder's");
+console.log("\n1. a paired set is one slim line until it is opened");
 await openEd();
+const d0 = await p.evaluate(()=>({
+  sums: document.querySelectorAll('#modal .pair-sum').length,
+  opens: document.querySelectorAll('#modal .pair-open').length,
+  pairRows: document.querySelectorAll('#modal .set.is-pairline').length,
+  text: ((document.querySelector('#modal .pair-sum') || {}).textContent || "").replace(/\s+/g, " ").trim()
+}));
+ck("the one paired set is a summary line", d0.sums === 1, d0.sums);
+ck("nothing is open in the editor until asked", d0.opens === 0 && d0.pairRows === 0,
+   d0.opens + " open, " + d0.pairRows + " rows");
+ck("and the line carries the numbers as text", /15/.test(d0.text) && /14/.test(d0.text), d0.text);
+
+console.log("\n1b. opened, it draws real rows, and they are the live builder's");
+ck("the summary line opened", await openPair(1, 0));
 const d1 = await p.evaluate(()=>{
   const wrap = document.querySelector('#modal [data-setsess]');
   const rows = Array.from(document.querySelectorAll('#modal .set'));
@@ -81,7 +102,7 @@ ck("so is the warm-up mark, which the old editor had no idea about", d1.hasWarm)
 ck("and the column headings", d1.labels);
 
 console.log("\n2. typing into a side writes to that side, in this session");
-await openEd();
+await openEd(); await openPair(1, 0);
 const d2 = await p.evaluate(()=>{
   const row = Array.from(document.querySelectorAll('#modal .set'))
     .find(r=> (r.querySelector('[data-sd="R"]')));
@@ -122,7 +143,10 @@ const d3 = await p.evaluate(()=>{
   const last = sets[sets.length-1];
   return {n: sets.length, hasBoth: !!(last.sides && last.sides.L && last.sides.R),
           blank: last.sides && last.sides.L.weight === "" && last.sides.L.reps === "",
-          rows: document.querySelectorAll('#modal .set [data-e="1"][data-f="reps"]').length};
+          /* The set just added is the one about to be filled in, so it opens itself. */
+          rows: document.querySelectorAll('#modal .pair-open .set [data-e="1"][data-f="reps"]').length,
+          openOnLast: !!document.querySelector('#modal .pair-open [data-pairopen="1:1"]'),
+          sums: document.querySelectorAll('#modal .pair-sum').length};
 });
 ck("there are two sets now", d3.n === 2, d3.n);
 ck("the new one has both sides", d3.hasBoth);
@@ -130,7 +154,9 @@ ck("the new one has both sides", d3.hasBoth);
    either, and two screens that add a set differently is the problem this whole piece of
    work exists to end. */
 ck("and both sides start empty, as they do live", d3.blank);
-ck("it drew as two more rows", d3.rows === 4, d3.rows);
+ck("the new pair opened itself, ready to fill in", d3.openOnLast && d3.rows === 2,
+   d3.rows + " rows, open " + d3.openOnLast);
+ck("and the one before it closed to a line", d3.sums === 1, d3.sums);
 
 console.log("\n3c. and a technique chosen in the menu lands on the set");
 const d3t = await p.evaluate(()=>{

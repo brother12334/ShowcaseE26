@@ -1800,6 +1800,54 @@ button.side-chip.sc-set::after{
   color:var(--faint);font-size:var(--fs-7);cursor:pointer;display:flex;align-items:center;justify-content:center;
 }
 .set .chk.on{background:var(--ok);border-color:var(--ok);color:#0d1a10}
+/* ---- A PAIR AS ONE SET (C1) ----------------------------------------------
+   The closed line is text: no border, no fill, nothing that looks like a field until
+   it is opened. The open pair is marked by a copper rule down its left edge rather
+   than by a filled block, because a tint behind a whole row reads as a container and a
+   rule reads as "you are here". Every tappable thing is 46px tall even where the ink
+   is small. */
+.pair-sum{display:flex;align-items:center;gap:8px;width:100%;min-height:46px;padding:2px 4px;
+  background:none;border:0;border-top:1px solid var(--line);text-align:left;color:var(--text);
+  font:inherit;cursor:pointer}
+.pair-sum:first-child{border-top:0}
+.pair-sum.is-warm{opacity:.62}
+.pr-n{flex:0 0 18px;text-align:center;font:var(--fs-4) var(--mono);color:var(--faint)}
+.pr-mid{flex:1;min-width:0;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.pr-load{font:var(--fs-5) var(--mono);color:var(--text)}
+.pr-u{font:var(--fs-2) var(--mono);color:var(--faint);text-transform:uppercase;letter-spacing:.07em}
+.pr-dot{color:var(--line)}
+.pr-side{display:inline-flex;align-items:center;gap:5px}
+.pr-reps{font:var(--fs-5) var(--mono);color:var(--text)}
+.pr-rpe{font:var(--fs-3) var(--mono);color:var(--faint)}
+.pr-warm{font:var(--fs-2) var(--mono);color:var(--faint);text-transform:uppercase;letter-spacing:.07em}
+.pr-tick{flex:0 0 44px;height:44px;display:flex;align-items:center;justify-content:center;
+  color:var(--faint);opacity:.45}
+.pr-tick.on{color:var(--ok);opacity:.9}
+.pr-tick svg{width:19px;height:19px}
+
+.pair-open{box-shadow:inset 2px 0 0 var(--copper);background:rgba(214,150,86,.045);
+  border-radius:0 10px 10px 0;padding:3px 6px 5px;margin:2px 0}
+.pair-head{display:flex;align-items:center;gap:8px;min-height:46px}
+.pair-head .idx-btn{min-width:28px;min-height:44px;color:var(--copper)}
+.pair-load{display:inline-flex;align-items:center;gap:5px}
+.pair-load input{width:72px;min-height:44px;padding:11px 6px;border-radius:var(--r);
+  border:1px solid var(--line);background:var(--card2);color:var(--text);
+  font-family:var(--mono);font-size:var(--fs-6);text-align:center}
+.pair-chk{flex:0 0 44px;width:44px;height:44px;min-height:44px;border-radius:12px;
+  border:1px solid var(--line);background:transparent;color:var(--faint);
+  display:flex;align-items:center;justify-content:center}
+.pair-chk svg{width:19px;height:19px}
+.pair-chk.on{color:var(--ok);border-color:rgba(120,200,140,.45);background:rgba(120,200,140,.1)}
+.pair-chk.not-ready{opacity:.4}
+.pair-need{font:var(--fs-2) var(--mono);color:var(--copper);text-transform:uppercase;
+  letter-spacing:.07em;padding:2px 0 3px 30px}
+/* The two short lines inside an open pair: no set number, no warm mark, no tick, and no
+   load when both sides share one, so the grid loses those columns. */
+.set.is-pairline{grid-template-columns:30px 1fr 86px;gap:7px;padding:1px 0}
+.set.is-pairline.pl-w{grid-template-columns:30px 62px 1fr 86px}
+.set.is-pairline.no-rpe{grid-template-columns:30px 1fr}
+.set.is-pairline.pl-w.no-rpe{grid-template-columns:30px 62px 1fr}
+.set.is-pairline .idx{min-width:0;display:flex;align-items:center;justify-content:center}
 .set-labels{display:grid;grid-template-columns:44px 1fr 1fr 86px 48px;gap:7px;color:var(--faint);font:var(--fs-2) var(--mono);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
 /* Same rows with the RPE column taken out, for people who chose not to rate their sets. */
 .set.no-rpe,.set-labels.no-rpe{grid-template-columns:44px 1fr 1fr 48px}
@@ -7225,7 +7273,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.16";
+const APP_VERSION = "2026.11.17.17";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -9409,6 +9457,11 @@ function addSetOfKind(ei, k, sess){
   }
   if(k) st.tech = k;
   en.setsOwn = true;              // this count is yours; the plan does not reset it
+  /* A SET YOU JUST ADDED IS THE SET YOU ARE ABOUT TO FILL IN, so it opens. Without this
+     the editor adds a pair and leaves it collapsed, and the next tap is one you should
+     not have had to make. In a live session the open pair follows the set you are on, so
+     this only matters where it is not already true. */
+  if(entryPerSide(en)) PAIR_OPEN = pairKey(s, ei, en.sets.length - 1);
   if(s !== S.active) setEditSaved(s);
   else { save(); render(); }
   toast(k === "lengthened" ? "Partials set added \u2014 " + lengthenedWhere(en.name)
@@ -35997,12 +36050,43 @@ function sessionLiveSet(){
   const a = S.active;
   if(!a || !Array.isArray(a.entries)) return {ei: -1, si: -1};
   for(let ei = 0; ei < a.entries.length; ei++){
-    const sets = a.entries[ei].sets || [];
+    const en = a.entries[ei];
+    const sets = (en && en.sets) || [];
     for(let si = 0; si < sets.length; si++){
-      if(!sets[si].done) return {ei, si};
+      /* A PAIRED SET HOLDS NO `done` OF ITS OWN — both of them live on the sides — so
+         this read the top level, found nothing, and called the FIRST set of a one-limb
+         movement the live one for ever. Every set of it looked unfinished, and with the
+         C1 layout that meant the open pair never moved off set 1 however many you did. */
+      if(!setPairIsDone(en, si)) return {ei, si};
     }
   }
   return {ei: -1, si: -1};
+}
+/* Is this whole set finished? Both sides of a pair, or the set itself otherwise. */
+function setPairIsDone(en, si){
+  const st = ((en && en.sets) || [])[si];
+  if(!st) return false;
+  if(!entryPerSide(en)) return !!st.done;
+  const sides = pairSidesOf(en, si);
+  if(!sides.length) return !!st.done;
+  return sides.every(sd=>{ const v = sideTarget(en, si, sd); return !!(v && v.done); });
+}
+/* WHICH SIDES THIS SET IS ASKING FOR, as opposed to which it already holds.
+
+   pairSidesOf() answers the second question, and it is right to: a set holding only a
+   left is the weaker-side extra at the end of an exercise and must not grow a phantom
+   right. While a pair is being logged that answer is wrong — type a rep count into the
+   left and the right row would vanish from under your thumb, because the left now exists
+   and the right does not.
+
+   So the open block and the tick's gate ask for the pair the ENTRY intends, and only an
+   explicit `oneSide` narrows it. */
+function pairSidesWanted(en, si){
+  if(!entryPerSide(en)) return [];
+  const st = ((en && en.sets) || [])[si];
+  if(st && st.oneSide) return [st.oneSide];
+  const first = en.startSide === "R" ? "R" : "L";
+  return [first, first === "L" ? "R" : "L"];
 }
 function viewActiveSession(){
   if(S.viewMode === "focus") return viewFocusSession();
@@ -36181,14 +36265,19 @@ function viewActiveSession(){
        is what you are about to act on, and the whole point of it is that it is read
        before the first set rather than looked up after it. */
     h += overloadTipHTML(a.workoutId, en, anyDay, occ);
-    h += setLabelsHTML();
+    /* The headings name the columns of a set ROW. A paired entry is a list of pair lines
+       with one open block among them, and those are not its columns — a header reading
+       LBS REPS RPE over a line of running text describes something else. */
+    if(!entryPerSide(en)) h += setLabelsHTML();
     en.sets.forEach((st,si)=>{ h += (()=>{
       /* P1-7 \u2014 a paired set is two rows sharing one set number: the opening side, then
          the other with no rest between them. sidesOf() gives the order, and a set that
          holds only one side (the weaker-side extra at the end) renders as one row. */
+      /* P1-7 / C1 — a paired set is ONE thing on the screen: a slim line when it is
+         finished, the open block when it is the one you are on. See pairBlockHTML(). */
       const sds = pairSidesOf(en, si);
       if(!sds.length) return setRowHTML(en, ei, si, last);
-      return sds.map((sd, k)=> setRowHTML(en, ei, si, last, k ? "" : (si + 1), sd)).join("");
+      return pairBlockHTML(en, ei, si, last);
     })(); });
     h += rebuildLineHTML(en);
     h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
@@ -37412,14 +37501,14 @@ function viewFocusSession(){
   h += inlineTipHTML(focusTipsFor(a.workoutId)[nrm(en.name)]);
   h += exNoteLineHTML(en);
   if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
-  h += setLabelsHTML();
+  if(!entryPerSide(en)) h += setLabelsHTML();     // see the note on the other one
   en.sets.forEach((st,si)=>{ h += (()=>{
       /* P1-7 \u2014 a paired set is two rows sharing one set number: the opening side, then
          the other with no rest between them. sidesOf() gives the order, and a set that
          holds only one side (the weaker-side extra at the end) renders as one row. */
       const sds = pairSidesOf(en, si);
       if(!sds.length) return setRowHTML(en, ei, si, last);
-      return sds.map((sd, k)=> setRowHTML(en, ei, si, last, k ? "" : (si + 1), sd)).join("");
+      return pairBlockHTML(en, ei, si, last);
     })(); });
   h += `<div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
     <button class="btn ghost small" data-addset="${ei}">+ set</button>
@@ -47548,6 +47637,127 @@ function bind(){
     save(); render();
     toast("Set to " + fmtLoad(parseFloat(st.weight)) + " — you plus " + fmtLoad(typed), "good");
   });
+  /* TAP A PAIR TO OPEN IT, TAP IT AGAIN TO CLOSE. Exactly one is open, so opening one
+     closes whatever was open before — the whole point is that the screen shows one set
+     being worked on and a list of what is done. */
+  document.querySelectorAll("[data-pairopen]").forEach(b=> b.onclick = ()=>{
+    const [ei, si] = b.dataset.pairopen.split(":").map(x=> parseInt(x, 10));
+    const sess = rowSess(b);
+    const key = pairKey(sess, ei, si);
+    PAIR_OPEN = (PAIR_OPEN === key) ? null : key;
+    /* Nothing is saved: which pair is open is a fact about this screen, not about the
+       training. It is deliberately NOT in the state and so never reaches a backup. */
+    if(sess && sess !== S.active) renderSessEditor(sess); else render();
+  });
+  /* ONE TICK FOR THE PAIR, GATED ON BOTH SIDES BEING LOGGED.
+
+     A pair is one set, so it is finished once, and the gate is what makes that safe:
+     reps on both sides, and an effort rating on both where RPE is tracked at all. The
+     effort is not politeness — matching the weaker side makes the rep counts equal by
+     construction, so the reserve is the only thing left that says anything about the
+     gap, and a pair logged without it drops out of the side comparison entirely. */
+  document.querySelectorAll("[data-pairdone]").forEach(b=> b.onclick = ()=>{
+    const [ei, si] = b.dataset.pairdone.split(":").map(x=> parseInt(x, 10));
+    const sess = rowSess(b);
+    const en = sess && (sess.entries || [])[ei];
+    if(!en) return;
+    /* Anything typed and not yet blurred is banked first, or agreeing with a pre-filled
+       load and tapping the tick would lose it. */
+    (sess === S.active ? [] : []).forEach(()=>{});
+    document.querySelectorAll(`.pair-open [data-e="${ei}"][data-s="${si}"][data-sd]`).forEach(el=>{
+      const sd = el.dataset.sd, f = el.dataset.f;
+      if(!sd || !f || f === "done") return;
+      const v = String(el.value == null ? "" : el.value).trim();
+      const t = sideTarget(en, si, sd);
+      if(t && v && !String(t[f] == null ? "" : t[f]).trim()) t[f] = (f === "weight") ? bwBoxStore(el) : v;
+    });
+    const f = pairFacts(en, si);
+    if(f.allDone){
+      /* Un-ticking a pair takes both sides back. In a live session the rule that a
+         finished exercise stays finished still applies, for the reason it always did:
+         un-ticking throws away the rest it recorded. */
+      if(sess === S.active && entryDone(en)){
+        b.classList.remove("chk-nudge"); void b.offsetWidth; b.classList.add("chk-nudge");
+        toast("Already logged \u2014 edit the numbers if they're wrong");
+        return;
+      }
+      pairSidesWanted(en, si).forEach(sd=>{
+        const t = sideTarget(en, si, sd);
+        if(t){ delete t.done; delete t.at; }
+      });
+      const stU = (en.sets || [])[si] || {};
+      delete stU.pr; delete stU.at; delete stU.why;
+      if(sess === S.active){
+        /* Taking the tick back cancels this set's clock and keeps where it started, so
+           ticking again resumes the rest rather than restarting it — see startRest(). */
+        const rt = S.active.restTimer;
+        if(rt && rt.e === ei && rt.s === si){
+          stU.restFrom = rt.start;
+          S.active.restTimer = null;
+          try{ clearRestAlert(); pushSyncSchedule(); hideRestUI(); }catch(e){}
+        }
+        delete stU.rest;
+      }
+      if(sess !== S.active) setEditSaved(sess); else { save(); render(); }
+      return;
+    }
+    /* A MOVEMENT WITH A PAUSE BETWEEN THE ARMS TAKES THE TICK TWICE.
+
+       sideRestFor() is a real setting: on some movements the protocol is left, breathe,
+       right, and that pause is timed. It used to be started by ticking the left side on
+       its own, and there is no per-side tick any more — so rather than lose the feature,
+       the pair's tick advances through the pair. The first tap banks the opening side and
+       starts the gap; the second banks the other side and starts the set rest.
+
+       Only where a gap is actually configured. Everywhere else one tap finishes the pair,
+       which is the whole point of the change. */
+    const order = pairSidesWanted(en, si);
+    const gapWanted = sess === S.active && order.length > 1 && sideRestFor(en) > 0;
+    if(gapWanted){
+      const firstSd = order[0], firstV = sideTarget(en, si, firstSd);
+      if(firstV && !firstV.done){
+        const fr = (f.missing || []).filter(m=> m.indexOf(firstSd) === 0);
+        if(fr.length){
+          b.classList.remove("chk-nudge"); void b.offsetWidth; b.classList.add("chk-nudge");
+          toast("Needs " + fr.join(", ") + " before that side is done");
+          return;
+        }
+        firstV.done = true;
+        if(firstV.at == null) firstV.at = Date.now();
+        try{ startSideGap(ei, si, firstSd); }catch(e){}
+        save(); render();
+        return;
+      }
+    }
+    if(!f.ready){
+      b.classList.remove("chk-nudge"); void b.offsetWidth; b.classList.add("chk-nudge");
+      toast("Needs " + f.missing.join(", ") + " before this set is done");
+      return;
+    }
+    const now = Date.now();
+    pairSidesWanted(en, si).forEach(sd=>{
+      const t = sideTarget(en, si, sd);
+      if(t){ t.done = true; if(t.at == null) t.at = now; }
+    });
+    const stD = (en.sets || [])[si] || {};
+    if(stD.at == null) stD.at = now;      // when the SET happened, which the export carries
+    if(sess !== S.active){ setEditSaved(sess); return; }
+    PAIR_OPEN = null;
+    try{ refreshPRs(ei); }catch(e){}
+    /* AND THE CLOCK, ON THE SAME TERMS AS ANY OTHER SET. The pair IS the set, so it
+       starts the rest when a set would: not inside a superset round that is still open,
+       not when nothing remains to rest for, and not when catching up a set already
+       behind you — starting its rest would throw away the clock running for the set you
+       really are resting from. There is no side-gap case, because both sides are banked
+       at once and the pause between them is over. */
+    try{
+      if(endsRound(S.active.entries, ei, si) && setsRemainAfter(S.active.entries, ei, si)
+         && !doneAfter(S.active.entries, ei, si)){
+        startRest(ei, si);
+      }
+    }catch(e){}
+    save(); render();
+  });
   document.querySelectorAll("[data-setwarm]").forEach(b=> b.onclick = ()=>{
     const [ei, si] = b.dataset.setwarm.split(":").map(x=> parseInt(x, 10));
     const sess = rowSess(b);
@@ -53368,13 +53578,15 @@ function editSetRowsHTML(sess, en, ei){
     return `<div class="sub" style="margin:4px 2px 2px;color:var(--faint)">No sets on this
       one yet. Add one below and fill it in.</div>`;
   }
-  let h = setLabelsHTML();
+  /* The headings name the columns of a set ROW, and a paired entry is a list of pair
+     lines with one open block among them — those are not its columns. */
+  let h = entryPerSide(en) ? "" : setLabelsHTML();
   sets.forEach((st, si)=>{
     /* The pair loop, verbatim from the workout screen: a paired set is two rows sharing
        one set number, and a set holding only one side renders as a single row. */
     const sds = pairSidesOf(en, si);
     if(!sds.length){ h += setRowHTML(en, ei, si, null, null, null, {sess}); return; }
-    h += sds.map((sd, k)=> setRowHTML(en, ei, si, null, k ? "" : (si + 1), sd, {sess})).join("");
+    h += pairBlockHTML(en, ei, si, null, {sess});
   });
   return h;
 }
@@ -60351,8 +60563,36 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.16";
+const NEWS_FOR = "2026.11.17.17";
 const NEWS = [
+  {k: "A pair is one set, and now it reads like one",
+   s: ["A one-limb movement took twice the height of an ordinary one, because every side "
+     + "got a full set row: four sets meant eight tall rows and a card that scrolled for "
+     + "ever. A pair is now one thing on the screen.",
+     "Finished or waiting, it is a single slim line of text \u2014 \u201c1 \u00b7 25 lb \u00b7 L 15 @8 "
+     + "\u00b7 R 14 @9 \u2713\u201d \u2014 with no boxes and nothing to type into. Tap it to open. The "
+     + "set you are actually on is the one that is open, and only one is ever open: its "
+     + "own line carries the number, the warm-up mark and the tick, and under it sit two "
+     + "short lines, one per side, holding only what a side has of its own. Measured on "
+     + "four sets: 591px of rows became 375px, and a finished exercise is about a third "
+     + "of what it was.",
+     "ONE TICK FOR THE PAIR, because a pair is one set. It will not take until both sides "
+     + "have reps and an effort rating, and it says which is missing. The effort is not "
+     + "politeness: matching the weaker side makes the rep counts equal by construction, "
+     + "so the reserve is the only thing left that says anything about the gap, and a "
+     + "pair logged without it drops out of the left-against-right check entirely.",
+     "Where a movement has a timed pause between the arms, that tick takes two taps \u2014 "
+     + "the first banks the opening side and starts the pause, the second finishes the "
+     + "pair and starts the rest. That pause used to be started by ticking one side on "
+     + "its own, and it is worth keeping.",
+     "The load stays on each side while the pair is open, so the day your right arm wants "
+     + "a heavier dumbbell there is somewhere to say so; the closed line shows it once "
+     + "when both sides agree and as \u201c30 / 25\u201d when they do not. The column headings "
+     + "are gone from one-limb movements: they named the columns of a set row, and this "
+     + "is not one.",
+     "In the session editor nothing is open until you tap it, which is what makes a "
+     + "finished session short enough to read. The editor and the workout screen draw "
+     + "this from the same code, so neither can drift."]},
   {k: "Adding an exercise in the editor, properly",
    s: ["The last of it. \u201cAdd an exercise\u201d in the session editor asked for weight, "
      + "reps and RPE in four boxes of its own \u2014 which was the last duplicate set row in "
@@ -64988,9 +65228,148 @@ function planBehindLineHTML(en){
    live-only affordances are switched off for a past session rather than removed: a rest
    lock, the copper "you are here" edge and a rebuild target are all statements about the
    set you are ABOUT to do, and there is no such set in a session from last week. */
+/* ======================================================================
+   A PAIR IS ONE SET, AND IT READS LIKE ONE
+
+   Reported: a one-limb movement took twice the height of an ordinary one, because every
+   side got a full set row. Four sets became eight tall rows and the card scrolled
+   forever.
+
+   So a pair is a single thing on the screen, in one of two states:
+
+     CLOSED   one slim line of text \u2014 "1 \u00b7 25 lb \u00b7 L 15 @8 \u00b7 R 14 @9 \u2713". No boxes, no
+              borders, nothing you can type into. Tap it to open.
+     OPEN     the set you are actually on. The pair's own line carries the number, the
+              load, the warm-up mark and ONE tick; under it, two short lines, one per
+              side, carrying only what a side has of its own.
+
+   Exactly one pair is open at a time. In a live session that is the set you are on,
+   chosen for you; anywhere else it is whichever one you tapped, and tapping another
+   closes the first. In the editor nothing is open until you ask, which is what makes a
+   finished session short enough to read.
+
+   THE SUMMARY LINE IS NOT A SET ROW. It has no inputs and writes nowhere, so it does not
+   use the .set markup \u2014 see editrows.mjs section 6, which counts set-row builders and
+   would otherwise be counting a thing that only looks like one. */
+let PAIR_OPEN = null;
+
+function pairKey(sess, ei, si){
+  return String((sess && sess.id) || "live") + ":" + ei + ":" + si;
+}
+/* Both sides, their numbers, and whether the pair can be ticked yet. */
+function pairFacts(en, si){
+  const sides = pairSidesWanted(en, si);
+  const out = {per: [], ready: true, missing: [], sharedLoad: null, anyDone: false, allDone: true};
+  if(!sides.length) return out;
+  const loads = [];
+  sides.forEach(sd=>{
+    const v = sideTarget(en, si, sd) || {};
+    const reps = v.reps == null ? "" : String(v.reps).trim();
+    const rpe = v.rpe == null ? "" : String(v.rpe).trim();
+    const w = v.weight == null ? "" : String(v.weight).trim();
+    loads.push(w);
+    if(v.done) out.anyDone = true; else out.allDone = false;
+    if(!reps) out.missing.push(sd + " reps");
+    /* THE EFFORT IS NOT OPTIONAL ON A PAIR, and this is the one place in the app that
+       insists. Matching the weaker side makes the rep counts equal by construction, so
+       the reps carry no information about the gap any more and the reserve is the only
+       thing that does \u2014 see sideExposure(). A pair logged without RPE drops out of the
+       side comparison entirely. */
+    else if(rpeTracked() && !rpe) out.missing.push(sd + " effort");
+    out.per.push({sd, reps, rpe, weight: w, done: !!v.done});
+  });
+  out.ready = out.missing.length === 0;
+  /* ONE LOAD WHEN THE SIDES AGREE, and a side nobody has typed into yet does not
+     disagree with anything. Requiring every side to carry the number meant the first
+     half of every pair said "load per side" until the second was filled in — which is
+     the whole set, every set. */
+  const given = loads.filter(x=> x !== "");
+  out.sharedLoad = (given.length && given.every(x=> x === given[0])) ? given[0] : null;
+  return out;
+}
+function pairIsOpen(en, ei, si, ctx){
+  const sess = (ctx && ctx.sess) || S.active;
+  const key = pairKey(sess, ei, si);
+  if(PAIR_OPEN === key) return true;
+  if(PAIR_OPEN) return false;
+  /* Nothing explicitly open: the live session opens the set you are on, and a session
+     being edited opens nothing at all. */
+  if(sess !== S.active) return false;
+  const lv = sessionLiveSet();
+  return lv.ei === entryIndexOf(en, sess) && lv.si === si;
+}
+function pairSummaryHTML(en, ei, si, ctx){
+  const f = pairFacts(en, si);
+  const u = unitWord();
+  const warm = setIsWarmup(en, si);
+  const num = v=> v === "" ? "\u2013" : esc(v);
+  const loadBit = f.sharedLoad
+    ? `<span class="pr-load">${esc(f.sharedLoad)}</span><span class="pr-u">${esc(u)}</span>`
+    : f.per.map(s=> s.weight).filter(Boolean).length
+      ? `<span class="pr-load">${f.per.map(s=> num(s.weight)).join("/")}</span><span class="pr-u">${esc(u)}</span>`
+      : "";
+  return `<button type="button" class="pair-sum${warm ? " is-warm" : ""}${f.allDone ? " done" : ""}"
+      data-pairopen="${ei}:${si}" aria-label="Set ${si + 1}, tap to open">
+    <span class="pr-n">${si + 1}</span>
+    <span class="pr-mid">
+      ${loadBit}${loadBit ? `<span class="pr-dot">\u00b7</span>` : ""}
+      ${f.per.map(s=> `<span class="pr-side"><i class="side-chip ${s.sd === "L" ? "sc-l" : "sc-r"}">${
+        esc(sideTag(en.altStyle || "side", s.sd))}</i><span class="pr-reps">${num(s.reps)}</span>${
+        s.rpe ? `<span class="pr-rpe">@${esc(s.rpe)}</span>` : ""}</span>`).join("")}
+      ${warm ? `<span class="pr-warm">warm-up</span>` : ""}
+    </span>
+    <span class="pr-tick${f.allDone ? " on" : ""}">${ICON.check}</span>
+  </button>`;
+}
+function pairOpenHTML(en, ei, si, last, ctx){
+  const f = pairFacts(en, si);
+  const sess = (ctx && ctx.sess) || S.active;
+  const rx = setPrescription(en, si);
+  const u = unitWord();
+  const sides = pairSidesWanted(en, si);
+  const warmOn = setIsWarmup(en, si);
+  const warmSaid = typeof (en.sets[si] || {}).warmup === "boolean";
+  const pctx = Object.assign({}, ctx || {}, {pair: {sharedLoad: false}});
+  return `${setTagHTML(en, si, rx)}<div class="pair-open">
+    <div class="pair-head">
+      <button type="button" class="idx-btn pr-n" data-pairopen="${ei}:${si}"
+        aria-label="Set ${si + 1}, tap to close">${si + 1}</button>
+      ${/* THE LOAD STAYS ON THE SIDES WHILE THE PAIR IS OPEN, and is only collapsed to
+            one number on the closed line. One shared box reads better and takes a way out
+            with it: there would be nowhere to type the day the right arm wants a heavier
+            dumbbell, which is exactly what a per-side movement is for. The two boxes sit
+            in the side lines and cost no extra height. */""}
+      <span class="pr-u" style="flex:1">${esc(u)} per side</span>
+      <button type="button" class="wu-btn${warmOn ? " on" : ""}${warmSaid ? " said" : ""}"
+        data-setwarm="${ei}:${si}" aria-pressed="${warmOn}"
+        aria-label="${warmOn ? "This set is a warm-up" : "Mark set " + (si + 1) + " as a warm-up"}"
+        title="Warm-ups do not count toward your volume">W</button>
+      <button class="chk pair-chk${f.allDone ? " on" : ""}${f.ready ? "" : " not-ready"}"
+        data-pairdone="${ei}:${si}" aria-label="Mark set ${si + 1} done, both sides"
+        >${ICON.check}</button>
+    </div>
+    ${sides.map(sd=> setRowHTML(en, ei, si, last, "", sd, pctx)).join("")}
+    ${f.ready ? "" : `<div class="pair-need">Needs ${esc(f.missing.join(", "))}</div>`}
+  </div>${prBadgeRow((en.sets || [])[si] || {}, ei, si, sess)}${techRowHTML(en, ei, si)}`;
+}
+/* The one entry point the screens call for a paired set. */
+function pairBlockHTML(en, ei, si, last, ctx){
+  return pairIsOpen(en, ei, si, ctx)
+    ? pairOpenHTML(en, ei, si, last, ctx)
+    : pairSummaryHTML(en, ei, si, ctx);
+}
+
 function setRowHTML(en, ei, si, last, idxLabel, side, ctx){
   const rowSessN = (ctx && ctx.sess) || S.active;
   const rowPast = !!(rowSessN && rowSessN !== S.active);
+  /* PAIR MODE — the same row, inside an open pair, with the things the PAIR owns taken
+     out of it: the set number, the warm-up mark and the tick are drawn once on the
+     pair's own line, and the load too when both sides share one. What is left is the
+     side chip, the reps and the effort, which is all a side has of its own.
+
+     Flags on this builder rather than a second, smaller builder, because a second
+     builder is exactly what the editor had and exactly what went wrong. */
+  const P = (ctx && ctx.pair) || null;
   /* P1-7 — `side` renders ONE side of a paired set. The whole row is reused rather than
      restructured: the fields read and write that side's object, the inputs carry it as
      data-sd, and the set number appears once with the second side labelled by its chip.
@@ -65056,8 +65435,11 @@ function setRowHTML(en, ei, si, last, idxLabel, side, ctx){
      asked of the session now. */
   const lv = rowPast ? {ei:-1, si:-1} : sessionLiveSet();
   const isLive = !rowPast && !st.done && lv.ei === entryIndexOf(en, rowSessN) && lv.si === si;
-  return `${setTagHTML(en, si, rx)}<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}${isWarm?" is-warm":""}${st.done?" is-logged":""}${isLive?" is-live":""}">
-    <span class="idx">${(()=>{
+  /* The pair line loses the set-number, warm and tick columns, and the load column too
+     when the pair's own line is carrying a shared load. The grid has to lose them with
+     it, or the row wraps to two lines and the layout is taller than what it replaced. */
+  return `${P ? "" : setTagHTML(en, si, rx)}<div class="set${P?(" is-pairline" + (P.sharedLoad ? "" : " pl-w")):""}${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}${isWarm&&!P?" is-warm":""}${st.done?" is-logged":""}${isLive&&!P?" is-live":""}">
+    <span class="idx">${P ? "" : (()=>{
       /* THE SET NUMBER IS THE WAY IN. Notes used to be reachable only from the pencil in
          the exercise header, which opens scoped to the whole movement — so "what happened
          on set three" was two taps and a chip away, and most people never found it. The
@@ -65068,7 +65450,7 @@ function setRowHTML(en, ei, si, last, idxLabel, side, ctx){
       const has = !!(st.noteCode || st.unote);
       return `<button type="button" class="idx-btn${has ? " has-note" : ""}" data-setnote="${ei2}:${si}"
         aria-label="Note on set ${idx}" title="${has ? "Edit this set's note" : "Add a note to this set"}">${idx}</button>`;
-    })()}${sideChip(en, si, side)}${(()=>{
+    })()}${sideChip(en, si, side)}${P ? "" : (()=>{
       /* A1: THE WARM-UP TOGGLE, where the set already says which set it is.
 
          Detection gets the ordinary ramp right on its own, so this is for the cases
@@ -65087,7 +65469,7 @@ function setRowHTML(en, ei, si, last, idxLabel, side, ctx){
                     : "Mark as a warm-up"} \u2014 warm-ups do not count toward your volume"
         >W</button>`;
     })()}</span>
-    ${(()=>{
+    ${P && P.sharedLoad ? "" : (()=>{
       const bwB = bwBoxOn(en);
       const ph = planLoadPh(en, last, si);
       const cls = (ph === planLoadFor(en, si) && planLoadFor(en, si) !== "") ? " ph-plan" : "";
@@ -65108,8 +65490,8 @@ function setRowHTML(en, ei, si, last, idxLabel, side, ctx){
       : `<input inputmode="numeric" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="reps" value="${esc(st.reps??"")}" placeholder="${esc(String(repsPh))}"${
       lock ? ` readonly class="is-locked" title="${esc(LOCK_WHY)}"` : ""}>`}
     ${rpeOn ? `<span class="rpe-cell${lock?" is-locked":""}"${lock?` title="${esc(LOCK_WHY)}"`:""}>${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="rpe"${lock?" disabled":""}>${rpeOptions(st.rpe)}</select></span>` : ""}
-    <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="done"
-      aria-label="Mark set ${idx} done">${ICON.check}</button>
+    ${P ? "" : `<button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="done"
+      aria-label="Mark set ${idx} done">${ICON.check}</button>`}
   </div>${setNoteHTML(st, en, si, rowSessN)}${prBadgeRow(st, ei, si, rowSessN)}${techRowHTML(en, ei, si)}`;
 }
 /* WHAT THE APP CHANGED, SAID WHERE YOU WOULD ACT ON IT.
