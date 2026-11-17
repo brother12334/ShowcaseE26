@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.12";
+const APP_VERSION = "2026.11.17.13";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -53601,9 +53601,22 @@ function scoreWorkout(sess){
      side-sets, because that is what the session holds and what every other section grades.
      A paired movement prescribing 3 sets is therefore 6 things to do, and comparing 6
      logged against 3 planned read as 200% and "everything got done" off half a session. */
+    /* AND THE UNITS COME FROM WHAT THE SESSION HOLDS, NOT FROM THE MOVEMENT'S SETTING.
+       entryPerSideWanted() answers "is this a one-limb movement", which is a fact about
+       the exercise. The logged figure counts what is in the session. A movement the slot
+       marks as per-side but which was LOGGED as plain sets — which is what the session
+       editor produced, because it had no L/R rows — therefore had 2n expected against n
+       logged, and a session that was done in full graded as half finished.
+
+       Where nothing was logged for the movement at all there is no entry to ask, and the
+       movement's own setting is the right answer: the work really was 2n side-sets and
+       none of it was done. */
     const planned = plan.reduce((t,{chosen:e})=>{
       const n = parseInt(e.sets,10) || 0;
-      return t + (entryPerSideWanted(e) ? n * 2 : n);
+      if(!n) return t;
+      const hit = occurrencesIn(sess, e.name)[0];
+      const perSide = hit ? entryPerSide(hit) : entryPerSideWanted(e);
+      return t + (perSide ? n * 2 : n);
     }, 0);
     const why = [];
     if(!planned){
@@ -59808,8 +59821,23 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.12";
+const NEWS_FOR = "2026.11.17.13";
 const NEWS = [
+  {k: "Graded as half a session when it was done in full",
+   s: ["A one-limb movement entered in the session editor comes out as plain sets, "
+     + "because the editor has no L/R rows \u2014 that is being fixed next and is a bigger "
+     + "job. This is the consequence of it, which is not.",
+     "The completion section asked the MOVEMENT whether it is per-side and doubled the "
+     + "expected set count on the answer, while the logged figure counts what the session "
+     + "actually holds. So four sets of a one-limb movement, done and logged, read as four "
+     + "against eight expected: a card you finished graded as half finished. The expected "
+     + "figure now comes from what the session holds, and falls back to the "
+     + "movement\u2019s setting only where nothing was logged for it \u2014 where the work "
+     + "really was eight side-sets and really was not done.",
+     "The other two readers were already right and are now pinned so they stay that way: "
+     + "plain sets are not double-counted as volume, and the asymmetry check gets no "
+     + "reading at all from an entry with no sides in it, rather than inventing one by "
+     + "comparing a limb with itself."]},
   {k: "Sending a set-aside record to somebody who can read it",
    s: ["A record moved out of the readers\u2019 way is only half useful if the only route "
      + "to it is a whole backup file. There are two new buttons \u2014 on the notice, and "
