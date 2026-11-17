@@ -196,6 +196,69 @@ ck("Legs B comes down", nov13.now.legsB < nov13.was.legsB,
 ck("and the Legs A squat stays at 80 - the audited bug, not reproduced",
    nov13.now.legsA === 80, nov13.was.legsA + " → " + nov13.now.legsA);
 
+console.log("\n4b - AND NOV 9 WAS AN INJURY SESSION: NO CUT AT ALL");
+/* The same session, same collapse, with the toe injury recorded the way a user would
+   record it. A collapse on a day something hurt says nothing about whether the load is
+   right, so the cut does not happen - and the pair of outcomes is pinned together:
+   unflagged the load goes to 65, flagged it does not move. */
+const hurt13 = await p.evaluate(fx=>{
+  const s = fx.sessions.filter(x=> x.date === "2026-11-09")[0];
+  S.program.legsA = [{name:"Smith Machine Squat", sets:4, reps:"6-10", weight:80}];
+  S.program.legsB = [{name:"Dumbbell RDL", sets:3, reps:"8-12", weight:50},
+                     {name:"Smith Machine Hip Thrust", sets:3, reps:"8-12", weight:115},
+                     {name:"Smith Machine Squat", sets:3, reps:"6-10", weight:70}];
+  S.sessions = []; S.flags = []; S.planLog = []; S.dayFlags = {}; S.joint = {};
+  const at = Date.parse(s.date + "T18:00:00");
+  S.sessions = [{id:"n9b", date: s.date, workoutId:"legsB", startedAt: at, finishedAt: at+3600000,
+    note: "Right toe hurt from the second set.",
+    entries: s.ex.map(e=> ({name: e.name, reps:"6-10", rpes:[8,8,8],
+      sets: e.sets.map(x=> ({weight:String(x.w), reps:String(x.reps),
+                             rpe: x.rpe == null ? "" : String(x.rpe), done:true,
+                             rest: x.rest == null ? undefined : x.rest}))}))}];
+  save();
+  const sess = S.sessions[0];
+  const loadOf = wid=>{
+    const g = findProgramEntryWhere("Smith Machine Squat", wid);
+    return g && g.wid === wid ? g.e.weight : null;
+  };
+  /* Marked through the editor, before anything acts on it. */
+  openSessionEditor("n9b");
+  const btn = document.querySelector("#modal [data-sessnotrep]");
+  if(btn) btn.click();
+  hideModal();
+  const was = {legsA: loadOf("legsA"), legsB: loadOf("legsB")};
+  /* The collapse is still SEEN - it happened - and still recorded. What stops is acting. */
+  const finds = fadeFindings(sess).filter(x=> /Smith Machine Squat/.test(x.name));
+  recordFlags(sess, fadeFindings(sess));
+  const flags = (flagLog()||[]).filter(x=> x.kind === "fade" && /Smith Machine Squat/.test(x.ex));
+  const tries = flags.map(f=>{ f.applied = false; if(f.did) delete f.did;
+                               return applyFlag(f.id, "load"); });
+  return {marked: !!sess.notRepresentative, why: sessionNotEvidence(sess),
+          seen: finds.length, stamped: flags.filter(f=> f.notEvidence).length,
+          nFlags: flags.length, tries, was,
+          now: {legsA: loadOf("legsA"), legsB: loadOf("legsB")}};
+}, FX);
+console.log("    marked: " + hurt13.marked + " (" + hurt13.why + ")");
+console.log("    collapse still seen: " + hurt13.seen + ", flags " + hurt13.nFlags
+  + " of which " + hurt13.stamped + " suppressed; applying returned "
+  + JSON.stringify(hurt13.tries));
+console.log("    before: " + JSON.stringify(hurt13.was) + "  after: " + JSON.stringify(hurt13.now));
+ck("the session is marked as not evidence", hurt13.marked
+   && /not representative/i.test(hurt13.why || ""), hurt13.why);
+ck("the collapse is still seen, because it did happen", hurt13.seen > 0, String(hurt13.seen));
+ck("but every flag from it is suppressed",
+   hurt13.nFlags > 0 && hurt13.stamped === hurt13.nFlags,
+   hurt13.stamped + "/" + hurt13.nFlags);
+ck("applying the cut is refused", hurt13.tries.every(x=> x === false),
+   JSON.stringify(hurt13.tries));
+ck("so Legs B keeps its load", hurt13.now.legsB === 70, String(hurt13.now.legsB));
+ck("and Legs A keeps its own", hurt13.now.legsA === 80, String(hurt13.now.legsA));
+/* THE PAIR, PINNED TOGETHER. Either number alone could be produced by a rule that had
+   simply stopped working; the two of them in one run say the rule is reading the flag. */
+ck("unflagged goes to 65 and flagged does not move",
+   nov13.now.legsB === 65 && hurt13.now.legsB === 70,
+   nov13.now.legsB + " vs " + hurt13.now.legsB);
+
 console.log("\n5 - A MOVEMENT IN ONE SLOT IS UNAFFECTED");
 const solo = await p.evaluate(()=>{
   S.program.legsA = [{name:"Seated Leg Curl", sets:3, reps:"8-12", weight:120}];

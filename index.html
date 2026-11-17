@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.3";
+const APP_VERSION = "2026.11.17.4";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -54548,11 +54548,20 @@ function impossibleLoadCheck(target, entry, sess){
     });
   };
   provenIn(entry);
-  /* From the quoted day onwards. Evidence older than the set being quoted has already
-     been superseded by it — that is what made it quotable — so it has no business
-     setting a floor under today's advice. */
+  /* SLOT DEBT 4 of 9, and the live half of it. This floor exists so the advice is never
+     lighter than something you have demonstrably done - and it asked that of every
+     session of the NAME, so a load proven on another day raised THIS slot's advice.
+     Measured: with Legs B unreachable at 100 the advice was 80, and a single Legs A
+     session at 90 for 10 reps dragged it to 90 - a weight that slot had never managed,
+     recommended off another day's evidence.
+
+     From the quoted day onwards, and from this slot only. Evidence older than the set
+     being quoted has already been superseded by it - that is what made it quotable - and
+     evidence from another slot was never about this prescription. */
+  const slot = sess && sess.workoutId;
   S.sessions.forEach(s=>{
     if(!s || s.date < cited.date) return;
+    if(slot && s.workoutId !== slot) return;
     (s.entries || []).forEach(provenIn);
   });
   if(proven > suggest && proven < base) suggest = roundLoadableOn(entry, proven, target.name);
@@ -55098,7 +55107,9 @@ function progressionFor(sess, entry){
   /* entry and sess, not just the plan: every number this prints has to be traceable to
      the session it is printed under. */
   const bad = impossibleLoadCheck(target, entry, sess);
-  if(bad) return {name: entry.name, kind: "toohard", detail: bad};
+  /* The slot travels on the verdict, so toohardTarget() can rebuild the number from the
+     right prescription when the detail carries none. */
+  if(bad) return {name: entry.name, kind: "toohard", wid: sess && sess.workoutId, detail: bad};
 
   if(!range) return null;
   /* H1. The sets at the top working load, and the last of those. */
@@ -56639,7 +56650,14 @@ function toohardTarget(p){
   if(isFinite(cited) && cited > 0){
     /* H4 \u2014 the same arithmetic as the card, so the number on the button and the number
        in the sentence cannot disagree. */
-    const prog = findProgramEntry(p.name);   // slot:todo
+    /* SLOT DEBT 4 of 9, the marked half. Only reached when the detail carries no target
+       of its own, which impossibleLoadCheck() normally supplies from the slot's own
+       planned entry - so this is a genuine fallback rather than the live bug, which was
+       the proven-floor scan inside that function. Scoped all the same: the rep range and
+       the step both differ between slots, and reading them off the wrong one would
+       rebuild the number against a prescription this verdict is not about. */
+    const pw = findProgramEntryWhere(p.name, p.wid);
+    const prog = (pw && (!p.wid || pw.wid === p.wid)) ? pw.e : null;
     const range = repRange((prog || {}).reps) || repRange(d.reps);
     let suggest = range ? reachableLoadFor(prog || {name: p.name}, d.at && {
       load: parseFloat(d.at.load != null ? d.at.load : d.at.w), raw: parseFloat(d.at.w),
@@ -59118,8 +59136,24 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.3";
+const NEWS_FOR = "2026.11.17.4";
 const NEWS = [
+  {k: "Advice drawn from a day you did not train it",
+   s: ["When a prescription turns out to be unreachable — you took it to RPE 10 and still "
+     + "came up short of the rep range — Element 26 suggests a load you can actually "
+     + "hit. It will not suggest something lighter than a weight you have demonstrably "
+     + "managed, which is right, and it worked out what you had managed from every "
+     + "session of that exercise NAME.",
+     "So another day’s slot could lift this day’s advice. With the same movement "
+     + "unreachable at 100 on one day, the honest suggestion was 80 — and a single "
+     + "session on the OTHER day at 90 for 10 reps dragged it to 90, a weight that slot "
+     + "had never managed, recommended off evidence from somewhere else.",
+     "Each slot’s floor is now its own. A weight proven on that slot still lifts its "
+     + "advice, which is the whole point of the floor; a weight proven elsewhere does "
+     + "not.",
+     "Fourth of nine. The marked line here turned out to be a real fallback rather than "
+     + "the bug; the bug was the unmarked scan next to it, which is why these are being "
+     + "proven with a test apiece rather than read and waved through."]},
   {k: "A collapse could be answered with a load increase",
    s: ["When reps fall away across the sets, Element 26 offers to take the opening load "
      + "down. The load it worked that cut out from came from whichever day held the "
