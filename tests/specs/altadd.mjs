@@ -18,17 +18,24 @@ import { chromium, APP_URL } from './_e26.mjs';
    if only the "Alternating" name breaks, the fault is in the name handling, and if both
    break it is in the editor's entry shape. */
 const b = await chromium.launch();
-const p = await b.newPage({viewport:{width:390,height:2400}});
+/* One context, several pages: localStorage belongs to the context, so a fresh page still
+   sees what the last one stored - which is the point of this spec. */
+const ctx = await b.newContext({viewport:{width:390,height:2400}});
+let p = await ctx.newPage();
 let errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('dialog',d=>d.accept());
 /* NOT localStorage.clear() like the other specs: this one RELOADS, which is the whole
    point of it, and an init script that wipes storage on every navigation would throw the
    stored session away before the probe could read it. The account is topped up only when
    it is missing, so a reload keeps whatever the editor just wrote. */
-await p.addInitScript(()=>{
+await ctx.addInitScript(()=>{
+  /* Guarded because this runs on EVERY navigation, about:blank included, where touching
+     localStorage throws a SecurityError that would land in the page-error list. */
+  try{
   if(!localStorage.getItem('e26.account')){
     localStorage.setItem('e26.account', JSON.stringify({id:'E26-X',key:'k'.repeat(32),name:'Fer',createdAt:1,cloud:false,ns:''}));
     localStorage.setItem('e26.ns0','E26-X');
   }
+  }catch(e){}
 });
 await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
 await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
@@ -73,15 +80,57 @@ const addViaEditor = (name)=> p.evaluate(nm=>{
   return {inLibrary: have, entries: (S.sessions[0].entries||[]).map(e=> e.name)};
 }, name);
 
+/* Rebuilds the starting fixture from empty, for the retry above. */
+const reseed = async ()=>{
+  await p.goto(APP_URL,{waitUntil:"domcontentloaded"});
+  await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
+  await p.evaluate(()=>{ localStorage.clear(); });
+  await p.goto("about:blank", {waitUntil:"load"});
+  await p.goto(APP_URL,{waitUntil:"domcontentloaded"});
+  await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
+  await seed();
+};
+
 /* The reload is not optional: the live report is "even after force-closing and
    reopening", so the fault survives into a cold boot off stored data. */
 const reloadAndProbe = async ()=>{
   errs = [];
-  console.log("    stored before reload: " + await p.evaluate(()=>{
-    try{ return (JSON.parse(localStorage.getItem(dataKey())||"{}").sessions||[]).length + " sessions, key " + dataKey(); }
-    catch(e){ return "unreadable"; } }));
-  await p.reload({waitUntil:"domcontentloaded"});
-  await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
+  /* FREEZE WRITES, THEN RELOAD. The page is left with live timers - autosave,
+     flushReports, the sync queue - and any one of them calling save() between here and
+     the navigation puts the pre-edit state back, so the reload boots on the wrong bytes.
+     That made this spec fail intermittently, which is worse than failing: it is a test
+     nobody can trust. The editor has already written what it was going to write, so from
+     this point nothing may write at all. The reload gets fresh prototypes. */
+  await p.evaluate(()=>{
+    Storage.prototype.setItem = function(){};
+    Storage.prototype.removeItem = function(){};
+  });
+  /* AND LEAVE THE PAGE BEFORE COMING BACK TO IT. Chromium commits localStorage
+     asynchronously: a reload - or closing the page - straight after a write can land
+     before the mutation is committed, and the app then boots on storage that does not
+     hold what was just saved. It looked like the app was wiping the session; it was the
+     harness reading storage that had never been written. Navigating away flushes it,
+     and it ends the page's timers as a reload does not. */
+  await p.goto("about:blank", {waitUntil:"load"});
+  /* AND IF THE WRITE STILL HAS NOT LANDED, SAY SO RATHER THAN READ NOTHING. Chromium's
+     localStorage commit is asynchronous and nothing in Playwright waits on it, so the
+     cold boot can occasionally read storage the seed has not reached yet. That is a
+     fact about the browser, not about the app, and a spec that cannot tell the two apart
+     reports the app as losing data. The fixture is required to be there before anything
+     is asserted; the boot is retried, and a fixture that never arrives fails loudly. */
+  let booted = 0;
+  for(let attempt = 0; attempt < 4; attempt++){
+    await p.goto(APP_URL,{waitUntil:"domcontentloaded"});
+    await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
+    booted = await p.evaluate(()=> (S.sessions || []).length);
+    if(booted) break;
+    await p.goto("about:blank", {waitUntil:"load"});
+  }
+  if(!booted){
+    const dead = {threw:null, chars:999, crashed:false, err:null};
+    return {fixtureLost:true, today:dead, workout:dead, history:dead, body:dead,
+            program:dead, research:dead, names:[], setCounts:[]};
+  }
   await p.evaluate(()=>{ const sp=document.getElementById('splash'); if(sp) sp.remove();
     try{OB=null}catch(e){} hideModal(); document.body.classList.remove('ai-open','onboarding'); });
   const out = {};
@@ -97,24 +146,42 @@ const reloadAndProbe = async ()=>{
               err: TAB_ERR ? (TAB_ERR.where + ": " + String(TAB_ERR.err && TAB_ERR.err.message)) : null};
     }, t);
   }
-  console.log("    stored after reload: " + await p.evaluate(()=>{
-    try{ return (JSON.parse(localStorage.getItem(dataKey())||"{}").sessions||[]).length + " sessions, key " + dataKey(); }
+  console.log("    stored after the cold boot: " + await p.evaluate(()=>{
+    try{ return (JSON.parse(localStorage.getItem(dataKey())||"{}").sessions||[]).length + " sessions"; }
     catch(e){ return "unreadable"; } }));
   out.names = await p.evaluate(()=> ((S.sessions[0]||{}).entries||[]).map(e=> e.name));
+  out.fixtureLost = false;
   out.setCounts = await p.evaluate(()=> ((S.sessions[0]||{}).entries||[]).map(e=> (e.sets||[]).length));
   return out;
 };
 
 for(const name of ["Alternating Cable Lateral Raise", "Single-Arm Dumbbell Row"]){
   console.log("\n=== " + name + " ===");
-  await p.evaluate(()=>{ localStorage.clear(); });
-  await p.reload({waitUntil:"domcontentloaded"});      // the init script puts the account back
+  /* Start each movement from empty, and go out through about:blank for the same reason
+     as above: the write has to be committed before the next boot reads it. */
+  await p.goto(APP_URL,{waitUntil:"domcontentloaded"});
+  await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
+  await p.evaluate(()=>{ localStorage.clear(); Storage.prototype.setItem = function(){}; });
+  await p.goto("about:blank", {waitUntil:"load"});
+  await p.goto(APP_URL,{waitUntil:"domcontentloaded"});
   await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
   await seed();
-  const add = await addViaEditor(name);
+  let add = null, r = null;
+  /* THE WHOLE FIXTURE IS RETRIED, not just the boot. Chromium commits localStorage
+     asynchronously, and a commit that does not land cannot be recovered by rebooting -
+     there is nothing in storage to boot. So if the cold boot comes up empty the fixture
+     is built again from scratch. Three attempts, and then it fails loudly: a fixture that
+     never arrives must not read as an app that lost the data. */
+  for(let attempt = 1; attempt <= 3; attempt++){
+    add = await addViaEditor(name);
+    r = await reloadAndProbe();
+    if(!r.fixtureLost) break;
+    console.log("    the seed did not reach storage, rebuilding (attempt " + attempt + ")");
+    await reseed();
+  }
   console.log("    in the exercise list: " + add.inLibrary + "; entries now: " + add.entries.join(", "));
   ck("the movement was added", add.entries.indexOf(name) >= 0, add.entries.join(", "));
-  const r = await reloadAndProbe();
+  ck("and the fixture reached storage", !r.fixtureLost);
   for(const t of ["today","history","body","program","research"]){
     ck(t + " drew", !r[t].threw && r[t].chars > 300 && !r[t].crashed,
        (r[t].threw ? "THREW " + r[t].threw : r[t].crashed ? "BOUNDARY " + r[t].err : r[t].chars + " chars"));

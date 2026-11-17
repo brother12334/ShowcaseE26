@@ -99,7 +99,9 @@ console.log("1 - EVERY READER SEES A PAIRED SET");
 console.log("\n2 - NOTHING READS AROUND THE ADAPTER WITHOUT SAYING SO");
 {
   /* The adapter itself lives between these two markers. Everything else that touches a
-     side directly must end its line with a `sides:` marker naming why — "display" for
+     side directly must end its line with a `sides:` marker naming why — "shape" for a
+     check that only asks whether `sides` is a thing the adapter can walk at all, which
+     cannot go through the adapter because it is what the adapter depends on; "display" for
      something that only draws a label, "write" for the one handler that edits a side by
      hand. A rule may not carry a marker at all: it goes through sideSets(). */
   /* Comments are stripped first, with newlines kept so line numbers still line up. A
@@ -129,7 +131,7 @@ console.log("\n2 - NOTHING READS AROUND THE ADAPTER WITHOUT SAYING SO");
     if(!/setSide\(|sideForSet\(|\.sides\b/.test(l)) return;
     if(/function (setSide|sideForSet)\(/.test(l)) return;  // their own definitions
     if(/trainPrefs\(\)\.sides|prefs\.sides|p\.sides|a\.sides|ans\.sides|rec\.sides|d\.prefs/.test(l)) return;
-    if(/\/\/\s*sides:(adapter|display|write|todo)\b/.test(raw[i] || "")) return;  // declared
+    if(/\/\/\s*sides:(adapter|display|write|todo|shape)\b/.test(raw[i] || "")) return;  // declared
     offenders.push((i + 1) + ": " + l.trim().slice(0, 96));
   });
   if(offenders.length) offenders.forEach(o=> console.log("    " + o));
@@ -143,7 +145,7 @@ console.log("\n3 - AND THE DECLARED EXCEPTIONS ARE WHAT THEY CLAIM TO BE");
   const kinds = {};
   raw.forEach((l, i)=>{
     /* Only a trailing marker counts, so prose that happens to name one does not. */
-    const m = l.match(/\/\/\s*sides:(adapter|display|write|todo)\b/);
+    const m = l.match(/\/\/\s*sides:(adapter|display|write|todo|shape)\b/);
     if(!m) return;
     (kinds[m[1]] = kinds[m[1]] || []).push((i + 1) + ": " + l.trim().slice(0, 78));
   });

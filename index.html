@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.10";
+const APP_VERSION = "2026.11.17.11";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -7291,6 +7291,14 @@ const AI_KEY   = "";     // local testing only — see above before publishing t
 const AI_MODEL = "gemini-3.6-flash";
 /* ================= DATA ================= */
 const LS_KEY = "ironlog.v1";
+/* WHERE A REPAIR PUTS THE ORIGINAL FIRST. Declared up here with LS_KEY rather than next
+   to the code that uses it, and that placement is the point: migrate() runs at line
+   13729, before the body of this file has finished executing, so a `const` declared
+   further down is still in its temporal dead zone when rescueBackupOnce() reaches for it.
+   It was — the backup silently failed and the repair went ahead without one, which is
+   the one thing this whole mechanism exists to prevent. */
+const RESCUE_BACKUP_PREFIX = "ironlog.rescue.";
+const RESCUE_BACKUP_KEEP = 3;
 const GIST_FILE = "ironlog-data.json";
 /* =====================================================================
    TRAINING DAYS AND THE SPLIT
@@ -13438,7 +13446,7 @@ function applySwap(ei, newName, cue, why){
   if(!en) return false;
   const from = en.swapFrom || en.name;
   const backToOriginal = swapSquash(newName) === swapSquash(from);
-  const filled = en.sets.filter(st=> st.done || st.weight !== "" || st.reps !== "").length;
+  const filled = entrySets(en).filter(setHasAnything).length;
 
   if(filled > 0){
     if(supersetInfo(a.entries, ei)){
@@ -13803,7 +13811,241 @@ function switchProfile(id){
   SYNC_ST = "off";
     return true;
 }
+/* ======================================================================
+   A MALFORMED ENTRY IS A RECORD TO SKIP, NEVER A SCREEN TO LOSE
+
+   WHAT WENT WRONG. A session entry whose shape no reader expected took Today, History
+   and Body down to a blank page each. Program and Research were fine, which is the
+   signature of the fault: it is not the state that is unreadable, it is the readers that
+   walk sessions, and there are dozens of them. Hardening them one at a time is a losing
+   game — the next shape finds the one that was missed.
+
+   SO THE SHAPE IS FIXED ONCE, AT THE DOOR. Every reader in this app assumes three things
+   about an entry: it is an object, it has a name, and `sets` is an array of objects. Those
+   assumptions are reasonable and there is no value in making six hundred call sites defend
+   them. What there is value in is guaranteeing them, in one place, before anything reads.
+
+   NOTHING IS DELETED. An entry that cannot be made to satisfy the invariant is moved to
+   `sess.badEntries` with a note — still in your file, still in every export, visible in
+   the session editor, and simply not walked by the rules. That is the difference between
+   skipping a record and losing it, and it is the whole point: the data is the thing that
+   cannot be replaced.
+
+   AND A BACKUP COMES FIRST. The first time this repairs anything it copies the whole of
+   the current raw state to its own localStorage key, untouched and unparsed, before
+   writing. If a repair ever turns out to be the wrong call, the original is still on the
+   device. */
+/* The raw bytes of the data key, copied aside. Returns the key it wrote, or null.
+   Deliberately reads localStorage rather than S: the point is to preserve what is ON the
+   device, including whatever is wrong with it. */
+function rescueBackupOnce(why){
+  try{
+    const k = dataKey();
+    const raw = localStorage.getItem(k);
+    if(raw == null) return null;
+    const name = RESCUE_BACKUP_PREFIX + k + "." + Date.now();
+    localStorage.setItem(name, raw);
+    try{ localStorage.setItem(name + ".why", String(why || "repair")); }catch(e){}
+    /* Old copies are pruned, newest kept, because storage is finite and a device that
+       runs out of room cannot save your next session. */
+    try{
+      const mine = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const n = localStorage.key(i);
+        if(n && n.indexOf(RESCUE_BACKUP_PREFIX + k + ".") === 0 && !/\.why$/.test(n)) mine.push(n);
+      }
+      mine.sort();
+      while(mine.length > RESCUE_BACKUP_KEEP){
+        const drop = mine.shift();
+        localStorage.removeItem(drop);
+        localStorage.removeItem(drop + ".why");
+      }
+    }catch(e){}
+    return name;
+  }catch(e){ return null; }
+}
+
+/* The same invariant, enforced per session at the points that walk one. The door
+   (repairStoredSessions, from migrate) covers everything that ARRIVES; this covers
+   everything BUILT while the app is running — the live session, an entry pushed by
+   the editor, anything a future code path adds. Cheap enough to call on every grade: it
+   is one typeof per entry unless something is actually wrong.
+
+   It returns true when it changed something, so a caller that wants to say so can. */
+function ensureSessionShape(sess){
+  if(!sess || typeof sess !== "object") return false;
+  if(!Array.isArray(sess.entries)){
+    if(sess.entries && typeof sess.entries === "object"){
+      const keys = Object.keys(sess.entries).filter(k=> /^\d+$/.test(k)).sort((a,b)=> a-b);
+      sess.entries = keys.map(k=> sess.entries[k]);
+    } else sess.entries = [];
+    return true;
+  }
+  /* The fast path, which is every call but the broken one. */
+  const suspect = sess.entries.some(en=> !en || typeof en !== "object" || Array.isArray(en)
+    || typeof en.name !== "string" || !en.name.trim()
+    || !Array.isArray(en.sets) || en.sets.some(st=> !setShapeOk(st)));
+  if(!suspect) return false;
+  normalizeSessions([sess], "session");
+  return true;
+}
+
+/* Every session this app holds, before anything draws. The renderers are the readers
+   there are most of — dozens of them across Today, History and Body — and hardening
+   each one is the losing game described above, so the shape is made true in front of
+   them instead. The suspect test is one typeof per entry, so an ordinary render pays
+   almost nothing and nothing is written unless something was actually wrong. */
+function ensureAllSessionShapes(){
+  let n = 0;
+  (Array.isArray(S.sessions) ? S.sessions : []).forEach(s=>{ if(ensureSessionShape(s)) n++; });
+  if(S.active && ensureSessionShape(S.active)) n++;
+  if(n) saveQuiet();
+  return n;
+}
+
+/* Is this a set every reader can walk? Objects only; `sides`, if present, holds objects. */
+function setShapeOk(st){
+  if(!st || typeof st !== "object" || Array.isArray(st)) return false;
+  /* The four reads below are the one place `sides` may be touched outside the adapter,
+     and they are declared as shape checks because they are what the adapter RESTS on:
+     sideSets() walks st.sides, so something has to establish first that it can be
+     walked. They read no value and decide nothing about training. */
+  if(st.sides != null){                                                 // sides:shape
+    if(typeof st.sides !== "object" || Array.isArray(st.sides)) return false;   // sides:shape
+    const bad = Object.keys(st.sides).some(k=> st.sides[k] != null      // sides:shape
+      && (typeof st.sides[k] !== "object" || Array.isArray(st.sides[k])));      // sides:shape
+    if(bad) return false;
+  }
+  return true;
+}
+
+/* One entry, repaired in place where that is possible without inventing anything.
+   Returns {ok, notes} — ok false means it cannot be walked and belongs in badEntries. */
+function repairEntry(en){
+  const notes = [];
+  if(!en || typeof en !== "object" || Array.isArray(en)) return {ok:false, notes:["not an object"]};
+  if(typeof en.name !== "string" || !en.name.trim()){
+    /* A name is what every history lookup, PR check and muscle attribution keys off, so
+       an entry without one cannot be matched to anything. It is kept and labelled rather
+       than guessed at, because guessing a name files somebody's sets under the wrong
+       exercise, which is worse than not filing them. */
+    return {ok:false, notes:["no exercise name"]};
+  }
+  if(!Array.isArray(en.sets)){
+    if(en.sets == null){ en.sets = []; notes.push("sets was missing, now empty"); }
+    else if(typeof en.sets === "object"){
+      /* An array that came back from somewhere as an object keyed "0","1","2" — which
+         is what a few JSON round-trips produce. The values are real sets; the container
+         is not. */
+      const keys = Object.keys(en.sets).filter(k=> /^\d+$/.test(k)).sort((a,b)=> a-b);
+      en.sets = keys.map(k=> en.sets[k]);
+      notes.push("sets was an object, read back as " + en.sets.length + " in order");
+    }
+    else { en.sets = []; notes.push("sets was " + typeof en.sets + ", now empty"); }
+  }
+  const before = en.sets.length;
+  const dropped = en.sets.filter(st=> !setShapeOk(st));
+  if(dropped.length){
+    en.sets = en.sets.filter(setShapeOk);
+    /* Kept on the entry, not thrown away: a set the readers cannot walk may still be
+       numbers somebody typed, and they are recoverable by hand from here or from an
+       export. */
+    en.badSets = (en.badSets || []).concat(dropped);
+    notes.push(dropped.length + " of " + before + " sets could not be read and were set aside");
+  }
+  return {ok:true, notes};
+}
+
+/* Every session, repaired. Returns a report rather than a boolean, because what was
+   changed has to be sayable — a silent repair of somebody's training log is not a
+   repair, it is a second bug. */
+function normalizeSessions(list, label){
+  const rep = {sessions:0, entries:0, sets:0, moved:0, notes:[]};
+  if(!Array.isArray(list)) return rep;
+  list.forEach((s, i)=>{
+    if(!s || typeof s !== "object") return;
+    if(!Array.isArray(s.entries)){
+      if(s.entries == null) s.entries = [];
+      else if(typeof s.entries === "object"){
+        const keys = Object.keys(s.entries).filter(k=> /^\d+$/.test(k)).sort((a,b)=> a-b);
+        s.entries = keys.map(k=> s.entries[k]);
+      }
+      else s.entries = [];
+      rep.sessions++;
+      rep.notes.push((label||"session") + " " + (s.id || i) + ": entries was not a list");
+    }
+    const keep = [], move = [];
+    s.entries.forEach(en=>{
+      const r = repairEntry(en);
+      if(!r.ok){
+        move.push({entry: en, why: r.notes.join("; ")});
+        return;
+      }
+      if(r.notes.length){
+        rep.entries++;
+        rep.sets += (en.badSets || []).length;
+        rep.notes.push((label||"session") + " " + (s.id || i) + " / " + en.name + ": " + r.notes.join("; "));
+      }
+      keep.push(en);
+    });
+    if(move.length){
+      s.entries = keep;
+      s.badEntries = (s.badEntries || []).concat(move);
+      rep.moved += move.length;
+      rep.sessions++;
+      move.forEach(m=> rep.notes.push((label||"session") + " " + (s.id || i)
+        + ": an entry was set aside — " + m.why));
+    }
+  });
+  return rep;
+}
+
+/* Called from migrate(), so it runs on load, on import and on a restore — the three
+   ways data arrives. The backup is taken only if there is something to repair, and only
+   once per load. */
+function repairStoredSessions(){
+  let backedUp = null;
+  const run = (list, label)=>{
+    /* Dry run first: nothing is written and no backup is taken for data that is fine,
+       which is every load but the one that needs this. */
+    const needs = Array.isArray(list) && list.some(s=>{
+      if(!s || typeof s !== "object") return false;
+      if(!Array.isArray(s.entries)) return true;
+      return s.entries.some(en=> !en || typeof en !== "object" || Array.isArray(en)
+        || typeof en.name !== "string" || !en.name.trim()
+        || !Array.isArray(en.sets) || en.sets.some(st=> !setShapeOk(st)));
+    });
+    if(!needs) return null;
+    if(!backedUp) backedUp = rescueBackupOnce("repairing session shape");
+    return normalizeSessions(list, label);
+  };
+  const a = run(S.sessions, "session");
+  const b = S.active ? run([S.active], "the live session") : null;
+  const rep = [a, b].filter(Boolean);
+  if(!rep.length) return false;
+  const total = rep.reduce((t, r)=> ({
+    sessions: t.sessions + r.sessions, entries: t.entries + r.entries,
+    sets: t.sets + r.sets, moved: t.moved + r.moved,
+    notes: t.notes.concat(r.notes)
+  }), {sessions:0, entries:0, sets:0, moved:0, notes:[]});
+  /* WRITTEN DOWN WHERE YOU CAN SEE IT. A repair nobody is told about is indistinguishable
+     from data loss, so it goes in the state, travels in the backup, and the Today tab
+     says so until it is read. */
+  S.dataIssues = (S.dataIssues || []).concat([{
+    at: Date.now(), version: APP_VERSION, backup: backedUp,
+    sessions: total.sessions, entries: total.entries, sets: total.sets, moved: total.moved,
+    notes: total.notes.slice(0, 40)
+  }]).slice(-10);
+  try{ console.warn("Element 26 repaired session shape", total); }catch(e){}
+  saveQuiet();
+  return true;
+}
+
 function migrate(){
+  /* FIRST, AND BEFORE ANY NAME COMPARISON OR ANYTHING ELSE. Every line below this one,
+     and every reader in the app, assumes an entry is an object with a name and an array
+     of set objects. This is where that becomes true rather than hoped for. */
+  try{ repairStoredSessions(); }catch(e){ try{ console.error("Element 26: session repair threw", e); }catch(e2){} }
   // Renames you've made yourself have to be live before ANY name comparison happens.
   if(!S.exAliases || typeof S.exAliases !== "object") S.exAliases = {};
   USER_ALIASES = S.exAliases; invalidateCanon();
@@ -13940,8 +14182,7 @@ function migrate(){
     S.active = null; saveQuiet();          // nothing in it to log into, so it is not a session
   }
   if(S.active){
-    const logged = (S.active.entries || []).some(e=>
-      (e.sets || []).some(st=> st && (st.done || st.reps || st.weight)));
+    const logged = (S.active.entries || []).some(entryHasAnything);
     const age = Date.now() - (S.active.startedAt || 0);
     const otherDay = S.active.date && S.active.date !== todayStr();
     /* Empty and from another day, or empty and eight hours old: nobody is still in that
@@ -15282,8 +15523,10 @@ function drawPRBadges(ei){
    with this session excluded. Records are awarded in set order so the badge lands on
    the set that actually broke the record, not on every heavier set after it. */
 function sweepSessionPRs(sess){
+  ensureSessionShape(sess);
   const others = S.sessions.filter(s=>s.id !== sess.id);
   (sess.entries||[]).forEach(e=>{
+    if(!e || typeof e !== "object") return;        // see repairStoredSessions()
     const key = nrm(e.name);
     // this session's own implement, already stamped by the time finish calls this
     const add = entryBarAdd(e);
@@ -15298,9 +15541,9 @@ function sweepSessionPRs(sess){
       if(!(w>0) && reps > maxRepsBw) maxRepsBw = reps;
     };
     others.forEach(s=> (s.entries||[]).forEach(en=>{
-      if(nrm(en.name)!==key) return;
+      if(!en || nrm(en.name)!==key) return;
       const oAdd = entryBarAdd(en);
-      en.sets.forEach(st=> consider(st, oAdd));
+      (Array.isArray(en.sets) ? en.sets : []).forEach(st=>{ if(st) consider(st, oAdd); });
     }));
     /* The same rule the live check follows: no previous session with this movement on
        it, no records today. `seen` goes true as soon as this session's own first set is
@@ -17945,7 +18188,7 @@ function lastGymNote(l){
 function lastBox(workoutId, exName, anyDay, occ){
   const l = lastEntryFor(workoutId, exName, anyDay, occ);
   if(!l) return null;
-  const sets = l.sets.filter(st=>st.reps||st.weight);
+  const sets = entrySets(l).filter(setHasAnything);
   if(!sets.length) return null;
   const d = new Date(l.date+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
   const color = dayMeta(workoutId).color;
@@ -18090,7 +18333,7 @@ function exHistory(name, n, occ){
     const hits = occurrencesIn(S.sessions[i], name);
     if(!hits.length) continue;
     const e = hits[Math.min(occ, hits.length-1)];
-    const sets = e.sets.filter(st=>st.reps||st.weight);
+    const sets = entrySets(e).filter(setHasAnything);
     if(sets.length) out.push({date:S.sessions[i].date, sets});
   }
   return out; // newest first
@@ -19569,10 +19812,18 @@ function entrySetRows(en){
 }
 function entryWorkingSets(en){ return entrySets(en).filter(isWorkingSet); }
 /* Anything at all written on this set: a tick, a rep count, a load. */
+/* ANYTHING TYPED COUNTS, AND RPE IS TYPED. This decides whether a set is kept at finish,
+   so every field somebody can fill in has to be on the list or filling that field in and
+   nothing else loses the row. RPE was missing: a set where the only thing recorded was
+   "that was an 8" was dropped as empty. It is a judgement about a set that happened,
+   which makes it evidence, and the set happened.
+
+   Not a blanket "any own property": rest, gap, side and the warm-up marks are written by
+   the app, not by you, and a set carrying only those really is empty. */
 function setHasAnything(st){
-  return !!(st && (st.done
-    || (st.reps != null && st.reps !== "")
-    || (st.weight != null && st.weight !== "")));
+  if(!st) return false;
+  const typed = v=> v != null && v !== "";
+  return !!(st.done || typed(st.reps) || typed(st.weight) || typed(st.rpe));
 }
 function entryHasAnything(en){ return entrySets(en).some(setHasAnything); }
 /* Is this SET - the whole thing, both sides of a pair - worth keeping? Either side
@@ -33170,6 +33421,8 @@ function render(){
   /* A running session follows its own day of the plan. Every path that edits the programme
      re-renders, so this is the one place it has to be read from, and it returns on a string
      compare when nothing has moved — which is every render but the handful that matter. */
+  /* BEFORE THE READERS, NOT AFTER THEM. See ensureAllSessionShapes(). */
+  try{ ensureAllSessionShapes(); }catch(e){ try{ console.error("Element 26: shape repair threw", e); }catch(e2){} }
   try{ syncActivePlan(); }catch(e){}
   /* And which ramp each movement has earned, which is a question about ORDER and was
      answered once, at Start, and then never again. See syncWarmKinds(). */
@@ -35025,6 +35278,44 @@ function inlineTipHTML(a, seen){
 }
 
 /* ---------- TODAY ---------- */
+/* ---------- SAYING SO, WHICH IS HALF THE POINT ----------
+
+   A repair nobody is told about is indistinguishable from data loss. The record is in
+   S.dataIssues and travels in every export; this is the part you can actually see, and it
+   stays up until it is read rather than appearing once and vanishing. It names the backup
+   key, because that is what makes the repair undoable. */
+function dataIssueCardHTML(){
+  const list = (S.dataIssues || []).filter(x=> x && !x.seen);
+  if(!list.length) return "";
+  const moved = list.reduce((t, x)=> t + (x.moved || 0), 0);
+  const sets  = list.reduce((t, x)=> t + (x.sets || 0), 0);
+  const ents  = list.reduce((t, x)=> t + (x.entries || 0), 0);
+  const backup = list.map(x=> x.backup).filter(Boolean).pop();
+  const bits = [];
+  if(moved) bits.push(moved + " exercise" + (moved === 1 ? "" : "s") + " set aside");
+  if(sets)  bits.push(sets + " set" + (sets === 1 ? "" : "s") + " set aside");
+  if(ents && !sets) bits.push(ents + " entr" + (ents === 1 ? "y" : "ies") + " tidied");
+  return `<div class="card" style="border-color:var(--warn)">
+    <h3 style="margin:0 0 6px">Something in your log had a shape nothing could read</h3>
+    <div class="sub" style="margin:0 0 8px">${esc(bits.join(", ") || "A record was repaired")}.
+      ${moved || sets ? `Nothing was deleted — what could not be read was moved to one
+      side so the screens and the rules can skip it, and it is still in your data and in
+      every export.` : ""}</div>
+    ${backup ? `<div class="sub" style="margin:0 0 8px;color:var(--faint);font-size:var(--fs-3)">
+      A copy of your data as it was, before any of this, is kept on this device under
+      <b>${esc(backup)}</b>.</div>` : ""}
+    <div class="btn-row">
+      <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
+      <button class="btn ghost small" id="dataIssueSeen" style="flex:1">Got it</button>
+    </div>
+    ${list.slice(-1).map(x=> (x.notes || []).length ? `<details style="margin-top:10px">
+      <summary class="sub" style="margin:0;cursor:pointer">What exactly</summary>
+      <pre style="margin:8px 0 0;padding:10px;overflow:auto;max-height:30vh;background:var(--bg);
+        border:1px solid var(--line);border-radius:10px;font-size:11px;white-space:pre-wrap;
+        word-break:break-word">${esc((x.notes || []).join("\n"))}</pre></details>` : "").join("")}
+  </div>`;
+}
+
 function viewToday(){
   const wid = todaysWorkoutId();
   const m = dayMeta(wid);
@@ -35056,6 +35347,9 @@ function viewToday(){
   const setBtn = `<button class="hdr-moon hdr-gear" id="todaySettings"
        aria-label="Settings" title="Settings">${gearGlyph()}</button>`;
   let h = `<div class="hdr"><h1>${brandMark()}</h1><span class="hdr-r">${moonBtn}${setBtn}<span class="date num">${fmtDate(todayStr())}</span></span></div>`;
+  /* ABOVE EVERYTHING. If a record in your log could not be read, that is the first thing
+     worth knowing about today. */
+  h += dataIssueCardHTML();
   if(skChip) h += `<div style="margin:-4px 2px 12px">${skChip}</div>`;
 
   h += plateStrip();
@@ -36979,7 +37273,7 @@ function openPickModal(ei){
   const en = a.entries[ei];
   const info = pickOptions(a.workoutId, en);
   if(!info) return;
-  const logged = en.sets.filter(st=> st.done || st.weight !== "" || st.reps !== "").length;
+  const logged = entrySets(en).filter(setHasAnything).length;
   showModal(`<h3>Which one today?</h3>
     <div class="sub" style="margin:6px 0 14px;text-transform:none;letter-spacing:0">${
       logged
@@ -37035,7 +37329,7 @@ function openSwapModal(ei){
     const lib = orig ? (EX_LIBRARY[orig.key]||[]).find(x=> swapSquash(x.name) === swapSquash(en.swapFrom)) : null;
     opts.unshift({name: en.swapFrom, gear: (orig&&orig.gear)||"", cue: (lib&&lib.cue)||"", back: true});
   }
-  const filled = en.sets.filter(st=> st.done || st.weight !== "" || st.reps !== "").length;
+  const filled = entrySets(en).filter(setHasAnything).length;
   const rows = opts.map((o, i)=>`
     <button class="btn ghost swap-opt" data-swappick="${i}" style="text-align:left;width:100%;margin-bottom:8px;padding:12px 14px">
       <b style="display:block">${o.back?"\u21a9 ":""}${esc(o.name)}</b>
@@ -41464,7 +41758,7 @@ function planTimeCut(minutes, entries){
   let cur = JSON.parse(JSON.stringify(entries || S.active.entries));
   const cuts = [];
   const est = ()=> estimateRemainingSec(cur);
-  const logged = e=> (e.sets || []).some(st=> st && (st.done || st.reps || st.weight));
+  const logged = entryHasAnything;
   const orderOf = {};
   (entries || S.active.entries).forEach((e, i)=>{ if(e && e.name) orderOf[e.name] = i; });
   const note = (name, kind, from, to)=>{
@@ -41674,7 +41968,7 @@ function travelPlan(gear){
   if(!a) return [];
   return (a.entries || []).map((en, i)=>{
     if(!en || !en.name) return null;
-    const started = (en.sets || []).some(st=> st.done || st.reps || st.weight);
+    const started = entryHasAnything(en);
     const need = travelGearOf(en.name);
     if(gear.indexOf(need) > -1) return {i, en, keep: true, need};
     if(started) return {i, en, keep: true, started: true, need};
@@ -49389,7 +49683,7 @@ function applyGymPlan(g){
     const k = gymKeyOf(en.name);
     const to = swaps[k];
     if(!to || swapSquash(to) === swapSquash(en.name)) return;
-    if((en.sets || []).some(st=> st.done || st.reps || st.weight)) return;
+    if(entryHasAnything(en)) return;      // renaming a movement that has been logged
     const from = en.name;
     en.swapFrom = from;
     en.swapWhy = {code: "nogym", text: null};
@@ -49413,7 +49707,7 @@ function undoGymPlan(){
   a.gymPlan.swaps.forEach(sw=>{
     const en = a.entries[sw.i];
     if(!en || swapSquash(en.name) !== swapSquash(sw.to)) return;
-    if((en.sets || []).some(st=> st.done || st.reps || st.weight)) return;
+    if(entryHasAnything(en)) return;      // ditto, on the way back
     en.name = sw.from;
     delete en.swapFrom; delete en.swapWhy;
     en.note = libraryCueFor(sw.from) || undefined;
@@ -52783,8 +53077,22 @@ function renderSessEditor(s){
     let name = $("#addExSel").value;
     if(name==="__custom__") name = $("#customName").value.trim();
     if(!name){ toast("Pick or name an exercise first"); return; }
-    const sets = newSets.filter(st=>String(st.reps).trim()||String(st.weight).trim()).map(st=>({weight:st.weight, reps:st.reps, rpe:st.rpe, done:true}));
+    /* EVERY ROW WITH ANYTHING IN IT IS KEPT, RPE INCLUDED. This filter asked only about
+       reps and weight, so a row where the only thing picked was an RPE went in the bin
+       without a word — which is the same class of fault as the one that deleted a
+       paired movement at finish: a test for "is this empty" that does not know about one
+       of the fields. */
+    const typedIn = st=> !!(String(st.reps||"").trim() || String(st.weight||"").trim()
+                            || String(st.rpe||"").trim());
+    const sets = newSets.filter(typedIn).map(st=>({weight:st.weight, reps:st.reps, rpe:st.rpe, done:true}));
     if(!sets.length){ toast("Fill in at least one set"); return; }
+    /* AND IF A ROW IS DROPPED, IT IS SAID OUT LOUD. A blank row at the bottom is the
+       normal case and worth no words, but somebody who typed something and lost it has to
+       hear about it rather than find out months later. */
+    const lost = newSets.length - sets.length;
+    if(lost && newSets.some(st=> !typedIn(st) && Object.keys(st).some(k=> String(st[k]||"").trim()))){
+      toast(lost + " row" + (lost === 1 ? "" : "s") + " had nothing readable in them and were not added", "warn");
+    }
     s.entries.push({name, sets});
     s.edited = Date.now();
     save(); queueSync();
@@ -53131,6 +53439,7 @@ function downContext(sess, entry, idx, prior){
   return {excuse: excuses[0] || null, excuses, context};
 }
 function scoreWorkout(sess){
+  ensureSessionShape(sess);
   const secs = [];
   /* `opt.na` marks a section as unmeasurable: it keeps its explanation and its
      "log this to unlock it" line, but contributes neither points nor maximum. */
@@ -55732,6 +56041,7 @@ function exposuresSincePlanChange(name, key, sess){
   return n;
 }
 function updateStalls(sess){
+  ensureSessionShape(sess);
   if(!S.stalls || typeof S.stalls !== "object") S.stalls = {};
   const off = layoffBefore(sess);
   const notEv = sessionNotEvidence(sess);
@@ -55863,8 +56173,8 @@ function exerciseConfidence(sess, entry){
     x && x.id !== sess.id && x.startedAt < (sess.startedAt || Infinity) &&
     (x.entries || []).some(e=> nrm(e.name) === key)).length;
 
-  const sets = entry.sets || [];
-  const filled = sets.filter(st=> st && (st.reps || st.weight));
+  const sets = entrySets(entry);
+  const filled = sets.filter(setHasAnything);
   const coverage = sets.length ? filled.length / sets.length : 0;
   // The numbers a load/effort conclusion actually rests on.
   const withReps = filled.filter(st=> parseFloat(st.reps) > 0).length;
@@ -56741,6 +57051,7 @@ function dismissFlag(id){
   save(); queueSync();
 }
 function buildProgression(sess){
+  ensureSessionShape(sess);
   const out = [];
   (sess.entries || []).forEach(en=>{
     const p = progressionFor(sess, en);
@@ -59384,8 +59695,38 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.10";
+const NEWS_FOR = "2026.11.17.11";
 const NEWS = [
+  {k: "A record nothing could read, and three blank screens",
+   s: ["This is the cause of the blank Today, History and Body screens that the last "
+     + "release gave you a way out of. Every reader in this app \u2014 and there are "
+     + "dozens that walk your sessions \u2014 assumes the same three things about a "
+     + "logged exercise: that it is a record, that it has a name, and that its sets are a "
+     + "list. Something in your log did not satisfy one of those, and the readers threw "
+     + "instead of finishing. Program and Research were fine because they do not read "
+     + "sessions.",
+     "Hardening those readers one at a time is a game you lose: the next odd shape finds "
+     + "the one that was missed. So the shape is now made true in one place before "
+     + "anything reads it \u2014 once as your data loads, and once in front of the "
+     + "screens for anything built while the app is running.",
+     "NOTHING IS DELETED. A record that cannot be read is moved aside with a note. It "
+     + "stays in your data, it travels in every export, and the rules simply skip it "
+     + "rather than falling over it. A set that cannot be read is kept on its exercise "
+     + "the same way. And before the first repair of anything, a copy of your whole state "
+     + "exactly as it was is written to this device under its own key \u2014 so if a "
+     + "repair is ever the wrong call, the original is still here. Today says what was "
+     + "done and names that copy.",
+     "Two more things found while fixing it, both the same fault as the paired-movement "
+     + "bug below. The CSV export dropped every one-limb movement entirely \u2014 it read "
+     + "the set\u2019s top level, which on a paired set holds nothing, so the exercise was "
+     + "simply absent from the file the analysis is built from. And \u201clast time\u201d, "
+     + "the exercise-swap sheet, the travel-gear pass and the gym swap all read a fully "
+     + "logged paired movement as untouched \u2014 which in the gym swap\u2019s case meant "
+     + "it would rename an exercise you had already logged sets against.",
+     "Lastly: a set where the only thing you recorded was an RPE was treated as empty and "
+     + "dropped, both at finish and when adding a movement in the session editor. An RPE "
+     + "is a judgement about a set that happened. It is kept now, and if a row is ever "
+     + "dropped with something in it you are told."]},
   {k: "A way out of a blank screen",
    s: ["Reported live: adding a movement in the session editor left Today, History and "
      + "Body drawing nothing at all \u2014 a tab bar above an empty page. Program and "
@@ -63311,6 +63652,8 @@ function subSetsFor(e, si){
   if(!st || !Array.isArray(st.sub) || !st.sub.length) return [];
   const t = techSub(e, si, (e.sets || []).length);
   const label = t ? TECHNIQUES[t.k].subLabel : "extra";
+  /* empty:ok — these are the sub-rows of a rest-pause or drop set, not sides, and they
+     carry no RPE of their own: the RPE belongs to the parent set. */
   return st.sub
     .filter(r=> r && (r.reps !== "" && r.reps != null || r.weight !== "" && r.weight != null))
     .map((r, i)=> ({label: label + " " + (i + 1), weight: r.weight, reps: r.reps}));
@@ -65502,6 +65845,10 @@ const BACKUP_FIELDS = [
      calibrations would re-base them a second time, so the stamp has to travel with
      the data it describes. */
   "volModelVersion","volMigrated","volHold","manualDisagreement","volClimb","volClimbFrom",
+  /* What was repaired and when, with the backup key it wrote first. Carried so a file
+     taken off a device that needed repairing says so, rather than looking like data that
+     was always this shape. */
+  "dataIssues",
   /* What the reader saved, read and has already seen in Research, plus their filter
      choices. The papers themselves are NOT here — they are public data the app did
      not author, reproducible from the Worker, and putting a feed in every backup file
@@ -66200,7 +66547,7 @@ function buildReportInner(){
          and `first` marks the row that carries the number. A legacy alternating log
          keeps printing one numbered row per side, because that is what it recorded. */
       const sets = sideSets(e)
-        .filter(x=> (x.reps != null && x.reps !== "") || (x.weight != null && x.weight !== ""))
+        .filter(x=> setHasAnything(x.ref))
         .map((x, k, all)=> ({st: x.ref, i: x.si, side: x.side, rest: x.rest, gap: x.gap,
           first: k === 0 || all[k - 1].si !== x.si,
           /* Whether another side of this same set follows. A left-only set is both the
@@ -66368,8 +66715,8 @@ function fmtSetShort(st, entry){
 function buildCSV(){
   const sessions = [...S.sessions].sort((a,b)=>b.startedAt-a.startedAt);
   let maxSets = 1;
-  sessions.forEach(s=>s.entries.forEach(e=>{
-    const n = e.sets.filter(st=>st.reps||st.weight).length;
+  sessions.forEach(s=>(s.entries||[]).forEach(e=>{
+    const n = entrySets(e).filter(setHasAnything).length;
     if(n>maxSets) maxSets = n;
   }));
   const header = ["Exercise"];
@@ -66390,7 +66737,11 @@ function buildCSV(){
   sessions.forEach(s=>{
     rows.push([s.date+", "+dayName(s.workoutId).toUpperCase(), s.note||"", ...Array(Math.max(0,maxSets-1)).fill("")]);
     s.entries.forEach(e=>{
-      const sets = e.sets.filter(st=>st.reps||st.weight);
+      /* THROUGH THE ADAPTER, OR A ONE-LIMB MOVEMENT IS NOT IN THE FILE AT ALL. A paired
+         set holds its numbers on its two sides, so this read nothing and the entry was
+         skipped — silently, in the export the analysis prompt is built from. Each side
+         is its own column here, which is what the old alternating log did anyway. */
+      const sets = entrySets(e).filter(setHasAnything);
       if(!sets.length) return;
       const row = [e.name];
       for(let i=0;i<maxSets;i++) row.push(sets[i] ? fmtSetShort(sets[i], e) : "");
@@ -66823,6 +67174,12 @@ const RESCUE_BTNS = `<div class="btn-row" style="margin-top:12px">
     <button class="btn ghost small" id="rescueCopy" style="flex:1">Copy the error</button></div>`;
 
 function bindRescue(){
+  const seen = $("#dataIssueSeen");
+  if(seen) seen.onclick = ()=>{
+    /* Marked read, never deleted: the record is the audit trail. */
+    (S.dataIssues || []).forEach(x=>{ if(x) x.seen = true; });
+    save(); render();
+  };
   const r = $("#rescueRaw");
   if(r) r.onclick = ()=>{
     let ok = false;
