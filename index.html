@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.11";
+const APP_VERSION = "2026.11.17.12";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -35284,6 +35284,96 @@ function inlineTipHTML(a, seen){
    S.dataIssues and travels in every export; this is the part you can actually see, and it
    stays up until it is read rather than appearing once and vanishing. It names the backup
    key, because that is what makes the repair undoable. */
+/* ---------- HANDING THE BROKEN RECORD TO SOMEBODY WHO CAN READ IT ----------
+
+   A record set aside is only half useful if the only way to look at it is to open a
+   whole backup file and find it. This builds a small file containing nothing but the
+   set-aside records and the session each came from.
+
+   WHAT IT DELIBERATELY DOES NOT CONTAIN. Not your account id or key — those live in
+   their own storage key and this reads only sessions, so there is nothing to strip.
+   Not a sync token, for the same reason, and the credential sweep runs over it anyway in
+   case a future field ever carries one. Not your programme, your body log, your notes or
+   any session that was fine. It is the smallest thing that answers "what shape was it",
+   which makes it the thing you can send to somebody without thinking about it. */
+function badRecordsReport(){
+  const out = {
+    e26bad: {app:"Element 26", kind:"set-aside records only", version: APP_VERSION,
+      exportedAt: Date.now(),
+      note:"The records that could not be read, and nothing else. No account id or key, "
+         + "no tokens, no programme, no body log, no sessions that were fine."},
+    repairs: (S.dataIssues || []).map(x=> ({at: x.at, version: x.version, backup: x.backup,
+      sessions: x.sessions, entries: x.entries, sets: x.sets, moved: x.moved, notes: x.notes})),
+    sessions: []
+  };
+  const look = (Array.isArray(S.sessions) ? S.sessions : []).concat(S.active ? [S.active] : []);
+  look.forEach(s=>{
+    if(!s || typeof s !== "object") return;
+    const setAside = Array.isArray(s.badEntries) ? s.badEntries : [];
+    const withBadSets = (Array.isArray(s.entries) ? s.entries : [])
+      .filter(e=> e && Array.isArray(e.badSets) && e.badSets.length)
+      .map(e=> ({name: e.name, perSide: !!e.perSide, startSide: e.startSide || null,
+                 badSets: e.badSets}));
+    if(!setAside.length && !withBadSets.length) return;
+    out.sessions.push({
+      id: s.id || null, date: s.date || null, workoutId: s.workoutId || null,
+      startedAt: s.startedAt || null, finishedAt: s.finishedAt || null,
+      live: s === S.active,
+      /* The session's NOTE is deliberately left out, although it is often the best
+         context for what the session looked like. It is free text in your own words,
+         and the one thing this file promises is that you can send it without having to
+         read it first. Context you choose to add is context you chose. */
+      noteOmitted: !!(s.note && s.note.trim()),
+      /* The names that ARE readable in the same session, because "what else was in there"
+         is most of the context for reading a broken record. */
+      readableEntries: (Array.isArray(s.entries) ? s.entries : []).map(e=> e && e.name),
+      badEntries: setAside,
+      entriesWithBadSets: withBadSets
+    });
+  });
+  /* Belt and braces: the credential sweep from the raw export, over this too. */
+  try{ rescueRedact(out, "", [], []); }catch(e){}
+  return out;
+}
+function badRecordsText(){
+  try{ return JSON.stringify(badRecordsReport(), null, 1); }
+  catch(e){ return JSON.stringify({e26bad:{error: String((e && e.message) || e)}}); }
+}
+function exportBadRecords(){
+  const text = badRecordsText();
+  let name = "element26-setaside";
+  try{ name = "element26-setaside-" + todayStr(); }catch(e){}
+  try{
+    const blob = new Blob([text], {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); }catch(e){} }, 4000);
+    return true;
+  }catch(e){}
+  /* On a phone a download is often the awkward route and the clipboard is the easy one,
+     so the fallbacks are the other way round from the raw export: this file is small
+     enough to paste into a message. */
+  try{ navigator.clipboard.writeText(text); return true; }catch(e){}
+  try{
+    const p = document.createElement("pre");
+    p.style.cssText = "position:fixed;inset:0;z-index:99999;margin:0;padding:12px;"
+      + "overflow:auto;background:#000;color:#fff;font-size:11px;white-space:pre-wrap;"
+      + "word-break:break-all;-webkit-user-select:text;user-select:text";
+    p.textContent = text;
+    document.body.appendChild(p);
+    return true;
+  }catch(e){}
+  return false;
+}
+/* Is there anything to hand over at all? Used to decide whether the buttons appear. */
+function haveBadRecords(){
+  try{ return badRecordsReport().sessions.length > 0; }catch(e){ return false; }
+}
+
 function dataIssueCardHTML(){
   const list = (S.dataIssues || []).filter(x=> x && !x.seen);
   if(!list.length) return "";
@@ -35304,10 +35394,22 @@ function dataIssueCardHTML(){
     ${backup ? `<div class="sub" style="margin:0 0 8px;color:var(--faint);font-size:var(--fs-3)">
       A copy of your data as it was, before any of this, is kept on this device under
       <b>${esc(backup)}</b>.</div>` : ""}
+    ${haveBadRecords() ? `<div class="btn-row">
+      <button class="btn" id="badRecCopy" style="flex:1">Copy the set-aside records</button></div>
     <div class="btn-row">
+      <button class="btn ghost small" id="badRecFile" style="flex:1">Save them as a file</button>
+      <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
+    </div>
+    <div class="sub" style="margin:6px 2px 0;color:var(--faint);font-size:var(--fs-3)">
+      The set-aside records and the sessions they came from, and nothing else — no
+      account id or key, no tokens, no programme, no sessions that were fine. Small enough
+      to paste into a message.</div>
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn ghost small" id="dataIssueSeen" style="flex:1">Got it</button>
+    </div>` : `<div class="btn-row">
       <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
       <button class="btn ghost small" id="dataIssueSeen" style="flex:1">Got it</button>
-    </div>
+    </div>`}
     ${list.slice(-1).map(x=> (x.notes || []).length ? `<details style="margin-top:10px">
       <summary class="sub" style="margin:0;cursor:pointer">What exactly</summary>
       <pre style="margin:8px 0 0;padding:10px;overflow:auto;max-height:30vh;background:var(--bg);
@@ -45003,6 +45105,17 @@ function viewProgram(){
     <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
     <button class="btn ghost small" id="rescueFull" style="flex:1">Normal export</button>
   </div>
+  ${/* ALWAYS REACHABLE, NOT ONLY WHILE THE NOTICE IS UP. The Today card goes the moment
+        you say you have read it, and the records it was about do not. */
+    haveBadRecords() ? `<div class="btn-row" style="margin-bottom:10px">
+    <button class="btn ghost small" id="badRecCopy" style="flex:1">Copy set-aside records</button>
+    <button class="btn ghost small" id="badRecFile" style="flex:1">Save them as a file</button>
+  </div>` : ""}
+  ${haveBadRecords() ? `<div class="sub" style="margin:-4px 2px 14px;font-size:var(--fs-3);color:var(--faint)">
+    <b>Set-aside records</b> are logged exercises whose shape nothing in the app could
+    read. They were moved out of the readers' way rather than deleted, and these two
+    buttons hand over just those records and the sessions they came from — no account id
+    or key, no tokens, nothing else.</div>` : ""}
   <div class="sub" style="margin:-4px 2px 14px;font-size:var(--fs-3);color:var(--faint)">
     <b>Export raw data</b> reads this device's storage directly as text rather than through
     the app, so it works even when a screen will not draw. It is here, not in Settings,
@@ -59695,8 +59808,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.11";
+const NEWS_FOR = "2026.11.17.12";
 const NEWS = [
+  {k: "Sending a set-aside record to somebody who can read it",
+   s: ["A record moved out of the readers\u2019 way is only half useful if the only route "
+     + "to it is a whole backup file. There are two new buttons \u2014 on the notice, and "
+     + "permanently on Program while there is anything to hand over \u2014 that copy or "
+     + "save a small file holding nothing but those records and the sessions they came "
+     + "from.",
+     "Nothing else is in it: no account id or key, no sync token, no programme, no body "
+     + "log, no sessions that were fine. The session\u2019s own note is left out too, "
+     + "although it is often the best context for what happened \u2014 it is free text in "
+     + "your words, and the one thing this file promises is that you can send it without "
+     + "reading it first. It does say that a note exists, so nothing looks lost.",
+     "It is a kilobyte or two, so it pastes into a message. If the clipboard is refused, "
+     + "which phones often do, it saves as a file instead rather than the button doing "
+     + "nothing."]},
   {k: "A record nothing could read, and three blank screens",
    s: ["This is the cause of the blank Today, History and Body screens that the last "
      + "release gave you a way out of. Every reader in this app \u2014 and there are "
@@ -67174,6 +67301,24 @@ const RESCUE_BTNS = `<div class="btn-row" style="margin-top:12px">
     <button class="btn ghost small" id="rescueCopy" style="flex:1">Copy the error</button></div>`;
 
 function bindRescue(){
+  const bc = $("#badRecCopy");
+  if(bc) bc.onclick = ()=>{
+    const text = badRecordsText();
+    try{
+      navigator.clipboard.writeText(text);
+      toast("Copied — " + Math.round(text.length / 1024 * 10) / 10 + " KB, paste it anywhere", "good");
+    }catch(e){
+      /* No clipboard permission is the common case on a phone, so fall through to the
+         file rather than leaving the button dead. */
+      exportBadRecords();
+      toast("Could not copy — saved as a file instead", "warn");
+    }
+  };
+  const bf = $("#badRecFile");
+  if(bf) bf.onclick = ()=>{
+    const ok = exportBadRecords();
+    try{ toast(ok ? "Saved" : "Could not save — screenshot this screen", ok ? "good" : "warn"); }catch(e){}
+  };
   const seen = $("#dataIssueSeen");
   if(seen) seen.onclick = ()=>{
     /* Marked read, never deleted: the record is the audit trail. */
