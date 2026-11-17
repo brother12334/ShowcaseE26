@@ -79,8 +79,8 @@ console.log("1 - EVERY LOOKUP IS SCOPED, DECLARED DISPLAY, OR A TRACKED DEBT");
      undeclared.length + " undeclared");
   /* THE DEBT, PINNED. Lower this number when a site is converted; raising it needs a
      reason in the commit message. */
-  ck("the tracked debt is no larger than it was", todo.length <= 8,
-     todo.length + " > 8");
+  ck("the tracked debt is no larger than it was", todo.length <= 7,
+     todo.length + " > 7");
   console.log("\n    tracked debt, in the order it should be paid:");
   todo.forEach(o=> console.log("      " + o));
   console.log("\n    declared display-only:");

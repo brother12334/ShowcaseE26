@@ -26,10 +26,23 @@ each currently carrying a `// slot:todo` marker. In the order the scan prints th
 9. `tmWanted`
 
 A name-only lookup falls through to `DAYS.concat(["finisher"])` and answers about the
-first slot holding that name, which is the P0-1 family of bug. These nine are reads that
-were judged not to prescribe anything; the marker exists so that judgement is recorded
-rather than assumed, and each one is to be either scoped to its slot or shown to be
-display-only.
+first slot holding that name, which is the P0-1 family of bug.
+
+**These were first recorded as reads that "fall back" rather than answer wrongly. That
+classification was wrong, and debt 1 disproved it.** `effortMismatchFor` judged one slot's
+sessions against another slot's prescription and wrote the cut to the wrong day - a live
+bug of exactly the kind P0-1 describes, not a harmless fallback. It had been on this list
+as a tracked read.
+
+So each remaining site is treated as a SUSPECTED LIVE BUG until a two-slot test proves
+otherwise: the same movement in two slots at different loads per day, driven through the
+real path, asserting that a finding from one slot cannot read or change the other. Only a
+passing test of that shape may downgrade a site to display-only. `tests/specs/effslot.mjs`
+is the pattern.
+
+The corollary, learned twice now: a reader that returns `null` because its fixture is
+incomplete looks exactly like a reader that correctly found nothing. Every one of these
+tests carries a control that must produce a finding, or the test proves nothing.
 
 ## 10. A session's gym, and what should be read in its light
 

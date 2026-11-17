@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.1";
+const APP_VERSION = "2026.11.17.2";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -54983,15 +54983,20 @@ function gearRoomFor(name, libGear){
   return GEAR_ROOM[g] == null ? 1 : GEAR_ROOM[g];
 }
 /* The shortlist, best first, or [] when the library has nothing better to offer. */
-function outgrownOptions(name){
+/* SLOT DEBT 2 of 9, first half. The day whose roster is checked for duplicates came from
+   a name-only lookup, so for a movement in two slots it was the wrong day's: a swap the
+   day in question already trains was offered anyway, and one only the OTHER day trains
+   was suppressed. Proven on a two-slot fixture before being changed. */
+function outgrownOptions(name, wid){
   const out = [], seen = {};
   const here = swapSquash(name);
   /* The day this movement sits in: a swap into a slot that day already trains is not a
      swap, it is a duplicate. */
-  const mine = findProgramEntryWhere(name);   // slot:todo
+  const mine = findProgramEntryWhere(name, wid);
+  const day = (wid && mine && mine.wid === wid) ? wid : (mine && mine.wid);
   const dayHas = (nm)=>{
-    if(!mine || !mine.wid) return false;
-    return (S.program[mine.wid] || []).some(e=> e && swapSquash(e.name) === swapSquash(nm));
+    if(!day) return false;
+    return (S.program[day] || []).some(e=> e && swapSquash(e.name) === swapSquash(nm));
   };
   const push = (nm, why, rank)=>{
     if(!nm) return;
@@ -55022,10 +55027,16 @@ function outgrownOptions(name){
 }
 /* TRIGGER B — the ceiling the app cannot see, read off what you did about it. Three
    sessions at one load, every one of them clearing the top of the range. */
-function outgrownStuck(name, range){
+/* SLOT DEBT 2 of 9, second half. The run of sessions at one unchanging load was gathered
+   by NAME, so two slots at different loads never agreed and the verdict was suppressed on
+   the slot that really was stuck - a false negative, and the one case this trigger exists
+   for. Where two slots happened to share a load it was worse: three sessions drawn from
+   two different prescriptions read as one run. */
+function outgrownStuck(name, range, wid){
   if(!range) return null;
   const hist = [];
   for(let i = (S.sessions || []).length - 1; i >= 0 && hist.length < OUTGROWN_SESSIONS; i--){
+    if(wid && S.sessions[i].workoutId !== wid) continue;
     const en = (S.sessions[i].entries || []).find(e=> e && nrm(e.name) === nrm(name));
     if(!en) continue;
     const grp = atTopLoadSets(en);
@@ -55189,7 +55200,7 @@ function progressionFor(sess, entry){
          somewhere to go, the verdict is the exercise rather than the number — and it is
          an offer with buttons, not a change, because swapping a movement is the one plan
          edit nobody should find they have agreed to by accident. */
-      const opts = outgrownOptions(entry.name);
+      const opts = outgrownOptions(entry.name, sess && sess.workoutId);
       if(opts.length) return {
         name: entry.name, kind: "harder", to: opts[0].name, alts: opts.slice(1), step,
         outgrownAt: isNaN(load) ? from : load,
@@ -55298,8 +55309,8 @@ function progressionFor(sess, entry){
        three sessions while the top of the range went on being cleared. The raise still
        leads, because somebody may simply not have got round to it; the way out rides
        underneath it. */
-    const stuckAt = outgrownStuck(entry.name, range);
-    const stuckOpts = stuckAt ? outgrownOptions(entry.name) : [];
+    const stuckAt = outgrownStuck(entry.name, range, sess && sess.workoutId);
+    const stuckOpts = stuckAt ? outgrownOptions(entry.name, sess && sess.workoutId) : [];
     if(!(isFinite(planW) && to != null && parseFloat(to) <= planW)) return {
       name: entry.name, kind: "up", from, to, step,
       /* P1-6 \u2014 the set this was read off, so the change row can name it. */
@@ -59088,8 +59099,23 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.1";
+const NEWS_FOR = "2026.11.17.2";
 const NEWS = [
+  {k: "“You have outgrown this” now looks at the right day",
+   s: ["When a movement has run out of rack — three sessions at one load with the top of "
+     + "the rep range cleared every time — Element 26 offers somewhere harder to go. Both "
+     + "halves of that worked by exercise name.",
+     "The run of sessions was gathered by name, so with the same movement in two slots at "
+     + "different loads the run never agreed and the offer was suppressed on the day that "
+     + "really was stuck — the one case the whole trigger exists for. Where two days "
+     + "happened to share a load it was the other way round: three sessions from two "
+     + "different prescriptions read as one run.",
+     "And the list of alternatives checked “does this day already train it” against "
+     + "whichever day held the name first, so a duplicate was offered on one day while a "
+     + "perfectly good option was hidden on the other.",
+     "Second of nine. Each remaining one is now treated as a live bug until a two-slot "
+     + "test with different loads per day proves otherwise — because the first two both "
+     + "were."]},
   {k: "The weight-for-effort card reads one slot at a time",
    s: ["“The weight, not the reps” watches for a load that is wrong for the effort it is "
      + "asking — reps landing inside the range at an RPE well outside it. All three parts "
