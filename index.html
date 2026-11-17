@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.14";
+const APP_VERSION = "2026.11.17.15";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -53068,6 +53068,273 @@ function openSessionEditor(id){
    and running the same pair loop, so left and right appear here for exactly the movements
    they appear for live. Nothing about a set can be entered in one place and not the
    other, because there is nothing left to keep in step. */
+/* ======================================================================
+   TURNING PLAIN SETS INTO L/R PAIRS, AFTER THE FACT
+
+   The session editor had no way to say "left" and "right", so a one-limb movement
+   entered there came out as plain sets on a movement every rule treats as per side. The
+   numbers are right and the shape is not, and only the person who did the session knows
+   which of two completely different things those rows mean:
+
+     ALTERNATING  each row was ONE arm, taken in turn: set 1 left, set 2 right, set 3
+                  left. Four rows are two pairs. This is the common case, because it is
+                  what the old per-set L/R chip described.
+
+     BOTH ARMS    each row was BOTH arms at once. Four rows are four pairs, and each
+                  row's numbers belong to both sides of its own pair.
+
+   NEITHER IS THE DEFAULT and neither is guessed. Picking wrong does not lose a number,
+   but it halves or doubles the set count the grade reads and it changes what the side
+   comparison sees, so it is a question with two real answers and the person is asked.
+   Both results are shown in full first: the conversion is reversible, but reading two
+   small tables is cheaper than undoing.
+
+   WHAT BOTH ARMS MUST NOT DO. Copying one row's numbers into both sides makes the two
+   sides identical by construction, and identical sides are exactly what the side-balance
+   check reads as "these limbs are even". That would have the app manufacturing the
+   evidence for its own conclusion. So those sides are stamped, and sideExposure() leaves
+   them out with a reason that says why. */
+function sideValueFromSet(st){
+  const v = {};
+  ["weight", "reps", "rpe"].forEach(k=>{ if(st && st[k] != null && st[k] !== "") v[k] = st[k]; });
+  if(st && st.done) v.done = true;
+  return v;
+}
+/* The pair-level things: a note, a reason code, a warm-up declaration and the sub-rows of
+   a drop or rest-pause set all belong to the SET rather than to a side - entryWarmups()
+   and subSetsFor() both index by set - so they are carried onto the pair. */
+function carryPairLevel(pair, st, notes, label){
+  if(!st) return;
+  ["noteCode", "unote", "why", "sub"].forEach(k=>{
+    if(st[k] == null) return;
+    if(pair[k] != null){ notes.push(label + ": two rows both had a " + k + "; the first was kept"); return; }
+    pair[k] = st[k];
+  });
+  if(typeof st.warmup === "boolean"){
+    if(typeof pair.warmup === "boolean" && pair.warmup !== st.warmup){
+      notes.push(label + ": one row was marked a warm-up and the other was not; the pair is a warm-up");
+      pair.warmup = true;
+    } else pair.warmup = st.warmup;
+  }
+}
+/* Builds what the conversion WOULD produce, and changes nothing. The editor shows this,
+   and applies it only on confirmation. */
+function convertPairsPlan(en, mode, startSide){
+  const sets = (Array.isArray(en && en.sets) ? en.sets : []).filter(st=> st && typeof st === "object");
+  const first = (startSide === "R") ? "R" : "L";
+  const second = first === "L" ? "R" : "L";
+  const notes = [];
+  const out = [];
+  const rows = [];
+  if(mode === "both"){
+    sets.forEach((st, i)=>{
+      const v = sideValueFromSet(st);
+      /* Stamped on both sides. See sideExposure(): identical sides are what the balance
+         check reads as even limbs, and these are identical because they were copied, not
+         because anything was measured. */
+      const pair = {L: Object.assign({}, v, {fromBoth: true}),
+                    R: Object.assign({}, v, {fromBoth: true})};
+      if(st.rest != null) pair.rest = st.rest;
+      carryPairLevel(pair, st, notes, "set " + (i + 1));
+      out.push(pair);
+      rows.push({pair: out.length, from: [i + 1], L: fmtPreviewSide(v), R: fmtPreviewSide(v), both: true});
+    });
+    if(sets.length) notes.push("Both sides of every pair carry the same numbers, so these "
+      + "sessions are left out of the left-against-right comparison \u2014 copied sides are "
+      + "not a measurement of balance.");
+  } else {
+    sets.forEach((st, i)=>{
+      const sd = (i % 2 === 0) ? first : second;
+      if(i % 2 === 0) out.push({});
+      const pair = out[out.length - 1];
+      pair[sd] = sideValueFromSet(st);
+      /* THE REST MOVES HOUSE, BECAUSE IT MEANS SOMETHING DIFFERENT ON A PAIR. The pause
+         after the FIRST row of a pair is the gap between the two sides, which is never
+         reported as a rest; the pause after the second is the pair's rest. Getting this
+         the other way round would feed the rest-discipline grade a twenty-second rest on
+         every set. */
+      if(st.rest != null){
+        if(i % 2 === 0) pair[sd].gap = st.rest;
+        else pair.rest = st.rest;
+      }
+      carryPairLevel(pair, st, notes, "set " + (i + 1));
+      if(i % 2 === 0) rows.push({pair: out.length, from: [i + 1], L: null, R: null});
+      const row = rows[rows.length - 1];
+      if(i % 2 === 1) row.from.push(i + 1);
+      row[sd] = fmtPreviewSide(sideValueFromSet(st));
+    });
+    if(sets.length % 2 === 1){
+      notes.push("The last set becomes a " + (first === "L" ? "left" : "right")
+        + "-only half set, which is a real thing the app already understands \u2014 one more "
+        + "set on the side that had more in it.");
+    }
+  }
+  /* `pairs` is deliberately NOT the stored shape: each one is {L, R} plus the
+     pair-level fields, and nothing here knows that a stored pair keeps its sides under
+     `sides`. applyPairsPlan() is where that becomes true, through sideTarget(), which
+     is the only thing in the app allowed to touch a side directly. A planner that built
+     the shape itself would be a second place that knows it, which is how the two got out
+     of step in the first place. */
+  return {pairs: out, notes, rows, mode, startSide: first,
+          wasSets: sets.length, nowSets: out.length};
+}
+function fmtPreviewSide(v){
+  if(!v || (v.reps == null && v.weight == null)) return null;
+  const w = v.weight != null && v.weight !== "" ? String(v.weight) : null;
+  const r = v.reps != null && v.reps !== "" ? String(v.reps) : "?";
+  return (w ? w + "\u00d7" : "") + r + (v.rpe != null && v.rpe !== "" ? " @" + v.rpe : "");
+}
+/* THE ONE PLACE THE PLAN BECOMES THE STORED SHAPE, and it builds every side through
+   sideTarget() rather than writing `sides` itself. The original sets are kept on the
+   entry so the whole thing can be put back; nothing is reconstructed on an undo. */
+function applyPairsPlan(en, plan){
+  if(!en || !plan) return false;
+  if(!en.preConvert){
+    en.preConvert = {sets: JSON.parse(JSON.stringify(en.sets || [])),
+                     perSide: en.perSide, startSide: en.startSide,
+                     at: Date.now(), mode: plan.mode};
+  }
+  en.sets = plan.pairs.map(()=> ({}));
+  en.perSide = true;
+  en.startSide = plan.startSide;
+  plan.pairs.forEach((pair, si)=>{
+    const st = en.sets[si];
+    ["rest", "warmup", "noteCode", "unote", "why", "sub"].forEach(k=>{
+      if(pair[k] != null) st[k] = pair[k];
+    });
+    ["L", "R"].forEach(sd=>{
+      if(!pair[sd]) return;
+      const t = sideTarget(en, si, sd);
+      Object.keys(pair[sd]).forEach(k=>{ t[k] = pair[sd][k]; });
+    });
+  });
+  return true;
+}
+function undoPairsPlan(en){
+  if(!en || !en.preConvert) return false;
+  const was = en.preConvert;
+  en.sets = JSON.parse(JSON.stringify(was.sets || []));
+  if(was.perSide == null) delete en.perSide; else en.perSide = was.perSide;
+  if(was.startSide == null) delete en.startSide; else en.startSide = was.startSide;
+  delete en.preConvert;
+  return true;
+}
+/* Is this entry a candidate? Sets that hold no sides, with something actually logged in
+   them, on a movement that IS treated as one limb at a time.
+
+   AND THAT LAST QUESTION HAS TO BE ASKED OF THE PLAN, NOT OF THE SESSION ENTRY. Whether
+   a movement is per side is a decision recorded on the programme entry — the `uni`
+   toggle in the programme editor — and a session entry never carries it. Asking the
+   session entry got a false answer for the exact movement this was written for: Cable
+   Lateral Raise is not in the unilateral table and does not match any one-limb name
+   pattern, so by name alone the app says it is a two-arm movement, while the person's own
+   plan says otherwise. The offer never appeared.
+
+   The session's own workoutId is passed, so the slot that holds the movement answers
+   first. findProgramEntryWhere() then falls back to any day, and HERE THAT FALLBACK IS
+   WANTED, which is the opposite of the P0-1 family where it was the bug. Those were live
+   wrong answers: a load, a target or a stall counter taken from the wrong day and acted
+   on silently. This decides only whether to ASK a question, and the answer is previewed
+   set by set and confirmed before anything is written. "I do this one arm at a time" is
+   also a statement about the movement rather than about the day, so the same `uni` set in
+   another day is real evidence, and refusing to offer on that basis would leave somebody
+   with a movement they cannot fix. */
+function pairsConvertDue(en, sess){
+  if(!en || entryPerSide(en)) return false;
+  if(!(en.sets || []).some(setHasAnything)) return false;
+  if(entryPerSideWanted(en)) return true;
+  const wid = sess && sess.workoutId;
+  let hit = null;
+  try{ hit = findProgramEntryWhere(en.swapFrom || en.name, wid); }catch(e){}
+  return !!(hit && hit.e && entryPerSideWanted(hit.e));
+}
+
+/* BOTH ANSWERS, IN FULL, BEFORE EITHER IS TAKEN.
+
+   Neither mode is preselected and neither is recommended, because the app genuinely does
+   not know: four rows of a one-limb movement are either two pairs or four, and only the
+   person who did the session can say. So both results are drawn out set by set and each
+   carries its own button. A radio pair with one preview would make whichever happened to
+   be first look like the suggestion.
+
+   The opening side is part of the alternating answer, not a separate question, so it is
+   shown in the heading with a link that flips it and redraws \u2014 "starting on the left" is
+   information somebody checks at a glance and corrects in one tap. */
+let PAIRS_CONV_SIDE = "L";
+function openPairsConvert(sess, en){
+  const alt = convertPairsPlan(en, "alt", PAIRS_CONV_SIDE);
+  const both = convertPairsPlan(en, "both", PAIRS_CONV_SIDE);
+  const h = `<h3>${esc(en.name)}: which were these?</h3>
+    <div class="sub" style="margin:4px 0 14px">${alt.wasSets} plain sets. Both readings are
+      below, as they would be stored. Nothing changes until you choose one, and it can be
+      undone afterwards.</div>
+    ${convertPreviewHTML(alt)}
+    <div class="btn-row" style="margin:-4px 0 6px">
+      <button class="btn" id="pcAlt" style="flex:1">Use this \u2014 rows alternated arms</button>
+    </div>
+    <div class="sub" style="margin:0 0 18px;color:var(--faint);font-size:var(--fs-3)">
+      <button type="button" class="lnk" id="pcFlip">Actually it started on the
+      ${PAIRS_CONV_SIDE === "L" ? "right" : "left"}</button></div>
+    ${convertPreviewHTML(both)}
+    <div class="btn-row" style="margin:-4px 0 6px">
+      <button class="btn" id="pcBoth" style="flex:1">Use this \u2014 each row was both arms</button>
+    </div>
+    <button class="btn ghost" style="margin-top:14px" id="closeModal">Leave them as they are</button>`;
+  showModal(h, "mo-page");
+  const m = $("#modal");
+  if(!m) return;
+  const go = (mode)=>{
+    const plan = convertPairsPlan(en, mode, PAIRS_CONV_SIDE);
+    applyPairsPlan(en, plan);
+    hideModal();
+    setEditSaved(sess);
+    toast(plan.wasSets + " sets became " + plan.nowSets + " pair"
+      + (plan.nowSets === 1 ? "" : "s") + " \u2014 undo is on the exercise", "good");
+  };
+  const a = m.querySelector("#pcAlt"); if(a) a.onclick = ()=> go("alt");
+  const bb = m.querySelector("#pcBoth"); if(bb) bb.onclick = ()=> go("both");
+  const f = m.querySelector("#pcFlip");
+  if(f) f.onclick = ()=>{
+    PAIRS_CONV_SIDE = PAIRS_CONV_SIDE === "L" ? "R" : "L";
+    openPairsConvert(sess, en);
+  };
+  const c = m.querySelector("#closeModal");
+  if(c) c.onclick = ()=>{ hideModal(); renderSessEditor(sess); };
+}
+
+function convertPreviewHTML(plan){
+  const head = plan.mode === "both"
+    ? "Each row was both arms"
+    : "The rows alternated arms, starting on the "
+      + (plan.startSide === "L" ? "left" : "right");
+  const sub = plan.mode === "both"
+    ? plan.wasSets + " rows become " + plan.nowSets + " pairs, each row's numbers on both sides."
+    : plan.wasSets + " rows become " + plan.nowSets + " pair" + (plan.nowSets === 1 ? "" : "s") + ".";
+  return `<div class="card" style="margin:0 0 12px">
+    <h3 style="margin:0 0 4px">${esc(head)}</h3>
+    <div class="sub" style="margin:0 0 8px">${esc(sub)}</div>
+    ${/* NOT .set and .set-labels, although the grid is the same shape. This is a
+          read-only comparison table with no inputs, no data-e and nowhere to write, and
+          borrowing the live row's classes would both couple it to that row's styling and
+          put a third thing in editrows.mjs's count of set-row builders. Its own classes,
+          laid out inline. */""}
+    <div style="display:grid;grid-template-columns:44px 1fr 1fr 1.2fr;gap:7px;color:var(--faint);
+      font:var(--fs-2) var(--mono);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px">
+      <span style="text-align:center">pair</span><span style="text-align:center">left</span>
+      <span style="text-align:center">right</span><span style="text-align:center">from</span>
+    </div>
+    ${plan.rows.map(r=>`<div style="display:grid;grid-template-columns:44px 1fr 1fr 1.2fr;gap:7px;
+      align-items:center;padding:5px 0;border-top:1px solid var(--line)">
+      <span class="num" style="text-align:center">${r.pair}</span>
+      <span class="num" style="text-align:center">${r.L ? esc(r.L) : "\u2014"}</span>
+      <span class="num" style="text-align:center">${r.R ? esc(r.R) : "\u2014"}</span>
+      <span style="text-align:center;color:var(--faint);font-size:var(--fs-3)">${esc("set " + r.from.join(" + "))}</span>
+    </div>`).join("")}
+    ${plan.notes.length ? `<div class="sub" style="margin:8px 0 0;color:var(--faint);font-size:var(--fs-3)">${
+      plan.notes.map(n=> esc(n)).join("<br>")}</div>` : ""}
+  </div>`;
+}
+
 function editSetRowsHTML(sess, en, ei){
   if(!en) return "";
   const sets = Array.isArray(en.sets) ? en.sets : [];
@@ -53133,6 +53400,15 @@ function renderSessEditor(s){
           <button data-rmex="${i}" aria-label="Remove">✕</button>
         </div>
       </div>
+      ${pairsConvertDue(e, s) ? `<div class="card" style="border-color:var(--warn);margin:8px 0 0;padding:10px">
+        <div class="sub" style="margin:0 0 8px">This is a one-limb movement, and these are
+          plain sets \u2014 which is what the editor used to produce, because it had no way to
+          say left and right. Only you know which of two things those rows mean.</div>
+        <button class="btn ghost small" data-seconv="${i}" style="width:100%">Turn these into L/R pairs\u2026</button>
+      </div>` : ""}
+      ${e.preConvert ? `<div class="btn-row" style="margin-top:8px">
+        <button class="btn ghost small" data-seunconv="${i}" style="flex:1">Undo the L/R conversion</button>
+      </div>` : ""}
       <div style="margin-top:8px">${editSetRowsHTML(s, e, i)}</div>
       <div class="btn-row" style="margin-top:6px">
         <button class="btn ghost small" data-seaddset="${i}" style="flex:1">+ set</button>
@@ -53200,6 +53476,18 @@ function renderSessEditor(s){
      the editor's own set-type choice is its own control. A paired entry gains a PAIR,
      because one set of a one-limb movement is one pair — adding a half-set would make a
      shape nothing else in the app produces. */
+  document.querySelectorAll("[data-seconv]").forEach(b=> b.onclick = ()=>{
+    const en = s.entries[parseInt(b.dataset.seconv, 10)];
+    if(en) openPairsConvert(s, en);
+  });
+  document.querySelectorAll("[data-seunconv]").forEach(b=> b.onclick = ()=>{
+    const en = s.entries[parseInt(b.dataset.seunconv, 10)];
+    if(!en || !en.preConvert) return;
+    if(!confirm("Put these sets back exactly as they were before the conversion?")) return;
+    undoPairsPlan(en);
+    setEditSaved(s);
+    toast("Back to how they were", "good");
+  });
   document.querySelectorAll("[data-seaddset]").forEach(b=> b.onclick = ()=>{
     const en = s.entries[parseInt(b.dataset.seaddset, 10)];
     if(!en) return;
@@ -60033,8 +60321,36 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.14";
+const NEWS_FOR = "2026.11.17.15";
 const NEWS = [
+  {k: "Turning plain sets into L/R pairs",
+   s: ["If a one-limb movement in an old session is sitting there as plain sets \u2014 which "
+     + "is what the editor used to produce, because it had no way to say left and right "
+     + "\u2014 the editor now offers to fix the shape. The numbers were never wrong; only "
+     + "the shape was.",
+     "It asks, because those rows mean one of two completely different things and only "
+     + "you know which. Either each row was ONE arm taken in turn, so four rows are two "
+     + "pairs, or each row was BOTH arms, so four rows are four pairs. Neither is the "
+     + "default and neither is guessed: both readings are drawn out set by set, with the "
+     + "set numbers they came from, and nothing is written until you pick one. The "
+     + "opening side is in the heading with one tap to flip it, and there is an undo on "
+     + "the exercise afterwards that puts the old sets back exactly.",
+     "Rest times move house, because a rest means something different on a pair: the "
+     + "pause after the first arm is the gap between the two sides and is never counted "
+     + "as a rest, while the pause after the second is the pair\u2019s rest. Getting that "
+     + "backwards would have fed the rest-discipline grade a twenty-second rest on every "
+     + "set. An odd number of rows ends in a half set on the opening side, which the app "
+     + "already understands, and the preview says so.",
+     "One thing \u201ceach row was both arms\u201d must not do: both sides end up with the "
+     + "same numbers, and identical sides are exactly what the left-against-right check "
+     + "reads as even limbs \u2014 so the app would be confirming its own conclusion from "
+     + "its own conversion. Those sides are marked, and the balance check leaves those "
+     + "sessions out and says why.",
+     "Which also fixed a message that was quietly lying: when the balance check had "
+     + "nothing to go on it always said the reps were matched with no RPE, because for a "
+     + "long time that was the only reason there was. It now gives the real one \u2014 a "
+     + "confidently wrong reason sends you off adding RPEs to a session whose problem was "
+     + "never the RPEs."]},
   {k: "The session editor shows the real set rows",
    s: ["Editing a past session now gives you the same rows you log with: left and right "
      + "on a one-limb movement, the warm-up mark, the RPE, the drops and mini-sets "
@@ -63569,6 +63885,14 @@ function sideExposure(h){
     return isFinite(r) && r > 0 && r <= 10;
   });
   const rL = reps("L"), rR = reps("R");
+  /* COPIED SIDES ARE NOT A MEASUREMENT OF BALANCE. A pair converted with "each row was
+     both arms" has identical sides because one row's numbers were written into both, not
+     because two limbs did the same work. Reading that as evidence the limbs are even
+     would have the app confirming its own conclusion from its own conversion. */
+  const copied = ["L", "R"].some(sd=> pick[sd].some(st=> st && st.fromBoth));
+  if(copied) return {date: h.date, at: h.at, w: pick.w, startSide: h.startSide,
+    excluded: "both sides carry the same numbers, copied from one row when this session "
+      + "was converted to pairs"};
   const matched = Math.abs(rR - rL) <= Math.max(rL, rR) * 0.02;
   if(matched && !(rated("L") && rated("R"))) return {date: h.date, at: h.at, w: pick.w,
     startSide: h.startSide, excluded: "matched reps with no effort rating"};
@@ -63591,10 +63915,16 @@ function sideStats(exName){
   const skipped = scored.length - usable.length;
   let out;
   if(!win.length){
+    /* THE REASON IS THE ONE THE EXPOSURE GAVE, not a stock sentence. This named matched
+       reps with no RPE for every exclusion, because for a long time that was the only
+       one there was. It is not any more — a session converted with "each row was both
+       arms" is left out because its two sides are copies of one row — and a message
+       that confidently gives the wrong reason is worse than a vague one: somebody goes
+       and adds RPEs to a session whose problem was never the RPEs. */
+    const why = Array.from(new Set(scored.filter(x=> x.excluded).map(x=> x.excluded)));
     out = {ok: false, sessions: hist.length, exposures: 0, balanced: 0, excluded: skipped,
       reason: skipped
-        ? skipped + " session" + (skipped === 1 ? "" : "s") + " left out: the reps were "
-          + "matched on both sides with no RPE, so there is nothing to compare"
+        ? skipped + " session" + (skipped === 1 ? "" : "s") + " left out: " + why.join("; ")
         : hist.length
           ? "no session yet with both sides logged at the same load"
           : "no sides logged for this movement yet"};
