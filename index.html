@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.2";
+const APP_VERSION = "2026.11.17.3";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -55955,13 +55955,32 @@ function restLengthenRefusal(sess, ei, d){
 /* How much longer to rest, and how much lighter to start, for a collapse. Both are
    suggestions with a box next to them — see the flag row. */
 const FADE_REST_ADD = 30;                    // seconds
-function fadeFixFor(d){
-  const cur = findProgramEntry(d.name);   // slot:todo
+/* SLOT DEBT 3 of 9. The load a collapse is answered from came from a name-only lookup,
+   so for a movement in two slots it was the first slot's \u2014 and the cut was computed off
+   a prescription the session never ran against.
+
+   That is not a near miss. recordFlags() stamps the session's own slot and applyFlag()
+   writes there, so the right day received a number worked out from the wrong day: with
+   Legs A at 100 and Legs B at 60, a Legs B collapse produced a "cut" to 95, and applying
+   it raised the collapsing slot by 58%. A collapse answered with a load increase.
+
+   The audited rows are the same shape. Nov 5's Push B V-bar collapse was answered from
+   the Push A V-bar's 75 rather than Push B's 90; Nov 13's cut came off Legs A's 80 while
+   the session that collapsed was Legs B. Both are acceptance tests in
+   tests/specs/fadeslot.mjs, on the real sessions from the export.
+
+   A cut also has to BE a cut. Even scoped, nothing here guaranteed the target came out
+   below the load that collapsed - a step bigger than the load, or a rack cap, could land
+   it level or above - so that is now stated rather than hoped for. */
+function fadeFixFor(d, wid){
+  const where = findProgramEntryWhere(d.name, wid);
+  const cur = (where && (!wid || where.wid === wid)) ? where.e : null;
   const w = cur && cur.weight != null ? cur.weight : d.weight;
   const step = progressionStep(cur || {name:d.name, weight:w}).amount || stepInUnits(5);
+  const to = w > 0 ? Math.max(0, roundLoadable(w - step, d.name)) : null;
   return {
     restAdd: FADE_REST_ADD,
-    to: w > 0 ? Math.max(0, roundLoadable(w - step, d.name)) : null
+    to: (to != null && to > 0 && to < w) ? to : null
   };
 }
 function recordFlags(sess, list){
@@ -56026,7 +56045,7 @@ function recordFlags(sess, list){
    the last two sets of it. */
 function fadeFindings(sess){
   return repDropOffs(sess).bad.slice(0, 3).map(d=>{
-    const fix = fadeFixFor(d);
+    const fix = fadeFixFor(d, sess && sess.workoutId);
     /* P1-4 — the collapse is still reported, because it happened. What it may not do is
        move the rest window when the drop was not about rest. The load half stands: a
        load the prescription cannot hold is wrong whatever caused the reps to fall. */
@@ -59099,8 +59118,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.2";
+const NEWS_FOR = "2026.11.17.3";
 const NEWS = [
+  {k: "A collapse could be answered with a load increase",
+   s: ["When reps fall away across the sets, Element 26 offers to take the opening load "
+     + "down. The load it worked that cut out from came from whichever day held the "
+     + "exercise name first — not the day that actually collapsed.",
+     "The right day received the change; the number was worked out from the wrong one. "
+     + "With the same movement at 100 on one day and 60 on another, a collapse on the "
+     + "lighter day produced a “cut” to 95, and taking it would have raised that day’s "
+     + "load by 58%. A collapse answered by adding weight.",
+     "The two audited cases are the same shape. Nov 5’s Push B V-bar collapse was "
+     + "answered from the Push A V-bar’s load; Nov 13’s cut was taken off the Legs A "
+     + "squat while the session that collapsed was Legs B. Both are now acceptance tests "
+     + "running on the real sessions from the export, beside the synthetic one.",
+     "And a cut now has to be a cut: a target that does not come out below the load that "
+     + "collapsed is refused rather than written. Third of nine."]},
   {k: "“You have outgrown this” now looks at the right day",
    s: ["When a movement has run out of rack — three sessions at one load with the top of "
      + "the rep range cleared every time — Element 26 offers somewhere harder to go. Both "

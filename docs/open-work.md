@@ -9,6 +9,52 @@ outcomes together. The replay is rerun after each item below.
 
 ---
 
+## Two rules, both learned the hard way
+
+These are not about any one item. They apply to everything below and to anything added
+later.
+
+### 1. A suspected live bug until a test proves otherwise
+
+Nine name-only programme lookups were recorded as reads that merely "fall back" to another
+slot rather than answer wrongly. That was an assumption, and it was wrong twice in a row:
+
+- `effortMismatchFor` judged one slot's sessions against another slot's prescription and
+  wrote the cut to the wrong day.
+- `outgrownStuck` suppressed the "you have outgrown this" offer on the slot that really
+  was stuck, which is the single case the trigger exists for.
+
+So nothing of this shape is called harmless on inspection. Each is treated as a live bug
+until a test of a specific shape says otherwise: **the same movement in two slots at
+different loads per day, driven through the real path, asserting that a finding from one
+slot can neither read nor change the other.** Only a passing test of that shape may
+downgrade a site to display-only. `tests/specs/effslot.mjs` and `tests/specs/outslot.mjs`
+are the pattern.
+
+Where an item has known real-world outcomes - a date in the audited export with a verdict
+that is known to be right or wrong - those become acceptance tests alongside the synthetic
+fixture. A synthetic two-slot case proves the mechanism; the export proves it on the data
+that found the bug.
+
+### 2. Every test carries a control that must produce a finding
+
+A reader that returns `null` because its fixture is incomplete is indistinguishable from a
+reader that correctly found nothing. This has now hidden a broken test three times:
+
+- `replay.mjs` built no `S.program`, so every slot-scoped reader answered `null` and four
+  sections passed while measuring nothing.
+- `replay.mjs` left session entries with `reps: ""`, so `progressionFor` returned at
+  `if(!range)` for all 1,231 sets - zero verdicts, and "no increase was earned" was a
+  statement about a rule that never ran.
+- `effslot.mjs` left session entries with no `rpes`, which is what `rpeBandFor` reads off
+  the entry, so every effort reading came back `null` including the single-slot control.
+
+So every test of a rule includes a case the rule MUST fire on, in the same run. A section
+asserting that something did not happen is not finished until something next to it shows
+the rule was awake.
+
+---
+
 ## 1-9. Slot-scoping debt
 
 `tests/specs/slotall.mjs` fails on any unmarked name-only programme lookup outside a
@@ -29,20 +75,8 @@ A name-only lookup falls through to `DAYS.concat(["finisher"])` and answers abou
 first slot holding that name, which is the P0-1 family of bug.
 
 **These were first recorded as reads that "fall back" rather than answer wrongly. That
-classification was wrong, and debt 1 disproved it.** `effortMismatchFor` judged one slot's
-sessions against another slot's prescription and wrote the cut to the wrong day - a live
-bug of exactly the kind P0-1 describes, not a harmless fallback. It had been on this list
-as a tracked read.
-
-So each remaining site is treated as a SUSPECTED LIVE BUG until a two-slot test proves
-otherwise: the same movement in two slots at different loads per day, driven through the
-real path, asserting that a finding from one slot cannot read or change the other. Only a
-passing test of that shape may downgrade a site to display-only. `tests/specs/effslot.mjs`
-is the pattern.
-
-The corollary, learned twice now: a reader that returns `null` because its fixture is
-incomplete looks exactly like a reader that correctly found nothing. Every one of these
-tests carries a control that must produce a finding, or the test proves nothing.
+classification was wrong: debt 1 disproved it and debt 2 confirmed it.** Both were live.
+See the two rules above, which came out of them.
 
 ## 10. A session's gym, and what should be read in its light
 
