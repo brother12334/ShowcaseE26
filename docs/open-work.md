@@ -217,3 +217,37 @@ ease-off map, and the per-entry `alt` partner.
 answer is not always "scope them both" - `priorEntryFor()`'s any-slot fallback is
 deliberate for a movement's first session in a new slot. The sweep produces a list with a
 verdict per pair, and fixes follow as their own items.
+
+## 13. Flaky: `logstill.mjs` section 1, exact scroll equality
+
+**Observed:** one failure in one full-suite run of 289 specs, 2026-11-17, on build
+2026.11.17.13:
+
+```
+FAIL logstill
+     BROKEN AND IT IS STILL THERE AFTER THE TICK  [1596 -> 1599]
+```
+
+**Not reproducible in isolation:** 14 consecutive standalone runs passed, plus 2 through
+`tests/run.js`. The runner is serial (`spawnSync` per spec), so this is not contention
+between specs inside the run; machine load during a long suite is the likeliest trigger.
+
+**What the assertion does:** compares `scrollY` before and after ticking a set for exact
+equality. The observed drift is 3px, which is sub-pixel layout settling rather than the
+round trip to the top that the spec exists to catch - that failure mode is hundreds of
+pixels, and section 2's overlay case and section 3's source scan both passed in the same
+run.
+
+**Why it is not just loosened.** Two flakes in this suite have turned out to be real
+bugs - the replay's four vacuous sections, and the "wiped session" that was Chromium's
+asynchronous localStorage commit - so a tolerance added without understanding costs the
+next one. A 3px shift on tick could also be a genuine layout shift that nobody wants,
+which is a different bug worth seeing. Before changing anything:
+
+1. Reproduce under load (run the suite with CPU contention, or loop the spec while
+   something else is busy) and record whether the drift is always ~3px or sometimes
+   larger.
+2. Find what moves. If a set row changes height by a few pixels when it gains
+   `is-logged`, that is the finding and the CSS is the fix, not the assertion.
+3. Only then decide between a small tolerance (with the reason in the commit message, per
+   the rule at the top of this doc) and waiting for scroll to settle before reading it.
