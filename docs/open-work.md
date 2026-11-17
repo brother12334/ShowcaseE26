@@ -187,6 +187,27 @@ have produced:
    counters are checked there against the real history rather than only on a synthetic
    two-slot fixture.
 
+**Editing a past session leaves the stall counters stale, and that is known.**
+`setEditSaved()` re-sweeps the session's PR marks and re-runs its stored grade, but
+deliberately does NOT call `updateStalls()`, for the reason the bar-weight editor already
+gives: it walks history in order mutating a running counter, so replaying one old session
+through it corrupts the count for every session after it. There is no way to update a
+counter in place for a session in the middle of the log.
+
+So today, correcting last week's reps in the editor can leave `S.stalls` describing a
+history that no longer exists - a counter that should have reset, or one that should have
+advanced and did not. Nothing on screen explains that, which is exactly the failure mode
+this item exists to end.
+
+**When item 11 lands, `setEditSaved()` must trigger the full drop-and-rebuild.** That is
+the only correct answer: the rebuild replays the log in order with live grading's
+exclusions, which is precisely what an in-place update cannot do. It belongs in
+`setEditSaved()` rather than at the editor's Done button, because every field change,
+warm-up toggle, set addition and tick in the editor goes through it. Worth measuring once
+the rebuild exists: if replaying the whole log per keystroke is too slow, debounce it to
+the editor closing - but the trigger is the save, not the close, and a debounce must still
+fire if the app is shut straight after.
+
 A lesser one in the same area: `priorEntryFor()` prefers an earlier session of the SAME
 slot and falls back to any slot when there is none. That fallback is reasonable for a
 movement's first session in a new slot and wrong once the slot has history of its own;

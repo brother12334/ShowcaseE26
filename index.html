@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.13";
+const APP_VERSION = "2026.11.17.14";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -28000,6 +28000,8 @@ function tourDemoBuild(){
   const rpeOn = rpeTracked();
   const u = unitWord();
   const w = u === "kg" ? "60" : "135";
+  /* rows:demo — a picture of a set row, not a set row: tabindex -1, no data-e, no
+     data-f, wired to nothing and writing nowhere. See editrows.mjs section 6. */
   const row = (n, wt, reps, rpe, done, live)=> `<div class="set${rpeOn?"":" no-rpe"}${live?" demo-live":""}">
     <span class="idx">${n}</span>
     <input inputmode="decimal" tabindex="-1" value="${esc(wt)}" placeholder="${esc(u)}">
@@ -53050,6 +53052,40 @@ function openSessionEditor(id){
   const s = S.sessions.find(x=>x.id===id);
   if(s) renderSessEditor(s);
 }
+/* ======================================================================
+   THE SAME SET ROWS, FOR A SESSION THAT HAS ALREADY BEEN FILED
+
+   WHY THIS IS THE SHARED BUILDER AND NOT THE EDITOR'S OWN. The session editor used to
+   build its own set rows: four boxes, no L/R, no set type, no warm-up mark. That was the
+   root of a whole family of reports. A one-limb movement re-entered there came out as
+   plain sets, because the editor had no way to say left and right. A drop set re-entered
+   there came out as a straight set, because the editor had never heard of a drop set. And
+   any field added to logging had to be added here as well, by somebody who remembered
+   this existed.
+
+   So there is one row builder. This is the setRowHTML() the workout screen calls, handed
+   the session it is drawing (see rowSess() for how a row then writes to the right place)
+   and running the same pair loop, so left and right appear here for exactly the movements
+   they appear for live. Nothing about a set can be entered in one place and not the
+   other, because there is nothing left to keep in step. */
+function editSetRowsHTML(sess, en, ei){
+  if(!en) return "";
+  const sets = Array.isArray(en.sets) ? en.sets : [];
+  if(!sets.length){
+    return `<div class="sub" style="margin:4px 2px 2px;color:var(--faint)">No sets on this
+      one yet. Add one below and fill it in.</div>`;
+  }
+  let h = setLabelsHTML();
+  sets.forEach((st, si)=>{
+    /* The pair loop, verbatim from the workout screen: a paired set is two rows sharing
+       one set number, and a set holding only one side renders as a single row. */
+    const sds = pairSidesOf(en, si);
+    if(!sds.length){ h += setRowHTML(en, ei, si, null, null, null, {sess}); return; }
+    h += sds.map((sd, k)=> setRowHTML(en, ei, si, null, k ? "" : (si + 1), sd, {sess})).join("");
+  });
+  return h;
+}
+
 function renderSessEditor(s){
   let h = `<h3>Edit session, ${esc(dayName(s.workoutId))}, ${fmtDate(s.date)}</h3>
   <div class="field"><label>Session note</label><input id="sessNoteEdit" value="${esc(s.note||"")}" placeholder="optional"></div>
@@ -53081,15 +53117,29 @@ function renderSessEditor(s){
   </div>`;
   if(s.entries.length){
     h += `<div class="sub" style="margin:2px 0 6px">Use ↑ ↓ to put the exercises back in the order you actually did them.</div>`;
-    h += s.entries.map((e,i)=>`<div class="prog-ex">
-      <div style="min-width:0"><b>${esc(e.name)}</b>${e.swapFrom?`<span class="sm" style="color:var(--faint)"> \u00b7 instead of ${esc(e.swapFrom)}</span>`:""}<div class="meta">${e.sets.map(fmtSetShort).map(esc).join("  |  ")||"no sets"}</div></div>
-      <div class="icon-btns">
-        <button data-serename="${i}" aria-label="Rename this exercise">${ICON.note}</button>
-        <button data-seup="${i}" aria-label="Move up" ${i===0?"disabled style=opacity:.35":""}>↑</button>
-        <button data-sedown="${i}" aria-label="Move down" ${i===s.entries.length-1?"disabled style=opacity:.35":""}>↓</button>
-        <button data-rmex="${i}" aria-label="Remove">✕</button>
+    /* ONE WRAPPER ROUND THE WHOLE LOT, carrying the session id. Every set handler in
+       the app reads it off the row it was clicked on, so these rows write here and the
+       live session's rows keep writing there, even with both on the page at once. */
+    h += `<div data-setsess="${attrSafe(String(s.id == null ? "" : s.id))}">`;
+    h += s.entries.map((e,i)=>`<div class="prog-ex" style="display:block">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <div style="min-width:0;flex:1"><b>${esc(e.name)}</b>${
+          e.swapFrom ? `<span class="sm" style="color:var(--faint)"> instead of ${esc(e.swapFrom)}</span>` : ""}${
+          entryPerSide(e) ? `<span class="sm" style="color:var(--faint)"> per side</span>` : ""}</div>
+        <div class="icon-btns">
+          <button data-serename="${i}" aria-label="Rename this exercise">${ICON.note}</button>
+          <button data-seup="${i}" aria-label="Move up" ${i===0?"disabled style=opacity:.35":""}>↑</button>
+          <button data-sedown="${i}" aria-label="Move down" ${i===s.entries.length-1?"disabled style=opacity:.35":""}>↓</button>
+          <button data-rmex="${i}" aria-label="Remove">✕</button>
+        </div>
+      </div>
+      <div style="margin-top:8px">${editSetRowsHTML(s, e, i)}</div>
+      <div class="btn-row" style="margin-top:6px">
+        <button class="btn ghost small" data-seaddset="${i}" style="flex:1">+ set</button>
+        <button class="btn ghost small" data-sermset="${i}" style="flex:1">− set</button>
       </div>
     </div>`).join("");
+    h += `</div>`;
   } else {
     h += `<div class="empty nb-empty">
       <div class="nb-empty-t">Nothing logged in this one</div>
@@ -53140,6 +53190,64 @@ function renderSessEditor(s){
   </div>
   <button class="btn" style="margin-top:16px" id="closeModal">Done</button>`;
   showModal(h, "mo-page");
+  /* THE SHARED HANDLERS, BOUND HERE TOO. The set rows above are the live builder's, so
+     the handlers they need are the live ones — bind() assigns them document-wide and
+     each one asks the row which session it is in. Without this call the rows would draw
+     and do nothing, which is the one failure mode that looks like it works. */
+  try{ bind(); }catch(err){ try{ console.error("Element 26: binding the session editor threw", err); }catch(e2){} }
+  /* + set and \u2212 set, per exercise. Separate from the live screen's data-addset
+     because that one opens the "what kind of set is this" menu against the live session;
+     the editor's own set-type choice is its own control. A paired entry gains a PAIR,
+     because one set of a one-limb movement is one pair — adding a half-set would make a
+     shape nothing else in the app produces. */
+  document.querySelectorAll("[data-seaddset]").forEach(b=> b.onclick = ()=>{
+    const en = s.entries[parseInt(b.dataset.seaddset, 10)];
+    if(!en) return;
+    if(!Array.isArray(en.sets)) en.sets = [];
+    if(en.sets.length >= 20){ toast("That is as many sets as one movement holds here"); return; }
+    const lastI = en.sets.length - 1;
+    const prev = en.sets[lastI];
+    if(entryPerSide(en)){
+      /* THE ADAPTER BUILDS THE PAIR, this does not. sideTarget() creates a side that is
+         not there yet and is the one thing allowed to touch `sides` directly, so pushing
+         an empty set and asking it for each side produces the paired shape without a
+         second place in the app knowing what that shape is. pairSidesOf() gives the order
+         from the entry's own opening side rather than assuming left leads.
+
+         The previous pair's load per side is carried over; reps and effort are left
+         empty on purpose, because those ARE the set and nobody wants last set's reps
+         pre-filled as if they had done them. */
+      const was = {};
+      if(lastI >= 0) pairSidesOf(en, lastI).forEach(sd=>{
+        const v = sideTarget(en, lastI, sd);
+        was[sd] = v && v.weight != null ? v.weight : "";
+      });
+      en.sets.push({});
+      const now = en.sets.length - 1;
+      const order = pairSidesOf(en, lastI >= 0 ? lastI : now);
+      (order.length ? order : ["L", "R"]).forEach(sd=>{
+        const t = sideTarget(en, now, sd);
+        t.weight = was[sd] != null ? was[sd] : "";
+        t.reps = ""; t.rpe = "";
+      });
+    } else {
+      en.sets.push({weight: prev && prev.weight != null ? prev.weight : "", reps:"", rpe:""});
+    }
+    setEditSaved(s);
+  });
+  document.querySelectorAll("[data-sermset]").forEach(b=> b.onclick = ()=>{
+    const en = s.entries[parseInt(b.dataset.sermset, 10)];
+    if(!en || !Array.isArray(en.sets) || !en.sets.length) return;
+    const last = en.sets[en.sets.length - 1];
+    /* A SET WITH SOMETHING IN IT IS NOT REMOVED BY A STRAY TAP. The whole reason to be in
+       here is to correct a log, and losing a row of real numbers to the button next to
+       the one you meant is the opposite of that. */
+    if(setPairHasAnything(en, en.sets.length - 1)
+       && !confirm("The last set has numbers in it. Remove it anyway?")) return;
+    void last;
+    en.sets.pop();
+    setEditSaved(s);
+  });
 
   let newSets = [{weight:"",reps:"",rpe:""}];
   const drawSets = ()=>{
@@ -59925,8 +60033,29 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.13";
+const NEWS_FOR = "2026.11.17.14";
 const NEWS = [
+  {k: "The session editor shows the real set rows",
+   s: ["Editing a past session now gives you the same rows you log with: left and right "
+     + "on a one-limb movement, the warm-up mark, the RPE, the drops and mini-sets "
+     + "hanging off the set they came from. Not rows that look like the logging ones \u2014 "
+     + "the same ones, built by the same code and handed the session you are editing.",
+     "That is the point. The editor used to build its own four boxes, which is why a "
+     + "one-limb movement entered there came out as plain sets, and why anything added to "
+     + "logging had to be remembered here as well. There is now one set row in the app, "
+     + "and a test fails if a second one appears.",
+     "Each exercise has its own + set and \u2212 set. On a per-side movement, + set adds a "
+     + "PAIR, because one set of a one-limb movement is one pair \u2014 and the pair is "
+     + "built by the same code that reads it, so it cannot come out a different shape "
+     + "from a pair logged live. Removing a set that has numbers in it asks first.",
+     "Correcting a tick works here, which it does not during a live session \u2014 there, a "
+     + "finished exercise stays finished, because un-ticking one throws away its recorded "
+     + "rest and hands a running clock to an exercise nobody started. In the editor there "
+     + "is no clock and no set in front of you, so a tick is just a fact you can put "
+     + "right. Every change re-grades the session on the spot.",
+     "Still to come: adding an exercise in the editor uses the old four-box form, so a "
+     + "movement added that way is still plain sets. That form is next, along with "
+     + "turning an existing plain entry into pairs."]},
   {k: "Graded as half a session when it was done in full",
    s: ["A one-limb movement entered in the session editor comes out as plain sets, "
      + "because the editor has no L/R rows \u2014 that is being fixed next and is a bigger "
