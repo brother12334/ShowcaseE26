@@ -7273,7 +7273,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.17";
+const APP_VERSION = "2026.11.17.18";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -16690,6 +16690,13 @@ function setEditSaved(sess){
   sess.edited = Date.now();
   try{ sweepSessionPRs(sess); }catch(e){}
   try{ sess.quality = scoreWorkout(sess); }catch(e){}
+  /* AND THE STALL COUNTERS, WHICH CANNOT BE UPDATED IN PLACE. updateStalls() walks
+     history in order mutating a running counter, so replaying one old session through it
+     would corrupt the count for every session after it — which is why editing a past
+     session used to leave the counters describing a history that no longer existed, with
+     nothing on screen to explain it. The rebuild replays the whole log, so there is
+     nothing to get out of step. */
+  try{ rebuildStalls(); }catch(e){}
   save(); queueSync();
   renderSessEditor(sess);
 }
@@ -22089,6 +22096,22 @@ function runOneTimeSeeds(){
   if(SEEDS_RUN) return;
   SEEDS_RUN = true;
   let dirty = false;
+  /* ITEM 11 — STALL COUNTERS ARE REBUILT ONCE, FROM THE LOG. Every counter written
+     before this was keyed by exercise name alone and conflated the slots a movement sits
+     in; one cannot be split back into two, because nothing recorded which sessions
+     contributed. Replaying is exact rather than approximate — see rebuildStalls().
+
+     HERE RATHER THAN IN migrate(), and that is not a preference. migrate() runs while the
+     file is still being evaluated, so a rebuild there reaches functions whose constants
+     are still in their temporal dead zone and throws — the same trap the rescue backup
+     fell into. This runs on the first render, with everything defined. */
+  try{
+    if(S.stallsV2 !== STALLS_VERSION){
+      const r = rebuildStalls();
+      try{ console.warn("Element 26 rebuilt stall counters", r); }catch(e){}
+      dirty = true;
+    }
+  }catch(e){ try{ console.error("Element 26: the stall rebuild threw", e); }catch(e2){} }
   try{
     if(!S.exCompoundSeeded){ seedCompoundFlags(); dirty = true; }
   }catch(e){ S.exCompoundSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
@@ -54033,13 +54056,21 @@ function priorSessionFor(sess){
    It now finds the last session that contains the exercise, preferring the same
    rotation day where there is one and falling back to any earlier session where there
    isn't, and matches on the canonical name so a rename is invisible here.           */
-function priorEntryFor(sess, exName, occ){
+/* `opts.sameSlotOnly` drops the fallback to another day.
+
+   The fallback is deliberate and stays the default: for "what did I last do on this
+   movement" a session from another day is a real answer, and for a movement's first
+   session in a new slot it is the only one. It is wrong wherever the question is about
+   PROGRESS within a slot — the other day is at a different load by design, so comparing
+   across them reports a change that never happened. */
+function priorEntryFor(sess, exName, occ, opts){
   occ = occ || 0;
   const k = nrm(exName);
+  const strict = !!(opts && opts.sameSlotOnly);
   const earlier = S.sessions
     .filter(s => s.id !== sess.id && s.startedAt < sess.startedAt)
     .sort((a,b)=> b.startedAt - a.startedAt);
-  for(const sameDayOnly of [true, false]){
+  for(const sameDayOnly of (strict ? [true] : [true, false])){
     for(const s of earlier){
       if(sameDayOnly && s.workoutId !== sess.workoutId) continue;
       const hits = (s.entries||[]).filter(en => nrm(en.name) === k);
@@ -56893,9 +56924,12 @@ const STALL_RESET_DAYS = 14;
 const STALL_GRACE_EXPOSURES = 2;
 /* Exposures of this slot since its load or rep range last changed, or null when nothing
    has changed. Counted from the plan history, which is where those changes are written. */
-function exposuresSincePlanChange(name, key, sess){
+/* `wid` scopes it to one day of the split. A load change written on Legs A says nothing
+   about the same movement on Legs B, and the grace it buys must not be spent there. */
+function exposuresSincePlanChange(name, key, sess, wid){
   const rows = (S.planLog || []).filter(c=> c && (c.kind === "weight" || c.kind === "reps")
-    && nrm(c.name || "") === key);
+    && nrm(c.name || "") === key
+    && (wid == null || !c.day || c.day === wid));
   if(!rows.length) return null;
   const at = rows.reduce((m, c)=> Math.max(m, c.at || 0), 0);
   if(!(at > 0)) return null;
@@ -56904,18 +56938,65 @@ function exposuresSincePlanChange(name, key, sess){
   let n = 0;
   (S.sessions || []).forEach(s=>{
     if(!s || !(s.startedAt > at) || s.startedAt > upto) return;
+    if(wid != null && s.workoutId !== wid) return;      // exposures of THIS slot
     if((s.entries || []).some(x=> x && nrm(x.name) === key)) n++;
   });
   return n;
 }
+/* ======================================================================
+   THE STALL COUNTER IS A FACT ABOUT A SLOT, NOT ABOUT A NAME
+
+   S.stalls was keyed by exercise name alone. A movement in two days of the split \u2014 the
+   same Smith squat on Legs A and Legs B, at different loads and different rep ranges \u2014
+   shared one counter, so a flat session on Monday and a flat session on Thursday read as
+   two stalled sessions of the same thing. Three of those offers to cut a set from a slot
+   that may never have stalled at all.
+
+   The key is now the slot and the name together. Which means every existing counter is in
+   the old shape and cannot be converted: a number that conflated two slots cannot be
+   split back into two numbers, because nothing recorded which sessions contributed to it.
+
+   SO IT IS DROPPED AND REBUILT, by replaying the log in order. That is the only way to
+   get counters the app would actually have arrived at, and it is exact rather than
+   approximate: updateStalls() is called per session, oldest first, with the whole history
+   present, which is precisely the state it was in when each session was finished. The
+   exclusions come along for free because they live inside updateStalls() \u2014 the injury
+   and illness marks through sessionNotEvidence(), the deload holds, the 14-day layoff
+   reset, and the grace after a plan change. A rebuild that reimplemented those would
+   produce counters the app would never have produced, which is worse than the by-name
+   counter it replaces, because it would be wrong in a way nothing on screen explains. */
+const STALLS_VERSION = 2;
+function stallKey(wid, name){ return String(wid || "") + "|" + nrm(name); }
+/* Old-shape keys carry no slot. Used to tell a rebuilt map from an inherited one, and to
+   keep a sync from an older device from seeding nonsense. */
+function stallKeyHasSlot(k){ return typeof k === "string" && k.indexOf("|") > 0; }
+
+function rebuildStalls(){
+  const before = Object.keys(S.stalls || {}).length;
+  S.stalls = {};
+  const list = (Array.isArray(S.sessions) ? S.sessions : [])
+    .filter(s=> s && typeof s === "object" && s.finishedAt)
+    .slice()
+    .sort((a, b)=> (a.startedAt || 0) - (b.startedAt || 0));
+  list.forEach(s=>{ try{ updateStalls(s); }catch(e){} });
+  S.stallsV2 = STALLS_VERSION;
+  return {before, after: Object.keys(S.stalls).length, sessions: list.length};
+}
+
 function updateStalls(sess){
   ensureSessionShape(sess);
   if(!S.stalls || typeof S.stalls !== "object") S.stalls = {};
   const off = layoffBefore(sess);
   const notEv = sessionNotEvidence(sess);
   (sess.entries || []).forEach(en=>{
-    const k = nrm(en.name);
-    const prior = priorEntryFor(sess, en.name, 0);
+    const k = stallKey(sess.workoutId, en.name);
+    /* THE COMPARISON IS WITHIN THE SLOT TOO, and it has to be. priorEntryFor() prefers
+       the same day and then falls back to any day, which is right for "what did I last
+       do on this movement" and wrong here: the previous session of the OTHER day is at a
+       different load by design, so comparing against it reports an improvement or a stall
+       that never happened. With no prior session in this slot there is nothing to compare
+       and the counter starts at zero, which is the honest answer. */
+    const prior = priorEntryFor(sess, en.name, 0, {sameSlotOnly: true});
     if(!prior){ S.stalls[k] = {n: 0, dates: [sess.date]}; return; }
     const now = bestOf(en, sess.date), was = bestOf(prior.entry, prior.sess && prior.sess.date);
     const improved = now.w > was.w || (now.w === was.w && now.reps > was.reps);
@@ -56947,7 +57028,7 @@ function updateStalls(sess){
 
        Two exposures of grace, counted in sessions of this slot rather than in days, so a
        movement trained weekly gets the same latitude as one trained three times a week. */
-    const sinceChange = exposuresSincePlanChange(en.name, k, sess);
+    const sinceChange = exposuresSincePlanChange(en.name, nrm(en.name), sess, sess.workoutId);
     if(sinceChange != null && sinceChange < STALL_GRACE_EXPOSURES){
       rec.dates = (rec.dates || []).concat(sess.date).slice(-3);
       rec.afterChange = sinceChange;
@@ -56962,7 +57043,7 @@ function updateStalls(sess){
   });
 }
 function stallVerdict(name, wid){
-  const rec = (S.stalls || {})[nrm(name)];
+  const rec = (S.stalls || {})[stallKey(wid, name)];
   if(!rec || rec.n < 3) return null;
   /* P1-5 — THE STALL IS REAL AND THE CUT MAY STILL BE WRONG. Whether the programme has
      stopped working is a question about the log; whether a set may come off this slot is
@@ -60563,8 +60644,32 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.17";
+const NEWS_FOR = "2026.11.17.18";
 const NEWS = [
+  {k: "Stall counters were counting two days as one",
+   s: ["If a movement sits in two days of your split \u2014 the same Smith squat on Legs A and "
+     + "Legs B, at different loads \u2014 it had ONE stall counter between them. A flat "
+     + "session on Monday and a flat session on Thursday read as two stalled sessions of "
+     + "the same thing, and three of those offers to cut a set from a slot that may never "
+     + "have stalled. Your own log has ten movements where the two slots genuinely "
+     + "disagree, so this was not hypothetical.",
+     "Counters are now per slot. The old ones could not be converted \u2014 a number that "
+     + "mixed two slots cannot be split back into two, because nothing recorded which "
+     + "sessions went into it \u2014 so they are dropped and rebuilt once, by replaying your "
+     + "log in order. That is exact rather than approximate: each session is fed through "
+     + "the same code that ran when you finished it, with the same history behind it, so "
+     + "the injury and illness marks, the deload holds, the fortnight-away reset and the "
+     + "grace after a load change all apply exactly as they did. A test asserts the "
+     + "rebuild lands on the same numbers as the sessions arriving one at a time.",
+     "Two smaller scopings came with it. The stall comparison now looks only at the same "
+     + "day of the split \u2014 the other day is at a different load by design, so comparing "
+     + "across them reported progress or a stall that never happened. And the grace after "
+     + "a load change belongs to the day it was written on, rather than being spent on "
+     + "the same movement elsewhere.",
+     "Editing a past session rebuilds the counters too, which it could not do before: the "
+     + "counter is a running total, so there was no way to update one session in the "
+     + "middle of the log without corrupting every session after it. It now replays the "
+     + "lot \u2014 three milliseconds on four months of training."]},
   {k: "A pair is one set, and now it reads like one",
    s: ["A one-limb movement took twice the height of an ordinary one, because every side "
      + "got a full set row: four sets meant eight tall rows and a card that scrolled for "
@@ -66979,6 +67084,10 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
+  /* The rebuild marker travels with the counters it describes: a backup carrying
+     slot-keyed stalls without it would be rebuilt again on restore, harmlessly but
+     pointlessly, and one carrying OLD counters with it would keep them for ever. */
+  "stallsV2",
   "asymRetired","asymRetest","askWhy","lmFloor","lmFloorAt","restCeilV1","pairGradeV2","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* P0-2 \u2014 where the log changed convention. A fact about how the numbers in
@@ -67100,6 +67209,16 @@ function mergeSessions(localArr, remoteArr, tomb){
    means a stall detected on your phone is not quietly reset by opening the app on a
    laptop that has not seen those sessions yet. */
 function mergeStalls(local, remote){
+  /* KEYS WITHOUT A SLOT ARE THE OLD SHAPE and are dropped rather than merged. They come
+     from a device still on an older build, and a counter that conflated two slots cannot
+     be made to mean anything here — the local map is rebuilt from the log, which is
+     authoritative and does not need help. */
+  const keep = o=>{
+    const out = {};
+    Object.keys(o || {}).forEach(k=>{ if(stallKeyHasSlot(k)) out[k] = o[k]; });
+    return out;
+  };
+  local = keep(local); remote = keep(remote);
   const out = Object.assign({}, remote || {});
   Object.keys(local || {}).forEach(k=>{
     const a = local[k], b = out[k];

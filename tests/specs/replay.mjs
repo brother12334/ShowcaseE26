@@ -230,6 +230,67 @@ console.log("         plan rows the app wrote during the replay: " + ran.written
   + ", flags recorded: " + ran.flags);
 if(ran.errs.length) ran.errs.forEach(e=> console.log("         ERR " + e));
 ck("every session graded without throwing", ran.nErr === 0, ran.errs.join(" | ") || "none");
+
+/* ITEM 11 - THE REBUILT STALL COUNTERS, PER SLOT, AGAINST THE REAL LOG.
+
+   The two-slot fixture in stallslot.mjs proves the rule. This proves it against four
+   months of actual training, which is where a rule meets the movements that really do sit
+   in two days of the split at different loads.
+
+   Three claims, and the third is the one that makes drop-and-rebuild safe to run on
+   somebody's data: every key names a slot; a movement trained in two slots has two
+   independent counters; and replaying the whole log in one go lands on exactly the same
+   numbers as feeding the sessions in one at a time, which is what the app did as they
+   were finished. */
+const stalls = await p.evaluate(()=>{
+  const live = JSON.parse(JSON.stringify(S.stalls || {}));
+  /* Timed, because setEditSaved() runs this on every change in the session editor and the
+     open question was whether that needs debouncing. */
+  const t0 = performance.now();
+  const r = rebuildStalls();
+  const ms = Math.round(performance.now() - t0);
+  const rebuilt = S.stalls || {};
+  const keys = Object.keys(rebuilt);
+  /* Which movements appear in more than one day of the split, by the counters' own keys. */
+  const byName = {};
+  keys.forEach(k=>{
+    const i = k.indexOf("|");
+    const nm = k.slice(i + 1), wid = k.slice(0, i);
+    (byName[nm] = byName[nm] || []).push({wid, n: (rebuilt[k] || {}).n || 0});
+  });
+  const shared = Object.keys(byName).filter(nm=> byName[nm].length > 1);
+  return {
+    r, ms, nKeys: keys.length,
+    noSlot: keys.filter(k=> k.indexOf("|") < 0),
+    shared: shared.map(nm=> nm + ": " + byName[nm].map(x=> x.wid + "=" + x.n).join(" ")),
+    sharedDiffer: shared.filter(nm=> new Set(byName[nm].map(x=> x.n)).size > 1).length,
+    sameAsLive: JSON.stringify(live) === JSON.stringify(rebuilt),
+    counted: keys.filter(k=> ((rebuilt[k] || {}).n || 0) > 0).length,
+    verdicts: keys.filter(k=>{
+      const i = k.indexOf("|");
+      return !!stallVerdict(k.slice(i + 1), k.slice(0, i));
+    }).length
+  };
+});
+console.log("         rebuilt " + stalls.nKeys + " counters from " + stalls.r.sessions
+  + " sessions in " + stalls.ms + "ms; " + stalls.counted + " carry a count, "
+  + stalls.verdicts + " reach a verdict");
+stalls.shared.forEach(x=> console.log("         two slots - " + x));
+ck("every counter names the slot it belongs to", stalls.noSlot.length === 0,
+   stalls.noSlot.join(",") || "none");
+ck("the replay produced counters at all", stalls.nKeys > 0, String(stalls.nKeys));
+/* The control for the whole item: if no movement in this log sits in two slots, the
+   by-name bug could not have shown here and the section proves nothing about it. */
+ck("the log really does train a movement in more than one slot",
+   stalls.shared.length > 0, stalls.shared.length + " shared");
+ck("and those slots count independently",
+   stalls.sharedDiffer > 0, stalls.sharedDiffer + " of " + stalls.shared.length + " differ");
+ck("rebuilding the whole log equals feeding it in session by session", stalls.sameAsLive);
+/* setEditSaved() calls this on every field change in the session editor. Four months of
+   training is the realistic upper end of what one person's log looks like, so if that is
+   cheap there is nothing to debounce. Pinned loosely: this is a guard against it becoming
+   seconds, not a benchmark. */
+ck("and it is cheap enough to run on every edit", stalls.ms < 400, stalls.ms + "ms");
 ck("the stall counter actually ran", ran.stalls > 0, String(ran.stalls));
 ck("and the grade produced verdicts to act on",
    Object.keys(ran.kinds).length > 0, JSON.stringify(ran.kinds));

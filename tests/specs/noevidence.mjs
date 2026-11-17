@@ -54,7 +54,10 @@ const run = (o)=> ev(a=>{
                      rest: [120, 150]}];
   /* Three sessions already failing to improve, so the next one completes a stall run
      unless this session is refused as evidence. */
-  S.stalls[nrm(EX)] = {n: 2, dates: [dayStr(now - 16*DAY), dayStr(now - 8*DAY)]};
+  /* The stall counter is keyed by SLOT and name now, not by name alone - the same
+     movement in two days of the split kept one shared counter, so a flat session on each
+     read as two stalled sessions of the same thing. stallKey() is the key. */
+  S.stalls[stallKey(wid, EX)] = {n: 2, dates: [dayStr(now - 16*DAY), dayStr(now - 8*DAY)]};
   if(a.mark === "deload") S.deload = {startedAt: now - 3*DAY, endedAt: now + 3*DAY};
   if(a.mark === "break"){
     for(let i = 1; i <= 14; i++) S.skipLog.push(dayStr(now - 1000 - i*DAY));
@@ -79,9 +82,9 @@ const run = (o)=> ev(a=>{
       loadMoved = Number((S.program[wid] || [])[0].weight) !== 50;
     }
   }
-  const before = (S.stalls[nrm(EX)] || {}).n;
+  const before = (S.stalls[stallKey(wid, EX)] || {}).n;
   updateStalls(sess);
-  const after = (S.stalls[nrm(EX)] || {}).n;
+  const after = (S.stalls[stallKey(wid, EX)] || {}).n;
   return {reported: !!fade, why: sessionNotEvidence(sess),
           restMoved, loadMoved, stallBefore: before, stallAfter: after,
           stallFlag: open.some(f=> f && f.kind === "stall"),
@@ -141,11 +144,11 @@ console.log("\n3 - A STALL COUNT IS WIPED BY TIME OFF, NOT BY TWO MISSED SESSION
       S.skipLog = [dayStr(now - 1000 - DAY), dayStr(now - 1000 - 2*DAY)];
       S.program[wid] = [{name: EX, sets: 3, reps: "6-12", weight: 50, rpe: "7-9",
                          rest: [120,150]}];
-      S.stalls = {}; S.stalls[nrm(EX)] = {n: 2, dates: [dayStr(now - 30*DAY),
+      S.stalls = {}; S.stalls[stallKey(wid, EX)] = {n: 2, dates: [dayStr(now - 30*DAY),
                                                         dayStr(now - gapDays*DAY)]};
       save();
       updateStalls(sess);
-      out[tag] = {gapDays, n: (S.stalls[nrm(EX)] || {}).n,
+      out[tag] = {gapDays, n: (S.stalls[stallKey(wid, EX)] || {}).n,
                   narrated: !!layoffBefore(sess)};
     });
     return out;

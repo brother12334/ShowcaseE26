@@ -107,7 +107,10 @@ console.log("\n2 - A STALL CUT CANNOT TAKE A MUSCLE UNDER ITS FLOOR (REAR DELTS,
         sets: [0,1,2].map(()=> ({weight:"30", reps:"13", rpe:"8", done:true, rest:120}))}]}));
     save();
     S.sessions.forEach(s=> updateStalls(s));
-    const run = ((S.stalls || {})[nrm(EX)] || {}).n;
+    /* The stall counter is keyed by SLOT and name now, not by name alone - the same
+       movement in two days of the split kept one shared counter, so a flat session on each
+       read as two stalled sessions of the same thing. stallKey() is the key. */
+    const run = ((S.stalls || {})[stallKey(wid, EX)] || {}).n;
     const v = stallVerdict(EX, wid);
     const flags = [];
     recordFlags(S.sessions[3], [{name: EX, stall: v}].filter(x=> x.stall));
@@ -158,12 +161,12 @@ console.log("\n3 - NO STALL WITHIN TWO EXPOSURES OF A LOAD CHANGE (SMITH SQUAT, 
                   name: EX, changes:["70 lb → 80 lb"]}];
     save();
     S.sessions.forEach(s=> updateStalls(s));
-    const withChange = ((S.stalls || {})[nrm(EX)] || {}).n;
+    const withChange = ((S.stalls || {})[stallKey(wid, EX)] || {}).n;
     const vChange = stallVerdict(EX, wid);
     /* The same three sessions with no recent load change: that IS a stall. */
     S.planLog = []; S.stalls = {}; save();
     S.sessions.forEach(s=> updateStalls(s));
-    const noChange = ((S.stalls || {})[nrm(EX)] || {}).n;
+    const noChange = ((S.stalls || {})[stallKey(wid, EX)] || {}).n;
     const vNone = stallVerdict(EX, wid);
     return {withChange, vChange: vChange && vChange.kind,
             noChange, vNone: vNone && vNone.kind,

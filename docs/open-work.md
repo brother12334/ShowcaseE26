@@ -143,75 +143,39 @@ than a nicety: the audited export's own blind spot was that nothing in it said w
 17 happened, so no amount of reading it could have found what took four exchanges to
 establish by hand.
 
-## 11. The stall counter is keyed by name, not by slot
+## 11. The stall counter is keyed by name — DONE (2026.11.17.18)
 
-Found while paying debt 5, by looking at what sits next to the marked line - which is now
-the standing practice and has earned its keep three times.
+Keyed by `stallKey(wid, name)` now. The old counters could not be converted — a number
+that conflated two slots cannot be split back into two, because nothing recorded which
+sessions contributed — so they are dropped and rebuilt by replaying the log in order.
 
-`S.stalls` is keyed by `nrm(name)` alone:
+`rebuildStalls()` clears `S.stalls` and calls `updateStalls()` per session, oldest first,
+with the whole history present: exactly the state each session was in when it was
+finished. The exclusions therefore come for free rather than being reimplemented — the
+injury and illness marks through `sessionNotEvidence()`, the deload holds, the 14-day
+layoff reset, and the grace after a plan change. `replay.mjs` asserts the rebuild equals
+feeding the sessions in one at a time.
 
-    S.stalls[k] = {n: 0, dates: [sess.date]}      // k = nrm(en.name)
+It runs from `runOneTimeSeeds()` rather than `migrate()`: migrate runs while the file is
+still being evaluated, and a rebuild there reaches functions whose constants are still in
+their temporal dead zone. The rescue backup fell into the same trap; worth remembering
+that `migrate()` is not a safe place to call anything that walks the app.
 
-So a movement in two slots shares ONE "sessions with no improvement" counter, and
-`updateStalls()` walks each finished session into it whatever day the session was.
+`setEditSaved()` triggers a full rebuild, which answers the question this doc left open:
+3ms for 72 sessions, so no debounce. Pinned in `replay.mjs`.
 
-**Measured.** Eight interleaved sessions - Legs A improving 7, 8, 9, 10 every time, Legs B
-flat at 8 every time, at different loads - leave the counter at `n: 1`, and neither slot
-reaches a stall verdict. Legs B is genuinely stalled four sessions running and the Legs A
-sessions reset its counter each time. A false negative of exactly the shape debt 2 had:
-the rule cannot fire in the one case it exists for.
+Two related scopings went with it: `priorEntryFor()` gained `sameSlotOnly`, used by the
+stall comparison because the other day's session is at a different load by design; and
+`exposuresSincePlanChange()` takes a `wid`, because a load change written on Legs A buys
+no grace on Legs B. The any-slot fallback remains the default everywhere else, which is
+right for "what did I last do on this movement".
 
-The reverse arrangement does the same thing to the other slot, and two slots flat at
-different loads would count toward one run.
+`mergeStalls()` drops name-only keys, so a sync from a device on an older build cannot
+seed counters in the old shape.
 
-Not fixed with the other debts because it is not a scope argument on a read. `S.stalls` is
-persisted state keyed by name in every existing profile, so re-keying it by slot needs a
-migration.
-
-**Agreed approach: drop and rebuild by replaying the log in order.** An existing by-name
-counter cannot be split between slots after the fact - there is no record of which slot
-each of its sessions came from - so it is discarded and recomputed from the sessions,
-which is the one source that does know.
-
-Two requirements on the rebuild, both of them about it producing what the app itself would
-have produced:
-
-1. **It applies the same exclusions live grading does.** `sessionNotEvidence()` - a
-   session marked not representative, a day marked ill, a day something hurt, a deload
-   week, the first session back after a layoff - and the 14-day layoff reset that
-   `layoffBefore()` decides. A replay that ignores these rebuilds counters the app would
-   never have arrived at, which is worse than the by-name counter it replaced: it would be
-   wrong in a way nothing on screen explains.
-2. **The replay suite asserts the rebuilt counters per slot.** `tests/specs/replay.mjs`
-   already runs `updateStalls()` over the whole export in order, so the rebuilt per-slot
-   counters are checked there against the real history rather than only on a synthetic
-   two-slot fixture.
-
-**Editing a past session leaves the stall counters stale, and that is known.**
-`setEditSaved()` re-sweeps the session's PR marks and re-runs its stored grade, but
-deliberately does NOT call `updateStalls()`, for the reason the bar-weight editor already
-gives: it walks history in order mutating a running counter, so replaying one old session
-through it corrupts the count for every session after it. There is no way to update a
-counter in place for a session in the middle of the log.
-
-So today, correcting last week's reps in the editor can leave `S.stalls` describing a
-history that no longer exists - a counter that should have reset, or one that should have
-advanced and did not. Nothing on screen explains that, which is exactly the failure mode
-this item exists to end.
-
-**When item 11 lands, `setEditSaved()` must trigger the full drop-and-rebuild.** That is
-the only correct answer: the rebuild replays the log in order with live grading's
-exclusions, which is precisely what an in-place update cannot do. It belongs in
-`setEditSaved()` rather than at the editor's Done button, because every field change,
-warm-up toggle, set addition and tick in the editor goes through it. Worth measuring once
-the rebuild exists: if replaying the whole log per keystroke is too slow, debounce it to
-the editor closing - but the trigger is the save, not the close, and a debounce must still
-fire if the app is shut straight after.
-
-A lesser one in the same area: `priorEntryFor()` prefers an earlier session of the SAME
-slot and falls back to any slot when there is none. That fallback is reasonable for a
-movement's first session in a new slot and wrong once the slot has history of its own;
-worth revisiting with this.
+What this does NOT do: the rebuild is triggered by the version marker and by an editor
+save. A session deleted from History does not trigger one. Worth adding if deletions turn
+out to leave counters describing sessions that are gone.
 
 ## 12. The write/clear asymmetry sweep
 
