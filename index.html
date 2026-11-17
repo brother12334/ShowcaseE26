@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.5";
+const APP_VERSION = "2026.11.17.6";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -57308,18 +57308,39 @@ const REBUILD_MAX_DAYS = 42;
    load can live: what the programme entry says, what this session froze at Start (a LIVE
    entry has no `weight` — that field holds the loads you type per set), and the
    programme's own row when neither is to hand. Same order as planLoadFor(). */
+/* SLOT DEBT 6 of 9. The last resort here is the programme's own row, which was found by
+   name - so a session entry carrying neither a typed load nor a frozen one was described
+   by whichever slot held the name first. Measured on a two-slot fixture: an entry logged
+   on a 60 lb slot reported a prescribed load of 100.
+
+   entryDayOf() answers which day an entry belongs to by finding it in the session that
+   holds it, which is the same thing the converted display sites use. */
 function prescribedLoadFor(entry){
   if(!entry) return null;
   const src = (entry.weight != null && entry.weight !== "") ? entry.weight
             : (entry.planWeight != null && entry.planWeight !== "") ? entry.planWeight
-            : (findProgramEntry(entry.name) || {}).weight;   // slot:todo
+            : (findProgramEntry(entry.name, entryDayOf(entry)) || {}).weight;
   if(src == null || src === "") return null;
   const w = parseFloat(src);
   return isNaN(w) ? null : w;
 }
+/* SLOT DEBTS 7 AND 8 of 9. A rebuild marker is written when a load goes up - "80 lb is
+   new, reps restart at 8 and climb back to 12" - and it holds the rep target at the
+   bottom of the range until the top comes back. Read by NAME, a marker written on one
+   slot was announced on another day's session, and that day's rep targets were held down
+   on the strength of an increase it never had. Measured: setPrescription() asked a Legs B
+   session for 8 reps because Legs A had just gone up.
+
+   A guard hid this most of the time without fixing it - the marker is discarded when the
+   prescribed load no longer matches the one it was written at, so two slots at DIFFERENT
+   loads failed that check by accident. Two slots at the same load did not.
+
+   The giveaway was the asymmetry: clearRebuiltEntries() had already been converted to the
+   session's own slot, so a rebuild was being READ off one day and CLEARED on another. One
+   of the two had to be wrong, and it was this one. */
 function rebuildFor(entry){
   if(!entry) return null;
-  const src = entry.rebuild ? entry : findProgramEntry(entry.name);   // slot:todo
+  const src = entry.rebuild ? entry : findProgramEntry(entry.name, entryDayOf(entry));
   const rb = src && src.rebuild;
   if(!rb || !rb.at || rb.from == null) return null;
   if(Date.now() - rb.at > REBUILD_MAX_DAYS * DAY_MS) return null;
@@ -57336,7 +57357,8 @@ function rebuildFor(entry){
      the programme's own row when neither is to hand. */
   const src2 = (entry.weight != null && entry.weight !== "") ? entry.weight
              : (entry.planWeight != null && entry.planWeight !== "") ? entry.planWeight
-             : (src && src !== entry ? src.weight : (findProgramEntry(entry.name) || {}).weight);   // slot:todo
+             : (src && src !== entry ? src.weight
+                : (findProgramEntry(entry.name, entryDayOf(entry)) || {}).weight);
   const w = (src2 == null || src2 === "") ? null : parseFloat(src2);
   if(w != null && !isNaN(w) && rb.weight != null && Math.abs(w - rb.weight) > 0.01) return null;
   return rb;
@@ -59161,8 +59183,23 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.5";
+const NEWS_FOR = "2026.11.17.6";
 const NEWS = [
+  {k: "A rebuild borrowed from another day held your reps down",
+   s: ["When a load goes up, Element 26 leaves a note on it: 80 lb is new, so the reps "
+     + "restart at the bottom of the range and climb back. That note holds the rep target "
+     + "down while you work back up, which is the point of it.",
+     "It was read by exercise name. So a note written on one day was announced on "
+     + "another day’s session, and THAT day’s rep targets were held at the bottom of the "
+     + "range on the strength of an increase it never had.",
+     "A guard hid this most of the time without fixing it: the note is dropped when the "
+     + "prescribed load no longer matches the one it was written at, so two days at "
+     + "different loads failed that check by accident. Two days at the same load did not.",
+     "The giveaway was that CLEARING the note had already been put right: it was being "
+     + "read off one day and cleared on another, so one of the two had to be wrong. The "
+     + "same fix covers the prescribed load a logged session reports when it carries no "
+     + "load of its own — that was the first day’s too.",
+     "Sixth, seventh and eighth of nine, all the same shape. One left."]},
   {k: "A raise you earned, with no button to press",
    s: ["The grade card decides whether a change has already been written into your plan by "
      + "comparing its target with the plan’s current load — and it looked that load up by "

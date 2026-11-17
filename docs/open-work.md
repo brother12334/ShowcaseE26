@@ -1,7 +1,10 @@
 # Open work
 
-The queue, in order. Written down rather than remembered, because the order has been
-revised several times and the reasons for it are worth keeping with the items.
+The queue. Written down rather than remembered, because the order has been revised
+several times and the reasons for it are worth keeping with the items.
+
+**Agreed order of work**, which is not the numbering (the numbers are the order the items
+were found in): the remaining slot-scoping debts first, then item 11, then item 10.
 
 Everything above the line is tested; `node tests/run.js` is the whole suite and
 `tests/specs/replay.mjs` replays the user's full export and checks the fix spec's six
@@ -151,9 +154,26 @@ different loads would count toward one run.
 
 Not fixed with the other debts because it is not a scope argument on a read. `S.stalls` is
 persisted state keyed by name in every existing profile, so re-keying it by slot needs a
-migration that decides what an existing by-name counter becomes - most defensibly, the
-counter is dropped and rebuilt by replaying the log, which `updateStalls()` can already do
-in order.
+migration.
+
+**Agreed approach: drop and rebuild by replaying the log in order.** An existing by-name
+counter cannot be split between slots after the fact - there is no record of which slot
+each of its sessions came from - so it is discarded and recomputed from the sessions,
+which is the one source that does know.
+
+Two requirements on the rebuild, both of them about it producing what the app itself would
+have produced:
+
+1. **It applies the same exclusions live grading does.** `sessionNotEvidence()` - a
+   session marked not representative, a day marked ill, a day something hurt, a deload
+   week, the first session back after a layoff - and the 14-day layoff reset that
+   `layoffBefore()` decides. A replay that ignores these rebuilds counters the app would
+   never have arrived at, which is worse than the by-name counter it replaced: it would be
+   wrong in a way nothing on screen explains.
+2. **The replay suite asserts the rebuilt counters per slot.** `tests/specs/replay.mjs`
+   already runs `updateStalls()` over the whole export in order, so the rebuilt per-slot
+   counters are checked there against the real history rather than only on a synthetic
+   two-slot fixture.
 
 A lesser one in the same area: `priorEntryFor()` prefers an earlier session of the SAME
 slot and falls back to any slot when there is none. That fallback is reasonable for a
