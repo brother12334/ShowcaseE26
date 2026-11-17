@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.8";
+const APP_VERSION = "2026.11.17.9";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -14182,6 +14182,20 @@ function migrate(){
      later. Cleared once, across the live session and the whole log. */
   try{ clearStraySides(); }catch(e){}
 
+  /* P1-7 FOLLOW-UP \u2014 REGRADE WHAT WAS GRADED BLIND.
+
+     Until this build every "was this set done" check read en.sets raw, so a paired
+     exercise contributed nothing and the grade on any session holding one was computed
+     without it. The grade is worked out once at finish and kept, which is right - it must
+     not drift as the surrounding history grows - but a score produced by a rule that
+     could not see half the session is not a record worth keeping.
+
+     So each such session is regraded once, PRs swept with it for the same reason.
+     updateStalls() is deliberately NOT re-run: it walks history in order mutating a
+     running counter, so replaying one old session through it would corrupt the count for
+     every session after it. Latched, so it happens once rather than on every load. */
+  try{ regradePairedSessions(); }catch(e){}
+
   /* Fill in the days you did not train before the cycle is recomputed, so everything
      downstream reads a history with no unexplained holes in it. */
   if(fillMissedRestDays(Date.now())) saveQuiet();
@@ -19522,6 +19536,57 @@ function sideRestFor(en){
   const v = Number(en && en.sideRest);
   return isFinite(v) && v > 0 ? Math.min(180, Math.round(v)) : 0;
 }
+/* P1-7 FOLLOW-UP \u2014 "THE SETS OF THIS ENTRY", for everything that counts or tests them.
+
+   A paired set keeps nothing at the top level: the reps, the weight, the RPE and the done
+   tick all live on st.sides.L and st.sides.R. So every check written as `st.done ||
+   st.reps` or `isWorkingSet(st)` over `en.sets` saw an empty object and read a fully
+   logged paired exercise as untouched.
+
+   It was not only a counting fault. finishWorkout() filtered each entry's sets to the
+   ones carrying something and then dropped entries with none left, so a paired exercise
+   was DELETED from the session at finish along with its reps. That is why a logged
+   lateral raise was missing from the finished session and graded as not done: it was not
+   in the session at all.
+
+   Two readers, because two different things are wanted:
+
+     entrySets(en)     the LIVE per-side objects. Counting, done-ness, and anything that
+                       writes - these are the stored objects, so a write reaches the log.
+                       They carry no `rest`: a pair has one rest and it belongs to the
+                       pair.
+     entrySetRows(en)  read-only views of the same sets WITH the pair's rest attached, for
+                       anything that grades or reports. Copies on purpose - a caller that
+                       means to write must use sideTarget() or entrySets(). */
+function entrySets(en){
+  if(!en) return [];
+  return entryPerSide(en) ? sideSets(en).map(x=> x.ref) : (en.sets || []);
+}
+function entrySetRows(en){
+  if(!en) return [];
+  if(!entryPerSide(en)) return (en.sets || []).slice();
+  return sideSets(en).map(x=> Object.assign({}, x.ref, {rest: x.rest}));
+}
+function entryWorkingSets(en){ return entrySets(en).filter(isWorkingSet); }
+/* Anything at all written on this set: a tick, a rep count, a load. */
+function setHasAnything(st){
+  return !!(st && (st.done
+    || (st.reps != null && st.reps !== "")
+    || (st.weight != null && st.weight !== "")));
+}
+function entryHasAnything(en){ return entrySets(en).some(setHasAnything); }
+/* Is this SET - the whole thing, both sides of a pair - worth keeping? Either side
+   carrying anything is enough; a pair half done is still a pair that happened. */
+function setPairHasAnything(en, si){
+  if(!en) return false;
+  if(!entryPerSide(en)) return setHasAnything((en.sets || [])[si]);
+  return sideSets(en).some(x=> x.si === si && setHasAnything(x.ref));
+}
+/* Every set of this entry finished. On a pair that means BOTH sides of every set. */
+function entryIsDone(en){
+  const list = entrySets(en);
+  return !!(list.length && list.every(st=> st && st.done));
+}
 /* SIDE-ADAPTER-END. Below here, every rule goes through sideSets(). */
 
 /* =====================================================================
@@ -20795,7 +20860,7 @@ function indexLifts(g){
     (sn.entries || []).forEach(e=>{
       const mm = musclesFor(e.name);
       if(!mm || mm[g] !== 1) return;               // owned outright, or not counted
-      const n = (e.sets || []).filter(isWorkingSet).length;
+      const n = entryWorkingSets(e).length;
       if(n > 0) count[nrm(e.name)] = (count[nrm(e.name)] || 0) + n;
     });
   });
@@ -35007,8 +35072,10 @@ function viewToday(){
      two places to tap the same tick. */
   if(S.active){
     const a = S.active;
-    const total = a.entries.reduce((n,e)=> n + (e.sets ? e.sets.length : 0), 0);
-    const done  = a.entries.reduce((n,e)=> n + (e.sets ? e.sets.filter(x=> x.done).length : 0), 0);
+    /* P1-7 FOLLOW-UP \u2014 side-sets, so a paired movement is counted at all: read raw, both
+       halves of the bar ignored it and a session of one sat at 0 of 0. */
+    const total = a.entries.reduce((n,e)=> n + entrySets(e).length, 0);
+    const done  = a.entries.reduce((n,e)=> n + entrySets(e).filter(x=> x && x.done).length, 0);
     const stale = a.date && a.date !== todayStr();
     return h + `<div class="today-rest"><div class="card live-card">
       <div class="lc-k"><i></i>In progress</div>
@@ -35574,7 +35641,7 @@ function viewActiveSession(){
                so the swap handed a running timer to the exercise you had not started,
                which is the phantom rest timer. Both halves are fixed: these are disabled,
                and the handler moves the timer with the entry. */
-            const doneEx = en.sets.length && en.sets.every(x=>x.done);
+            const doneEx = entryIsDone(en);
             const off = doneEx ? ` disabled aria-disabled="true" title="Already done — the order it ran in is fixed"` : "";
             return `<button data-exup="${ei}" aria-label="Move earlier"${off}>\u2191</button>
           <button data-exdown="${ei}" aria-label="Move later"${off}>\u2193</button>`;
@@ -35774,6 +35841,18 @@ function altHintHTML(style, startSide, nSets, exName){
 /* The L / R marker that sits under each set number on an alternating exercise, so you
    never have to count back to work out whose turn it is. Colour-coded because a glance
    at the shape is faster to read mid-set than the letter. */
+/* The sessions whose grade was computed without seeing their paired exercises. */
+function regradePairedSessions(){
+  if(S.pairGradeV2) return 0;
+  let n = 0;
+  (S.sessions || []).forEach(s=>{
+    if(!s || !(s.entries || []).some(entryPerSide)) return;
+    try{ sweepSessionPRs(s); s.quality = scoreWorkout(s); n++; }catch(e){}
+  });
+  S.pairGradeV2 = true;
+  saveQuiet();
+  return n;
+}
 /* P1-7 FOLLOW-UP \u2014 THE LEGACY OVERRIDE HAS NO BUSINESS ON A PAIRED SET.
 
    st.side is the legacy "which limb was this set" override, read by setSide() and
@@ -36753,8 +36832,8 @@ function swapNoteHTML(en){
 }
 function plateLoaderHTML(a){
   const total = a.entries.length;
-  const doneMain = a.entries.filter(e=>!e.fin && e.sets.length && e.sets.every(st=>st.done)).length;
-  const doneFin = a.entries.filter(e=>e.fin && e.sets.length && e.sets.every(st=>st.done)).length;
+  const doneMain = a.entries.filter(e=>!e.fin && entryIsDone(e)).length;
+  const doneFin = a.entries.filter(e=>e.fin && entryIsDone(e)).length;
   const doneEx = doneMain + doneFin;
   const isNew = (a._loaded!=null && doneEx > a._loaded);
   a._loaded = doneEx;
@@ -41358,7 +41437,7 @@ function medianPerSetSeconds(){
   (S.sessions || []).slice(-12).forEach(s=>{
     if(!s.startedAt || !s.finishedAt || s.finishedAt <= s.startedAt) return;
     const sets = (s.entries || []).reduce((n,e)=>
-      n + (e.sets || []).filter(st=> st.done || st.reps).length, 0);
+      n + entrySets(e).filter(st=> st.done || st.reps).length, 0);
     if(sets < 4) return;
     const v = (s.finishedAt - s.startedAt) / 1000 / sets;
     if(v > 20 && v < 600) per.push(v);          // 20s and 10min bracket out the nonsense
@@ -43238,7 +43317,9 @@ function sessVolume(s){
       u + ((parseFloat(st.weight)||0) * (parseFloat(st.reps)||0)), 0), 0);
 }
 function sessSets(s){
-  return (s.entries || []).reduce((t,e)=> t + (e.sets || []).filter(x=> x && x.reps).length, 0);
+  /* P1-7 FOLLOW-UP \u2014 through the adapter, or a paired exercise contributes nothing and a
+     session of one reads as empty on the history row. */
+  return (s.entries || []).reduce((t,e)=> t + entrySets(e).filter(x=> x && x.reps).length, 0);
 }
 /* The Monday of whatever week this date falls in, as a date string — the key a week is
    grouped under and the label it is headed with. */
@@ -46171,7 +46252,7 @@ function bwFixMoves(){
     (sess.entries || []).forEach(en=>{
       if(!en || !en.name || entryBwOn(en)) return;      // already counted
       if(!isBodyweightMove(en.name)) return;
-      const n = (en.sets || []).filter(isWorkingSet).length;
+      const n = entryWorkingSets(en).length;
       if(!n) return;
       const k = nrm(en.name);
       if(!by[k]) by[k] = {key: k, name: en.name, sets: 0, sessions: 0};
@@ -47282,7 +47363,7 @@ function bind(){
       refreshPRs(ei);
       drawPRBadges(ei);
       save();
-      const isComplete = entry.sets.length && entry.sets.every(x=>x.done);
+      const isComplete = entryIsDone(entry);
       if(S.viewMode==="focus" && wasComplete !== isComplete){
         // completion flipped → the barbell gains/loses a plate
         const doShake = isComplete;
@@ -47398,7 +47479,7 @@ function bind(){
     if(!list || i < 0 || i >= list.length) return false;
     const idx = entryOrderAfterMove(list, i, dir);
     if(!idx) return false;                       // already at the end it was heading for
-    const doneAt = k=> list[k].sets.length && list[k].sets.every(x=>x.done);
+    const doneAt = k=> entryIsDone(list[k]);
     /* EVERY ENTRY THAT ACTUALLY MOVES, not just the one you tapped. Refusing only the
        tapped card still let an unfinished exercise be dragged past a finished one, which
        moves the finished one just as surely — and with blocks a single tap can now shift
@@ -50379,14 +50460,21 @@ function finishWorkout(){
      enough. There is nothing to finish twice, so the second call simply returns. */
   const a = S.active;
   if(!a) return;
-  const logged = a.entries.some(e=>e.sets.some(st=>st.done || st.reps));
+  const logged = a.entries.some(entryHasAnything);
   if(!logged){
     if(!confirm("No sets logged yet, finish anyway?")) return;
   } else if(!confirm("Complete your workout? This saves the session to your history.")){
     return;
   }
   if(a.restTimer){ a.restTimer = null; hideRestUI(); }
-  a.entries.forEach(e=>{ e.sets = e.sets.filter(st=>st.done || st.reps || st.weight); });
+  /* P1-7 FOLLOW-UP \u2014 THROUGH THE ADAPTER, OR THE EXERCISE IS DELETED. A paired set has
+     nothing at the top level, so the old filter emptied every one of them and the entry
+     was then dropped for having no sets. Asked per SET, both sides counted, a pair that
+     happened is kept. */
+  a.entries.forEach(e=>{
+    const keep = (e.sets || []).map((st, si)=> setPairHasAnything(e, si));
+    e.sets = (e.sets || []).filter((st, si)=> keep[si]);
+  });
   a.entries = a.entries.filter(e=>e.sets.length);
   a.finishedAt = Date.now();
   const wid = a.workoutId;
@@ -52944,8 +53032,8 @@ function downContext(sess, entry, idx, prior){
   const excuses = [], context = [];
 
   // 1, fewer sets today: the top set simply had fewer attempts at being the best one
-  const nowSets = (entry.sets||[]).filter(isWorkingSet).length;
-  const wasSets = (prior.entry.sets||[]).filter(isWorkingSet).length;
+  const nowSets = entryWorkingSets(entry).length;
+  const wasSets = entryWorkingSets(prior.entry).length;
   if(nowSets > 0 && nowSets < wasSets){
     excuses.push(nowSets+" working set"+(nowSets===1?"":"s")+" today against "+wasSets+
       " last time, so the best set had fewer goes at being the best one");
@@ -53050,7 +53138,11 @@ function scoreWorkout(sess){
   };
   const entries = sess.entries || [];
   const allSets = [];
-  entries.forEach(e=> e.sets.forEach(st=>{ if(isWorkingSet(st)) allSets.push({e, st}); }));
+  /* P1-7 FOLLOW-UP \u2014 entrySetRows(), so a paired exercise is graded at all. Read raw,
+     every section of this card saw an empty set for each pair: completion counted none of
+     them, and intensity, rep range, fatigue and log quality all scored only the
+     two-handed movements. The rows carry the pair's rest, which rest discipline needs. */
+  entries.forEach(e=> entrySetRows(e).forEach(st=>{ if(isWorkingSet(st)) allSets.push({e, st}); }));
   const nSets = allSets.length;
   const prs = sessionPRs(sess);
 
@@ -53069,7 +53161,14 @@ function scoreWorkout(sess){
     const plan = inDeload
       ? deloadView(rawPlan.map(x=> x.chosen)).map((e, i)=> Object.assign({}, rawPlan[i], {chosen: e}))
       : rawPlan;
-    const planned = plan.reduce((t,{chosen:e})=>t + (parseInt(e.sets,10)||0), 0);
+  /* P1-7 FOLLOW-UP \u2014 THE SAME UNITS ON BOTH SIDES OF THE RATIO. The logged figure counts
+     side-sets, because that is what the session holds and what every other section grades.
+     A paired movement prescribing 3 sets is therefore 6 things to do, and comparing 6
+     logged against 3 planned read as 200% and "everything got done" off half a session. */
+    const planned = plan.reduce((t,{chosen:e})=>{
+      const n = parseInt(e.sets,10) || 0;
+      return t + (entryPerSideWanted(e) ? n * 2 : n);
+    }, 0);
     const why = [];
     if(!planned){
       add("completion","Completion",14,0,
@@ -55982,7 +56081,7 @@ function restLengthenRefusal(sess, ei, d){
        + "what happened here."};
   /* A set somebody stopped on purpose, or stopped because the weight was wrong, did not
      end because the rest was short. */
-  const ws = (en.sets || []).filter(isWorkingSet);
+  const ws = entryWorkingSets(en);
   const last = ws[ws.length - 1];
   const code = last && last.why && last.why.code;
   if(code === "deliberate" || code === "heavy") return {
@@ -57437,7 +57536,7 @@ function clearRebuiltEntries(sess){
     const e = findProgramEntry(en.name, sess && sess.workoutId);
     const rb = e && e.rebuild;
     if(!rb || rb.top == null) return;
-    const done = (en.sets || []).filter(st=> st.done || st.reps);
+    const done = entrySets(en).filter(st=> st.done || st.reps);
     const last = done[done.length - 1];
     if(!last) return;
     const w = parseFloat(last.weight);
@@ -58888,7 +58987,7 @@ function shareSnapshot(opts){
     .map(s=> ({date: s.date, day: dayName(s.workoutId), total: s.quality.total,
                grade: s.quality.grade || null,
                sets: (s.entries || []).reduce((n, e)=>
-                 n + (e.sets || []).filter(isWorkingSet).length, 0),
+                 n + entryWorkingSets(e).length, 0),
                mins: (s.startedAt && s.finishedAt) ? Math.round((s.finishedAt - s.startedAt) / 60000) : null,
                note: o.notes ? String(s.note || "").slice(0, 200) : ""}));
   /* THE STREAK, which is the one number that says whether any of this is being done. */
@@ -59271,8 +59370,29 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.8";
+const NEWS_FOR = "2026.11.17.9";
 const NEWS = [
+  {k: "A paired movement that didn\u2019t count as done",
+   s: ["Reported from the same live session as the L/R labels below: a one-limb movement "
+     + "was logged in full, and afterwards it was missing from the finished session and "
+     + "the grade said it had not been done. The note below says your logged data was "
+     + "never wrong \u2014 that was true of the LIVE session only. At finish, those sets "
+     + "were discarded, so for a finished session it was wrong, and this is the fix.",
+     "A paired set keeps nothing of its own: the reps, the load and the tick all live on "
+     + "its two sides. Anything deciding \u201cwas this set done\u201d by reading the "
+     + "set itself therefore saw an empty row. The filter that drops blank sets at finish "
+     + "was one of them, which is why the exercise vanished rather than merely scoring "
+     + "zero.",
+     "Every done / completed / counted check now reads through the same side adapter: "
+     + "the grade\u2019s completion score and its planned-set count, the \u201cN of M "
+     + "sets logged\u201d bar, the session summary and history list, volume, the share "
+     + "snapshot and the per-set timing. A test now logs a session of one paired "
+     + "movement and requires it to grade as complete, appear in the finished session and "
+     + "count toward volume, and a scan keeps new raw reads out.",
+     "Sessions you have already finished are regraded once, automatically, the first "
+     + "time this build loads \u2014 so a grade that was marked down for an exercise you "
+     + "did perform corrects itself. Sets already discarded at finish on the old build "
+     + "cannot be recovered; re-enter them in the session editor if you want them back."]},
   {k: "L, L instead of L, R",
    s: ["On a one-limb movement logged as pairs, the rows read “set 1: L, L · set 2: R, R” "
      + "instead of one L and one R under each set number. Reported from a live session.",
@@ -64485,7 +64605,8 @@ function restLocks(en, si){
    running timer to an exercise nobody had started. The numbers stay editable; only the
    fact that it happened is fixed. */
 function entryDone(en){
-  return !!(en && en.sets && en.sets.length && en.sets.every(x=> x && x.done));
+  /* P1-7 FOLLOW-UP \u2014 on a pair, finished means BOTH sides of every set. */
+  return entryIsDone(en);
 }
 /* Does ticking this set END a round, and therefore start the rest clock?
 
@@ -64537,7 +64658,7 @@ function supersetGroupHTML(a, i, tips, tipsSeen){
 
      Done is done, the same as an ordinary card: once every set on both legs is logged the
      order it ran in is a fact. */
-  const ssDone = pair.every(p=> p.en.sets.length && p.en.sets.every(x=> x.done));
+  const ssDone = pair.every(p=> entryIsDone(p.en));
   const ssOff = ssDone ? ` disabled aria-disabled="true" title="Already done \u2014 the order it ran in is fixed"` : "";
   let h = `<div class="card ex ss-group">
     <div class="ss-hdr">
@@ -65315,7 +65436,7 @@ const BACKUP_FIELDS = [
   "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
   "exAliases","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
-  "asymRetired","asymRetest","askWhy","lmFloor","lmFloorAt","restCeilV1","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
+  "asymRetired","asymRetest","askWhy","lmFloor","lmFloorAt","restCeilV1","pairGradeV2","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
   "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* P0-2 \u2014 where the log changed convention. A fact about how the numbers in
      `sessions` are to be READ, so a backup carrying the sessions without it restores a
