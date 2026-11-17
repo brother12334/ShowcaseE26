@@ -79,8 +79,11 @@ console.log("1 - EVERY LOOKUP IS SCOPED, DECLARED DISPLAY, OR A TRACKED DEBT");
      undeclared.length + " undeclared");
   /* THE DEBT, PINNED. Lower this number when a site is converted; raising it needs a
      reason in the commit message. */
-  ck("the tracked debt is no larger than it was", todo.length <= 1,
-     todo.length + " > 1");
+  /* THE DEBT IS PAID. All nine are converted, so this is now a ratchet against new ones
+     rather than a countdown: an unscoped write or prescribe has to declare itself, and
+     there is nothing left for it to hide among. */
+  ck("the tracked debt is paid and stays paid", todo.length === 0,
+     todo.length + " left");
   console.log("\n    tracked debt, in the order it should be paid:");
   todo.forEach(o=> console.log("      " + o));
   console.log("\n    declared display-only:");

@@ -4,7 +4,8 @@ The queue. Written down rather than remembered, because the order has been revis
 several times and the reasons for it are worth keeping with the items.
 
 **Agreed order of work**, which is not the numbering (the numbers are the order the items
-were found in): the remaining slot-scoping debts first, then item 11, then item 10.
+were found in): the remaining slot-scoping debts, then the asymmetry sweep (item 12), then
+item 11, then item 10.
 
 Everything above the line is tested; `node tests/run.js` is the whole suite and
 `tests/specs/replay.mjs` replays the user's full export and checks the fix spec's six
@@ -58,7 +59,7 @@ the rule was awake.
 
 ---
 
-## 1-9. Slot-scoping debt
+## 1-9. Slot-scoping debt  — DONE
 
 `tests/specs/slotall.mjs` fails on any unmarked name-only programme lookup outside a
 declared display site, with a pinned count that can only go down. Nine call sites remain,
@@ -76,6 +77,17 @@ each currently carrying a `// slot:todo` marker. In the order the scan prints th
 
 A name-only lookup falls through to `DAYS.concat(["finisher"])` and answers about the
 first slot holding that name, which is the P0-1 family of bug.
+
+**All nine are converted.** 32 call sites: 28 scoped, 4 declared display-only, none
+undeclared, no tracked debt. `slotall.mjs` now asserts the debt is zero rather than
+counting down, so it is a ratchet against new ones.
+
+Eight of the nine were live bugs. The ninth, `tmWanted`, was the one whose answer was to
+WIDEN rather than scope - the stored max is per exercise, not per slot - which is the
+reason they were worth checking one at a time instead of converted as a batch. Two of the
+nine also turned up a live bug in unmarked code beside the marked line: the proven-floor
+scan in `impossibleLoadCheck` (debt 4) and the by-name stall counter (debt 5, now item
+11).
 
 **These were first recorded as reads that "fall back" rather than answer wrongly. That
 classification was wrong: debt 1 disproved it and debt 2 confirmed it.** Both were live.
@@ -179,3 +191,29 @@ A lesser one in the same area: `priorEntryFor()` prefers an earlier session of t
 slot and falls back to any slot when there is none. That fallback is reasonable for a
 movement's first session in a new slot and wrong once the slot has history of its own;
 worth revisiting with this.
+
+## 12. The write/clear asymmetry sweep
+
+A heuristic that came out of debts 6-8 and is worth running deliberately rather than
+stumbling into again.
+
+`rebuildFor()` read a rebuild marker by exercise name while `clearRebuiltEntries()` had
+already been converted to the session's own slot. The pair wrote and unwrote the same
+per-exercise state with different ideas of what "this exercise" meant, so one of them had
+to be wrong - and the mismatch was visible without knowing anything about what a rebuild
+does.
+
+So: find every pair of functions that SET and CLEAR, or WRITE and READ, the same
+per-exercise or per-slot state, and flag any pair where one side is slot-scoped and the
+other is not. A scan of the static kind `slotall.mjs` does cannot see this, because both
+sides can be individually defensible; it is the disagreement that is the defect.
+
+Candidate state to walk, each of which is keyed per exercise somewhere: `rebuild`,
+`repExt`, `byApp`, `S.stalls`, `S.restEx`, `S.asymRetired` / `asymRetest`, `S.marks`,
+`S.lmSuggest`, `S.reversed`, `S.joint`, `exAliases`, `S.maxes` / training maxes, the
+ease-off map, and the per-entry `alt` partner.
+
+**Report before fixing.** Each pair is a question about which side is right, and the
+answer is not always "scope them both" - `priorEntryFor()`'s any-slot fallback is
+deliberate for a movement's first session in a new slot. The sweep produces a list with a
+verdict per pair, and fixes follow as their own items.

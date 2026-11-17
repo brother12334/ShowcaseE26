@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.6";
+const APP_VERSION = "2026.11.17.7";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -58076,11 +58076,34 @@ function setTmFor(name, w, extra){
 }
 /* Does this lift want a training max at all? Only one run on a wave, or one whose plan
    writes its percentages off a TM. Everything else is asking for a one-rep max. */
+/* SLOT DEBT 9 of 9, and the only one of the nine whose answer was to WIDEN rather than
+   scope - which is why they were worth checking one at a time rather than converting as a
+   batch.
+
+   This decides whether the max sheet asks for a TRAINING max or a one-rep max. It asked
+   the first slot holding the name. But `wave` and `pct` are per-ENTRY fields, so two slots
+   of one movement can differ, while the number itself is stored per MOVEMENT -
+   maxStore()[nrm(name)], one entry per exercise, no slot in the key.
+
+   So the question is not "what does this slot want" but "does any slot of this movement
+   run on a training max", because there is one number and it has to be the right KIND of
+   number for whichever slot needs it. Asked of the first slot, the answer depended on the
+   order the movement happened to appear in the plan: a waved slot that was not first read
+   as not wanting a training max, and the sheet asked for a 1RM. Every wave load then came
+   off a number that meant something else.
+
+   Scoping this to a slot would have been worse than leaving it alone, because the sheet
+   it feeds is not about a slot. */
 function tmWanted(name){
-  const e = findProgramEntry(name);   // slot:todo
-  if(e && waveFor(e)) return true;
-  const spec = e ? pctSpecFor(e) : null;
-  return !!(spec && spec.of === "tm");
+  const k = nrm(name);
+  const wants = e=>{
+    if(!e || nrm(e.name) !== k) return false;
+    if(waveFor(e)) return true;
+    const spec = pctSpecFor(e);
+    return !!(spec && spec.of === "tm");
+  };
+  return DAYS.concat(["finisher"]).some(wid=>
+    (S.program[wid] || []).some(e=> wants(e) || wants(e && e.alt)));
 }
 
 /* ---------- 6. THE WAVES ----------
@@ -59183,8 +59206,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.6";
+const NEWS_FOR = "2026.11.17.7";
 const NEWS = [
+  {k: "The wrong kind of max, depending on plan order",
+   s: ["A plan written in percentages needs one number to take them from, and whether "
+     + "that number is a one-rep max or a TRAINING max depends on how the lift is "
+     + "programmed. Element 26 asked the first day in your plan that carried the "
+     + "exercise — so if the day running the percentages was not the first one, it asked "
+     + "for the wrong kind of number, and every load worked out from it came off a figure "
+     + "that meant something else.",
+     "The answer here was to widen rather than narrow, which is why these were checked "
+     + "one at a time instead of converted as a batch: the number is stored per EXERCISE, "
+     + "not per day, so the question is whether any day of it runs on a training max. "
+     + "Scoping it to one day would have been worse than leaving it alone.",
+     "Ninth of nine. Every automated rule that reads or writes a prescription now names "
+     + "the day it is about, and a test fails the build if a new one does not."]},
   {k: "A rebuild borrowed from another day held your reps down",
    s: ["When a load goes up, Element 26 leaves a note on it: 80 lb is new, so the reps "
      + "restart at the bottom of the range and climb back. That note holds the rep target "
