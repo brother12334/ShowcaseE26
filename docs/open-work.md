@@ -127,3 +127,35 @@ an analysis of one can separate sessions by gym. That is a requirement of the it
 than a nicety: the audited export's own blind spot was that nothing in it said where Oct
 17 happened, so no amount of reading it could have found what took four exchanges to
 establish by hand.
+
+## 11. The stall counter is keyed by name, not by slot
+
+Found while paying debt 5, by looking at what sits next to the marked line - which is now
+the standing practice and has earned its keep three times.
+
+`S.stalls` is keyed by `nrm(name)` alone:
+
+    S.stalls[k] = {n: 0, dates: [sess.date]}      // k = nrm(en.name)
+
+So a movement in two slots shares ONE "sessions with no improvement" counter, and
+`updateStalls()` walks each finished session into it whatever day the session was.
+
+**Measured.** Eight interleaved sessions - Legs A improving 7, 8, 9, 10 every time, Legs B
+flat at 8 every time, at different loads - leave the counter at `n: 1`, and neither slot
+reaches a stall verdict. Legs B is genuinely stalled four sessions running and the Legs A
+sessions reset its counter each time. A false negative of exactly the shape debt 2 had:
+the rule cannot fire in the one case it exists for.
+
+The reverse arrangement does the same thing to the other slot, and two slots flat at
+different loads would count toward one run.
+
+Not fixed with the other debts because it is not a scope argument on a read. `S.stalls` is
+persisted state keyed by name in every existing profile, so re-keying it by slot needs a
+migration that decides what an existing by-name counter becomes - most defensibly, the
+counter is dropped and rebuilt by replaying the log, which `updateStalls()` can already do
+in order.
+
+A lesser one in the same area: `priorEntryFor()` prefers an earlier session of the SAME
+slot and falls back to any slot when there is none. That fallback is reasonable for a
+movement's first session in a new slot and wrong once the slot has history of its own;
+worth revisiting with this.

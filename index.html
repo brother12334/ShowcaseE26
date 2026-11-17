@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.4";
+const APP_VERSION = "2026.11.17.5";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -56567,6 +56567,14 @@ function buildProgression(sess){
   (sess.entries || []).forEach(en=>{
     const p = progressionFor(sess, en);
     if(!p) return;
+    /* SLOT DEBT 5 of 9 - THE SLOT, STAMPED ONCE, HERE.
+
+       Every verdict is about one slot's prescription, and until now only `toohard`
+       carried that. Stamped in the one place that builds the list and knows the session,
+       rather than threaded through progressionApplied(), the grade card's filters and
+       Apply-all separately - which is how a verdict and the thing checking it came to
+       disagree about which day they were talking about. */
+    p.wid = sess && sess.workoutId;
     const conf = exerciseConfidence(sess, en);
     p.conf = {score: conf.score, band: conf.band.k, before: conf.before,
               logged: conf.logged, of: conf.of};
@@ -56580,7 +56588,11 @@ function buildProgression(sess){
        A STALL is the opposite. It is a claim about a trend, it is the most consequential
        thing the card says, and off one session it is unfounded. It is attached only when
        there is real history behind the movement. */
-    const stall = stallVerdict(en.name);
+    /* Scoped too, while the session is in hand: stallCutBlocked() inside this asks about
+       the muscle's floor and the open proposals FOR A SLOT, and asking it about the wrong
+       one gave the wrong answer. Note that the stall COUNTER is still keyed by name
+       rather than by slot, which is its own item - see docs/open-work.md item 11. */
+    const stall = stallVerdict(en.name, sess && sess.workoutId);
     /* A WAVED LIFT CANNOT STALL IN THESE TERMS. Three exposures with no improvement in
        the top set is the definition of a stall on a plan where you choose the load; on a
        percentage wave the load is dictated and week two is MEANT to be heavier for fewer
@@ -56681,7 +56693,20 @@ function progressionApplied(p){
   if(p.kind !== "up" && p.kind !== "toohard" && p.kind !== "catchup") return false;
   if(p.applied) return true;
   if(to == null) return false;
-  const e = findProgramEntry(p.name);   // slot:todo
+  /* SLOT DEBT 5 of 9. "Has this already been written into the plan?" was answered by
+     comparing the verdict's target with whichever slot held the name first, and both ways
+     round were live:
+
+       A raise on one slot to 65 read as ALREADY APPLIED because the OTHER slot happened
+       to sit at 65. The row moved to the done list with a tick and the change was never
+       offered - no button left to press.
+
+       A raise already written to this slot read as NOT applied because the other slot sat
+       elsewhere, so Apply-all would write it a second time.
+
+     The verdict carries its slot now, stamped in buildProgression(). */
+  const pe = findProgramEntryWhere(p.name, p.wid);
+  const e = (pe && (!p.wid || pe.wid === p.wid)) ? pe.e : null;
   if(!e || e.weight == null) return false;
   const now = parseFloat(e.weight), t = parseFloat(to);
   return !isNaN(now) && !isNaN(t) && now === t;
@@ -59136,8 +59161,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.4";
+const NEWS_FOR = "2026.11.17.5";
 const NEWS = [
+  {k: "A raise you earned, with no button to press",
+   s: ["The grade card decides whether a change has already been written into your plan by "
+     + "comparing its target with the plan’s current load — and it looked that load up by "
+     + "exercise name, so a verdict about one day was judged against another day’s.",
+     "Both ways round were live, and the first is the one worth knowing about. A raise "
+     + "earned on one day to 65 read as ALREADY APPLIED because the OTHER day happened to "
+     + "sit at 65: the row moved to the done list with a tick beside it, and the weight "
+     + "you had earned was never offered. There was no button left to press.",
+     "The other way round, a change already written to this day read as not applied "
+     + "because the other day sat elsewhere, so Apply-all would write it a second time.",
+     "Every verdict now carries the slot it came from, stamped in one place rather than "
+     + "worked out again by each thing that reads it — which is how a verdict and the "
+     + "check on it came to disagree about which day they meant. Fifth of nine."]},
   {k: "Advice drawn from a day you did not train it",
    s: ["When a prescription turns out to be unreachable — you took it to RPE 10 and still "
      + "came up short of the rep range — Element 26 suggests a load you can actually "
