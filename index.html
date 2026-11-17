@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.16.18";
+const APP_VERSION = "2026.11.17.1";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -48369,8 +48369,13 @@ function bind(){
      session you are in the middle of is brought along with it, because a plan change you
      cannot act on until next week is not what somebody standing at the rack asked for. */
   document.querySelectorAll("[data-effortfix]").forEach(b=> b.onclick = ()=>{
-    const name = b.dataset.effortfix;
-    const f = effortMismatchFor(name);
+    /* "<wid>|<name>", so the tap acts on the slot the row was drawn for rather than on
+       whichever slot happens to hold the name first. */
+    const raw = String(b.dataset.effortfix || "");
+    const cut = raw.indexOf("|");
+    const wid = cut > -1 ? raw.slice(0, cut) : "";
+    const name = cut > -1 ? raw.slice(cut + 1) : raw;
+    const f = effortMismatchFor(name, wid || undefined);
     if(!f){ toast("That one has already been answered"); render(); return; }
     const why = f.dir === "down"
       ? "Reps were landing inside the range at about " + r1(f.avg) + " RPE past the target "
@@ -48379,8 +48384,11 @@ function bind(){
       : "Reps were landing inside the range at about " + r1(f.avg) + " RPE short of the "
         + "target across " + f.hits.length + " of the last " + f.n + " sessions, so the load "
         + "was lighter than the prescription asks for.";
-    if(!applyProgression(name, f.to, why, "effort")) return;
-    const live = effortApplyToActive(name, f.from, f.to);
+    if(!applyProgression(name, f.to, why, "effort", {wid: f.wid || undefined})) return;
+    /* The live session only where it IS that slot: a change to the Legs A squat has no
+       business retargeting the rows of a Legs B session in progress. */
+    const live = (!f.wid || (S.active && S.active.workoutId === f.wid))
+      ? effortApplyToActive(name, f.from, f.to) : false;
     render();
     toast(fmtLoad(f.from) + " \u2192 " + fmtLoad(f.to) + " on " + name
       + (live ? ", today's session too" : ""), "good");
@@ -54686,15 +54694,32 @@ function effortReadOf(entry){
 }
 /* The finding, or null. Reads the log only — so it speaks for a plan that has been run
    for a while without anybody having to turn anything on. */
-function effortMismatchFor(name){
+/* SLOT DEBT 1 of 9. Every part of this was name-only: the prescription came from
+   whichever slot held the name first, the sessions read were every session of that name
+   whatever day they were on, and the change went back to that first slot. On a plan with
+   the same movement in two slots at different loads - the Smith squat at 80 on Legs A and
+   60 on Legs B - one slot's grinding sessions were measured against the other's
+   prescription and the cut landed on the wrong day. The P0-1 family exactly.
+
+   `wid` now scopes all three, and travels on the finding so the card's button and the
+   write both know where it belongs. */
+function effortMismatchFor(name, wid){
   if(!rpeTracked()) return null;
-  const where = findProgramEntryWhere(name);   // slot:todo
+  const where = findProgramEntryWhere(name, wid);
   const e = where && where.e;
   if(!e) return null;                                  // not in the plan: nothing to change
+  /* Asked about a slot that does not hold this movement, the lookup falls back to one
+     that does, which is the bug. The slot has to be the slot. */
+  if(wid && where.wid !== wid) return null;
+  const slot = where.wid;
   const planW = parseFloat(e.weight);
   if(!(planW > 0)) return null;
   const hist = [];
   for(let i = S.sessions.length - 1; i >= 0 && hist.length < EFFORT_SESSIONS; i--){
+    /* THE SESSIONS OF THIS SLOT. A session of the same movement on another day was
+       performed against another prescription, often at another load, and reading it here
+       is what let a hard Legs B session cut the Legs A squat. */
+    if(slot && S.sessions[i].workoutId !== slot) continue;
     const hit = (S.sessions[i].entries || []).find(en=> nrm(en.name) === nrm(name));
     if(!hit) continue;
     const read = effortReadOf(hit);
@@ -54726,7 +54751,7 @@ function effortMismatchFor(name){
     if(hard.every(h=> near(h.load, base))){
       const to = roundLoadableOn(e, base - amt, name);
       if(to > 0 && to < planW){
-        return {name: e.name, dir: "down", from: planW, to, step: amt, hits: hard,
+        return {name: e.name, wid: slot, dir: "down", from: planW, to, step: amt, hits: hard,
                 n: upto.length, worked: near(base, planW) ? null : base,
                 avg: hard.reduce((t,h)=> t + h.over, 0) / hard.length};
       }
@@ -54744,7 +54769,7 @@ function effortMismatchFor(name){
   if(easy.length >= EFFORT_MIN_HITS){
     const to = roundLoadableOn(e, planW + amt, name);
     if(!(to > planW)) return null;
-    return {name: e.name, dir: "up", from: planW, to, step: amt, hits: easy, n: atPlan.length,
+    return {name: e.name, wid: slot, dir: "up", from: planW, to, step: amt, hits: easy, n: atPlan.length,
             avg: easy.reduce((t,h)=> t + h.under, 0) / easy.length};
   }
   return null;
@@ -54758,11 +54783,18 @@ function effortMismatchFor(name){
 function effortReadable(){
   let n = 0;
   const seen = {};
+  /* Counted in SLOTS, like the findings it is the empty-state for. A movement in two
+     slots is two prescriptions that can be read separately, and a count that said "1
+     movement" while the list beside it could show two rows would be describing a
+     different thing from the one on screen. */
   DAYS.forEach(wid=> (S.program[wid] || []).forEach(e=>{
-    if(!e || !e.name || seen[nrm(e.name)]) return;
-    seen[nrm(e.name)] = 1;
+    if(!e || !e.name) return;
+    const k = wid + "|" + nrm(e.name);
+    if(seen[k]) return;
+    seen[k] = 1;
     let hits = 0;
     for(let i = S.sessions.length - 1; i >= 0 && hits < EFFORT_SESSIONS; i--){
+      if(S.sessions[i].workoutId !== wid) continue;
       const hit = (S.sessions[i].entries || []).find(en=> nrm(en.name) === nrm(e.name));
       if(hit && effortReadOf(hit)) hits++;
     }
@@ -54774,9 +54806,14 @@ function effortReadable(){
 function effortMismatches(){
   const seen = {}, out = [];
   DAYS.forEach(wid=> (S.program[wid] || []).forEach(e=>{
-    if(!e || !e.name || seen[nrm(e.name)]) return;
-    seen[nrm(e.name)] = 1;
-    const f = effortMismatchFor(e.name);
+    if(!e || !e.name) return;
+    /* KEYED BY SLOT AND NAME, not by name. The same movement in two slots is two
+       prescriptions with two histories, and de-duplicating by name alone meant the second
+       of them could never be reported at all. */
+    const k = wid + "|" + nrm(e.name);
+    if(seen[k]) return;
+    seen[k] = 1;
+    const f = effortMismatchFor(e.name, wid);
     if(f) out.push(f);
   }));
   return out.sort((a,b)=> b.avg - a.avg);
@@ -54857,7 +54894,8 @@ function effortBlockHTML(){
                      + " since; you have been working at " + esc(fmtLoad(f.worked)) + "." : ""}
             ${esc(fmtLoad(f.from))} → ${esc(fmtLoad(f.to))}.</div>
         </div>
-        <button type="button" class="btn ghost small" data-effortfix="${esc(f.name)}">Apply</button>
+        <button type="button" class="btn ghost small" data-effortfix="${
+          esc((f.wid || "") + "|" + f.name)}">Apply</button>
       </div>`;
     }).join("")}
     <div class="ef-why">Reps say whether the set happened; effort says whether the load was
@@ -59050,8 +59088,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.16.18";
+const NEWS_FOR = "2026.11.17.1";
 const NEWS = [
+  {k: "The weight-for-effort card reads one slot at a time",
+   s: ["“The weight, not the reps” watches for a load that is wrong for the effort it is "
+     + "asking — reps landing inside the range at an RPE well outside it. All three parts "
+     + "of it worked by exercise NAME: the prescription it judged against came from "
+     + "whichever day held that name first, the sessions it read were every session of "
+     + "that name whatever day they were on, and the change it wrote went back to that "
+     + "first day.",
+     "With the same movement in two slots at different loads, one day’s grinding sessions "
+     + "were therefore measured against the other day’s prescription, and the cut landed "
+     + "on the wrong day. Each slot now gets its own reading from its own sessions, "
+     + "written back to itself, and two slots both reading that way are two separate rows "
+     + "rather than one — before, the second could never be reported at all.",
+     "First of nine remaining lookups being converted the same way."]},
   {k: "Which of the two facts is the wrong one",
    s: ["The impossible-load warning was built on a real case — a 55 lb dumbbell on a rack "
      + "that ends at 50 — and on a real log it was also wrong 42 times. Cable stacks that "

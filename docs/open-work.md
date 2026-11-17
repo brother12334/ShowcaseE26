@@ -74,3 +74,9 @@ A session's loads read in the light of where they were performed: checked agains
 gym's kit, and not treated as the starting point for prescriptions at another one.
 Cross-gym data may still feed estimates - the same distinction P0-1 draws between what may
 inform an estimate and what may set a prescription.
+
+And the gym goes into the report and the CSV export, so that future exports carry it and
+an analysis of one can separate sessions by gym. That is a requirement of the item rather
+than a nicety: the audited export's own blind spot was that nothing in it said where Oct
+17 happened, so no amount of reading it could have found what took four exchanges to
+establish by hand.
