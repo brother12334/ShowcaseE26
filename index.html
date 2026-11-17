@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.9";
+const APP_VERSION = "2026.11.17.10";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -33136,7 +33136,10 @@ function render(){
      read-only page with somebody else's Today tab mid-read. One gate, at the only door
      that draws anything. */
   if(document.body.classList.contains("share-view")) return;
-  runOneTimeSeeds();
+  /* GUARDED BECAUSE A THROW HERE COSTS EVERY TAB, NOT ONE. These run before anything is
+     drawn, so one bad record in a migration or a seed took the whole app down — which
+     is a blank screen on every tab at once and no way to reach an export. */
+  try{ runOneTimeSeeds(); }catch(e){ try{ console.error("Element 26: a one-time seed threw", e); }catch(e2){} }
   const app = $("#app");
   /* No account, no app. Signing up comes before everything — the plan, the wizard, the
      tab bar — because every byte the app is about to write belongs to an account, and
@@ -33187,7 +33190,7 @@ function render(){
   /* The tab only exists while a session does, and TAB can be pointing at it when one
      ends in another tab or on another device, so both are settled before anything is
      painted. */
-  syncWorkoutTab();
+  try{ syncWorkoutTab(); }catch(e){ try{ console.error("Element 26: syncWorkoutTab threw", e); }catch(e2){} }
   /* THE ARRIVAL ANIMATION BELONGS TO THE ARRIVAL, NOT TO EVERY REDRAW.
 
      It is carried by the cards themselves, and render() builds new cards every time, so
@@ -33198,15 +33201,10 @@ function render(){
   app.classList.remove("view-in");
   /* A menu is anchored to a button in the markup that is about to be replaced. */
   closeDropdown();
-  if(TAB==="today") app.innerHTML = viewToday();
-  else if(TAB==="workout") app.innerHTML = viewWorkoutTab();
-  else if(TAB==="history") app.innerHTML = RECORDS_OPEN ? viewRecords() : viewHistory();
-  else if(TAB==="body") app.innerHTML = viewBody();
-  else if(TAB==="program") app.innerHTML = viewProgram();
-  else if(TAB==="research") app.innerHTML = viewResearch();
-  else app.innerHTML = viewSync();
-  bind();
-  countUpAll(app);
+  /* ONE BAD RECORD MUST NOT COST YOU THE SCREEN. Every tab is drawn and wired behind
+     renderTabInto(), which shows what threw and an export button rather than leaving a
+     tab bar above nothing. See the RESCUE section. */
+  renderTabInto(app);
   // the page just changed height, so the tab bar's "am I at the bottom?" test needs
   // the new figure. Read it here, once, rather than inside the scroll handler.
   refreshNavBounds();
@@ -44080,6 +44078,9 @@ function viewResearch(){
 
   let h = `<div class="hdr"><h1>Research Lab</h1>${hdrRight()}</div>
     <div class="rs-sub">New science for better training.</div>
+    <div class="btn-row" style="margin:0 0 12px">
+      <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
+    </div>
     <div class="rs-search">
       <label class="rs-sr" for="rsQ">Search research</label>
       <input id="rsQ" type="search" inputmode="search" autocomplete="off"
@@ -44704,6 +44705,15 @@ function viewProgram(){
     <button class="btn ghost small" id="planBtn" style="flex:1">${ICON.doc} Full plan</button>
     <button class="btn ghost small" id="buildPlanBtn" style="flex:1">Build a new plan</button>
   </div>
+  <div class="btn-row" style="margin-bottom:10px">
+    <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
+    <button class="btn ghost small" id="rescueFull" style="flex:1">Normal export</button>
+  </div>
+  <div class="sub" style="margin:-4px 2px 14px;font-size:var(--fs-3);color:var(--faint)">
+    <b>Export raw data</b> reads this device's storage directly as text rather than through
+    the app, so it works even when a screen will not draw. It is here, not in Settings,
+    because Settings is one of the screens that can go down. GitHub sync tokens are left
+    out; your account key is in it, so keep the file private.</div>
   <div class="btn-row" style="margin-bottom:16px">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
     <button class="btn ghost small" id="planHistBtn" style="flex:1">What changed${
@@ -46579,6 +46589,10 @@ document.addEventListener("keydown", e=>{
 });
 
 function bind(){
+  /* THE RESCUE BUTTONS FIRST, AND IN THEIR OWN TRY. They are the way out of a broken
+     app, so they are wired before anything that could throw and take the rest of bind()
+     with it. */
+  try{ bindRescue(); }catch(e){}
   /* Research first, and it returns immediately on every other tab, so the cost to the
      four existing screens is one string comparison. */
   try{ bindResearch(); }catch(e){}
@@ -59370,8 +59384,27 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.9";
+const NEWS_FOR = "2026.11.17.10";
 const NEWS = [
+  {k: "A way out of a blank screen",
+   s: ["Reported live: adding a movement in the session editor left Today, History and "
+     + "Body drawing nothing at all \u2014 a tab bar above an empty page. Program and "
+     + "Research still worked, so the data had loaded fine; it was the screens that read "
+     + "sessions that were falling over. And every route to an export ran through one of "
+     + "those screens, so the one thing worth doing was the one thing you could not reach.",
+     "This release does nothing but fix that, and it changes no data of yours. Each tab "
+     + "now draws behind a boundary: if it throws, you get the error text and an export "
+     + "button instead of a blank page, and the other tabs are unaffected. A screen that "
+     + "draws but fails to wire up its buttons says so too, rather than sitting there "
+     + "half working.",
+     "\u201cExport raw data\u201d is the new button, on Program and on Research as well "
+     + "as on any screen that has failed. It does not read the app at all: it takes every "
+     + "Element 26 key in this browser\u2019s storage as plain text and writes it to a "
+     + "file. There is no schema in it to be wrong about, so it works on data that makes "
+     + "everything else throw \u2014 a value too corrupt to parse goes in verbatim, "
+     + "because that is exactly the one you most need off the device. GitHub sync tokens "
+     + "are left out; your account key is in it, so keep the file to yourself.",
+     "The cause of the blank screen itself is next, and it is a separate release."]},
   {k: "A paired movement that didn\u2019t count as done",
    s: ["Reported from the same live session as the L/R labels below: a one-limb movement "
      + "was logged in full, and afterwards it was missing from the finished session and "
@@ -66596,6 +66629,307 @@ function openWorkoutExport(sessId){
 }
 
 /* ---------- backup ---------- */
+/* ======================================================================
+   RESCUE: GETTING THE DATA OUT WHEN THE APP CANNOT DRAW IT
+
+   WHY THIS EXISTS AND WHY IT IS DELIBERATELY STUPID. exportJSON() walks S through
+   BACKUP_FIELDS and re-serialises it. That is the right export for ordinary use and
+   the wrong one for an emergency: it reads the same in-memory state the broken screen
+   was reading, so a shape that makes a renderer throw can make the export throw too,
+   and the one action that could have saved the data is the one that fails.
+
+   So this reads NOTHING of the app's. It walks localStorage by key name, takes each
+   value as a string, and writes those strings to a file. There is no schema, no
+   migration and no field list; a key added tomorrow is carried without anybody
+   remembering to add it. It cannot be made wrong by bad data because it does not
+   interpret data.
+
+   Each value is parsed ONLY to redact, never to decide whether to include it. A key
+   that will not parse is included verbatim, as text, with a note saying so — the
+   whole point is that a corrupt value is exactly the value you most need off the
+   device.
+
+   WHAT IS REDACTED, AND WHY ONLY THAT. A GitHub token must never travel in a file:
+   it is a credential for a third-party service, syncSafeState() strips it from the
+   ordinary export for the same reason, and a rescue file is the file most likely to be
+   emailed to somebody for help. Your account id and key are NOT redacted: they are
+   your own identity, and a rescue file that cannot restore the account it came from is
+   not a rescue file. The header says so, so you know what you are holding. */
+const RESCUE_PREFIXES = ["ironlog", "e26."];
+const RESCUE_SECRET_KEYS = ["token", "pat"];
+
+/* Walks a parsed value and blanks any field named as a credential, at any depth,
+   recording where. Returns the paths it blanked. Mutates the copy it is given, which is
+   why the caller hands it a fresh parse rather than anything the app is using. */
+function rescueRedact(v, path, hit, seen){
+  path = path || "";
+  hit = hit || [];
+  seen = seen || [];
+  if(!v || typeof v !== "object") return hit;
+  if(seen.indexOf(v) >= 0) return hit;        // a cycle would otherwise never return
+  seen.push(v);
+  if(Array.isArray(v)){
+    v.forEach((x, i)=> rescueRedact(x, path + "[" + i + "]", hit, seen));
+    return hit;
+  }
+  Object.keys(v).forEach(k=>{
+    const p = path ? path + "." + k : k;
+    if(RESCUE_SECRET_KEYS.indexOf(k) >= 0 && typeof v[k] === "string"){
+      if(v[k]) hit.push(p + " (" + v[k].length + " chars)");
+      v[k] = "";
+      return;
+    }
+    rescueRedact(v[k], p, hit, seen);
+  });
+  return hit;
+}
+
+/* The whole of this device's Element 26 storage, as data. Every step is individually
+   guarded: one unreadable key must not cost you the other twenty. */
+function rawStateDump(){
+  const out = {
+    e26raw: {
+      app: "Element 26",
+      kind: "raw localStorage dump",
+      version: APP_VERSION,
+      exportedAt: Date.now(),
+      exportedAtLocal: new Date().toString(),
+      note: "Every Element 26 storage key on this device, taken as text. GitHub sync "
+          + "tokens are blanked; your account id and key are NOT, so treat this file as "
+          + "private. Import it with the normal importer, or send it for help."
+    },
+    notes: [],
+    keys: {}
+  };
+  let names = [];
+  try{
+    for(let i = 0; i < localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && RESCUE_PREFIXES.some(p=> k.indexOf(p) === 0)) names.push(k);
+    }
+  }catch(e){
+    out.notes.push("Could not list storage: " + ((e && e.message) || e));
+  }
+  names.sort();
+  if(!names.length) out.notes.push("No Element 26 keys found in this browser's storage.");
+  names.forEach(k=>{
+    const rec = {};
+    let raw = null;
+    try{ raw = localStorage.getItem(k); }
+    catch(e){
+      rec.readError = String((e && e.message) || e);
+      out.keys[k] = rec;
+      out.notes.push(k + " could not be read: " + rec.readError);
+      return;
+    }
+    rec.bytes = raw == null ? 0 : raw.length;
+    let obj = null, parsed = false;
+    try{ obj = JSON.parse(raw); parsed = true; }
+    catch(e){ rec.parseError = String((e && e.message) || e); }
+    if(parsed){
+      let hit = [];
+      try{ hit = rescueRedact(obj, "", [], []); }catch(e){ rec.redactError = String((e && e.message) || e); }
+      rec.value = obj;
+      if(hit.length) rec.redacted = hit;
+    } else {
+      /* Unparseable is the case this whole function was written for. It goes in as
+         text, untouched, and the note says it may still hold a token — because
+         redaction needs a parse and there wasn't one. */
+      rec.rawText = raw;
+      out.notes.push(k + " would not parse (" + rec.parseError + "), so it is included "
+        + "verbatim as rawText. Nothing in it could be redacted, so assume it may hold a token.");
+    }
+    out.keys[k] = rec;
+  });
+  return out;
+}
+
+/* Written with JSON.stringify's replacer-free path first, and a last-ditch per-key
+   build if something in there will not serialise at all. */
+function rawStateText(){
+  const d = rawStateDump();
+  try{ return JSON.stringify(d, null, 1); }
+  catch(e){
+    const parts = [];
+    Object.keys(d.keys || {}).forEach(k=>{
+      let s;
+      try{ s = JSON.stringify(d.keys[k]); }
+      catch(e2){ s = JSON.stringify({unserialisable: String((e2 && e2.message) || e2)}); }
+      parts.push(JSON.stringify(k) + ":" + s);
+    });
+    return '{"e26raw":' + JSON.stringify(d.e26raw) + ',"notes":'
+      + JSON.stringify((d.notes || []).concat(["The dump would not serialise whole: "
+        + ((e && e.message) || e) + ". Rebuilt key by key."]))
+      + ',"keys":{' + parts.join(",") + "}}";
+  }
+}
+
+/* Downloading is itself a step that can fail — a revoked object URL, a blocked
+   click, a browser with no download. Each fallback is one the previous failure leaves
+   open, and the last one puts the text on the screen where it can be selected. */
+function exportRaw(){
+  const text = rawStateText();
+  let name = "element26-raw";
+  try{ name = "element26-raw-" + profSlug() + "-" + todayStr(); }catch(e){}
+  try{
+    const blob = new Blob([text], {type: "application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); }catch(e){} }, 4000);
+    return true;
+  }catch(e){}
+  try{
+    const w = window.open("", "_blank");
+    if(w && w.document){
+      w.document.write("<pre></pre>");
+      w.document.querySelector("pre").textContent = text;
+      w.document.title = name;
+      return true;
+    }
+  }catch(e){}
+  try{
+    const p = document.createElement("pre");
+    p.id = "rescueDump";
+    p.style.cssText = "position:fixed;inset:0;z-index:99999;margin:0;padding:12px;"
+      + "overflow:auto;background:#000;color:#fff;font-size:11px;white-space:pre-wrap;"
+      + "word-break:break-all;-webkit-user-select:text;user-select:text";
+    p.textContent = text;
+    document.body.appendChild(p);
+    return true;
+  }catch(e){}
+  return false;
+}
+
+/* ---------- the panel a broken tab shows instead of nothing ---------- */
+let TAB_ERR = null;
+
+function errText(err){
+  if(!err) return "Unknown error";
+  let s = "";
+  try{ s = (err.name ? err.name + ": " : "") + (err.message || String(err)); }
+  catch(e){ s = "Unprintable error"; }
+  try{ if(err.stack) s += "\n\n" + err.stack; }catch(e){}
+  return s;
+}
+
+const RESCUE_BTNS = `<div class="btn-row" style="margin-top:12px">
+    <button class="btn" id="rescueRaw" style="flex:1">Export raw data</button></div>
+  <div class="btn-row">
+    <button class="btn ghost small" id="rescueFull" style="flex:1">Normal export</button>
+    <button class="btn ghost small" id="rescueCopy" style="flex:1">Copy the error</button></div>`;
+
+function bindRescue(){
+  const r = $("#rescueRaw");
+  if(r) r.onclick = ()=>{
+    let ok = false;
+    try{ ok = exportRaw(); }catch(e){ ok = false; }
+    try{ toast(ok ? "Raw data written" : "Could not write the file — screenshot this screen", ok ? "good" : "warn"); }catch(e){}
+  };
+  const f = $("#rescueFull");
+  if(f) f.onclick = ()=>{
+    try{ exportJSON(); }
+    catch(e){ try{ toast("The normal export failed too — use Export raw data", "warn"); }catch(e2){} }
+  };
+  const c = $("#rescueCopy");
+  if(c) c.onclick = ()=>{
+    const t = TAB_ERR ? (TAB_ERR.tab + " / " + TAB_ERR.where + "\n" + errText(TAB_ERR.err)) : "No error recorded";
+    try{ navigator.clipboard.writeText(t); toast("Copied", "good"); }
+    catch(e){ try{ toast("Copy failed — screenshot it", "warn"); }catch(e2){} }
+  };
+}
+
+const TAB_TITLES = {today:"Today", workout:"Workout", history:"History", body:"Body",
+  program:"Program", research:"Research Lab", sync:"Settings"};
+
+function viewTabCrashHTML(err, where){
+  return `<div class="hdr"><h1>${esc(TAB_TITLES[TAB] || "Element 26")}</h1></div>
+  <div class="card" style="border-color:var(--bad)">
+    <h3 style="margin:0 0 8px">This screen could not be drawn</h3>
+    <div class="sub" style="margin:0 0 10px"><b>Your data is still here.</b> Something in it
+      has a shape this screen does not expect, so drawing it threw instead of finishing.
+      Nothing has been changed or deleted, and the other tabs may still work.</div>
+    <div class="sub" style="margin:0 0 10px"><b>Export the raw data first.</b> That button
+      reads your storage directly as text rather than through the app, so it works even
+      when nothing else does. Keep the file somewhere safe before doing anything else.</div>
+    ${RESCUE_BTNS}
+    <div class="sub" style="margin:14px 0 4px;color:var(--faint)">What threw, while ${esc(where)}:</div>
+    <pre style="margin:0;padding:10px;overflow:auto;max-height:40vh;background:var(--bg);
+      border:1px solid var(--line);border-radius:10px;font-size:11px;white-space:pre-wrap;
+      word-break:break-word;-webkit-user-select:text;user-select:text">${esc(errText(err))}</pre>
+  </div>`;
+}
+
+/* When even the panel cannot be built — esc, var(--bad), anything. No template, no
+   helpers, no classes: a string and two buttons. */
+function rescueBareHTML(err){
+  let msg = "Unknown error";
+  try{ msg = String((err && (err.message || err.name)) || err); }catch(e){}
+  msg = msg.replace(/[&<>]/g, c=> ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+  return '<div style="padding:16px;color:#fff;font:14px system-ui">'
+    + '<h3>This screen could not be drawn</h3>'
+    + '<p>Your data is still here. Export it before doing anything else.</p>'
+    + '<p><button id="rescueRaw">Export raw data</button></p>'
+    + '<pre style="white-space:pre-wrap;font-size:11px">' + msg + '</pre></div>';
+}
+
+/* The banner for the other half of the failure: the screen DREW, and then wiring its
+   controls threw. The content is real and worth keeping on screen, so this goes above
+   it rather than replacing it — but it is not silent, because a tab whose buttons
+   are half-wired behaves wrong in ways nobody can see. */
+function rescueBannerHTML(err){
+  return `<div class="card" style="border-color:var(--warn);margin-bottom:12px">
+    <h3 style="margin:0 0 6px">This screen is only half working</h3>
+    <div class="sub" style="margin:0 0 8px">It drew, but wiring up its buttons threw, so
+      some of them will do nothing. Your data is unchanged. Export it, then tell me what
+      this says.</div>
+    ${RESCUE_BTNS}
+    <pre style="margin:10px 0 0;padding:10px;overflow:auto;max-height:30vh;background:var(--bg);
+      border:1px solid var(--line);border-radius:10px;font-size:11px;white-space:pre-wrap;
+      word-break:break-word;-webkit-user-select:text;user-select:text">${esc(errText(err))}</pre>
+  </div>`;
+}
+
+/* One place that decides which tab's HTML to build, so the boundary wraps exactly one
+   call and no screen can be added later that skips it. */
+function tabViewHTML(){
+  if(TAB === "today") return viewToday();
+  if(TAB === "workout") return viewWorkoutTab();
+  if(TAB === "history") return RECORDS_OPEN ? viewRecords() : viewHistory();
+  if(TAB === "body") return viewBody();
+  if(TAB === "program") return viewProgram();
+  if(TAB === "research") return viewResearch();
+  return viewSync();
+}
+
+/* THE BOUNDARY. Draw, then wire, then animate — each a separate failure with its
+   own outcome, because they fail differently and leave the screen in different states. */
+function renderTabInto(app){
+  TAB_ERR = null;
+  try{
+    app.innerHTML = tabViewHTML();
+  }catch(err){
+    TAB_ERR = {tab: TAB, where: "drawing the screen", err: err};
+    try{ app.innerHTML = viewTabCrashHTML(err, "drawing the screen"); }
+    catch(e2){ try{ app.innerHTML = rescueBareHTML(err); }catch(e3){} }
+    try{ bindRescue(); }catch(e4){}
+    try{ console.error("Element 26: " + TAB + " failed to draw", err); }catch(e5){}
+    return false;
+  }
+  try{
+    bind();
+  }catch(err){
+    TAB_ERR = {tab: TAB, where: "wiring up the screen", err: err};
+    try{ app.insertAdjacentHTML("afterbegin", rescueBannerHTML(err)); bindRescue(); }catch(e2){}
+    try{ console.error("Element 26: " + TAB + " failed to bind", err); }catch(e3){}
+  }
+  try{ countUpAll(app); }catch(e){}
+  return !TAB_ERR;
+}
+
 function exportJSON(){
   const blob = new Blob([payload()], {type:"application/json"});
   const a = document.createElement("a");
