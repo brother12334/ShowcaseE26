@@ -69,12 +69,22 @@ const addViaEditor = (name)=> p.evaluate(nm=>{
     sel.value = "__custom__"; fire(sel);
     const c = document.getElementById("customName"); if(c){ c.value = nm; fire(c); }
   }
-  /* Two sets, both sides' worth of numbers typed, exactly as the editor offers them. */
-  document.getElementById("plusSet").click();
-  const put = (i, f, v)=>{ const el = document.querySelector(`#newSets [data-ns="${i}"][data-f="${f}"]`);
-    if(el){ el.value = v; el.dispatchEvent(new Event("change", {bubbles:true})); } };
-  put(0,"weight","25"); put(0,"reps","15"); put(1,"weight","25"); put(1,"reps","13");
+  /* THE FORM CHANGED, AND THIS DRIVES THE NEW ONE. It used to ask for weight, reps and
+     RPE in four boxes of its own - the last duplicate set-row builder, and the reason a
+     one-limb movement added here came out as plain sets. It now asks only the two things
+     that decide the SHAPE of the rows, and the rows take the numbers. Both limbs is
+     chosen here, because this spec reproduces the reported crash, which came from an
+     entry added as plain sets - the paired path is covered by editkind.mjs. */
+  document.getElementById("aeBoth").click();
+  document.getElementById("aeCount").value = "2";
   document.getElementById("addToSess").click();
+  /* The numbers then go into the real rows, by their live attribute names. */
+  const ei = S.sessions[0].entries.length - 1;
+  const put = (si, f, v)=>{
+    const el = document.querySelector(`#modal .set [data-e="${ei}"][data-s="${si}"][data-f="${f}"]`);
+    if(el){ el.value = v; el.dispatchEvent(new Event("change", {bubbles:true})); }
+  };
+  put(0,"weight","25"); put(0,"reps","15"); put(1,"weight","25"); put(1,"reps","13");
   const btn = document.getElementById("closeModal");
   if(btn) btn.click();
   return {inLibrary: have, entries: (S.sessions[0].entries||[]).map(e=> e.name)};

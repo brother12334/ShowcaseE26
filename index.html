@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.15";
+const APP_VERSION = "2026.11.17.16";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -9376,15 +9376,41 @@ function openDropdown(btn, items, pick, head){
   if(first) try{ first.focus({preventScroll:true}); }catch(e){}
 }
 /* Adding the set itself, wherever it was asked for. */
-function addSetOfKind(ei, k){
-  const en = S.active && S.active.entries[ei];
+/* ONE "ADD A SET", FOR THE LIVE SESSION AND THE EDITOR.
+
+   `sess` defaults to the live session, which is every caller that existed before the
+   editor shared this. The kind of set is chosen from setKindOptions() in both places, so
+   the editor cannot offer a type logging does not, or miss one it gains.
+
+   The technique goes on the SET rather than on a side: techFor() reads it per set index,
+   and a drop set is a property of the set, not of the left arm. */
+function addSetOfKind(ei, k, sess){
+  const s = sess || S.active;
+  const en = s && (s.entries || [])[ei];
   if(!en) return;
-  const st = {weight:"", reps:"", rpe:"", done:false};
+  if(!Array.isArray(en.sets)) en.sets = [];
+  let st;
+  if(entryPerSide(en)){
+    /* A PAIR, BUILT BY THE ADAPTER. One set of a one-limb movement is one pair, so
+       adding a half set would make a shape nothing else in the app produces, and
+       sideTarget() is the only thing allowed to create the sides. */
+    en.sets.push({});
+    const si = en.sets.length - 1;
+    st = en.sets[si];
+    const order = pairSidesOf(en, si);
+    (order.length ? order : ["L", "R"]).forEach(sd=>{
+      const t = sideTarget(en, si, sd);
+      t.weight = ""; t.reps = ""; t.rpe = "";
+    });
+  } else {
+    st = {weight:"", reps:"", rpe:"", done:false};
+    bwSeedSet(en, st);            // a card does not get two kinds of number in it
+    en.sets.push(st);
+  }
   if(k) st.tech = k;
-  bwSeedSet(en, st);              // a card does not get two kinds of number in it
-  en.sets.push(st);
   en.setsOwn = true;              // this count is yours; the plan does not reset it
-  save(); render();
+  if(s !== S.active) setEditSaved(s);
+  else { save(); render(); }
   toast(k === "lengthened" ? "Partials set added \u2014 " + lengthenedWhere(en.name)
       : k ? TECHNIQUES[k].label + " set added"
           : "Set added", "good");
@@ -53458,10 +53484,33 @@ function renderSessEditor(s){
       </select>
     </div>
     <div class="field" id="customWrap" style="display:none"><label>Custom exercise name</label><input id="customName" placeholder="e.g. Face Pulls"></div>
-    <div id="newSets"></div>
+    ${/* HOW IT WAS DONE, AND HOW MANY — AND THEN THE REAL ROWS DO THE REST.
+
+          This used to be four boxes of its own: weight, reps, RPE and a + set. That was
+          the last duplicate set-row builder in the app, and the reason a one-limb movement
+          added here came out as plain sets with no way to say left and right and no way to
+          say what kind of set it was. It is gone.
+
+          What is left is the two things the ROWS cannot ask, because they decide what
+          shape the rows have: one limb at a time or both, and how many sets. Press Add and
+          the exercise appears above with that many empty sets, drawn by the same builder
+          logging uses — L and R where it applies, the warm-up mark, and the set type on
+          each + set. Nothing is typed twice and nothing can drift. */""}
+    <div class="field"><label>How was it done?</label>
+      <div class="ch-list" style="margin-top:2px">
+        <button type="button" class="ch" id="aeBoth" aria-pressed="false">
+          <span class="ch-tx"><b>Both limbs at once</b><span>One set is one set — a bench press, a pulldown.</span></span>
+        </button>
+        <button type="button" class="ch" id="aeSide" aria-pressed="false">
+          <span class="ch-tx"><b>One limb at a time</b><span>Each set is a left and a right, logged as a pair.</span></span>
+        </button>
+      </div>
+    </div>
+    <div class="field"><label>How many sets?</label>
+      <input id="aeCount" inputmode="numeric" value="3" style="width:90px;text-align:center">
+    </div>
     <div class="btn-row">
-      <button class="btn ghost small" id="plusSet">+ set</button>
-      <button class="btn small" id="addToSess">Add to session</button>
+      <button class="btn small" id="addToSess" style="flex:1">Add it, then fill in the rows</button>
     </div>
   </div>
   <button class="btn" style="margin-top:16px" id="closeModal">Done</button>`;
@@ -53488,40 +53537,17 @@ function renderSessEditor(s){
     setEditSaved(s);
     toast("Back to how they were", "good");
   });
+  /* THE SAME MENU AS THE WORKOUT SCREEN'S + set, under the button, with the same options
+     from setKindOptions() and the same adder. The editor cannot drift from logging on
+     what kinds of set exist, because there is one list and one addSetOfKind(). Carrying
+     the previous pair's load over was dropped with the old handler: logging does not do
+     it either, and two screens that add a set differently is the whole problem. */
   document.querySelectorAll("[data-seaddset]").forEach(b=> b.onclick = ()=>{
-    const en = s.entries[parseInt(b.dataset.seaddset, 10)];
+    const ei = parseInt(b.dataset.seaddset, 10);
+    const en = s.entries[ei];
     if(!en) return;
-    if(!Array.isArray(en.sets)) en.sets = [];
-    if(en.sets.length >= 20){ toast("That is as many sets as one movement holds here"); return; }
-    const lastI = en.sets.length - 1;
-    const prev = en.sets[lastI];
-    if(entryPerSide(en)){
-      /* THE ADAPTER BUILDS THE PAIR, this does not. sideTarget() creates a side that is
-         not there yet and is the one thing allowed to touch `sides` directly, so pushing
-         an empty set and asking it for each side produces the paired shape without a
-         second place in the app knowing what that shape is. pairSidesOf() gives the order
-         from the entry's own opening side rather than assuming left leads.
-
-         The previous pair's load per side is carried over; reps and effort are left
-         empty on purpose, because those ARE the set and nobody wants last set's reps
-         pre-filled as if they had done them. */
-      const was = {};
-      if(lastI >= 0) pairSidesOf(en, lastI).forEach(sd=>{
-        const v = sideTarget(en, lastI, sd);
-        was[sd] = v && v.weight != null ? v.weight : "";
-      });
-      en.sets.push({});
-      const now = en.sets.length - 1;
-      const order = pairSidesOf(en, lastI >= 0 ? lastI : now);
-      (order.length ? order : ["L", "R"]).forEach(sd=>{
-        const t = sideTarget(en, now, sd);
-        t.weight = was[sd] != null ? was[sd] : "";
-        t.reps = ""; t.rpe = "";
-      });
-    } else {
-      en.sets.push({weight: prev && prev.weight != null ? prev.weight : "", reps:"", rpe:""});
-    }
-    setEditSaved(s);
+    if((en.sets || []).length >= 20){ toast("That is as many sets as one movement holds here"); return; }
+    openDropdown(b, setKindOptions(en), k=> addSetOfKind(ei, k, s), "Goes on the end, empty");
   });
   document.querySelectorAll("[data-sermset]").forEach(b=> b.onclick = ()=>{
     const en = s.entries[parseInt(b.dataset.sermset, 10)];
@@ -53537,24 +53563,6 @@ function renderSessEditor(s){
     setEditSaved(s);
   });
 
-  let newSets = [{weight:"",reps:"",rpe:""}];
-  const drawSets = ()=>{
-    $("#newSets").innerHTML = `<div class="set-labels"><span>set</span><span>lbs</span><span>reps</span><span>rpe</span><span></span></div>` +
-      newSets.map((st,i)=>`<div class="set"><span class="idx">${i+1}</span>
-        <input inputmode="decimal" data-ns="${i}" data-f="weight" value="${esc(st.weight)}" placeholder="${unitWord()}">
-        <input inputmode="numeric" data-ns="${i}" data-f="reps" value="${esc(st.reps)}" placeholder="reps">
-        <select data-ns="${i}" data-f="rpe">${rpeOptions(st.rpe)}</select><span></span></div>`).join("");
-    document.querySelectorAll("#newSets input, #newSets select").forEach(el=>{
-      el.onchange = ()=>{ newSets[el.dataset.ns][el.dataset.f] = el.value; };
-    });
-  };
-  drawSets();
-
-  const harvest = ()=>{
-    document.querySelectorAll("#newSets [data-ns]").forEach(el=>{
-      newSets[el.dataset.ns][el.dataset.f] = el.value;
-    });
-  };
 
   const ne = $("#sessNoteEdit");
   if(ne) ne.onchange = ()=>{ s.note = ne.value.trim(); s.edited = Date.now(); save(); queueSync(); };
@@ -53613,7 +53621,6 @@ function renderSessEditor(s){
     toast(en.name + ": " + fmtLoad(val) + " " + unitWord() + " added, session re-graded");
   });
   $("#addExSel").onchange = ev=>{ $("#customWrap").style.display = ev.target.value==="__custom__" ? "block" : "none"; };
-  $("#plusSet").onclick = ()=>{ harvest(); newSets.push({weight:"",reps:"",rpe:""}); drawSets(); };
   /* PUTTING THE RIGHT NAME ON SETS THAT ALREADY HAPPENED.
 
      Nothing else could do this. Switching mid-session splits the entry and names both
@@ -53685,32 +53692,55 @@ function renderSessEditor(s){
   document.querySelectorAll("[data-sedown]").forEach(b=> b.onclick=()=>{
     if(moveSessEx(s.id, b.dataset.sedown, 1, true)) renderSessEditor(s);
   });
+  /* THE SHAPE IS CHOSEN, NOT GUESSED, and it is defaulted from the plan rather than
+     left blank: the programme knows whether this movement is one limb at a time, and
+     pre-selecting the likely answer while leaving it visible and changeable is different
+     from deciding it silently. */
+  let aeSide = null;
+  const aeDraw = ()=>{
+    const bo = $("#aeBoth"), sd = $("#aeSide");
+    if(bo){ bo.classList.toggle("on", aeSide === false); bo.setAttribute("aria-pressed", String(aeSide === false)); }
+    if(sd){ sd.classList.toggle("on", aeSide === true); sd.setAttribute("aria-pressed", String(aeSide === true)); }
+  };
+  const aeGuess = ()=>{
+    let name = $("#addExSel") ? $("#addExSel").value : "";
+    if(name === "__custom__") name = ($("#customName") || {value:""}).value.trim();
+    if(!name) return null;
+    const probe = {name};
+    if(entryPerSideWanted(probe)) return true;
+    let hit = null;
+    try{ hit = findProgramEntryWhere(name, s.workoutId); }catch(e){}
+    if(hit && hit.e) return !!entryPerSideWanted(hit.e);
+    return false;
+  };
+  const aeSync = ()=>{ if(aeSide === null){ aeSide = aeGuess(); aeDraw(); } };
+  aeSync();
+  if($("#aeBoth")) $("#aeBoth").onclick = ()=>{ aeSide = false; aeDraw(); };
+  if($("#aeSide")) $("#aeSide").onclick = ()=>{ aeSide = true; aeDraw(); };
+  if($("#addExSel")) $("#addExSel").addEventListener("change", ()=>{ aeSide = null; aeSync(); });
+  if($("#customName")) $("#customName").addEventListener("change", ()=>{ aeSide = null; aeSync(); });
+
   $("#addToSess").onclick = ()=>{
-    harvest();
     let name = $("#addExSel").value;
-    if(name==="__custom__") name = $("#customName").value.trim();
+    if(name === "__custom__") name = $("#customName").value.trim();
     if(!name){ toast("Pick or name an exercise first"); return; }
-    /* EVERY ROW WITH ANYTHING IN IT IS KEPT, RPE INCLUDED. This filter asked only about
-       reps and weight, so a row where the only thing picked was an RPE went in the bin
-       without a word — which is the same class of fault as the one that deleted a
-       paired movement at finish: a test for "is this empty" that does not know about one
-       of the fields. */
-    const typedIn = st=> !!(String(st.reps||"").trim() || String(st.weight||"").trim()
-                            || String(st.rpe||"").trim());
-    const sets = newSets.filter(typedIn).map(st=>({weight:st.weight, reps:st.reps, rpe:st.rpe, done:true}));
-    if(!sets.length){ toast("Fill in at least one set"); return; }
-    /* AND IF A ROW IS DROPPED, IT IS SAID OUT LOUD. A blank row at the bottom is the
-       normal case and worth no words, but somebody who typed something and lost it has to
-       hear about it rather than find out months later. */
-    const lost = newSets.length - sets.length;
-    if(lost && newSets.some(st=> !typedIn(st) && Object.keys(st).some(k=> String(st[k]||"").trim()))){
-      toast(lost + " row" + (lost === 1 ? "" : "s") + " had nothing readable in them and were not added", "warn");
-    }
-    s.entries.push({name, sets});
+    if(aeSide === null) aeSide = aeGuess();
+    if(aeSide === null){ toast("Say whether it was one limb at a time or both"); return; }
+    const n = Math.max(1, Math.min(20, parseInt($("#aeCount").value, 10) || 1));
+    /* THE ENTRY IS CREATED EMPTY AND THE ROWS ARE FILLED IN ABOVE. No numbers are asked
+       for here, because asking for them here is what required a second set-row builder.
+       addSetOfKind() makes each set - a pair where the movement is per side - so a set
+       added by this form and a set added live are made by the same code. */
+    const en = {name, sets: []};
+    if(aeSide){ en.perSide = true; en.startSide = "L"; }
+    s.entries.push(en);
+    const ei = s.entries.length - 1;
+    for(let i = 0; i < n; i++) addSetOfKind(ei, "", s);
     s.edited = Date.now();
     save(); queueSync();
     renderSessEditor(s);
-    toast("Added "+name);
+    toast("Added " + name + " with " + n + (aeSide ? " pair" : " set") + (n === 1 ? "" : "s")
+      + " to fill in", "good");
   };
   $("#closeModal").onclick = ()=>{ hideModal(); render(); };
 }
@@ -60321,8 +60351,31 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.15";
+const NEWS_FOR = "2026.11.17.16";
 const NEWS = [
+  {k: "Adding an exercise in the editor, properly",
+   s: ["The last of it. \u201cAdd an exercise\u201d in the session editor asked for weight, "
+     + "reps and RPE in four boxes of its own \u2014 which was the last duplicate set row in "
+     + "the app, and the reason a one-limb movement added there came out as plain sets "
+     + "with no way to say left and right, and no way to say what kind of set it was.",
+     "It now asks only the two things that decide what shape the rows should be: one limb "
+     + "at a time or both, and how many sets. The answer is pre-selected from what your "
+     + "plan says about the movement, and you can change it. Press Add and the exercise "
+     + "appears above with that many empty sets, drawn by the same builder you log with "
+     + "\u2014 L and R where they apply, the warm-up mark, the lot \u2014 and you fill them in "
+     + "there.",
+     "Each exercise\u2019s + set now opens the same menu the workout screen opens, from the "
+     + "same list: normal, lengthened partials, to failure, AMRAP. A set added in the "
+     + "editor and the same set added live are now made by the same code, so they are the "
+     + "same object \u2014 which a test checks field by field, driven from that list rather "
+     + "than from a copy of it, so a type added to logging tomorrow is covered without "
+     + "anybody remembering this.",
+     "Worth saying plainly, since it is easy to assume otherwise: drop sets, myo-reps, "
+     + "rest-pause and clusters are not per-set choices in this app, live or in the "
+     + "editor. They are set on the EXERCISE in your programme, and their drops and "
+     + "mini-sets hang off whichever set carries them \u2014 editable in both places now, "
+     + "through the same row.",
+     "There is one set row in the app, and a test fails if a second one ever appears."]},
   {k: "Turning plain sets into L/R pairs",
    s: ["If a one-limb movement in an old session is sitting there as plain sets \u2014 which "
      + "is what the editor used to produce, because it had no way to say left and right "

@@ -102,31 +102,58 @@ ck("including the one logged on the left only", d3.json.indexOf('"13"') >= 0);
 ck("and the one that is only an RPE on the right", d3.json.indexOf('"rpe":"9"') >= 0, d3.json);
 ck("the two empty pairs are dropped", d3.sets === 3);
 
-/* ---------- 4. the session editor keeps an RPE-only row ---------- */
-console.log("\n4. the session editor's Add an exercise");
+/* ---------- 4. the session editor cannot drop a typed value, because it takes none --- */
+/* THIS SECTION CHANGED WITH THE FORM, and the reason matters. It used to add an exercise
+   through four boxes of the editor's own and assert that a row holding only an RPE was
+   not binned. That form is gone: it was the last duplicate set-row builder and the reason
+   a one-limb movement added in the editor came out as plain sets. The new form asks only
+   what shape the rows should be and how many, and the rows - the live builder's - take
+   every number.
+
+   So the guarantee is stronger than it was, and is asserted as such: the form creates
+   empty sets, so there is nothing for it to drop; a value typed into any field of a row
+   is stored, RPE included; and removing a set that has anything in it asks first. */
+console.log("\n4. the session editor");
 const d4 = await p.evaluate(()=>{
-  const s = S.sessions[0];
-  const before = (s.entries||[]).length;
-  renderSessEditor(s);
+  const sess = S.sessions[0];
+  renderSessEditor(sess);
   const sel = document.getElementById("addExSel");
   sel.value = "__custom__"; sel.dispatchEvent(new Event("change", {bubbles:true}));
-  const c = document.getElementById("customName"); c.value = "Spider Curl";
-  c.dispatchEvent(new Event("change", {bubbles:true}));
-  document.getElementById("plusSet").click();
-  document.getElementById("plusSet").click();
-  const put = (i, f, v)=>{ const el = document.querySelector(`#newSets [data-ns="${i}"][data-f="${f}"]`);
-    if(el){ el.value = v; el.dispatchEvent(new Event("change", {bubbles:true})); } };
-  put(0,"weight","30"); put(0,"reps","12");
-  put(1,"rpe","8");                       // RPE and nothing else
-  /* row 2 left completely blank - the control */
+  const c = document.getElementById("customName");
+  c.value = "Spider Curl"; c.dispatchEvent(new Event("change", {bubbles:true}));
+  document.getElementById("aeBoth").click();
+  document.getElementById("aeCount").value = "2";
   document.getElementById("addToSess").click();
-  const e = (s.entries||[]).find(x=> x.name === "Spider Curl") || {};
-  return {added: (s.entries||[]).length - before, sets:(e.sets||[]).length, json:JSON.stringify(e.sets||[])};
+  const en = sess.entries.find(x=> x.name === "Spider Curl");
+  const ei = sess.entries.indexOf(en);
+  const created = JSON.parse(JSON.stringify(en.sets));
+  /* RPE and nothing else, into the real row. */
+  const sel2 = document.querySelector(`#modal .set [data-e="${ei}"][data-s="1"][data-f="rpe"]`);
+  sel2.value = "8"; sel2.dispatchEvent(new Event("change", {bubbles:true}));
+  return {sets: en.sets.length, createdEmpty: created.every(st=> !setHasAnything(st)),
+          rpeKept: en.sets[1].rpe === "8", ei};
 });
-ck("the movement was added", d4.added === 1, d4.added);
-ck("both rows with something in them went in", d4.sets === 2, d4.sets);
-ck("including the RPE-only row", d4.json.indexOf('"rpe":"8"') >= 0, d4.json);
-ck("and the blank row did not", d4.sets === 2);
+ck("the form created the sets it was asked for", d4.sets === 2, d4.sets);
+ck("and created them empty, so it has nothing to drop", d4.createdEmpty);
+ck("an RPE typed into a row on its own is stored", d4.rpeKept);
+
+const d4b = await p.evaluate(()=>{
+  const sess = S.sessions[0];
+  const en = sess.entries.find(x=> x.name === "Spider Curl");
+  const ei = sess.entries.indexOf(en);
+  const before = en.sets.length;
+  /* The set with the RPE in it is last, so this is the dangerous tap. The dialog is
+     auto-accepted by the harness, so what is asserted is that it ASKED. */
+  let asked = false;
+  const realConfirm = window.confirm;
+  window.confirm = (m)=>{ asked = /numbers in it/.test(String(m)); return false; };
+  document.querySelector(`#modal [data-sermset="${ei}"]`).click();
+  window.confirm = realConfirm;
+  const en2 = S.sessions[0].entries.find(x=> x.name === "Spider Curl");
+  return {asked, before, after: en2.sets.length};
+});
+ck("removing a set with something in it asks first", d4b.asked);
+ck("and says no means it stays", d4b.after === d4b.before, d4b.before + " -> " + d4b.after);
 
 /* ---------- 5. the static guard ---------- */
 /* Any NEW filter written the old way is the next instance of this bug, so the shape is

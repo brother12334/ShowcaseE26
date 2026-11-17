@@ -97,31 +97,67 @@ ck("the left side is untouched", d2.L === "15", d2.L);
 ck("and nothing was written at the set's top level", d2.top);
 ck("there is no live session for it to have gone to instead", d2.live);
 
-console.log("\n3. + set on a paired movement adds a PAIR, not a half set");
+console.log("\n3. + set opens the SAME menu the workout screen opens");
+/* The editor's + set used to add a plain set straight away. It now opens the live
+   screen's own menu, from setKindOptions(), so the two cannot offer different kinds of
+   set - and the kinds themselves are asserted against that function rather than against
+   a list written out here, which would just be a second list to drift. */
 await openEd();
-const d3 = await p.evaluate(()=>{
+const d3m = await p.evaluate(()=>{
   document.querySelector('#modal [data-seaddset="1"]').click();
+  const dd = document.querySelector(".dd");
+  const offered = Array.from(dd ? dd.querySelectorAll("[data-ddk]") : []).map(b=> b.dataset.ddk);
+  const want = setKindOptions(S.sessions[0].entries[1]).map(o=> o.k || "");
+  return {open: !!dd, offered, want, added: S.sessions[0].entries[1].sets.length};
+});
+ck("a menu opened", d3m.open);
+ck("offering exactly what logging offers", d3m.offered.join(",") === d3m.want.join(","),
+   d3m.offered.join(",") + " vs " + d3m.want.join(","));
+ck("and nothing was added by merely opening it", d3m.added === 1, d3m.added);
+
+console.log("\n3b. choosing Normal adds a PAIR, not a half set");
+const d3 = await p.evaluate(()=>{
+  document.querySelector('.dd [data-ddk=""]').click();
   const sets = S.sessions[0].entries[1].sets;
   const last = sets[sets.length-1];
   return {n: sets.length, hasBoth: !!(last.sides && last.sides.L && last.sides.R),
-          carried: last.sides && last.sides.L.weight,
+          blank: last.sides && last.sides.L.weight === "" && last.sides.L.reps === "",
           rows: document.querySelectorAll('#modal .set [data-e="1"][data-f="reps"]').length};
 });
 ck("there are two sets now", d3.n === 2, d3.n);
 ck("the new one has both sides", d3.hasBoth);
-ck("with the load carried over, reps left empty", d3.carried === "25", d3.carried);
-ck("and it drew as two more rows", d3.rows === 4, d3.rows);
+/* The load is NOT carried over, and that is the change: logging does not carry it
+   either, and two screens that add a set differently is the problem this whole piece of
+   work exists to end. */
+ck("and both sides start empty, as they do live", d3.blank);
+ck("it drew as two more rows", d3.rows === 4, d3.rows);
+
+console.log("\n3c. and a technique chosen in the menu lands on the set");
+const d3t = await p.evaluate(()=>{
+  document.querySelector('#modal [data-seaddset="1"]').click();
+  const b = document.querySelector('.dd [data-ddk="amrap"]');
+  if(!b) return {skipped:true};
+  b.click();
+  const sets = S.sessions[0].entries[1].sets;
+  const last = sets[sets.length-1];
+  return {tech: last.tech, onSide: !!(last.sides && last.sides.L && last.sides.L.tech),
+          n: sets.length};
+});
+ck("AMRAP was offered and taken", !d3t.skipped && d3t.n === 3, JSON.stringify(d3t));
+ck("stored on the set, where techFor() reads it", d3t.tech === "amrap", d3t.tech);
+ck("and not on a side, because a technique is a property of the set", !d3t.onSide);
 
 console.log("\n4. + set on the plain movement adds a plain set (control)");
 const d4 = await p.evaluate(()=>{
   document.querySelector('#modal [data-seaddset="0"]').click();
+  document.querySelector('.dd [data-ddk=""]').click();
   const sets = S.sessions[0].entries[0].sets;
   const last = sets[sets.length-1];
-  return {n: sets.length, plain: !last.sides, carried: last.weight};
+  return {n: sets.length, plain: !last.sides, blank: last.weight === ""};
 });
 ck("three sets now", d4.n === 3, d4.n);
 ck("the new one holds no sides", d4.plain);
-ck("with the load carried over", d4.carried === "135", d4.carried);
+ck("and starts empty", d4.blank);
 
 console.log("\n5. the grade is redone on every edit, and the session stamped");
 const d5 = await p.evaluate(()=>{
@@ -155,15 +191,16 @@ builders.forEach(([n, l])=> console.log("       " + n + "  " + l.trim().slice(0,
    two are the editor's "Add an exercise" mini-form, which still builds its own four-box
    rows - it is the last duplicate left and the next piece of work replaces it.
 
-   setLabelsHTML emits its headings on two lines, one per branch, so the shared builders
-   account for three of the five.
+   THREE, WHICH IS THE FLOOR: setRowHTML's row, and setLabelsHTML's headings on two lines,
+   one per branch. The editor's Add an exercise mini-form was the fourth and fifth and is
+   gone - it asked for weight, reps and RPE in boxes of its own, which is why a movement
+   added there came out as plain sets with no way to say left and right.
 
-   PINNED, AND IT MAY ONLY GO DOWN. Five today, three when the add-form is gone. A number
-   that can only fall is the whole point: nobody can add another builder without this
-   failing, and nobody can quietly leave the add-form's in place either. */
-const BUILDER_PIN = 5;
+   PINNED, AND IT MAY ONLY GO DOWN. There is now exactly one set row in the app, so any
+   increase is a second one appearing and this fails. */
+const BUILDER_PIN = 3;
 ck("no new set-row builder has appeared", builders.length <= BUILDER_PIN, builders.length + " of at most " + BUILDER_PIN);
-ck("and the pin is still the real count, so it falls when the add-form goes",
+ck("and the pin is still the real count, so a new one cannot hide under it",
    builders.length === BUILDER_PIN, builders.length);
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
