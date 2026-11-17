@@ -7225,7 +7225,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.7";
+const APP_VERSION = "2026.11.17.8";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -14175,6 +14175,13 @@ function migrate(){
      history says what moved and why. */
   try{ migrateRestCeilings(); }catch(e){}
 
+  /* P1-7 FOLLOW-UP \u2014 the one piece of residue from the mislabelled chip. A paired set
+     keeps its reps in st.sides.L / .R and the adapter never reads st.side, so a chip
+     tapped to "correct" a label wrote a legacy override onto a set that does not use
+     one: inert where it sits, and believed by any legacy-shape reader that meets it
+     later. Cleared once, across the live session and the whole log. */
+  try{ clearStraySides(); }catch(e){}
+
   /* Fill in the days you did not train before the cycle is recomputed, so everything
      downstream reads a history with no unexplained holes in it. */
   if(fillMissedRestDays(Date.now())) saveQuiet();
@@ -16036,7 +16043,13 @@ function restNextLineHTML(){
   if(!nx) return "";
   const rx = setPrescription(nx.entry, nx.si);
   const target = rx.reps != null ? rx.reps : (repRange(nx.entry.reps) ? nx.entry.reps : null);
-  const side = setSide(nx.entry, nx.si);                    // sides:display
+  /* P1-7 FOLLOW-UP \u2014 on a paired set the next thing to do is the next SIDE not yet done,
+     not the set index's turn in an alternation this entry does not run. */
+  const side = (()=>{
+    if(!entryPerSide(nx.entry)) return setSide(nx.entry, nx.si);      // sides:display
+    const open = sideSets(nx.entry).filter(x=> x.si === nx.si && !x.done);
+    return open.length ? open[0].side : null;
+  })();
   const en = nx.entry;
   const num = v=>{ const t = String(v == null ? "" : v).trim();
                    return t && isFinite(parseFloat(t)) ? t : ""; };
@@ -35242,11 +35255,17 @@ function readinessNoteHTML(wid){
   </div>`;
 }
 // A finished exercise's sets, each tagged with the side it was done on where relevant.
+/* P1-7 FOLLOW-UP \u2014 one line per SIDE-SET, through the adapter. This walked `e.sets` and
+   labelled each with the set-index flip, so a paired entry printed one line per PAIR
+   carrying one side's figures with the wrong letter beside it. The adapter already knows
+   the answer; reading the sets directly was the mistake. */
 function setListHTML(e){
   const parts = [];
-  (e.sets||[]).forEach((st,i)=>{
-    if(!st.reps) return;
-    const side = setSide(e, i);                             // sides:display
+  const rows = entryPerSide(e)
+    ? sideSets(e).map(x=> ({st: x.ref, i: x.si, side: x.side}))
+    : (e.sets || []).map((st, i)=> ({st, i, side: setSide(e, i)}));   // sides:display
+  rows.forEach(({st, i, side})=>{
+    if(!st || !st.reps) return;
     const chip = side
       ? `<i class="side-chip ${side==="L"?"sc-l":"sc-r"}" style="margin-right:5px">${esc(sideTag(e.altStyle||"side", side))}</i>`
       : "";
@@ -35755,20 +35774,66 @@ function altHintHTML(style, startSide, nSets, exName){
 /* The L / R marker that sits under each set number on an alternating exercise, so you
    never have to count back to work out whose turn it is. Colour-coded because a glance
    at the shape is faster to read mid-set than the letter. */
-function sideChip(en, si){
+/* P1-7 FOLLOW-UP \u2014 THE LEGACY OVERRIDE HAS NO BUSINESS ON A PAIRED SET.
+
+   st.side is the legacy "which limb was this set" override, read by setSide() and
+   meaningful only where one set IS one side. On a paired set the sides live in
+   st.sides.L / .R and the adapter ignores st.side entirely - so one written there is
+   inert, but it is also a trap for anything that later reads the legacy shape.
+
+   Returns how many it cleared, so a caller can say. Deliberately does not touch an entry
+   that is NOT paired: there the override is the whole point. */
+function clearStraySides(){
+  let n = 0;
+  const sweep = en=>{
+    if(!en || !entryPerSide(en)) return;
+    (en.sets || []).forEach(st=>{
+      if(st && st.side){ delete st.side; n++; }
+    });
+  };
+  (S.sessions || []).forEach(s=> (s && s.entries || []).forEach(sweep));
+  if(S.active) (S.active.entries || []).forEach(sweep);
+  if(n) saveQuiet();
+  return n;
+}
+/* P1-7 FOLLOW-UP \u2014 THE SIDE ON A ROW IS THE ROW'S SIDE.
+
+   Reported from a live session: a paired Cable Lateral Raise rendered as
+
+       set 1: L, L    set 2: R, R    set 3: L, L    set 4: R, R
+
+   setRowHTML() is handed the side it is drawing and used it correctly for the INPUTS -
+   every field carried the right data-sd, so the typed reps always went to the right side
+   and no logged data was ever wrong. This chip took no side and recomputed one from the
+   SET INDEX with setSide(). On a legacy entry, one side per set alternating, that is
+   exactly right. On a paired entry it stamps both rows of a pair with the same letter.
+
+   sideall.mjs could not catch it: the line carried a `sides:display` marker and a chip IS
+   display. The marker was accurate and the reasoning behind it was not - a side LABEL is
+   an assertion about which limb a row is for, and the only honest source is the row.
+   tests/specs/sidelabel.mjs is the guard, because a static scan cannot tell a label that
+   agrees with the adapter from one that contradicts it.
+
+   AND ON A PAIRED SET THE CHIP IS A LABEL, NOT A BUTTON. A pair has both sides by
+   construction, so there is nothing about it to correct; which side LEADS is a
+   per-exercise setting rather than a per-set guess. The button stays on the legacy shape,
+   where "I actually did two on the left" is a real thing that happens. */
+function sideChip(en, si, side){
   if(!en || !en.startSide) return "";
   const style = en.altStyle || "side";
-  const side = setSide(en, si);                             // sides:display
-  if(!side) return "";
+  const paired = entryPerSide(en);
+  const sd = side || (paired ? null : setSide(en, si));     // sides:display
+  if(!sd) return "";
+  const full = sideFull(style, sd, en.name);
+  const ei = entryIndexOf(en);
+  if(paired || ei < 0)
+    return `<i class="side-chip ${sd==="L"?"sc-l":"sc-r"}" title="${esc(full)}">${esc(sideTag(style, sd))}</i>`;
   /* A BUTTON, not a label. It is the only place in a session where "which arm was that"
      can be corrected, and it is on the row you are typing into. */
-  const ei = entryIndexOf(en);
   const own = (en.sets[si] || {}).side ? " sc-set" : "";
-  const full = sideFull(style, side, en.name);
-  if(ei < 0) return `<i class="side-chip ${side==="L"?"sc-l":"sc-r"}" title="${esc(full)}">${esc(sideTag(style, side))}</i>`;
-  return `<button type="button" class="side-chip ${side==="L"?"sc-l":"sc-r"}${own}" data-sideflip="${ei}:${si}"
+  return `<button type="button" class="side-chip ${sd==="L"?"sc-l":"sc-r"}${own}" data-sideflip="${ei}:${si}"
     title="${esc(full)} \u2014 tap to switch sides"
-    aria-label="${esc(full)}, tap to switch sides">${esc(sideTag(style, side))}</button>`;
+    aria-label="${esc(full)}, tap to switch sides">${esc(sideTag(style, sd))}</button>`;
 }
 /* =====================================================================
    PER-SET RPE TARGETS
@@ -59206,8 +59271,25 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.7";
+const NEWS_FOR = "2026.11.17.8";
 const NEWS = [
+  {k: "L, L instead of L, R",
+   s: ["On a one-limb movement logged as pairs, the rows read “set 1: L, L · set 2: R, R” "
+     + "instead of one L and one R under each set number. Reported from a live session.",
+     "Your logged data was never wrong. Each row’s input fields always carried the right "
+     + "side, so every rep went to the limb it was performed on, and every rule reads "
+     + "those through one adapter. It was the L/R chip beside the set number: it took no "
+     + "side and worked one out from the SET number instead, which is exactly right on "
+     + "the older one-side-per-set shape and labels both halves of a pair the same on this "
+     + "one. Nothing needs relabelling.",
+     "The chip is now also a label rather than a button on a paired set. A pair has both "
+     + "sides by definition, so there is nothing to correct; which side leads is the "
+     + "per-exercise setting. On the older shape it stays a button, because “I actually "
+     + "did two on the left” is a real thing.",
+     "Two other places had the same fault and are fixed with it: a finished exercise’s "
+     + "set list, and the “next up” line on the rest screen. And if you tapped a chip to "
+     + "correct a label, that left a note on the set which nothing on a paired movement "
+     + "reads — cleared automatically."]},
   {k: "The wrong kind of max, depending on plan order",
    s: ["A plan written in percentages needs one number to take them from, and whether "
      + "that number is a one-rep max or a TRAINING max depends on how the lift is "
@@ -63705,7 +63787,7 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
       const has = !!(st.noteCode || st.unote);
       return `<button type="button" class="idx-btn${has ? " has-note" : ""}" data-setnote="${ei2}:${si}"
         aria-label="Note on set ${idx}" title="${has ? "Edit this set's note" : "Add a note to this set"}">${idx}</button>`;
-    })()}${sideChip(en, si)}${(()=>{
+    })()}${sideChip(en, si, side)}${(()=>{
       /* A1: THE WARM-UP TOGGLE, where the set already says which set it is.
 
          Detection gets the ordinary ramp right on its own, so this is for the cases
