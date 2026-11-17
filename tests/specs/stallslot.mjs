@@ -172,6 +172,45 @@ ck("the slot was stalled before the edit", JSON.parse(d7pre.A ? JSON.stringify(d
 ck("and the correction broke the run", d7.n === 0, String(d7.n));
 ck("without anything else being asked to do it", d7.before !== d7.after);
 
+console.log("\n7b. removing a session from the log rebuilds the counters too");
+/* A counter is a running total over the sessions in order, so taking one out of the
+   middle cannot be undone in place: the runs either side of it may now be one run, or
+   none. Every path that removes a session has to replay.
+
+   The assertion is the strongest available and does not depend on knowing the right
+   answer in advance: whatever the counters are after the deletion, they must equal a
+   fresh rebuild of what is left. The control is that the deletion CHANGED something -
+   without it this would pass against a delete button that did nothing. */
+const d7b = await build([
+  ["A",100,8], ["B",60,8], ["A",100,8], ["B",60,9],
+  ["A",100,8], ["B",60,10], ["A",100,8], ["B",60,11]
+]);
+const del = await p.evaluate(()=>{
+  const A = ROTATION[2];
+  const before = JSON.stringify(S.stalls);
+  /* The second session of the stalled slot, from the middle of its run. */
+  const mid = S.sessions.filter(s=> s.workoutId === A)
+    .sort((a,b)=> a.startedAt - b.startedAt)[1];
+  /* Driven through the History button rather than by calling the helper, so what is
+     tested is the path somebody actually takes. */
+  TAB = "history"; RECORDS_OPEN = false; render();
+  const btn = document.querySelector(`[data-delsess="${mid.id}"]`);
+  if(!btn) return {noButton: true};
+  btn.click();
+  const after = JSON.stringify(S.stalls);
+  const gone = !S.sessions.some(s=> s.id === mid.id);
+  /* And what a fresh rebuild of the remaining log says. */
+  rebuildStalls();
+  return {before, after, gone, fresh: JSON.stringify(S.stalls), id: mid.id};
+});
+ck("the delete button was there and used it", !del.noButton);
+ck("the session is gone", del.gone);
+ck("the counters match a fresh rebuild of what is left",
+   del.after === del.fresh, del.after + "\n   vs " + del.fresh);
+ck("and the deletion actually moved them (control)", del.before !== del.after,
+   del.before + "\n   -> " + del.after);
+ck("d7b's slot was stalled to begin with", (d7b.A || {}).n >= 3, (d7b.A || {}).n);
+
 console.log("\n8. an old by-name map is dropped, not inherited");
 const d8 = await p.evaluate(()=>{
   S.stalls = {"smith machine squat": {n: 7, dates:["2026-01-01"]}};

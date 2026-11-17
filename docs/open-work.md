@@ -173,35 +173,58 @@ right for "what did I last do on this movement".
 `mergeStalls()` drops name-only keys, so a sync from a device on an older build cannot
 seed counters in the old shape.
 
-What this does NOT do: the rebuild is triggered by the version marker and by an editor
-save. A session deleted from History does not trigger one. Worth adding if deletions turn
-out to leave counters describing sessions that are gone.
+Every path that removes or replaces sessions rebuilds: the version marker, an editor
+save, deleting from History, resuming a finished session back to live, and importing or
+restoring a backup. The import case is the least obvious and the most necessary - on a
+REPLACE the file's counters describe the file's log and would be right, but on a MERGE
+the sessions are a union of two devices while the counters came from one of them.
 
-## 12. The write/clear asymmetry sweep
+## 12. The write/clear asymmetry sweep - RUN, nothing found (2026.11.17.19)
 
-A heuristic that came out of debts 6-8 and is worth running deliberately rather than
-stumbling into again.
+The heuristic, restated: when two functions set and clear, or write and read, the same
+per-exercise state, and one side is slot-scoped while the other is not, the mismatch is
+the defect. It found `rebuildFor` / `clearRebuiltEntries`, and `tmWanted`.
 
-`rebuildFor()` read a rebuild marker by exercise name while `clearRebuiltEntries()` had
-already been converted to the session's own slot. The pair wrote and unwrote the same
-per-exercise state with different ideas of what "this exercise" meant, so one of them had
-to be wrong - and the mismatch was visible without knowing anything about what a rebuild
-does.
+**What was swept.** Three passes, because one shape of the bug hides from each:
 
-So: find every pair of functions that SET and CLEAR, or WRITE and READ, the same
-per-exercise or per-slot state, and flag any pair where one side is slot-scoped and the
-other is not. A scan of the static kind `slotall.mjs` does cannot see this, because both
-sides can be individually defensible; it is the disagreement that is the defect.
+1. *Subscript keying.* Every `S.<key>[...]` and `<store>()[...]` expression in the file,
+   with local key variables resolved to their assignment, grouped per store and checked
+   for a store reached by both a slot-aware and a name-only key. 38 stores; no store is
+   reached both ways.
+2. *Function pairs.* Every function signature, grouped by stem across the set/clear,
+   mark/unmark, apply/revert and `...For` prefixes, looking for a pair where one side
+   takes a `wid` and the other does not. One candidate, `dropStep(wid, mode)` against
+   `step()`, which is a name collision and not a pair.
+3. *Two normalisers on one store.* A store written under `nrm(name)` and read under
+   `tableKey(name)` is the same defect wearing different clothes, and passes pass 1
+   because both look like "name". Every per-exercise store checked for a single key
+   function. `rpeSugSkip` is `tableKey` on both sides; `jointOk`, `asymRetired`, `bwEx`,
+   `exCompound`, `maxStore`, `tmStore` are `nrm` on both. The ones that try both keys -
+   `musclesFor`, `headShares` - are read-only lookups against constant tables, where
+   trying both is the point.
 
-Candidate state to walk, each of which is keyed per exercise somewhere: `rebuild`,
-`repExt`, `byApp`, `S.stalls`, `S.restEx`, `S.asymRetired` / `asymRetest`, `S.marks`,
-`S.lmSuggest`, `S.reversed`, `S.joint`, `exAliases`, `S.maxes` / training maxes, the
-ease-off map, and the per-entry `alt` partner.
+**Verdicts on the per-exercise state that is keyed by name, and why each is right.**
 
-**Report before fixing.** Each pair is a question about which side is right, and the
-answer is not always "scope them both" - `priorEntryFor()`'s any-slot fallback is
-deliberate for a movement's first session in a new slot. The sweep produces a list with a
-verdict per pair, and fixes follow as their own items.
+| state | keyed by | verdict |
+| --- | --- | --- |
+| `maxStore`, `tmStore` | name | right. A max is a fact about you and the lift; it does not differ by weekday. Already argued at the `tmWanted` fix. |
+| `asymRetired` / `asymRetest` | name | right. The gap between your arms is the same gap whichever day the movement is trained. |
+| `bwEx`, `exCompound`, `exMuscleStore` | name | right. All three are classifications of the MOVEMENT. |
+| `jointOk` / `S.joint` | name + date | right, and symmetric: `jointSettle()` writes, `jointRecord()` deletes, both `nrm(exName)`. A joint that hurts on a movement hurts on it on any day. |
+| `exAliases` | name | right by definition - it is the rename table. |
+| `rpeSugSkip` | name | arguable, recorded rather than changed. The ramp is per slot, so "do not suggest a ramp for this" could be per slot. It reads as a preference about the movement, and nobody has reported wanting it twice. Left alone deliberately. |
+
+The per-ENTRY markers the earlier note listed - `rebuild`, `repExt`, `byApp`, `setsCut`,
+the `alt` partner - are fields on `S.program[wid][i]`, so they are slot-scoped by
+construction. Their only failure mode is a LOOKUP that finds the entry by name without a
+slot, which is the P0-1 family and is pinned at zero by `slotall.mjs`.
+
+**Conclusion: no mismatched pair remains.** That is a weaker claim than "there are no
+scoping bugs left" and is meant to be: the sweep finds disagreements between two sides of
+one piece of state. A store that is consistently wrong on both sides - `S.stalls` before
+item 11 - is invisible to it, which is exactly how item 11 was found by reasoning rather
+than by this scan. The scans are in this document rather than committed as a spec because
+their value is the judgement in the table, which a passing test cannot express.
 
 ## 13. Flaky: `logstill.mjs` section 1, exact scroll equality
 

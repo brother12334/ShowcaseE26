@@ -7273,7 +7273,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.18";
+const APP_VERSION = "2026.11.17.19";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -49148,6 +49148,11 @@ function bind(){
       S.sessions = S.sessions.filter(s=>s.id!==id);
       if(!S.deleted.includes(id)) S.deleted.push(id);
       recomputeCycle(false);
+      /* THE STALL COUNTERS DESCRIBED A HISTORY THAT NO LONGER EXISTS. A counter is a
+         running total over the sessions in order, so removing one from the middle cannot
+         be undone in place — the run either side of it may now be one run, or none. The
+         whole thing is replayed, which is 3ms for four months of training. */
+      try{ rebuildStalls(); }catch(e){}
       save(); queueSync(); render();
     }
   });
@@ -51233,6 +51238,10 @@ function resumeSession(id){
   };
   S.sessions.splice(idx,1); // remove from history while it's live again
   recomputeCycle(false);
+  /* Same reason as a delete: the session has left the log, so a counter built from it
+     describes something that is not there. It is re-filed when the session is finished
+     again, and updateStalls() picks it up then. */
+  try{ rebuildStalls(); }catch(e){}
   save(); queueSync();
   goTab("workout");
   toast("Workout resumed, finish again when you're done");
@@ -60644,8 +60653,18 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.18";
+const NEWS_FOR = "2026.11.17.19";
 const NEWS = [
+  {k: "Deleting a session now corrects the stall counters",
+   s: ["A stall counter is a running total over your sessions in order, so taking one out "
+     + "of the middle cannot be undone in place \u2014 the runs either side of it may now be "
+     + "one run, or none. Deleting a session from History left the counters describing a "
+     + "history that no longer existed.",
+     "Every path that removes or replaces a session now replays the log: deleting one, "
+     + "resuming a finished session back to live, and importing or restoring a backup. "
+     + "The import case is the one that is easy to miss \u2014 restoring a file wholesale "
+     + "leaves counters that match it, but MERGING two devices leaves sessions from both "
+     + "and counters from one."]},
   {k: "Stall counters were counting two days as one",
    s: ["If a movement sits in two days of your split \u2014 the same Smith squat on Legs A and "
      + "Legs B, at different loads \u2014 it had ONE stall counter between them. A flat "
@@ -68733,6 +68752,11 @@ function adoptBackup(d, mode){
   }
   /* And derive the ticks from the sessions, which is the part that was always right. */
   recomputeCycle(false);
+  /* AND THE STALL COUNTERS, WHICH THE FILE CANNOT BE TRUSTED FOR. On a replace they
+     describe the file's log, which is now the log, so they would be right — but on a
+     MERGE the sessions are a union of two devices and the counters came from one of
+     them. Replaying is the only answer correct for both, and it costs milliseconds. */
+  try{ rebuildStalls(); }catch(e){}
   save();
   queueSync();                                   // and up to the account, if there is one
   render();
