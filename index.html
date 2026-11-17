@@ -15495,8 +15495,9 @@ function prRowInner(name, st, ei, si){
   const note = name ? prNoteFor(name, st, ei, si) : "";
   return prBadgeHTML(st) + (note ? `<span class="pr-note">${esc(note)}</span>` : "") + whyBadgeHTML(st);
 }
-function prBadgeRow(st, ei, si){
-  const name = (S.active && S.active.entries[ei] && S.active.entries[ei].name) || "";
+function prBadgeRow(st, ei, si, sess){
+  const s = sess || S.active;
+  const name = (s && (s.entries || [])[ei] && s.entries[ei].name) || "";
   return `<div class="pr-row" data-prrow="${ei}-${si}">${prRowInner(name, st, ei, si)}</div>`;
 }
 function drawPRBadges(ei){
@@ -16563,8 +16564,62 @@ function shouldAskWhy(ei, si){
    was dismissed. */
 /* The index of an entry in the live session, so a prompt can find that exercise's own
    note button and come out of it. */
-function entryIndexOf(entry){
-  const list = (S.active && S.active.entries) || [];
+/* ======================================================================
+   WHICH SESSION IS THIS SET ROW IN?
+
+   Every set handler in this app read S.active, because for most of the app's life a set
+   row only ever existed inside a live workout. The session editor is about to render the
+   same rows for a session from last week, and a handler that assumes S.active would then
+   write last week's reps into today's session.
+
+   THE ANSWER IS CARRIED BY THE ROW, NOT BY A GLOBAL. A module-level "currently editing"
+   variable is quicker to write and leaks: the editor's modal outlives any single render,
+   so a path that forgot to clear the variable would silently point live logging at a
+   finished session — a corruption with no error and no symptom until somebody read
+   their history. A row inside the editor is wrapped in [data-setsess], the handlers ask
+   the DOM, and there is no state to forget to clear.
+
+   A row with no wrapper is a live row, which is what every existing row is. */
+function rowSess(el){
+  const host = (el && el.closest) ? el.closest("[data-setsess]") : null;
+  if(!host) return S.active;
+  const id = String(host.dataset.setsess || "");
+  if(S.active && String(S.active.id) === id) return S.active;
+  return (Array.isArray(S.sessions) ? S.sessions : []).find(x=> x && String(x.id) === id) || null;
+}
+/* Past means "not the session being logged right now", which is the thing that decides
+   whether a tick starts a rest timer. */
+function rowIsPast(el){
+  const s = rowSess(el);
+  return !!(s && s !== S.active);
+}
+function rowEntry(el, ei){
+  const s = rowSess(el);
+  return s ? (s.entries || [])[ei] : null;
+}
+/* COMMITTING AN EDIT TO A SESSION THAT HAS ALREADY BEEN FILED.
+
+   A live session is saved and the screen redrawn. A finished one has a stored grade and
+   stored PR marks that were computed from the numbers just changed, so leaving them is
+   leaving the card saying something that is no longer true.
+
+   updateStalls() is deliberately NOT re-run, for the reason the bar-weight editor gives:
+   it walks history in order and mutates a running counter, so replaying one old session
+   through it corrupts the count for every session after it. */
+function setEditSaved(sess){
+  if(!sess || sess === S.active){ save(); render(); return; }
+  sess.edited = Date.now();
+  try{ sweepSessionPRs(sess); }catch(e){}
+  try{ sess.quality = scoreWorkout(sess); }catch(e){}
+  save(); queueSync();
+  renderSessEditor(sess);
+}
+
+/* Which index an entry sits at, in the session that holds it. `sess` defaults to the
+   live one, which is every existing caller. */
+function entryIndexOf(entry, sess){
+  const s = sess || S.active;
+  const list = (s && s.entries) || [];
   for(let i = 0; i < list.length; i++) if(list[i] === entry) return i;
   return -1;
 }
@@ -36950,10 +37005,10 @@ function exNoteLineHTML(en){
 /* The note attached to one set, under that set's row — and the two things you can do to
    it. Tapping the words reopens it scoped to this set; the ✕ erases it. Neither used to
    exist: the only way to change a note was to remember which sheet it came from. */
-function setNoteHTML(st, en, si){
+function setNoteHTML(st, en, si, sess){
   const w = noteWords(st);
   if(!w) return "";
-  const ei = en ? entryIndexOf(en) : -1;
+  const ei = en ? entryIndexOf(en, sess) : -1;
   if(ei < 0) return `<div class="set-note">${ICON.note} ${esc(w)}</div>`;
   return `<div class="set-note">
     <button type="button" class="set-note-t" data-setnote="${ei}:${si}"
@@ -47372,10 +47427,17 @@ function bind(){
   };
 
   document.querySelectorAll(".set input, .set select").forEach(el=>{
-    if(el.dataset.e==null) return;      // skip the session-editor's own rows
+    if(el.dataset.e==null) return;      // a row that is not addressing a session
     el.onchange = async ()=>{
       const ei = parseInt(el.dataset.e,10), si = parseInt(el.dataset.s,10), f = el.dataset.f;
-      const entryS = S.active.entries[ei];
+      /* THE ROW SAYS WHICH SESSION IT IS IN. See rowSess(). Past means the session
+         editor: the value is written the same way and none of the live consequences
+         follow it — no rest clock, no PR float, no celebration. */
+      const sess = rowSess(el);
+      if(!sess) return;
+      const past = sess !== S.active;
+      const entryS = (sess.entries || [])[ei];
+      if(!entryS) return;
       /* P1-7 — a paired set's fields belong to one SIDE. data-sd says which; without it
          this is an ordinary set and sideTarget() hands back the set itself. */
       const st = sideTarget(entryS, si, el.dataset.sd || null);
@@ -47405,6 +47467,12 @@ function bind(){
         SANE_OK.add(ei + ":" + si + ":" + f + ":" + val);
       }
       st[f] = val;
+      if(past){
+        /* A finished session has a stored grade and stored PR marks that were worked out
+           from the number just changed. Both are redone; nothing else is. */
+        setEditSaved(sess);
+        return;
+      }
       if(String(val).trim() !== "") markPriorDone(ei, si);
       // Typing a heavier weight (or more reps) onto an already-ticked set is a PR path
       // the old code never looked at. Re-check the whole exercise, then surface it.
@@ -47454,8 +47522,9 @@ function bind(){
   });
   document.querySelectorAll("[data-setwarm]").forEach(b=> b.onclick = ()=>{
     const [ei, si] = b.dataset.setwarm.split(":").map(x=> parseInt(x, 10));
-    const en = S.active && S.active.entries[ei];
-    const st = en && en.sets[si];
+    const sess = rowSess(b);
+    const en = sess && (sess.entries || [])[ei];
+    const st = en && (en.sets || [])[si];
     if(!st) return;
     /* Tapping sets the flag to the OPPOSITE of what is showing, which is what you meant
        whether the current state was detected or declared. Tapping back to agree with the
@@ -47465,7 +47534,8 @@ function bind(){
     delete st.warmup;
     const auto = setIsWarmup(en, si);
     if(auto === !shown) delete st.warmup; else st.warmup = !shown;
-    save(); render();
+    /* A warm-up is not a working set, so the grade and the volume both change. */
+    setEditSaved(sess);
     /* AND IT SAYS WHAT IT DID. Reported as "I don't know what the W is on the side of the
        set" — a single letter with a tooltip nobody can hover on a phone. The letter stays
        (there is room for a letter and not for a word beside a set number), and now one tap
@@ -47481,18 +47551,20 @@ function bind(){
   });
   document.querySelectorAll("[data-setnotedel]").forEach(b=> b.onclick = ()=>{
     const [ei, si] = b.dataset.setnotedel.split(":").map(x=> parseInt(x, 10));
-    const st = S.active && S.active.entries[ei] && S.active.entries[ei].sets[si];
+    const sess = rowSess(b);
+    const en = sess && (sess.entries || [])[ei];
+    const st = en && (en.sets || [])[si];
     if(!st) return;
     const row = b.closest(".set-note");
     delete st.noteCode; delete st.unote;
-    removeExNote(S.active.id, S.active.entries[ei].name, si);
+    removeExNote(sess.id, en.name, si);
     save();
     /* Out, then gone. Deleting by re-rendering makes the line vanish between frames,
        which reads as a glitch rather than as the thing you just asked for. */
     if(row && !reducedMotion()){
       row.classList.add("note-out");
-      setTimeout(()=>{ render(); }, 190);
-    } else render();
+      setTimeout(()=>{ setEditSaved(sess); }, 190);
+    } else setEditSaved(sess);
     toast("Note removed");
   });
   document.querySelectorAll("[data-sideflip]").forEach(b=> b.onclick = ()=>{
@@ -47533,6 +47605,29 @@ function bind(){
   document.querySelectorAll(".set .chk").forEach(el=>{
     el.onclick = async ()=>{
       const ei = parseInt(el.dataset.e,10), si = parseInt(el.dataset.s,10);
+      /* IN THE SESSION EDITOR A TICK IS A FACT BEING CORRECTED, NOT A SET BEING LOGGED.
+
+         Everything below this branch is about the set in front of you: the rest clock
+         that has to be served first, the PR that floats out of the tick, the celebration,
+         the superset round that must not come apart, and the rule that a finished
+         exercise stays finished. Not one of those means anything in a session from last
+         week, and two of them would do harm — ticking a row in the editor would start a
+         rest clock, and the stays-finished rule exists to protect a running clock, so in
+         the editor it would simply refuse to let somebody fix a tick they got wrong.
+
+         So a past session gets the only thing a tick means there: the set did or did not
+         happen. The numbers already have their own handler, and the grade is redone by
+         setEditSaved() exactly as it is for a typed value. */
+      const sessChk = rowSess(el);
+      if(!sessChk) return;
+      if(sessChk !== S.active){
+        const enP = (sessChk.entries || [])[ei];
+        const stP = enP && sideTarget(enP, si, el.dataset.sd || null);
+        if(!stP) return;
+        if(stP.done) delete stP.done; else stP.done = true;
+        setEditSaved(sessChk);
+        return;
+      }
       const entry = S.active.entries[ei];
       const wasComplete = entryDone(entry);
       /* P1-7 — the tick belongs to one SIDE of a paired set. endsRound() then holds the
@@ -47811,44 +47906,53 @@ function bind(){
      TECHNIQUES note. Typed values are written straight through on change, and harvested
      alongside the main rows before any re-render, or a half-typed drop is lost the moment
      the card redraws. */
-  const subOf = (ei, si)=>{
-    const st = S.active && S.active.entries[ei] && S.active.entries[ei].sets[si];
+  const subOf = (ei, si, sess)=>{
+    const s = sess || S.active;
+    const en = s && (s.entries || [])[ei];
+    const st = en && (en.sets || [])[si];
     if(!st) return null;
     if(!Array.isArray(st.sub)) st.sub = [];
     return st.sub;
   };
+  /* Harvested per ROW rather than per session, so a page holding the live session and the
+     editor's modal at once puts each row into the session it belongs to. */
   function harvestSubs(){
-    if(!S.active) return;
     document.querySelectorAll(".sub-set input[data-sub]").forEach(el=>{
       const ei = +el.dataset.e, si = +el.dataset.s, ri = +el.dataset.sub;
-      const rows = subOf(ei, si);
+      const rows = subOf(ei, si, rowSess(el));
       if(rows && rows[ri]) rows[ri][el.dataset.f] = el.value;
     });
   }
   document.querySelectorAll(".sub-set input[data-sub]").forEach(el=>{
     el.onchange = ()=>{
-      const rows = subOf(+el.dataset.e, +el.dataset.s);
-      if(rows && rows[+el.dataset.sub]){ rows[+el.dataset.sub][el.dataset.f] = el.value; save(); }
+      const sess = rowSess(el);
+      const rows = subOf(+el.dataset.e, +el.dataset.s, sess);
+      if(rows && rows[+el.dataset.sub]){
+        rows[+el.dataset.sub][el.dataset.f] = el.value;
+        if(sess && sess !== S.active) setEditSaved(sess); else save();
+      }
     };
   });
   document.querySelectorAll("[data-subadd]").forEach(b=> b.onclick=()=>{
     const [ei, si] = b.dataset.subadd.split(":").map(Number);
+    const sess = rowSess(b);
     harvestSubs();
-    const rows = subOf(ei, si);
+    const rows = subOf(ei, si, sess);
     if(!rows) return;
     /* Seeded from the parent set's own load, because every one of these techniques starts
        from the weight you just used — an empty box would be re-typing what is on the bar. */
-    const parent = S.active.entries[ei].sets[si];
+    const parent = (((sess || S.active).entries || [])[ei] || {sets:[]}).sets[si];
     rows.push({weight: parent && parent.weight != null ? parent.weight : "", reps:""});
-    save(); render();
+    setEditSaved(sess);
   });
   document.querySelectorAll("[data-subdel]").forEach(b=> b.onclick=()=>{
     const [ei, si, ri] = b.dataset.subdel.split(":").map(Number);
+    const sess = rowSess(b);
     harvestSubs();
-    const rows = subOf(ei, si);
+    const rows = subOf(ei, si, sess);
     if(!rows) return;
     rows.splice(ri, 1);
-    save(); render();
+    setEditSaved(sess);
   });
   /* ONE BUTTON, AND IT ASKS. Adding a set and choosing what kind of set it is were two
      controls for one decision, and the second only ever covered one technique. */
@@ -64367,7 +64471,14 @@ function planBehindLineHTML(en){
     <button type="button" class="nb-link ex-catch" data-plancatch="${esc(p.name)}"
       data-plancatchto="${esc(String(top))}">Set my plan to ${esc(fmtLoad(top))}</button></span></div>`;
 }
-function setRowHTML(en, ei, si, last, idxLabel, side){
+/* `ctx.sess` is the session this row belongs to, defaulting to the live one — which is
+   every caller that existed before the session editor started using this builder. The
+   live-only affordances are switched off for a past session rather than removed: a rest
+   lock, the copper "you are here" edge and a rebuild target are all statements about the
+   set you are ABOUT to do, and there is no such set in a session from last week. */
+function setRowHTML(en, ei, si, last, idxLabel, side, ctx){
+  const rowSessN = (ctx && ctx.sess) || S.active;
+  const rowPast = !!(rowSessN && rowSessN !== S.active);
   /* P1-7 — `side` renders ONE side of a paired set. The whole row is reused rather than
      restructured: the fields read and write that side's object, the inputs carry it as
      data-sd, and the set number appears once with the second side labelled by its chip.
@@ -64384,7 +64495,14 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
   /* What THIS set is asking for, which is not always what the movement asks for — see
      setPrescription(). The reps placeholder follows it, so the number the row suggests is
      the number the rules actually want rather than last week's. */
-  const rx = setPrescription(en, si);
+  const rx = (()=>{
+    const r = setPrescription(en, si);
+    if(!rowPast) return r;
+    /* The technique label stays: it says what KIND of set this was, which is as true
+       afterwards as it was at the time. The target, the matched-side instruction and the
+       rebuild aim do not. */
+    return Object.assign({}, r, {match:null, why:null, rebuild:null});
+  })();
   /* P1-7 — THE SECOND SIDE AIMS AT WHAT THE FIRST ONE DID. The protocol is to go left
      first and hold the right to the left's count, so the number to beat is sitting in
      the row above rather than in last week's log. It is a placeholder, not a cap: a
@@ -64409,7 +64527,7 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
      did. They open when you STOP the rest, not when it has merely run long enough: a
      clock past its target says nothing about whether you have stood up. The WEIGHT stays
      live, because loading the bar is exactly what rest is for. */
-  const lock = restLocks(en, si);
+  const lock = rowPast ? false : restLocks(en, si);
   const isWarm = setIsWarmup(en, si);
   /* M1 — WHICH SET AM I ON?
 
@@ -64424,8 +64542,8 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
      three movements ahead lit a copper edge on a row you are not on, and "exactly one
      thing on this screen is asking for something" stopped being true. The question is
      asked of the session now. */
-  const lv = sessionLiveSet();
-  const isLive = !st.done && lv.ei === entryIndexOf(en) && lv.si === si;
+  const lv = rowPast ? {ei:-1, si:-1} : sessionLiveSet();
+  const isLive = !rowPast && !st.done && lv.ei === entryIndexOf(en, rowSessN) && lv.si === si;
   return `${setTagHTML(en, si, rx)}<div class="set${st.pr?" is-pr":""}${rpeOn?"":" no-rpe"}${rx.match!=null?" is-matched":""}${isWarm?" is-warm":""}${st.done?" is-logged":""}${isLive?" is-live":""}">
     <span class="idx">${(()=>{
       /* THE SET NUMBER IS THE WAY IN. Notes used to be reachable only from the pencil in
@@ -64433,7 +64551,7 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
          on set three" was two taps and a chip away, and most people never found it. The
          number of the set you mean is the most specific thing on the row and it was doing
          nothing. It carries a mark when that set already has a note. */
-      const ei2 = entryIndexOf(en);
+      const ei2 = entryIndexOf(en, rowSessN);
       if(ei2 < 0) return idx;
       const has = !!(st.noteCode || st.unote);
       return `<button type="button" class="idx-btn${has ? " has-note" : ""}" data-setnote="${ei2}:${si}"
@@ -64445,7 +64563,7 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
          arithmetic cannot see: a light set that was real work, or a heavy single that
          was not. One tap, and it lives in the index cell, which already stacks the
          number over the side chip and had room for a third thing. */
-      const ei3 = entryIndexOf(en);
+      const ei3 = entryIndexOf(en, rowSessN);
       if(ei3 < 0) return "";
       const on = setIsWarmup(en, si);
       const said = typeof st.warmup === "boolean";
@@ -64480,7 +64598,7 @@ function setRowHTML(en, ei, si, last, idxLabel, side){
     ${rpeOn ? `<span class="rpe-cell${lock?" is-locked":""}"${lock?` title="${esc(LOCK_WHY)}"`:""}>${rpeTargetChipHTML(en, si, rx)}<select data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="rpe"${lock?" disabled":""}>${rpeOptions(st.rpe)}</select></span>` : ""}
     <button class="chk ${st.done?"on":""}" data-e="${ei}" data-s="${si}" data-sd="${esc(side || "")}" data-f="done"
       aria-label="Mark set ${idx} done">${ICON.check}</button>
-  </div>${setNoteHTML(st, en, si)}${prBadgeRow(st, ei, si)}${techRowHTML(en, ei, si)}`;
+  </div>${setNoteHTML(st, en, si, rowSessN)}${prBadgeRow(st, ei, si, rowSessN)}${techRowHTML(en, ei, si)}`;
 }
 /* WHAT THE APP CHANGED, SAID WHERE YOU WOULD ACT ON IT.
 
