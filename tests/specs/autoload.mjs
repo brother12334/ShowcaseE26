@@ -551,10 +551,68 @@ ck("with the top of the range beaten in two sessions", fcase.rdl.runs === 2, Str
 ck("so the verdict is a movement, not a number", fcase.rdl.kind === "harder", JSON.stringify(fcase.rdl));
 ck("and it is the same pattern on the kit the week is made of",
    /smith machine romanian deadlift/i.test(fcase.rdl.to || ""), String(fcase.rdl.to));
-ck("a deadlift is offered only as an alternative, never first",
-   fcase.rdl.alts.some(a=> /conventional|sumo|trap bar/i.test(a))
-   && !/conventional|sumo|trap bar/i.test(fcase.rdl.to || ""),
+/* CORRECTED: this asserted that a deadlift appears among the ALTERNATIVES, which was the
+   behaviour at the time and should not have been. A conventional deadlift is not a
+   substitute for a Romanian deadlift - different hip and knee travel, a different
+   hamstring length, a different job - and offering it under "or" says that it is. Where
+   the ladder has any same-pattern option, the ones that are not are now dropped rather
+   than demoted, so the assertion is that no deadlift is offered at all. */
+ck("no deadlift is offered, as first choice or as an alternative",
+   !/conventional|sumo|trap bar/i.test([fcase.rdl.to].concat(fcase.rdl.alts).join(" ")),
    fcase.rdl.to + " | " + fcase.rdl.alts.join(", "));
+ck("and the alternative that remains is the same movement on a bar",
+   fcase.rdl.alts.length === 1 && /^Romanian Deadlift$/.test(fcase.rdl.alts[0]),
+   fcase.rdl.alts.join(", "));
+
+/* THE STARTING LOAD, PINNED ARITHMETIC BY ARITHMETIC, because the first version read
+   130 lb and was right about none of it. Every step is asserted, so a future change to
+   any of them has to say which one it meant to move. */
+const sizeF = await p.evaluate(()=>{
+  const pe = (S.program.legsB || []).find(e=> e && /romanian|rdl/i.test(e.name));
+  let en = null;
+  for(let i = S.sessions.length - 1; i >= 0 && !en; i--){
+    if(S.sessions[i].workoutId !== "legsB") continue;
+    en = (S.sessions[i].entries || []).find(e=> e && nrm(e.name) === nrm(pe.name)) || null;
+  }
+  const ws = sideSetsWorking(en).map(x=> x.ref), st = ws[ws.length - 1];
+  const w = parseFloat(st.weight) || 0, reps = parseFloat(st.reps) || 0, rpe = parseFloat(st.rpe) || 0;
+  const range = repRange(pe.reps), to = "Smith Machine Romanian Deadlift";
+  return {w, reps, rpe, bothHands: heldInBothHands(pe.name),
+          total: loadTotalOf(pe.name, w),
+          e1rm: sizeE1RM(loadTotalOf(pe.name, w), reps, rpe),
+          planRpe: pe.rpe, startRpe: startRpeFor(pe), bottom: range[0],
+          wantTotal: loadForRepsAt(sizeE1RM(loadTotalOf(pe.name, w), reps, rpe), range[0], startRpeFor(pe)),
+          newBothHands: heldInBothHands(to), bar: barWeightFor(to), step: loadStepFor(to),
+          final: ceilingStartLoad(to, en, range, pe),
+          /* The first version's two mistakes, each priced separately: no effort target
+             (so the target reps are taken as a set to failure), and the per-hand figure
+             run through the strength-equivalence ratio. Together they made 130. */
+          toFailure: loadForRepsAt(sizeE1RM(loadTotalOf(pe.name, w), reps, rpe), range[0]),
+          oldWay: loadForRepsAt(sizeE1RM(w, reps, rpe), range[1]) / DB_HAND_OF_WHOLE};
+});
+console.log("    " + sizeF.w + " a hand x " + sizeF.reps + " @" + sizeF.rpe
+          + "  ->  total " + sizeF.total + "  e1RM " + sizeF.e1rm.toFixed(1)
+          + "  ->  " + sizeF.bottom + " reps @" + sizeF.startRpe + " = "
+          + sizeF.wantTotal.toFixed(1) + "  ->  " + sizeF.final);
+ck("the pair is read as a pair, not as one hand",
+   sizeF.bothHands && sizeF.total === sizeF.w * 2, sizeF.total + " from " + sizeF.w);
+ck("and no strength-equivalence bonus is added on top",
+   Math.abs(sizeF.total - 100) < 0.01, String(sizeF.total));
+ck("the effort target is the low end of the slot's own, capped at 8",
+   sizeF.planRpe === "7-9" && sizeF.startRpe === 7, sizeF.planRpe + " -> " + sizeF.startRpe);
+ck("it aims at the BOTTOM of the range, not reps to failure",
+   sizeF.bottom === 8 && sizeF.wantTotal > 100 && sizeF.wantTotal < 112,
+   sizeF.bottom + " reps -> " + sizeF.wantTotal.toFixed(2));
+ck("rounded DOWN on the new movement's own grid", sizeF.final === 105,
+   sizeF.final + " (bar " + sizeF.bar + ", step " + sizeF.step + ")");
+ck("CONTROL: and that is above what was being lifted, not below it",
+   sizeF.final > sizeF.total && sizeF.final < sizeF.total * 1.15,
+   sizeF.final + " vs " + sizeF.total);
+ck("CONTROL: dropping the effort target alone makes it braver",
+   sizeF.toFailure > sizeF.wantTotal + 5,
+   sizeF.toFailure.toFixed(1) + " vs " + sizeF.wantTotal.toFixed(1));
+ck("CONTROL: and the equivalence ratio is what made it 130",
+   sizeF.oldWay > 128 && sizeF.oldWay < 132, sizeF.oldWay.toFixed(1));
 ck("with a starting load sized from the set, not copied from the dumbbells",
    fcase.rdl.startAt > 0 && Math.abs(fcase.rdl.startAt - fcase.rdl.load) > 0.01,
    String(fcase.rdl.startAt));

@@ -7306,7 +7306,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.29";
+const APP_VERSION = "2026.11.17.30";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -30040,9 +30040,13 @@ function startingLoadFor(name, opts){
   const mult = START_LEVEL_MULT[o.level] || START_LEVEL_MULT.intermediate;
   let w = bw * ratio * mult;
   /* A pair of dumbbells totals about eighty per cent of the barbell version, which is
-     forty per cent in each hand — and one hand is what the app stores. Named, because
-     Rule F needs the same conversion to say what to start a Smith machine RDL on when the
-     only evidence is a pair of 50s, and two copies of a ratio is one too many. */
+     forty per cent in each hand — and one hand is what the app stores.
+
+     Named rather than inline because Rule F reached for it once and should not have: this
+     is a STRENGTH-EQUIVALENCE ratio between two movements a lifter is trained on, and
+     "what should I start a movement I have never done on" is a different question with a
+     more conservative answer. Kept here, where the question really is "what barbell load
+     matches this bodyweight", and deliberately not exported into the ceiling rule. */
   if(!row[3] && /\b(dumbbell|db|d\.b\.)\b/i.test(n)) w *= DB_HAND_OF_WHOLE;
   const load = roundLoadable(w, n);
   const step = stepInUnits(5);
@@ -57203,7 +57207,24 @@ function outgrownOptions(name, wid){
      already done yourself. */
   out.sort((a,b)=> (a.rank - b.rank) || (b.same - a.same) || (b.room - a.room)
                    || (b.gearUse - a.gearUse) || ((b.known ? 1 : 0) - (a.known ? 1 : 0)));
-  return out.slice(0, 3);
+  /* AND A DIFFERENT MOVEMENT IS NOT AN ALTERNATIVE, IT IS A DIFFERENT MOVEMENT.
+
+     Sorting put the same pattern first and left the rest underneath, so a dumbbell RDL at
+     the end of the rack was offered a Smith machine RDL and then, as an "or", a
+     conventional deadlift. A conventional deadlift is not a substitute for a Romanian
+     deadlift — different hip and knee travel, different hamstring length, a different
+     job — and offering it under the same heading says it is. Being heavier does not make
+     it one.
+
+     So where the ladder has ANY option that is the same pattern, the ones that are not
+     are dropped rather than demoted. Where it has none — a leg press has no "machine leg
+     press with more room", and a back squat is the honest next rung — they are all that
+     is on offer and they stay. The one-limb option is always the same movement by
+     definition and is never filtered. */
+  const keep = out.some(x=> x.rank === 0 || x.same)
+             ? out.filter(x=> x.rank === 0 || x.same)
+             : out;
+  return keep.slice(0, 3);
 }
 /* TRIGGER B — the ceiling the app cannot see, read off what you did about it. Three
    sessions at one load, every one of them clearing the top of the range. */
@@ -57321,9 +57342,23 @@ function dismissHarder(name, wid){
    a factor of two — and it would be wrong in the dangerous direction on the way back. The
    app already wrote this conversion down once, for the starting loads it estimates from
    bodyweight, and that is the one used here. */
-function loadBasisOf(name){
-  const g = equipmentOf(name);
-  return (g === "dumbbell" || g === "kettlebell") ? "hand" : "whole";
+/* WHAT THE STORED NUMBER IS, AND WHAT IT WEIGHS.
+
+   Not a new idea: heldInBothHands() already knows that a dumbbell RDL is a pair and a
+   goblet squat and a single-arm row are not, and it was written for exactly this class of
+   mistake — a split squat prescribed 20.4 lb of dumbbell, "nothing you can pick up".
+   A pair of 50s is 100 lb on the lifter; everything else is already its own total. */
+function loadTotalOf(name, w){ return heldInBothHands(name) ? w * 2 : w; }
+function loadAsStored(name, total){ return heldInBothHands(name) ? total / 2 : total; }
+/* The effort a first attempt at a movement should be made at: the LOW end of what the
+   slot already asks for, and never above 8 however hard the slot runs. A first session on
+   a movement is for finding out where it sits, and RPE 9 is not a question, it is a
+   commitment. */
+const START_RPE_MAX = 8, START_RPE_DEFAULT = 7.5;
+function startRpeFor(target){
+  const m = String((target && target.rpe) || "").match(/\d+(?:\.\d+)?/);
+  const low = m ? parseFloat(m[0]) : NaN;
+  return isFinite(low) && low > 0 ? Math.min(low, START_RPE_MAX) : START_RPE_DEFAULT;
 }
 /* ONE SENTENCE, SAID THE SAME WAY BY BOTH DOORS. The ceiling is reachable through a raise
    the rack swallowed and through Trigger C, and a lifter must not be told two different
@@ -57337,23 +57372,43 @@ function loadBasisOf(name){
    to infer it. */
 function ceilingStartNote(start, range, oldName, newName){
   if(!(start > 0)) return "Rebuild from " + range[0] + " reps on it.";
-  const basisMoved = loadBasisOf(oldName) !== loadBasisOf(newName);
+  const basisMoved = heldInBothHands(oldName) !== heldInBothHands(newName);
   return "Start it around " + fmtLoad(start)
        + (basisMoved ? " \u2014 the whole bar or carriage, not one hand \u2014" : " \u2014")
        + " which should be about " + range[1] + " reps on a movement you have not done "
        + "before, and let double progression take it from there.";
 }
-function ceilingStartLoad(newName, entry, range){
+/* WHAT TO START THE NEW MOVEMENT ON, after the first answer was shown to be too brave.
+
+   The first version read 130 lb for a Smith RDL off a 50 lb-a-hand dumbbell RDL, and the
+   lifter was right to query it. Two things pushed it up, and both were wrong:
+
+     IT APPLIED A STRENGTH-EQUIVALENCE RATIO. DB_HAND_OF_WHOLE (40% a hand) answers "what
+     barbell load matches this pair of dumbbells for a lifter trained on both" — 125 lb
+     for a pair of 50s. That is a fine answer to a question nobody asked here. A pair of
+     50s is 100 lb, arithmetically, and 100 lb is what the lifter has actually been
+     hinging; the extra 25 was a bonus awarded for a movement they have never performed.
+
+     AND IT SIZED FOR REPS TO FAILURE. loadForRepsAt() was called with no RPE, which means
+     the target reps are taken as a set to RPE 10. "12 reps" at RPE 10 is a heavier load
+     than "12 reps" at the RPE 7-9 the slot actually asks for, so the model handed back
+     MORE than the lifter had been lifting while appearing to be conservative.
+
+   So: the arithmetic total, sized for the BOTTOM of the range at the low end of the
+   slot's own effort target capped at 8, converted back into whatever the new movement
+   stores, and rounded DOWN on its grid. For the audited case that is 105 lb rather than
+   130 — just above the 100 lb already being lifted, which is where a first session on a
+   new movement belongs. */
+function ceilingStartLoad(newName, entry, range, target){
   const ws = sideSetsWorking(entry).map(x=> x.ref);
   const st = ws[ws.length - 1];
   if(!st || !range) return null;
   const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
-  const e = sizeE1RM(w, r, parseFloat(st.rpe) || 0);
+  if(!(w > 0) || !(r > 0)) return null;
+  const e = sizeE1RM(loadTotalOf(entry.name, w), r, parseFloat(st.rpe) || 0);
   if(!(e > 0)) return null;
-  let want = loadForRepsAt(e, range[1]);
+  const want = loadAsStored(newName, loadForRepsAt(e, range[0], startRpeFor(target || entry)));
   if(!(want > 0)) return null;
-  const from = loadBasisOf(entry.name), to = loadBasisOf(newName);
-  if(from !== to) want = from === "hand" ? want / DB_HAND_OF_WHOLE : want * DB_HAND_OF_WHOLE;
   /* AND A NUMBER SOMEBODY CAN PUT ON A BAR. roundLoadable() snaps to the grid the gear
      makes, and returns the figure UNCHANGED when it does not know the grid - no plate
      sizes named, no stack step - so this handed back 133.92857142857144 lb on a gym with
@@ -57363,10 +57418,10 @@ function ceilingStartLoad(newName, entry, range){
      The fallback is the one startingLoadFor() already uses for exactly this: the nearest
      five, in whichever unit the lifter is in. A step that is occasionally the wrong size
      still lands on a number somebody could try, which fourteen decimal places does not. */
-  const grid = roundLoadable(want, newName), step = stepInUnits(5);
-  const snapped = grid !== want ? grid : Math.max(step, Math.round(want / step) * step);
+  const grid = roundLoadableDown(want, newName), step = stepInUnits(5);
+  const snapped = grid !== want ? grid : Math.max(step, Math.floor(want / step) * step);
   const on = capToRack(snapped, newName);
-  return on > 0 && Math.abs(on - w) > 0.01 ? on : (on > 0 ? on : null);
+  return on > 0 ? on : null;
 }
 function progressionFor(sess, entry){
   const range = repRange(entry.reps);
@@ -57666,7 +57721,7 @@ function progressionFor(sess, entry){
          edit nobody should find they have agreed to by accident. */
       const opts = hardDismissed(entry.name, sess && sess.workoutId)
                  ? [] : outgrownOptions(entry.name, sess && sess.workoutId);
-      const startOn = opts.length ? ceilingStartLoad(opts[0].name, entry, range) : null;
+      const startOn = opts.length ? ceilingStartLoad(opts[0].name, entry, range, target) : null;
       if(opts.length) return {
         name: entry.name, kind: "harder", to: opts[0].name, alts: opts.slice(1), step,
         outgrownAt: isNaN(load) ? from : load,
@@ -57890,7 +57945,7 @@ function progressionFor(sess, entry){
      && beatTopRuns(entry.name, range, sess && sess.workoutId, load)){
     const opts = outgrownOptions(entry.name, sess && sess.workoutId);
     if(opts.length){
-      const rk = rackMaxSrc(), start = ceilingStartLoad(opts[0].name, entry, range);
+      const rk = rackMaxSrc(), start = ceilingStartLoad(opts[0].name, entry, range, target);
       return {
         name: entry.name, kind: "harder", to: opts[0].name, alts: opts.slice(1), step,
         outgrownAt: load, ceiling: true, startAt: start,
@@ -62201,8 +62256,20 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.29";
+const NEWS_FOR = "2026.11.17.30";
 const NEWS = [
+  {k: "The weight it suggests for a new movement is one you can actually start on",
+   s: ["It read 130 lb for a Smith machine RDL off a dumbbell RDL at 50 lb a hand, and "
+     + "that was too brave. Two things pushed it up. It treated a pair of 50s as worth "
+     + "125 lb on a bar \u2014 true of somebody trained on both, and not the question when "
+     + "you have never done the movement \u2014 and it sized the load for reps taken to "
+     + "failure rather than at the effort your plan asks for.",
+     "A pair of 50s is 100 lb. It now starts from that, aims at the bottom of your rep "
+     + "range at the easier end of your own RPE target, and rounds down. The same case "
+     + "reads 105 lb.",
+     "And a conventional deadlift is no longer offered as an alternative to a Romanian "
+     + "deadlift. Different hip travel, different hamstring length, different job. Where "
+     + "the app has the same movement on heavier kit it offers that and nothing else."]},
   {k: "And it tells you what to put on the bar",
    s: ["The swap offer worked out a starting load for the new movement and then did not "
      + "say it \u2014 the sentence underneath still read \u201crebuild from 8 reps\u201d. One of the "
@@ -64797,6 +64864,17 @@ function roundLoadable(w, name){
   const plates = w - bar;
   if(plates <= 0) return capToRack(w, name);
   return capToRack(bar + Math.max(st, Math.round(plates / st) * st), name);
+}
+/* THE SAME GRID, TAKEN DOWNWARDS. For a load the app is proposing on a movement somebody
+   has never performed, the nearest plate is the wrong direction to err in: too light costs
+   a set, too heavy costs the session, and on a hinge it can cost more than that. */
+function roundLoadableDown(w, name){
+  const st = loadStepFor(name);
+  if(!(st > 0) || !(w > 0)) return capToRack(w, name);
+  const bar = barWeightFor(name);
+  const plates = w - bar;
+  if(plates <= 0) return capToRack(w, name);
+  return capToRack(bar + Math.max(st, Math.floor(plates / st) * st), name);
 }
 /* P2-11 — A LOAD THAT IS NOT IN THE BUILDING, AFTER THE FACT.
 

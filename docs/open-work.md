@@ -576,6 +576,40 @@ spec changed with it: it pinned the words "Rebuild from 8 reps", which was the o
 the app had to "where do I restart" when it was written; a weight is a better answer to the
 same question, and a rep count is not actionable at the rack.
 
+**And the starting load was too brave, which the user caught by reading it (2026.11.17.30).**
+130 lb for a Smith machine RDL, off a dumbbell RDL at 50 lb a hand. Two separate mistakes,
+each priced in the spec so neither can come back unnoticed:
+
+1. **A strength-equivalence ratio was applied.** `DB_HAND_OF_WHOLE` (40% a hand) answers
+   "what barbell load matches this pair of dumbbells for a lifter trained on both" — 125 lb
+   for a pair of 50s. A fine answer to a question nobody asked. A pair of 50s is 100 lb,
+   arithmetically, and 100 lb is what was being hinged; the extra 25 was a bonus awarded for
+   a movement never performed. The ratio stays where it was written, in `startingLoadFor()`,
+   and is deliberately not exported into the ceiling rule. The basis now goes through
+   `heldInBothHands()`, which the file already had, and which already knows a goblet squat
+   and a single-arm row are not pairs.
+2. **It sized for reps to failure.** `loadForRepsAt()` was called with no RPE, so the target
+   reps were taken as a set at RPE 10 — heavier than the same reps at the RPE the slot asks
+   for. The model handed back MORE than the lifter had been lifting while looking
+   conservative. It now takes the low end of the slot's own RPE target, capped at 8
+   (`START_RPE_MAX`), because a first session on a movement is for finding out where it sits.
+
+Measured contributions on the audited case: dropping the effort target alone accounts for
+115.8 vs 107.3; the ratio accounts for the rest of the 131. The rule is now the arithmetic
+total, sized for the BOTTOM of the range at that effort, converted into whatever the new
+movement stores, and rounded DOWN (`roundLoadableDown()`, new, beside the round-to-nearest
+one — on a load nobody has performed, too light costs a set and too heavy costs the
+session). **Dumbbell RDL reads 105 lb** and the shrug 100 lb, against 100 lb being lifted.
+
+**And a conventional deadlift is no longer an alternative to a Romanian deadlift.** Sorting
+put the same pattern first and left the rest underneath as "or", which says they are
+substitutes. Different hip and knee travel, different hamstring length, different job.
+Where the ladder has ANY same-pattern option the others are now DROPPED, not demoted; where
+it has none — a leg press has no heavier leg press, and a back squat is the honest next rung
+— they are all there is and they stay. One assertion of mine changed with it, and it was
+wrong for the reason the user gave: it pinned a deadlift appearing among the alternatives,
+which was the behaviour and should not have been.
+
 **And `dupedecl`, `cssdupe` and `autoload` are now in `REQUIRED` in `tests/run.js`.** They
 were not, which meant a clone missing them would have run 295 specs and said so cheerfully.
 The runner's count, for the record: 298 specs in `tests/specs` plus `tests/share-worker.mjs`,
