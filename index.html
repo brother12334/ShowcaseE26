@@ -7286,7 +7286,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.24";
+const APP_VERSION = "2026.11.17.25";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -22150,6 +22150,8 @@ function cycleBounds(){
    prerequisite: if either throws on a log shape I have not seen, the app still starts
    and the user gets exactly what they had before the update. */
 let SEEDS_RUN = false;
+/* RULE E, ADJUSTMENT 1 — at most one injury question per open of the app. */
+let INJURY_ASK_SHOWN = false;
 /* Everything anybody has ever logged under "something hurt" belongs in the joint signal
    too — it was the same question, asked before there was anywhere to put the answer. Run
    once, on the day it was said, and never overwriting a worse reading on the same day. */
@@ -33686,6 +33688,14 @@ function render(){
      re-renders, so this is the one place it has to be read from, and it returns on a string
      compare when nothing has moved — which is every render but the handful that matter. */
   /* BEFORE THE READERS, NOT AFTER THEM. See ensureAllSessionShapes(). */
+  /* RULE E, ADJUSTMENT 1 — asked on the way in, at most once per open, only on the
+     Today tab with no session running, and never over a modal already on screen. */
+  try{
+    if(!INJURY_ASK_SHOWN && TAB === "today" && !S.active && !document.getElementById("modal")){
+      INJURY_ASK_SHOWN = true;
+      setTimeout(()=>{ try{ if(!document.getElementById("modal")) openInjuryAsk(); }catch(e){} }, 400);
+    }
+  }catch(e){}
   try{ ensureAllSessionShapes(); }catch(e){ try{ console.error("Element 26: shape repair threw", e); }catch(e2){} }
   try{ syncActivePlan(); }catch(e){}
   /* And which ramp each movement has earned, which is a question about ORDER and was
@@ -51684,6 +51694,36 @@ function finishWorkout(){
      Only on "auto". On "ask" the drift is still found and still offered — that is the
      catch-up verdict on the grade card — but nothing is written without being asked,
      because a setting that says ask is a setting that says ask. */
+  /* RULE E — THE CUTS, AFTER THE SYNC AND BEFORE THE RAISE. Only the ones every
+     condition allows; a proposal and a rep-range suggestion are findings on the card,
+     never writes. A rep-range change is ALWAYS a proposal, even where every condition
+     holds, because it changes what the plan asks of you rather than what it loads. */
+  if(trainPrefs().progression === "auto"){
+    try{
+      const cuts = [];
+      const seen2 = {};
+      (sessObj.entries || []).forEach(en=>{
+        if(!en || !en.name) return;
+        const k = nrm(en.name);
+        if(seen2[k]) return;
+        seen2[k] = 1;
+        const r = loadCutFor(en.name, sessObj.workoutId, sessObj);
+        if(r && r.kind) cuts.push(r);
+      });
+      sessObj.loadCuts = cuts.map(r=> ({name: r.name, kind: r.kind, from: r.from, to: r.to,
+                                        why: r.why || null, say: r.say || null}));
+      cuts.filter(r=> r.kind === "apply").forEach(r=>{
+        const where = findProgramEntryWhere(r.name, r.wid);
+        const e2 = where && where.e;
+        if(!e2) return;
+        const undo = where.alt ? null : [planSnapOne(r.wid, e2, e2.name)];
+        e2.weight = r.to;
+        logPlanChange("programme", r.wid, r.name,
+          [fmtLoad(r.from) + " \u2192 " + fmtLoad(r.to)],
+          {note: "Load reduced. " + r.say, rule: "cut", undo});
+      });
+    }catch(e){ try{ console.error("Element 26: the cut rule threw", e); }catch(e2){} }
+  }
   if(trainPrefs().progression === "auto" && !sessionNotEvidence(sessObj)){
     try{
       const rows = planSyncPlan(sessObj);
@@ -58015,6 +58055,120 @@ function migrateRestCeilings(){
 
    So the finding stays and every automated consequence stops. This suppresses what the
    app DOES, never what it tells you. */
+/* =====================================================================
+   RULE E — A NOTE THAT MENTIONS AN INJURY, AND WHAT THE APP MAY DO ABOUT IT
+
+   Nov 9 in the audited export reads "I had a toe injury." The session was logged, the
+   squat collapsed from 9 reps to 3, and four days later the plan was cut 80 → 70 on the
+   strength of it. Nothing in the app read that note: the flag that suppresses a session
+   is a mark somebody taps, and nobody taps it while limping home.
+
+   WHAT A KEYWORD MATCH IS ALLOWED TO DO, AND WHAT IT IS NOT. It is allowed to be
+   CONSERVATIVE: a session whose note sounds like an injury stops being evidence for a
+   load CUT, immediately, because the cost of ignoring a real injury is a wrong
+   prescription and the cost of pausing on a false positive is one session's delay. It is
+   NOT allowed to be the final word, because "no pain today" is a good session. So it
+   asks, once, and the answer becomes a real dayFlags mark that every other rule already
+   respects.
+
+   NEGATION IS THE WHOLE DIFFICULTY. "No pain", "pain free", "shoulder felt fine" are the
+   opposite of what the keyword says, and are matched per sentence so one clause cannot
+   excuse another.
+
+   ITS LIMITS, PLAINLY. Sentences are split on . ; ! ? and nothing else, so a denial and
+   a complaint joined by "but" are read as one clause and the denial wins. It also has no
+   idea that soreness is not injury. Both err toward excluding a session, which is the
+   safe direction here and is why the question exists: the answer, not the regex, is what
+   gets written down. */
+const INJURY_WORDS = /\b(injur\w*|hurt\w*|pain\w*|sore(?:ness)?|strain\w*|sprain\w*|tweak\w*|pulled|twinge\w*|ache\w*|aching|flare[- ]?up|ill|illness|sick|fever|flu|unwell|migraine|concussion|dizzy|nausea\w*)\b/i;
+const INJURY_DENIED = new RegExp(
+  "\\b(?:no|not|without|free of|zero|never any|nothing)\\b[^.;!?]{0,24}\\b(?:injur\\w*|hurt\\w*|pain\\w*|sore(?:ness)?|niggle\\w*|ache\\w*|issues?)\\b"
+  + "|\\b(?:pain|injury|ache|soreness)[- ]free\\b"
+  + "|\\b(?:felt|feels|feeling|was|were)\\s+(?:fine|good|great|strong|ok|okay|normal)\\b", "i");
+function noteLooksInjured(text){
+  const t = String(text || "").trim();
+  if(!t || !INJURY_WORDS.test(t)) return null;
+  const parts = t.split(/[.;!?]+/).map(x=> x.trim()).filter(Boolean);
+  const bad = parts.filter(x=> INJURY_WORDS.test(x) && !INJURY_DENIED.test(x));
+  if(!bad.length) return null;
+  const m = INJURY_WORDS.exec(bad[0]);
+  return {word: m ? m[0] : "", say: bad[0].slice(0, 90)};
+}
+/* Already answered — marked, or asked and declined. Either way it is settled. */
+function injuryAsked(sess){
+  const d = sess && sess.date;
+  if(!d) return true;
+  const fl = (S.dayFlags || {})[d] || {};
+  if(fl.ill || fl.notRep || fl.hurtAsked) return true;
+  return !!(sess.notRepresentative || sess.injuryAsked);
+}
+/* RULE E, ADJUSTMENT 1 — THE KEYWORD DECIDES NOTHING ON ITS OWN; IT ASKS.
+
+   The regex buys one session's caution and no more. What it cannot do is write anything
+   down, because it is wrong often enough that a silent mark would be worse than no mark:
+   soreness is not injury, and a note can mention an ache that had nothing to do with the
+   session. So the oldest unanswered one is put to the person, once, and THEIR answer
+   becomes a real dayFlags mark that every rule in the app already respects.
+
+   "No" is an answer too, and is remembered as one — otherwise the question returns
+   every time the app opens, which is how a useful prompt becomes a thing to dismiss. */
+function injuryAskDue(){
+  const list = (S.sessions || []).slice().sort((a,b)=> b.startedAt - a.startedAt);
+  for(const s of list.slice(0, 12)){
+    if(!s || injuryAsked(s)) continue;
+    const hit = noteLooksInjured(s.note);
+    if(hit) return {sess: s, hit};
+  }
+  return null;
+}
+function markInjuryAnswer(sess, marked){
+  if(!sess || !sess.date) return;
+  if(!S.dayFlags || typeof S.dayFlags !== "object") S.dayFlags = {};
+  const d = S.dayFlags[sess.date] || (S.dayFlags[sess.date] = {});
+  if(marked){ d.notRep = true; sess.notRepresentative = true; }
+  d.hurtAsked = true;
+  sess.injuryAsked = true;
+  /* A session that stops being evidence changes what the counters describe, and the
+     rebuild is 4ms — item 11's reason for doing it rather than patching in place. */
+  try{ if(marked) rebuildStalls(); }catch(e){}
+  save(); queueSync();
+}
+function openInjuryAsk(){
+  const due = injuryAskDue();
+  if(!due) return false;
+  const s = due.sess;
+  showModal(`<h3>Was this a normal session?</h3>
+    <p class="sub" style="text-transform:none;letter-spacing:0;margin:-4px 0 12px">
+      ${esc(fmtDate(s.date))}, ${esc(dayName(s.workoutId))}</p>
+    <div class="set-says" style="margin-bottom:12px">Your note says
+      “${esc(due.hit.say)}”. Element 26 has already stopped using this session to
+      lower any of your loads, just in case. It keeps showing everywhere it did before.</div>
+    <p>Mark it as a session not to learn from?</p>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn small" id="injYes" style="flex:1">Yes, mark it</button>
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn ghost small" id="injNo" style="flex:1">No, it was a normal session</button>
+    </div>`);
+  const m = document.getElementById("modal");
+  const yes = m && m.querySelector("#injYes");
+  const no = m && m.querySelector("#injNo");
+  if(yes) yes.onclick = ()=>{ markInjuryAnswer(s, true); hideModal(); render();
+    toast("Marked — nothing will be learned from that one", "good"); };
+  if(no) no.onclick = ()=>{ markInjuryAnswer(s, false); hideModal(); render();
+    toast("Kept as a normal session"); };
+  return true;
+}
+/* RULE E — the conservative exclusion, used by the CUT rules only. Everything else goes
+   on reading the session exactly as before: it stays in the history, in the totals, in
+   the volume, and on every screen it was on. */
+function sessionNotEvidenceForCut(sess){
+  const base = sessionNotEvidence(sess);
+  if(base) return base;
+  const hit = noteLooksInjured(sess && sess.note);
+  if(hit) return "a session whose note mentions " + (hit.word || "an injury");
+  return null;
+}
 function sessionNotEvidence(sess){
   if(!sess) return null;
   if(deloadCovers(sess.date, sess.finishedAt || sess.startedAt)) return "a deload week";
@@ -59314,6 +59468,68 @@ function recentSlotLoads(name, wid, sess, n){
   }
   return out;
 }
+/* =====================================================================
+   RULE E \u2014 WHEN A LOAD MAY COME DOWN ON ITS OWN, AND WHEN IT MAY ONLY BE OFFERED
+
+   Three audited cuts are the whole brief. Smith squat 80 \u2192 70 on Nov 16 off a session
+   of 7, 7, 8 and 6 reps against a 9-13 range \u2014 a good session against a range that does
+   not fit. The same slot cut 80 \u2192 70 on Nov 13 off Nov 9, which was the toe injury. And
+   the shoulder press cut 95 \u2192 60, an overshoot so large the next session went 11, 14, 17.
+
+   Every condition below exists to refuse one of those.
+
+     TWO CONSECUTIVE QUALIFYING SESSIONS, so one bad day cannot move a load.
+     QUALIFYING EXCLUDES the injury note, the day flags, the break, the deload \u2014 and,
+       since item 10, sessions at ANOTHER GYM: cross-gym evidence may feed an estimate
+       and may never set a prescription, and a carriage 10 lb heavier is exactly the kind
+       of thing that looks like a collapse.
+     NEVER BELOW A LOAD YOU HAVE JUST DONE INSIDE THE RANGE, which is the floor that
+       stops a cut chasing a bad week down.
+     TEN PER CENT AT MOST, because a cut that overshoots costs more than a cut that is
+       too small: too small corrects itself next session, too large takes a month.
+     AND IF THE SMALLEST LOADABLE STEP IS ITSELF MORE THAN TEN PER CENT, nothing is
+       applied at all \u2014 the gear cannot make a cut this size, so the choice belongs to
+       a person rather than to the rounding. */
+const CUT_MAX_FRACTION = 0.10;
+const CUT_RECENT_WINDOW = 3;
+function cutEvidenceFor(name, wid, sess, n){
+  const k = nrm(name);
+  const home = sess ? sessionGym(sess).id : null;
+  const out = [];
+  const list = (S.sessions || [])
+    .filter(s=> s && s.workoutId === wid && (!sess || s.startedAt <= sess.startedAt))
+    .sort((a,b)=> b.startedAt - a.startedAt);
+  for(const s of list){
+    if(out.length >= (n || 4)) break;
+    const en = (s.entries || []).find(e=> e && nrm(e.name) === k);
+    if(!en) continue;
+    const why = sessionNotEvidenceForCut(s);
+    /* ITEM 10's RULE, APPLIED TO THE CUT. An untagged session resolves to the home gym,
+       so a log from before gyms existed still counts at home, as it should. */
+    const gymWhy = (home && sessionGym(s).id !== home)
+      ? "it was at " + (sessionGymLabel(s) || "another gym") : null;
+    out.push({sess: s, entry: en, skip: why || gymWhy || null});
+  }
+  return out;
+}
+/* Did set 1 come in under the bottom of the range at or above the effort prescribed for
+   it? That is the shape of a load that is too heavy, as against a range that is wrong \u2014
+   which looks like set 1 landing just short at the prescribed effort, session after
+   session, with the estimated max holding up. */
+function firstSetShort(en, range){
+  const ws = sideSetsWorking(en);
+  if(!ws.length || !range) return null;
+  const first = ws[0];
+  const st = first.ref || first;
+  const si = first.si != null ? first.si : 0;
+  const reps = parseFloat(st.reps) || 0;
+  const rpe = parseFloat(st.rpe) || 0;
+  const t = rpeTargetFor(en, si);
+  if(!(reps > 0)) return null;
+  const hardEnough = (t == null || !rpe) ? true : rpe >= t - RPE_TOL;
+  return {reps, rpe, target: t, short: reps < range[0] && hardEnough,
+          under: Math.max(0, range[0] - reps)};
+}
 function planSyncFor(name, wid, sess){
   const where = findProgramEntryWhere(name, wid);
   const e = where && where.e;
@@ -59341,6 +59557,142 @@ function planSyncFor(name, wid, sess){
           say: "Your plan says " + fmtLoad(planW) + " and your last "
              + disagree.length + " sessions on this day were at "
              + disagree.map(x=> fmtLoad(x.w)).join(" and ") + "."};
+}
+/* THE VERDICT ITSELF. Returns {apply|propose|range|null} with everything needed to
+   explain it \u2014 never writes. */
+function loadCutFor(name, wid, sess){
+  const where = findProgramEntryWhere(name, wid);
+  const e = where && where.e;
+  if(!e || where.alt) return null;
+  const range = repRange(e.reps);
+  if(!range) return null;
+  const ev = cutEvidenceFor(name, wid, sess, 4);
+  if(!ev.length) return null;
+  const usable = ev.filter(x=> !x.skip);
+  const skipped = ev.filter(x=> x.skip);
+  /* TWO CONSECUTIVE qualifying sessions, counted from the newest usable one. A session
+     that does not qualify is passed over, not counted as a miss: an injury week must
+     not be able to CAUSE a cut, and it must not be able to prevent one either. */
+  const planWNow = (e.weight == null || e.weight === "") ? null : parseFloat(e.weight);
+  const stepNow = progressionStep(e, planWNow || 0);
+  const nearPlan = w => planWNow == null ? true
+    : Math.abs(w - planWNow) <= Math.max((stepNow && stepNow.amount > 0 ? stepNow.amount : 0) / 2, 0.01);
+  const hits = [];
+  for(const x of usable){
+    const sh = firstSetShort(x.entry, range);
+    if(!sh || !sh.short) break;
+    /* AND IT HAS TO BE EVIDENCE ABOUT THIS LOAD.
+
+       Skipping a session that does not qualify and reading the one before it is right —
+       an injury week must not be able to prevent a cut any more than cause one — but it
+       lets the search reach a long way back, and a set that fell short at a DIFFERENT
+       weight says nothing about the weight now prescribed. On the real export this had
+       the incline Smith cut from 95 because two August sessions at 70 came in short.
+       Found by reading the citation the rule printed, which is the whole reason a
+       verdict has to name the sessions it read. */
+    const add = entryBarAdd(x.entry);
+    let topW = 0;
+    sideSetsWorking(x.entry).forEach(y=>{
+      const st = y.ref || y; const w = setLoad(st, add); if(w > topW) topW = w; });
+    if(!nearPlan(topW)) break;
+    hits.push({sess: x.sess, entry: x.entry, sh, at: topW});
+    if(hits.length >= 2) break;
+  }
+  const e1s = usable.slice(0, 3).map(x=>{
+    const ws = sideSetsWorking(x.entry);
+    let best = 0;
+    ws.forEach(y=>{ const st = y.ref || y;
+      const v = est1RM(setLoad(st, entryBarAdd(x.entry)), repsToFailure(st));
+      if(v > best) best = v; });
+    return best;
+  }).filter(v=> v > 0);
+  const holding = e1s.length >= 3 && e1s[0] >= Math.min.apply(null, e1s) * 0.98;
+  /* RANGE FIRST, AND WITHOUT THE LOAD GUARD. "Is this load too heavy" and "does this rep
+     range fit me" are different questions, and only the first is about a particular
+     weight. The audited squat lands at or just under the bottom of 9-13 session after
+     session across two different loads — 8, 8, 9, 7 at 70 and 80 — which is a range
+     that does not fit rather than a weight that is wrong. Judging it with the cut's
+     same-load requirement threw away half the evidence and said "one session so far". */
+  /* UNDER the bottom, not AT it. Set 1 finishing exactly on the bottom of the range at
+     RPE 7 is double progression working as intended — you start at the bottom and work
+     up — and counting it as evidence that the range is wrong put a proposal on 29 of
+     the slots in the real export, most of them perfectly healthy. One to three reps
+     SHORT is the pattern that means the range does not fit. */
+  const nearBottom = usable.slice(0, 4).map(x=> firstSetShort(x.entry, range))
+    .filter(sh=> sh && sh.reps > 0 && range[0] - sh.reps >= 1 && range[0] - sh.reps <= 3);
+  const under = nearBottom.length
+    ? Math.max.apply(null, nearBottom.map(sh=> sh.under))
+    : (hits.length ? Math.max.apply(null, hits.map(h=> h.sh.under)) : 0);
+  if(nearBottom.length >= 3 && under >= 1 && under <= 3 && holding){
+    const lo = Math.max(1, range[0] - 3), hi = Math.max(lo + 1, range[1] - 3);
+    return {kind: "range", name, wid, from: e.reps, to: lo + "-" + hi, skipped,
+            e1s: e1s.map(v=> Math.round(v)), n: nearBottom.length,
+            say: "Set 1 has finished short of " + range[0] + " in "
+               + nearBottom.length + " of your last " + Math.min(4, usable.length)
+               + " sessions on this day, at the prescribed effort, while your estimated "
+               + "max held up. That is a range that does not fit rather than a load that "
+               + "is too heavy."};
+  }
+  if(hits.length < 2){
+    /* The reason has to name the thing that actually stopped it. "Set 1 is inside the
+       range" was printed for a slot whose sessions were at a different load from the
+       one prescribed, which is a different fact and a confusing one to read. */
+    const top0 = usable.length ? (()=>{
+      const add = entryBarAdd(usable[0].entry);
+      let w = 0;
+      sideSetsWorking(usable[0].entry).forEach(y=>{
+        const st = y.ref || y; const v = setLoad(st, add); if(v > w) w = v; });
+      return w;
+    })() : 0;
+    const why = !usable.length ? "no session this rule may read"
+      : (planWNow != null && top0 > 0 && !nearPlan(top0))
+        ? "your last session was at " + fmtLoad(top0) + ", not the " + fmtLoad(planWNow) + " planned"
+      : hits.length === 1 ? "one session so far"
+      : "set 1 is inside the range";
+    return {kind: null, why, skipped};
+  }
+  const planW = (e.weight == null || e.weight === "") ? null : parseFloat(e.weight);
+  if(!(planW > 0)) return {kind: null, why: "no planned load to cut", skipped};
+  /* THE RANGE MAY BE THE THING THAT IS WRONG. One to three reps under, at the prescribed
+     effort, with the estimated max flat or rising over three or more sessions, is a
+     person who is strong and a range that does not fit them. Nov 15's squat is exactly
+     that: 7, 7, 8 and 6 against 9-13, four days after the best squat in the log. Cutting
+     the load there chases a number that was never the problem. */
+  /* THE CUT. Ten per cent at most, never below a load done inside the range recently,
+     and on the grid the gear makes. */
+  const floorLoad = (()=>{
+    let best = 0;
+    usable.slice(0, CUT_RECENT_WINDOW).forEach(x=>{
+      const sh = firstSetShort(x.entry, range);
+      if(!sh || sh.short) return;                       // only sessions that MET the range
+      const ws = sideSetsWorking(x.entry);
+      ws.forEach(y=>{ const st = y.ref || y;
+        const w = setLoad(st, entryBarAdd(x.entry));
+        if(w > best) best = w; });
+    });
+    return best;
+  })();
+  const step = progressionStep(e, planW);
+  const amt = step && step.amount > 0 ? step.amount : 0;
+  const lowest = planW * (1 - CUT_MAX_FRACTION);
+  let to = amt > 0 ? roundLoadableOn(e, Math.max(lowest, planW - amt), name) : null;
+  if(to == null || !(to > 0) || to >= planW) return {kind: null, why: "no smaller load this gear makes", skipped};
+  if(floorLoad > 0 && to < floorLoad){
+    return {kind: null, why: "you did " + fmtLoad(floorLoad) + " inside the range recently", skipped};
+  }
+  const pct = (planW - to) / planW;
+  const base = {name, wid, from: planW, to, skipped,
+    hits: hits.map(h=> ({date: h.sess.date, reps: h.sh.reps, rpe: h.sh.rpe, target: h.sh.target})),
+    say: "Set 1 came in under " + range[0] + " reps at or past the prescribed effort in "
+       + hits.map(h=> h.sess.date).join(" and ") + "."};
+  /* ADJUSTMENT 4: a step the gear cannot make smaller than 10% is a decision, not a
+     rounding. It is offered rather than taken. */
+  if(pct > CUT_MAX_FRACTION + 1e-9){
+    return Object.assign({kind: "propose", pct: Math.round(pct * 1000) / 10,
+      why: "the smallest step this makes is " + Math.round(pct * 1000) / 10
+         + "%, more than the " + Math.round(CUT_MAX_FRACTION * 100) + "% a cut may take"}, base);
+  }
+  return Object.assign({kind: "apply", pct: Math.round(pct * 1000) / 10}, base);
 }
 function planSyncPlan(sess){
   if(!sess || !sess.workoutId) return [];
@@ -61439,8 +61791,26 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.24";
+const NEWS_FOR = "2026.11.17.25";
 const NEWS = [
+  {k: "A load only comes down when the evidence is solid",
+   s: ["The audited cuts were all one bad session read as a trend. The Legs A squat was "
+     + "cut 80 → 70 off a session of 7, 7, 8 and 6 reps — four days after the best "
+     + "squat in the log — and cut again off Nov 9, the day the note says “I had a toe "
+     + "injury”. Nothing in the app read that note.",
+     "A cut now wants set 1 under the bottom of the range at the prescribed effort, in "
+     + "TWO qualifying sessions in a row, at the load actually prescribed, at the same "
+     + "gym, never below a weight you have just done inside the range, and never more "
+     + "than 10%. If the smallest step your gear makes is bigger than that, it is "
+     + "offered rather than taken.",
+     "And where set 1 lands one to three reps short session after session while your "
+     + "estimated max holds up, the answer is not a lighter weight — it is a rep range "
+     + "that does not fit. Element 26 proposes the range instead. It only ever proposes: "
+     + "changing what the plan asks of you is not something it will do on its own.",
+     "A note that mentions an injury, pain or illness now stops that session counting "
+     + "toward any cut straight away, and asks you once whether to mark it. Your answer "
+     + "is what gets written down — “no pain today” and “shoulder felt fine” are read "
+     + "as the good sessions they are."]},
   {k: "Your plan keeps up with what you actually lift",
    s: ["Four loads in your plan had drifted and stayed drifted — the Legs B leg curl "
      + "said 75 while every session ran 160, the Legs A leg extension said 70 against a "

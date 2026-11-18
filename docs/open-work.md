@@ -274,6 +274,59 @@ item 11 - is invisible to it, which is exactly how item 11 was found by reasonin
 than by this scan. The scans are in this document rather than committed as a spec because
 their value is the judgement in the table, which a passing test cannot express.
 
+## 16. Automatic load management — A, B, C, D, E DONE; F and G open
+
+Asked for on 2026-11-18 with eight acceptance tests, built against the real exported
+state (`tests/fixtures/state-2026-11-17.json`, 74 sessions to 2026-11-16). Tests live in
+`tests/specs/autoload.mjs`.
+
+**A — identity (2026.11.17.23).** `S.exAliases` had merged two triceps attachments into
+one key, and the rename that made it had swept the Push A log under the Push B name.
+`splitAttachmentAliases()` undoes both once; six entries relabelled, undoable from
+Settings. `planEditSave()` can no longer produce it. Comparing on `tableKey()` alone
+cannot work: once the alias is gone the two names are deliberately different keys, so the
+repair must compare with the parenthetical stripped.
+
+**B — one load basis.** Verified, not built: already true. With `barMode: "total"` the
+logged number IS the total, `entryBarAdd()` is 0 across all 76 Smith sessions, and the
+per-gym carriage reaches the rules through item 10's `kitFor()` and `lastLoggedLoad()`.
+
+**C — sync (2026.11.17.24).** `planSyncFor` / `planSyncPlan` / `applyPlanSync`, run at
+finish on "auto" BEFORE the raise, because a raise is measured against the load lifted
+and the reverse order would overwrite a fresh increase. Two sessions for a drift, one for
+a blank, capped and rounded before comparison, never called progression.
+
+**D — increases (2026.11.17.23-24).** The decision reads the LAST working set; the guard
+moved across sessions with three routes (2 of 3, a consistent session, or 3+ past the
+top). Big overshoots are sized from the set's own e1RM, on a sizing-only RTF cap of 20,
+rounded DOWN, checked forwards, allowed past the per-movement cap but measured, said and
+bounded at 20%.
+
+**E — decreases (2026.11.17.25).** Two qualifying sessions in a row, set 1 under the
+bottom at the prescribed effort, AT THE LOAD PRESCRIBED, same gym, never below a load
+done inside the range recently, never more than 10%, and offered rather than applied when
+the smallest step the gear makes exceeds that. A note mentioning injury, pain or illness
+excludes the session from cuts immediately and asks once; the answer becomes a real
+`dayFlags` mark. Rep-range changes are ALWAYS proposals.
+
+**Three things the replay caught that would otherwise have shipped:**
+
+1. Skipping non-qualifying sessions let the cut rule reach six weeks back and cut the
+   incline Smith from 95 because two August sessions at 70 came in short. Evidence must
+   be at the load being cut: 19 automatic cuts became 4. Found by reading the citation
+   the verdict printed, which is why a verdict names its sessions.
+2. The same-load guard is right for a cut and wrong for a rep-range proposal. "Is this
+   weight too heavy" and "does this range fit me" are different questions.
+3. Counting set 1 landing AT the bottom of the range as evidence put a range proposal on
+   29 slots. Landing at the bottom on set 1 is double progression working. One to three
+   reps SHORT is the pattern; 29 became 8.
+
+**Still open: F** (at dbMax and above the range for 2 sessions, propose a harder
+variation rather than prescribing the same thing again — `outgrownOptions()` and the
+`harder` verdict are most of it already) **and G** (every automatic change already writes
+a day-scoped row with its rule and an undo; what is missing is "Changed since last time"
+at the start of the next session for that day).
+
 ## 15. Plan patches — QUEUED, spec in docs/plan-patches-spec.md
 
 Paste a strict JSON patch in Settings, preview it as before/after with warnings, apply it

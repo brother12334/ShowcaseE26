@@ -331,6 +331,102 @@ ck("P2-9: and none is called progression",
    cRows.notes.every(t=> !/progress|double progression|cleared the top/i.test(t)), cRows.notes.join(" | "));
 ck("and every one can be put back", cRows.undoable === cRows.n, cRows.undoable + "/" + cRows.n);
 
+console.log("\nE. WHEN A LOAD MAY COME DOWN  (Rule E)");
+const notes = await p.evaluate(()=>{
+  const t = {};
+  ["I had a toe injury.", "no pain today", "Pain-free session", "shoulder felt fine",
+   "tweaked my back", "felt great", "sore from Tuesday", "", "AC fixed in gym"]
+    .forEach(x=>{ const r = noteLooksInjured(x); t[x || "(empty)"] = r ? r.word : null; });
+  return t;
+});
+Object.keys(notes).forEach(k=> console.log("    " + JSON.stringify(k).padEnd(26) + " -> " + notes[k]));
+ck("\"I had a toe injury.\" is read as an injury", !!notes["I had a toe injury."], String(notes["I had a toe injury."]));
+ck("\"no pain today\" is NOT", notes["no pain today"] === null, String(notes["no pain today"]));
+ck("nor is \"Pain-free session\"", notes["Pain-free session"] === null, String(notes["Pain-free session"]));
+ck("nor \"shoulder felt fine\"", notes["shoulder felt fine"] === null, String(notes["shoulder felt fine"]));
+ck("CONTROL: a real complaint still lands", !!notes["tweaked my back"], String(notes["tweaked my back"]));
+ck("CONTROL: an ordinary note is left alone", notes["AC fixed in gym"] === null, String(notes["AC fixed in gym"]));
+
+const nov9 = await p.evaluate(()=>{
+  const s = S.sessions.find(x=> x.date === "2026-11-09");
+  return {note: s.note, flagged: !!s.notRepresentative,
+          forCut: sessionNotEvidenceForCut(s), forAll: sessionNotEvidence(s),
+          asked: injuryAsked(s), due: !!injuryAskDue()};
+});
+console.log("    Nov 9: " + JSON.stringify(nov9));
+ck("Nov 9 never counts as evidence for a cut", !!nov9.forCut, String(nov9.forCut));
+ck("and it was never marked by hand — the note is all there was",
+   !nov9.flagged && !nov9.forAll, JSON.stringify({flagged: nov9.flagged, forAll: nov9.forAll}));
+ck("and the app has a question queued about it, not a silent decision", nov9.due, String(nov9.due));
+
+const asked = await p.evaluate(()=>{
+  const s = S.sessions.find(x=> x.date === "2026-11-09");
+  const before = sessionNotEvidence(s);
+  markInjuryAnswer(s, true);
+  const after = sessionNotEvidence(s);
+  const flag = ((S.dayFlags || {})["2026-11-09"] || {});
+  const stillDue = !!injuryAskDue();
+  return {before, after, flag, stillDue};
+});
+console.log("    answered: " + JSON.stringify(asked));
+ck("answering yes writes a real dayFlags mark", asked.flag.notRep === true, JSON.stringify(asked.flag));
+ck("which every other rule then respects too", !asked.before && !!asked.after,
+   JSON.stringify({before: asked.before, after: asked.after}));
+ck("and it is not asked again", asked.flag.hurtAsked === true, String(asked.flag.hurtAsked));
+
+console.log("\nE2. THE AUDITED CUTS, AND THE RANGE THAT DID NOT FIT");
+const cut = await p.evaluate(()=>{
+  const s15 = S.sessions.find(x=> x.date === "2026-11-15" && x.workoutId === "legsA");
+  /* The live order is sync, then cut: the plan said 70 while the session squatted 80,
+     and the cut rule rightly refuses evidence at a load it is not prescribing. */
+  applyPlanSync(planSyncPlan(s15));
+  const squat = loadCutFor("Smith Machine Squat", "legsA", s15);
+  const s16 = S.sessions.find(x=> x.date === "2026-11-16");
+  applyPlanSync(planSyncPlan(s16));
+  const press = loadCutFor("Smith Machine Shoulder Press", "pushB", s16);
+  return {squat, press};
+});
+console.log("    squat: " + JSON.stringify(cut.squat && {kind: cut.squat.kind, from: cut.squat.from, to: cut.squat.to}));
+console.log("    " + ((cut.squat || {}).say || (cut.squat || {}).why || ""));
+ck("THE AUDITED CASE: Nov 15 squat is not cut", cut.squat && cut.squat.kind !== "apply",
+   String(cut.squat && cut.squat.kind));
+ck("it proposes the rep range instead", cut.squat && cut.squat.kind === "range",
+   String(cut.squat && cut.squat.kind));
+ck("and the range it proposes is 6-10", cut.squat && cut.squat.to === "6-10",
+   String(cut.squat && cut.squat.to));
+ck("a rep-range change is ALWAYS a proposal, never applied",
+   cut.squat && cut.squat.kind === "range" && cut.squat.from === "9-13", String(cut.squat && cut.squat.from));
+
+console.log("\nE3. THE GUARDS");
+const guards = await p.evaluate(()=>{
+  const out = {};
+  /* SAME GYM ONLY. Retag the newest Legs A session to another gym and the evidence from
+     it stops counting toward a cut at home. */
+  const s = [...S.sessions].reverse().find(x=> x.workoutId === "legsA");
+  const other = (S.gyms || []).find(g=> g.id !== S.homeGym);
+  const ev1 = cutEvidenceFor("Smith Machine Squat", "legsA", s, 3).map(x=> x.skip);
+  const keep = s.gymId;
+  s.gymId = other.id; s.gymName = other.name;
+  const ev2 = cutEvidenceFor("Smith Machine Squat", "legsA", s, 3).map(x=> x.skip);
+  s.gymId = keep;
+  out.sameGym = {before: ev1, after: ev2, other: other.name};
+  /* TEN PER CENT. A load whose smallest step is a bigger fraction than that is offered,
+     not taken. */
+  out.caps = {max: CUT_MAX_FRACTION};
+  return out;
+});
+console.log("    same gym: " + JSON.stringify(guards.sameGym));
+/* The gym compared against is the gym of the session being JUDGED, so retagging that
+   session to Lotus makes the Palma Vista history the mismatch - which is the rule
+   working, not failing. An earlier version of this looked for the retagged gym's name
+   in the skip reason and found the other one. */
+ck("evidence from a different gym than the session being judged is skipped",
+   (guards.sameGym.after || []).some(x=> x && /^it was at /i.test(String(x))),
+   JSON.stringify(guards.sameGym.after));
+ck("CONTROL: and counted before it was retagged",
+   !(guards.sameGym.before || [])[0], JSON.stringify(guards.sameGym.before[0]));
+ck("a cut may never take more than 10%", guards.caps.max === 0.10, String(guards.caps.max));
+
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");
