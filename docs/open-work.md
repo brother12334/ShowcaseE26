@@ -274,6 +274,44 @@ item 11 - is invisible to it, which is exactly how item 11 was found by reasonin
 than by this scan. The scans are in this document rather than committed as a spec because
 their value is the judgement in the table, which a passing test cannot express.
 
+## 14. The plan still counted one-limb work in the pre-pair unit — DONE (2026.11.17.21)
+
+Found while building the "both sides in each set" button the user asked for, and worth
+recording because the button turned out to be the smaller half of it.
+
+**What was true.** Since P1-7 a set of a one-limb movement IS a pair: `entryPerSideWanted()`
+returns true for any `isSingleArm()` entry, and `startWorkout()` builds `perSide` sets. But
+two things still described the shape before that:
+
+- **The note.** Every one-limb movement carried "alternate L/R each set", stamped on every
+  load by the migration at the top of `migrate()`. That sentence is the pre-pair
+  instruction — set 1 left, set 2 right — and it had been untrue since P1-7 shipped.
+- **The set count.** A plan line reading 4 sets of a split squat produces four PAIRS, which
+  is four per leg. Read through the note, the same line looks like two per leg. Measured,
+  not assumed: `sideSets()` on a session built from a 4-set entry returns 8, four per side.
+
+So a person reading their own plan was out by a factor of two on exactly the movements
+where the app had quietly changed what a set means. The user's request — "3 per leg instead
+of 4 alternating sets" — was itself made through that misreading, which is why the preview
+prints per-side counts rather than raw set numbers.
+
+**Built.** `bothSidesPlan()` surveys with no side effects, `applyBothSides()` writes, and
+`openBothSides()` shows every line before anything moves. The note is rewritten only where
+it is the app's own sentence; a note a person typed keeps their words and loses only the
+stamped half. `e.perSide = true` is written outright so a name table that changes its mind
+cannot un-convert a plan, and the stamper now produces the pair sentence for a converted
+entry instead of putting the old one back on the next load. Set changes go through
+`setChangeConflict()` (P1-5) and a floor or ceiling breach is SHOWN, not applied silently
+and not silently refused. Every row is logged under its day (P0-1).
+
+**And one real gap it surfaced.** `Standing Cable Hip Abduction` names no limb, so
+`isSingleArm()` read it as bilateral: no `startSide`, no sides recorded on anything logged
+since. Its P1-8 asymmetry check is live and correct, reading the L/R rows the OLD
+alternating log left behind — it would have starved on new data. Declared in `UNILATERAL`
+now, with the seated machine named as NOT unilateral beside it.
+
+Tests: `bothsides.mjs`, six sections, each with a bilateral control in the same plan.
+
 ## 13. Flaky: `logstill.mjs` section 1, exact scroll equality — CLOSED (2026.11.17.20)
 
 **Closed as not reproducible.** Watched from build .13 through .20, which is the whole of
