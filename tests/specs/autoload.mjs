@@ -427,6 +427,54 @@ ck("CONTROL: and counted before it was retagged",
    !(guards.sameGym.before || [])[0], JSON.stringify(guards.sameGym.before[0]));
 ck("a cut may never take more than 10%", guards.caps.max === 0.10, String(guards.caps.max));
 
+/* RULE E — A SET LEFT IN THE TANK IS NOT EVIDENCE OF A LOAD THAT IS TOO HEAVY.
+   The ramp makes set 1's target the easy one, so "at its target" alone let a session of
+   95 x 11 at RPE 7 against a 12-15 range help cut the pulldown from 95. A cut now wants
+   set 1 at or above the slot's target AND never below RPE 8. */
+const rpeGate = await p.evaluate(()=>{
+  const s = [...S.sessions].reverse().find(x=> x.workoutId === "pullB"
+    && (x.entries || []).some(e=> /Single-Arm Cable Pulldown/.test(e.name)));
+  const en = s.entries.find(e=> /Single-Arm Cable Pulldown/.test(e.name));
+  const keep = JSON.parse(JSON.stringify(en.sets));
+  const range = repRange("12-15");
+  const at = rpe =>{
+    sideSetsWorking(en).forEach((y, i)=>{ const st = y.ref || y;
+      if(i === 0){ st.reps = "11"; st.rpe = String(rpe); } });
+    return firstSetShort(en, range);
+  };
+  const soft = at(7), hard = at(8.5);
+  en.sets = keep;
+  return {soft, hard};
+});
+console.log("    11 reps of 12-15 at RPE 7: " + JSON.stringify(rpeGate.soft));
+console.log("    the same at RPE 8.5:       " + JSON.stringify(rpeGate.hard));
+ck("short of the range at RPE 7 is not evidence for a cut",
+   rpeGate.soft && rpeGate.soft.short === false, JSON.stringify(rpeGate.soft && rpeGate.soft.short));
+ck("CONTROL: the same reps at RPE 8.5 are",
+   rpeGate.hard && rpeGate.hard.short === true, JSON.stringify(rpeGate.hard && rpeGate.hard.short));
+
+const fired = await p.evaluate(()=>{
+  const out = [];
+  S.sessions.forEach(s=>{
+    const seen = {};
+    (s.entries || []).forEach(en=>{
+      if(!en || !en.name) return;
+      const k = nrm(en.name);
+      if(seen[k]) return;
+      seen[k] = 1;
+      let r = null;
+      try{ r = loadCutFor(en.name, s.workoutId, s); }catch(e){ return; }
+      if(r && r.kind === "apply") out.push(s.date + " " + s.workoutId + " " + en.name + " " + r.from + "->" + r.to);
+    });
+  });
+  return out;
+});
+fired.forEach(x=> console.log("    applies: " + x));
+ck("the pulldown is no longer cut off a set left in the tank",
+   !fired.some(x=> /Cable Pulldown/.test(x)), fired.join(" | ") || "none");
+ck("CONTROL: the cuts with genuinely hard first sets still fire",
+   fired.some(x=> /Rear Delt/.test(x)) && fired.some(x=> /Preacher/.test(x)), fired.join(" | "));
+
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");
