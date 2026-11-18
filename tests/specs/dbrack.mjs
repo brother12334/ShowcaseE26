@@ -67,7 +67,14 @@ console.log("2 - SO THE CARD STOPS ASKING FOR A WEIGHT THAT IS NOT IN THE BUILDI
   ck("the session earns a progression", !r.none, JSON.stringify(r));
   ck("it is not a raise off the end of the rack", r.kind !== "up" || parseFloat(r.to) <= 50,
      JSON.stringify(r));
-  ck("it holds the load instead", r.kind === "hold", JSON.stringify(r));
+  /* NOT "it holds the load". That was always a proxy for the claim this section makes —
+     the card stops asking for a weight that is not in the building — and the hold was only
+     ever what happened when the library had nothing above the rack to offer. With the
+     barbell/dumbbell RDL alias split the hinge ladder does have something above it, so the
+     honest verdict here is the movement rather than the number. The section's real claim is
+     unchanged and still asserted on both lines below. */
+  ck("it answers with a movement that has room above it", r.kind === "harder"
+     && /romanian deadlift/i.test(r.to || ""), JSON.stringify(r));
   ck("and says where the ceiling is", /the rack at Palma Vista ends at 50 lb/.test(r.sub || ""), r.sub);
 }
 

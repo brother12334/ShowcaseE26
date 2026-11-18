@@ -475,6 +475,208 @@ ck("the pulldown is no longer cut off a set left in the tank",
 ck("CONTROL: the cuts with genuinely hard first sets still fire",
    fired.some(x=> /Rear Delt/.test(x)) && fired.some(x=> /Preacher/.test(x)), fired.join(" | "));
 
+console.log("\nF. OUT OF RACK IS NOT OUT OF PROGRESS  (Rule F)");
+/* The user's own case: Dumbbell RDL on Legs B, planned 8-12, sitting at 50 lb - which is
+   exactly dbMax at Palma Vista - and beating 12 reps session after session. What the app
+   said before this rule was "Hold this load - the rack stops here", for ever.
+
+   The cause was not the ceiling logic. It was identity: the built-in alias table filed
+   "romanian deadlift" as "dumbbell rdl", so a barbell and a pair of 50s were one movement.
+   exSlotFor() keeps the FIRST record per key and the barbell entry comes first in the
+   hinge ladder, so the app believed the lifter was holding a barbell - and a barbell has
+   nothing above it. Every option was filtered out as "no more room than you already have". */
+const idF = await p.evaluate(()=>({
+  apart:   nrm("Dumbbell RDL") !== nrm("Romanian Deadlift"),
+  longDb:  nrm("Dumbbell Romanian Deadlift") === nrm("Dumbbell RDL"),
+  longSm:  nrm("Smith Machine RDL") === nrm("Smith Machine Romanian Deadlift"),
+  dbIsDb:  equipmentOf("Dumbbell RDL"),
+  barIsBar: equipmentOf("Romanian Deadlift")
+}));
+ck("the barbell and the dumbbell RDL are two keys", idF.apart, JSON.stringify(idF));
+ck("but one implement's two spellings are one key", idF.longDb && idF.longSm,
+   JSON.stringify({longDb: idF.longDb, longSm: idF.longSm}));
+ck("and each reads as its own implement", idF.dbIsDb === "dumbbell" && idF.barIsBar === "barbell",
+   idF.dbIsDb + " / " + idF.barIsBar);
+
+/* THE THING THE USER ASKED FOR A TEST OF: the two histories must stay apart. A barbell
+   session written in must not appear in the dumbbell movement's history, in either
+   direction, or the split is cosmetic and every estimate downstream is still shared. */
+const histF = await p.evaluate(()=>{
+  const n = S.sessions.length;
+  S.sessions.push({id:"fbar", workoutId:"legsB", date:"2026-11-16", gymId:(S.gyms[0]||{}).id,
+    startedAt:Date.now()-3600e3, finishedAt:Date.now(),
+    entries:[{name:"Romanian Deadlift", reps:"8-12",
+              sets:[{weight:"225", reps:"10", rpe:"8", done:true}]}]});
+  const db  = exHistory("Dumbbell RDL", 40).map(h=> h.load != null ? h.load : (h.top || 0));
+  const bar = exHistory("Romanian Deadlift", 40).map(h=> h.load != null ? h.load : (h.top || 0));
+  S.sessions.length = n;                       // leave the state as found
+  return {db, bar, dbHas225: db.some(w=> Math.abs(w - 225) < 0.01),
+          barN: bar.length, dbN: db.length};
+});
+console.log("    dumbbell history " + histF.dbN + " entries, barbell " + histF.barN);
+ck("a barbell session does not land in the dumbbell movement's history", !histF.dbHas225,
+   JSON.stringify(histF.db.slice(0, 6)));
+ck("and the barbell has a history of its own, one session long", histF.barN === 1, String(histF.barN));
+
+/* The real verdict, on the real export, for the real slot. */
+const fcase = await p.evaluate(()=>{
+  const read = (needle, wid)=>{
+    const pe = (S.program[wid] || []).find(e=> e && new RegExp(needle, "i").test(e.name));
+    if(!pe) return {none: true};
+    for(let i = S.sessions.length - 1; i >= 0; i--){
+      const s = S.sessions[i]; if(s.workoutId !== wid) continue;
+      const en = (s.entries || []).find(e=> e && nrm(e.name) === nrm(pe.name));
+      if(!en) continue;
+      const g = atTopLoadSets(en), rr = repRange(pe.reps);
+      const v = progressionFor(s, en);
+      return {name: pe.name, on: s.date, load: g && g.top,
+              reps: g ? g.at.map(x=> x.st.reps).join("/") : "",
+              range: rr && rr.join("-"),
+              ceiling: atLoadCeiling(pe.name, g && g.top),
+              runs: beatTopRuns(pe.name, rr, wid, g && g.top),
+              kind: v && v.kind, to: v && v.to, startAt: v && v.startAt,
+              alts: (v && v.alts || []).map(a=> a.name),
+              msg: v && v.msg, sub: v && v.sub};
+    }
+    return {none: true};
+  };
+  return {rdl: read("romanian|rdl", "legsB"), shrug: read("shrug", "pullA")};
+});
+console.log("    RDL   " + fcase.rdl.on + "  " + fcase.rdl.load + " x " + fcase.rdl.reps
+          + " vs " + fcase.rdl.range + "  ->  " + fcase.rdl.kind + " " + (fcase.rdl.to || ""));
+console.log("    SHRUG " + fcase.shrug.on + "  " + fcase.shrug.load + " x " + fcase.shrug.reps
+          + " vs " + fcase.shrug.range + "  ->  " + fcase.shrug.kind + " " + (fcase.shrug.msg || ""));
+ck("the RDL is read as being at the end of the rack", fcase.rdl.ceiling, String(fcase.rdl.ceiling));
+ck("with the top of the range beaten in two sessions", fcase.rdl.runs === 2, String(fcase.rdl.runs));
+ck("so the verdict is a movement, not a number", fcase.rdl.kind === "harder", JSON.stringify(fcase.rdl));
+ck("and it is the same pattern on the kit the week is made of",
+   /smith machine romanian deadlift/i.test(fcase.rdl.to || ""), String(fcase.rdl.to));
+ck("a deadlift is offered only as an alternative, never first",
+   fcase.rdl.alts.some(a=> /conventional|sumo|trap bar/i.test(a))
+   && !/conventional|sumo|trap bar/i.test(fcase.rdl.to || ""),
+   fcase.rdl.to + " | " + fcase.rdl.alts.join(", "));
+ck("with a starting load sized from the set, not copied from the dumbbells",
+   fcase.rdl.startAt > 0 && Math.abs(fcase.rdl.startAt - fcase.rdl.load) > 0.01,
+   String(fcase.rdl.startAt));
+ck("and it names the rack it read", /ends at/.test(fcase.rdl.sub || ""), fcase.rdl.sub);
+/* THE CONTROL THAT MUST FIRE, and the one the user's own second case provides for free:
+   the shrug is ALSO at 50 lb at the end of the same rack, with the same three options
+   waiting in its ladder - and it has NOT beaten 10-15 (14, 13). So it must still be held
+   in double progression. Being at the ceiling is not the trigger; beating the range at the
+   ceiling is. */
+ck("CONTROL: at the rack's end but still inside its range, nothing is offered",
+   fcase.shrug.kind === "hold" && fcase.shrug.runs === 0,
+   fcase.shrug.kind + " runs=" + fcase.shrug.runs);
+
+/* TRIGGER C ON ITS OWN. The old door was a raise that the rack cancelled, which asks every
+   set to reach the top of the range. This asks only what the ceiling actually implies. The
+   shrug is turned into that case: two sessions beating 15, with a short set in each so no
+   raise can be earned. */
+const trigF = await p.evaluate(()=>{
+  const hits = [];
+  for(let i = S.sessions.length - 1; i >= 0 && hits.length < 2; i--){
+    const s = S.sessions[i]; if(s.workoutId !== "pullA") continue;
+    const en = (s.entries || []).find(e=> e && /shrug/i.test(e.name));
+    if(en) hits.push({s, en, was: JSON.stringify(en.sets)});
+  }
+  hits.forEach(h=>{ h.en.sets = [{weight:"50", reps:"17", rpe:"9", done:true},
+                                 {weight:"50", reps:"11", rpe:"9", done:true}]; });
+  const last = hits[0];
+  const v = progressionFor(last.s, last.en);
+  const out = {kind: v && v.kind, to: v && v.to, ceiling: !!(v && v.ceiling),
+               msg: v && v.msg, startAt: v && v.startAt};
+  /* and the same slot, turned down */
+  dismissHarder(last.en.name, "pullA");
+  const after = progressionFor(last.s, last.en);
+  out.afterNo = after && after.kind;
+  /* three more sessions beating the range and the question is live again */
+  const mk = (d)=>({id:"fx"+d, workoutId:"pullA", date:"2026-11-2" + d,
+    startedAt:Date.now(), finishedAt:Date.now(),
+    entries:[{name: last.en.name, reps:"10-15",
+              sets:[{weight:"50", reps:"17", rpe:"9", done:true}]}]});
+  const n0 = S.sessions.length;
+  [1,2].forEach(d=> S.sessions.push(mk(d)));
+  out.afterTwo = (progressionFor(last.s, last.en) || {}).kind;
+  S.sessions.push(mk(3));
+  out.afterThree = (progressionFor(last.s, last.en) || {}).kind;
+  S.sessions.length = n0;
+  delete (S.hardNo || {})["pullA|" + nrm(last.en.name)];
+  hits.forEach(h=>{ h.en.sets = JSON.parse(h.was); });
+  return out;
+});
+console.log("    " + JSON.stringify(trigF));
+ck("beating the range twice at the ceiling is enough on its own",
+   trigF.kind === "harder" && trigF.ceiling, JSON.stringify(trigF));
+ck("without a raise having to be earned and cancelled first",
+   /smith machine shrug/i.test(trigF.to || ""), String(trigF.to));
+ck("and it too is sized rather than guessed", trigF.startAt > 0, String(trigF.startAt));
+ck("turned down, it stops asking", trigF.afterNo === "hold", String(trigF.afterNo));
+ck("CONTROL: two more sessions above the range is not yet three",
+   trigF.afterTwo === "hold", String(trigF.afterTwo));
+ck("after three it asks again", trigF.afterThree === "harder", String(trigF.afterThree));
+
+/* AND THE PROOF THAT THE ALIAS WAS THE WHOLE STORY. Put it back and the shortlist empties
+   again - which is what every option looked like before this rule, and the one measurement
+   that shows the ladder was never the problem. */
+const aliasBack = await p.evaluate(()=>{
+  const before = outgrownOptions("Dumbbell RDL", "legsB").map(o=> o.name);
+  /* Mutated in place and the binding re-pointed: USER_ALIASES holds the OBJECT, so
+     assigning a fresh one leaves the canonicaliser reading the old table. And the slot
+     index is built once and cached, so it has to be dropped too. */
+  S.exAliases = S.exAliases || {};
+  S.exAliases["romanian deadlift"] = "Dumbbell RDL";
+  USER_ALIASES = S.exAliases; invalidateCanon(); _EX_SLOT_IX = null;
+  const merged = nrm("Romanian Deadlift") === nrm("Dumbbell RDL");
+  const after = outgrownOptions("Dumbbell RDL", "legsB").map(o=> o.name);
+  delete S.exAliases["romanian deadlift"];
+  USER_ALIASES = S.exAliases; invalidateCanon(); _EX_SLOT_IX = null;
+  const restored = outgrownOptions("Dumbbell RDL", "legsB").map(o=> o.name);
+  return {before, after, restored, merged};
+});
+console.log("    merged again: " + JSON.stringify(aliasBack.after));
+ck("the merge really is a merge", aliasBack.merged, String(aliasBack.merged));
+ck("CONTROL: merge the two back and the ladder goes empty again",
+   aliasBack.before.length > 0 && aliasBack.after.length === 0,
+   JSON.stringify(aliasBack.before) + " -> " + JSON.stringify(aliasBack.after));
+ck("and splitting them restores it", aliasBack.restored.length === aliasBack.before.length,
+   JSON.stringify(aliasBack.restored));
+
+/* AND THE BUTTON, IN THE REAL CARD. The logic above is reached by calling the rule; this
+   opens the grade a lifter actually sees, finds the offer on it, and taps "Not now" the
+   way a thumb would. New wiring is the part a unit test cannot vouch for. */
+const domF = await p.evaluate(async ()=>{
+  const pe = (S.program.legsB || []).find(e=> e && /romanian|rdl/i.test(e.name));
+  let sess = null, en = null;
+  for(let i = S.sessions.length - 1; i >= 0; i--){
+    if(S.sessions[i].workoutId !== "legsB") continue;
+    const e2 = (S.sessions[i].entries || []).find(e=> e && nrm(e.name) === nrm(pe.name));
+    if(e2){ sess = S.sessions[i]; en = e2; break; }
+  }
+  delete (S.hardNo || {})["legsB|" + nrm(pe.name)];
+  sess.progression = [progressionFor(sess, en)];
+  openScoreCard(sess);
+  await new Promise(r=> setTimeout(r, 60));
+  const offer = !!document.querySelector('#modal [data-proghard]');
+  const no = document.querySelector('#modal [data-proghardno]');
+  const out = {offer, hasNo: !!no, text: (document.querySelector('#modal #progWrap') || {}).innerText || ""};
+  if(no) no.click();
+  await new Promise(r=> setTimeout(r, 60));
+  out.afterOffer = !!document.querySelector('#modal [data-proghard]');
+  out.afterText = (document.querySelector('#modal #progWrap') || {}).innerText || "";
+  out.remembered = !!(S.hardNo || {})["legsB|" + nrm(pe.name)];
+  hideModal();
+  delete S.hardNo["legsB|" + nrm(pe.name)];
+  delete sess.progression;
+  return out;
+});
+ck("the offer is on the card a lifter opens", domF.offer && domF.hasNo,
+   JSON.stringify({offer: domF.offer, no: domF.hasNo}));
+ck("it reads as a harder version, not a load", /harder version/i.test(domF.text), domF.text.slice(0, 90));
+ck("tapping Not now takes the buttons away", !domF.afterOffer, String(domF.afterOffer));
+ck("and leaves the record on the card", /turned down/i.test(domF.afterText),
+   domF.afterText.replace(/\s+/g, " ").slice(0, 120));
+ck("and it is remembered, not just hidden", domF.remembered, String(domF.remembered));
+
 console.log("\nG. CHANGED SINCE LAST TIME  (Rule G)");
 const chg = await p.evaluate(()=>{
   const wid = "legsA";

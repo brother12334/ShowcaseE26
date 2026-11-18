@@ -119,7 +119,7 @@ Nothing was loosened to make it go away.
   P1-8b and items 10-13; its own header says so.
 - `docs/open-work.md` — every item, what was found, and what was deliberately not done.
 - `tests/specs/replay.mjs` — the whole-export regression, all six outcomes at once.
-- `tests/specs/` — 297 specs. Every one carries a control that must fire, because a
+- `tests/specs/` — 299 specs. Every one carries a control that must fire, because a
   reader returning nothing for want of a fixture looks exactly like one that correctly
   found nothing.
 

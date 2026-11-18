@@ -7306,7 +7306,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.27";
+const APP_VERSION = "2026.11.17.28";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -8692,7 +8692,21 @@ const EX_ALIASES = {
   "guillotine bench press":"guillotine press",
   "incline db bench press":"incline dumbbell bench press",
   "db bench press":"dumbbell bench press",
-  "romanian deadlift":"dumbbell rdl", "db rdl":"dumbbell rdl"
+  /* F1 — TWO IMPLEMENTS ARE TWO MOVEMENTS, AND THIS TABLE HAD MADE THEM ONE.
+     "romanian deadlift":"dumbbell rdl" used to live here, so a barbell loaded to 225 and
+     a pair of 50s were one movement with one history, one estimated max and one rung on
+     the ladder. It is the same mistake Rule A repaired in a user's own aliases — the
+     triceps attachments — sitting in the app's own table, and it is WHY a dumbbell RDL
+     at the end of the rack could never be offered anything harder: exSlotFor() keeps the
+     first record per key, the barbell entry comes first in the hinge ladder, so the app
+     believed the lifter was holding a barbell and a barbell has nothing above it.
+
+     The long dumbbell spelling IS aliased, because that is one implement under two names
+     — and without it the split simply strands the short one: the library's own entry is
+     "Dumbbell Romanian Deadlift", so "Dumbbell RDL" would match no record at all. Same
+     for the Smith machine's two spellings. */
+  "db rdl":"dumbbell rdl", "dumbbell romanian deadlift":"dumbbell rdl",
+  "smith machine rdl":"smith machine romanian deadlift"
 };
 // User-recorded renames, loaded out of S once it exists. Kept in its own binding
 // because canonEx() runs during module evaluation, while `let S` is still in its
@@ -29945,6 +29959,7 @@ function aiQNum(v, fallback){
    dumbbell — so a barbell figure handed to a dumbbell row would prescribe twice the load
    and then some. Movements done with no load at all are absent on purpose: their answer
    is no number, which loadNeededFor() already understands. */
+const DB_HAND_OF_WHOLE = 0.40;
 const START_RATIOS = [
   /* PART 4 \u2014 THE REFERENCE'S OWN TABLE, specific names before generic patterns, and the
      fourth column marking a ratio that ALREADY describes one hand. Every figure is a
@@ -30025,8 +30040,10 @@ function startingLoadFor(name, opts){
   const mult = START_LEVEL_MULT[o.level] || START_LEVEL_MULT.intermediate;
   let w = bw * ratio * mult;
   /* A pair of dumbbells totals about eighty per cent of the barbell version, which is
-     forty per cent in each hand — and one hand is what the app stores. */
-  if(!row[3] && /\b(dumbbell|db|d\.b\.)\b/i.test(n)) w *= 0.40;
+     forty per cent in each hand — and one hand is what the app stores. Named, because
+     Rule F needs the same conversion to say what to start a Smith machine RDL on when the
+     only evidence is a pair of 50s, and two copies of a ratio is one too many. */
+  if(!row[3] && /\b(dumbbell|db|d\.b\.)\b/i.test(n)) w *= DB_HAND_OF_WHOLE;
   const load = roundLoadable(w, n);
   const step = stepInUnits(5);
   const out = load !== w ? load : Math.max(step, Math.round(w / step) * step);
@@ -56178,6 +56195,14 @@ function openScoreCard(sess, onDone){
         redrawProgression();
       } else { btn.classList.remove("done"); btn.disabled = false; }
     });
+    document.querySelectorAll("#modal [data-proghardno]").forEach(btn=> btn.onclick = ()=>{
+      const name = btn.dataset.proghardno;
+      dismissHarder(name, sess.workoutId);
+      (sess.progression || []).forEach(x=>{ if(x && x.name === name && x.kind === "harder") x.dismissed = true; });
+      save(); queueSync();
+      toast("Not asking again until you beat the range " + HARD_DISMISS_SESSIONS + " more times");
+      redrawProgression();
+    });
     const all = $("#progApplyAll");
     if(all) all.onclick = ()=>{
       let n = 0;
@@ -57091,6 +57116,46 @@ function gearRoomFor(name, libGear){
   const g = libGear || libraryGearFor(name) || equipmentOf(name);
   return GEAR_ROOM[g] == null ? 1 : GEAR_ROOM[g];
 }
+/* THE SAME MOVEMENT, A DIFFERENT IMPLEMENT.
+
+   Room left above the load is the right FIRST question and a bad only question. A Smith
+   machine RDL and a conventional deadlift both come off plates, so they tie on room, and
+   the tie was broken by whichever sat earlier in the table — which is how a hinge at the
+   end of the dumbbells was offered a conventional deadlift ahead of the Smith machine RDL
+   that is the same movement with a bar on rails. None of Conventional, Sumo or Trap Bar is
+   a substitute for a Romanian deadlift; being heavier does not make it one.
+
+   So the implement words come out and what is left is compared. Deliberately only the
+   implements: "seated" and "standing" stay, because a seated and a standing calf raise
+   train different muscles and this file refuses to merge them anywhere else either. */
+const IMPLEMENT_WORDS = /\b(barbell|dumbbell|kettlebell|smith machine|smith|cable|machine|trap bar|ez[- ]?bar|landmine|band)\b/g;
+function movementCore(name){
+  return structNorm(nrmRaw(name || ""))
+    .replace(/\brdl\b/g, "romanian deadlift")
+    .replace(IMPLEMENT_WORDS, " ")
+    .replace(/\s+/g, " ").trim();
+}
+/* AND BETWEEN TWO THAT ARE THE SAME MOVEMENT WITH THE SAME ROOM, THE KIT YOU USE.
+
+   The hinge ladder offers a barbell RDL and a Smith machine RDL, both the same pattern
+   and both room 3, so the tie fell to table order and the barbell won. For a lifter whose
+   every other leg movement is on a Smith machine that is the wrong answer: it asks them to
+   go and find a barbell, in a room they have told the app about. The implements their own
+   last few weeks are made of are the ones they can actually walk up to, so a tie goes to
+   the gear they already use. */
+const GEAR_USE_SESSIONS = 20;
+function gearUseCounts(){
+  const n = {};
+  const ss = S.sessions || [];
+  for(let i = ss.length - 1, seen = 0; i >= 0 && seen < GEAR_USE_SESSIONS; i--, seen++){
+    (ss[i].entries || []).forEach(e=>{
+      if(!e || !e.name) return;
+      const g = libraryGearFor(e.name) || equipmentOf(e.name);
+      if(g) n[g] = (n[g] || 0) + 1;
+    });
+  }
+  return n;
+}
 /* The shortlist, best first, or [] when the library has nothing better to offer. */
 /* SLOT DEBT 2 of 9, first half. The day whose roster is checked for duplicates came from
    a name-only lookup, so for a movement in two slots it was the wrong day's: a swap the
@@ -57107,6 +57172,7 @@ function outgrownOptions(name, wid){
     if(!day) return false;
     return (S.program[day] || []).some(e=> e && swapSquash(e.name) === swapSquash(nm));
   };
+  const core = movementCore(name), gearUse = gearUseCounts();
   const push = (nm, why, rank)=>{
     if(!nm) return;
     const q = swapSquash(nm);
@@ -57114,7 +57180,9 @@ function outgrownOptions(name, wid){
     seen[q] = 1;
     let known = false;
     try{ known = exHistory(nm, 1).length > 0; }catch(e){}
-    out.push({name: nm, why: why, rank: rank, known: known});
+    out.push({name: nm, why: why, rank: rank, known: known,
+              same: movementCore(nm) === core ? 1 : 0, room: gearRoomFor(nm),
+              gearUse: gearUse[libraryGearFor(nm) || equipmentOf(nm)] || 0});
   };
   push(unilateralUpFor(name),
        "one limb at a time, so the stack only has to give half as much",
@@ -57131,7 +57199,10 @@ function outgrownOptions(name, wid){
   }
   /* Among equals, the one you have already done. A movement with a history is one you
      know how to set up and one the app can already compare you against. */
-  out.sort((a,b)=> (a.rank - b.rank) || ((b.known ? 1 : 0) - (a.known ? 1 : 0)));
+  /* Pattern first, then room, then the kit you already use, then the one you have
+     already done yourself. */
+  out.sort((a,b)=> (a.rank - b.rank) || (b.same - a.same) || (b.room - a.room)
+                   || (b.gearUse - a.gearUse) || ((b.known ? 1 : 0) - (a.known ? 1 : 0)));
   return out.slice(0, 3);
 }
 /* TRIGGER B — the ceiling the app cannot see, read off what you did about it. Three
@@ -57159,6 +57230,114 @@ function outgrownStuck(name, range, wid){
   if(!hist.every(h=> Math.abs(h.load - base) <= 0.01)) return null;   // the load did move
   if(!hist.every(h=> h.reps >= range[1])) return null;                // not topping it out
   return {load: base, n: hist.length};
+}
+/* TRIGGER C — THE CEILING, WITHOUT WAITING FOR A RAISE TO BE SWALLOWED.
+
+   The offer of a harder version already existed and was reachable through exactly one
+   door: a raise had to be EARNED and then cancelled by the rack. That is the wrong gate.
+   Earning a raise asks every set to reach the top of the range; running out of dumbbells
+   asks nothing of the sort. A lifter at the end of the rack who beats the top of the range
+   on one set and falls a rep short on another never earns the raise, so the ceiling is
+   never consulted, and the verdict stays "need 14-15 on every set at this load" for ever
+   on a movement that has run out of load to add.
+
+   So the ceiling is read directly: the next step up is not in the building, and the top of
+   the range was beaten in the last two sessions AT THIS LOAD. Consecutive, and at this
+   load — a session at a lighter weight says nothing about the ceiling, and one that did
+   not beat the range ENDS the run rather than being skipped over. Skipping is the exact
+   mistake Rule E's replay caught: it let evidence six weeks old decide today. */
+const CEILING_BEAT_SESSIONS = 2;
+function atLoadCeiling(name, load){
+  const step = loadStepFor(name);
+  if(!(load > 0) || !(step > 0)) return false;
+  return capToRack(load + step, name) <= load + 0.01;
+}
+function beatTopRuns(name, range, wid, load){
+  if(!range || !(load > 0)) return 0;
+  let n = 0;
+  for(let i = (S.sessions || []).length - 1; i >= 0 && n < CEILING_BEAT_SESSIONS; i--){
+    const s = S.sessions[i];
+    if(wid && s.workoutId !== wid) continue;
+    const en = (s.entries || []).find(e=> e && nrm(e.name) === nrm(name));
+    if(!en) continue;
+    const g = atTopLoadSets(en);
+    if(!g || !g.at.length) continue;
+    if(Math.abs(g.top - load) > 0.01) break;
+    if(!g.at.some(x=> (parseFloat(x.st.reps) || 0) > range[1])) break;
+    n++;
+  }
+  return n >= CEILING_BEAT_SESSIONS ? n : 0;
+}
+/* AND AN OFFER IS AN OFFER, WHICH MEANS IT CAN BE TURNED DOWN AND STAY TURNED DOWN.
+
+   Swapping a movement is the one plan edit nobody should find they have agreed to by
+   accident, so this has always been buttons rather than a change. The other half of that
+   is that "no" has to mean something: an offer that reappears every session is not an
+   offer, it is nagging, and the way out of nagging is usually to stop reading the card.
+
+   Dismissing it is remembered against the slot, and what reopens it is the thing that
+   justified it in the first place — three MORE sessions beating the top of the range. Not
+   a date: if the movement goes back inside its range the question has answered itself and
+   the counter simply never gets there. Per slot, so turning it down on Legs B says nothing
+   about the same movement on another day. */
+const HARD_DISMISS_SESSIONS = 3;
+function hardNoKey(name, wid){ return (wid || "") + "|" + nrm(name); }
+function beatTopTotal(name, wid){
+  let n = 0;
+  (S.sessions || []).forEach(s=>{
+    if(wid && s.workoutId !== wid) return;
+    const en = (s.entries || []).find(e=> e && nrm(e.name) === nrm(name));
+    if(!en) return;
+    /* The range the SESSION was run under, not today's: a session is a snapshot, and a
+       range that has since been widened must not retroactively un-beat itself. */
+    const rr = repRange(en.reps);
+    const g = atTopLoadSets(en);
+    if(!rr || !g || !g.at.length) return;
+    if(g.at.some(x=> (parseFloat(x.st.reps) || 0) > rr[1])) n++;
+  });
+  return n;
+}
+function hardDismissed(name, wid){
+  const d = (S.hardNo || {})[hardNoKey(name, wid)];
+  if(!d) return false;
+  return beatTopTotal(name, wid) - (d.n || 0) < HARD_DISMISS_SESSIONS;
+}
+function dismissHarder(name, wid){
+  S.hardNo = S.hardNo || {};
+  S.hardNo[hardNoKey(name, wid)] = {at: Date.now(), date: todayStr(),
+                                    n: beatTopTotal(name, wid)};
+}
+/* WHAT TO START THE NEW MOVEMENT ON.
+
+   Sized from the set that earned the verdict, and deliberately sized for the TOP of the
+   range rather than the bottom. The e1RM model knows what the old movement could do and
+   nothing whatever about the new one: a first session on a bar you have never hinged with
+   is a feeling-out session, and the conservative end of the range is the one that lets
+   double progression take it from there. Rounded and capped on the NEW movement's gear,
+   because a load that is not loadable there is not a starting point. */
+/* AND THE NUMBER DOES NOT MEAN THE SAME THING ON BOTH. A dumbbell load is stored as ONE
+   HAND; a bar, a Smith carriage, a stack and a machine are stored whole. Sizing a Smith
+   machine RDL from "50" without saying which kind of 50 it is would be wrong by more than
+   a factor of two — and it would be wrong in the dangerous direction on the way back. The
+   app already wrote this conversion down once, for the starting loads it estimates from
+   bodyweight, and that is the one used here. */
+function loadBasisOf(name){
+  const g = equipmentOf(name);
+  return (g === "dumbbell" || g === "kettlebell") ? "hand" : "whole";
+}
+function ceilingStartLoad(newName, entry, range){
+  const ws = sideSetsWorking(entry).map(x=> x.ref);
+  const st = ws[ws.length - 1];
+  if(!st || !range) return null;
+  const w = parseFloat(st.weight) || 0, r = parseFloat(st.reps) || 0;
+  const e = sizeE1RM(w, r, parseFloat(st.rpe) || 0);
+  if(!(e > 0)) return null;
+  let want = loadForRepsAt(e, range[1]);
+  if(!(want > 0)) return null;
+  const from = loadBasisOf(entry.name), to = loadBasisOf(newName);
+  if(from !== to) want = from === "hand" ? want / DB_HAND_OF_WHOLE : want * DB_HAND_OF_WHOLE;
+  const on = capToRack(roundLoadable(want, newName), newName);
+  return on > 0 && Math.abs(on - w) > 0.01 ? on : (on > 0 ? on : null);
 }
 function progressionFor(sess, entry){
   const range = repRange(entry.reps);
@@ -57456,10 +57635,12 @@ function progressionFor(sess, entry){
          somewhere to go, the verdict is the exercise rather than the number — and it is
          an offer with buttons, not a change, because swapping a movement is the one plan
          edit nobody should find they have agreed to by accident. */
-      const opts = outgrownOptions(entry.name, sess && sess.workoutId);
+      const opts = hardDismissed(entry.name, sess && sess.workoutId)
+                 ? [] : outgrownOptions(entry.name, sess && sess.workoutId);
       if(opts.length) return {
         name: entry.name, kind: "harder", to: opts[0].name, alts: opts.slice(1), step,
         outgrownAt: isNaN(load) ? from : load,
+        startAt: ceilingStartLoad(opts[0].name, entry, range),
         msg: "Move to " + opts[0].name,
         sub: "You cleared " + range[1] + " reps at " + fmtLoad(from) + " and there is no "
            + "heavier one" + (isFinite(mx) && mx > 0
@@ -57666,6 +57847,35 @@ function progressionFor(sess, entry){
              (best.r === 1 ? "" : "s") + ", inside " + range[0] + "-" + range[1] +
              (best.rpe ? " and at RPE " + best.rpe + (best.t != null ? " against a target of " + best.t : "") : "") +
              ". Your plan still says " + fmtLoad(planW) + ". This is the plan catching up, not another jump."
+      };
+    }
+  }
+  /* TRIGGER C, read above. It lands HERE on purpose: after the catch-up, because a plan
+     that is merely out of date should be corrected before the app proposes changing the
+     movement; and before the fall-through hold, because "one more rep and the load goes
+     up" is not a true thing to say about a load that cannot go up. Every verdict above
+     this line is untouched. */
+  if(range && !isNaN(load) && atLoadCeiling(entry.name, load)
+     && !hardDismissed(entry.name, sess && sess.workoutId)
+     && beatTopRuns(entry.name, range, sess && sess.workoutId, load)){
+    const opts = outgrownOptions(entry.name, sess && sess.workoutId);
+    if(opts.length){
+      const rk = rackMaxSrc(), start = ceilingStartLoad(opts[0].name, entry, range);
+      return {
+        name: entry.name, kind: "harder", to: opts[0].name, alts: opts.slice(1), step,
+        outgrownAt: load, ceiling: true, startAt: start,
+        msg: "Move to " + opts[0].name,
+        sub: "You beat " + range[1] + " reps at " + fmtLoad(load) + " in your last "
+           + CEILING_BEAT_SESSIONS + " sessions and there is nothing heavier"
+           + (isFinite(rk.max) && rk.max > 0
+               ? " \u2014 " + (rk.gym ? "the rack at " + rk.gym : "your rack")
+                 + " ends at " + fmtLoad(rk.max)
+               : "")
+           + ". " + opts[0].name + " is the same pattern with room above it: " + opts[0].why
+           + (start
+                ? ". Start it around " + fmtLoad(start) + " \u2014 about " + range[1]
+                  + " reps on a movement you have not done before, and take it from there."
+                : ". Rebuild from " + range[0] + " reps on it.")
       };
     }
   }
@@ -59340,7 +59550,7 @@ function progressionHTML(list){
   /* L4 \u2014 THE RUNG UP. Its own heading too: it changes the movement, not a number, and
      that is the one kind of plan edit somebody should never find they have agreed to by
      accident. */
-  const harder = list.filter(p=> p.kind === "harder" && !p.applied);
+  const harder = list.filter(p=> p.kind === "harder" && !p.applied && !p.dismissed);
   if(harder.length && manual){
     h += `<div class="rev-head">A harder version is available, ${harder.length}</div>`;
     harder.forEach(p=>{
@@ -59356,7 +59566,20 @@ function progressionHTML(list){
         </div>
         <button class="pg-apply" data-proghard="${esc(p.name)}"
           data-proghardto="${esc(p.to)}">Apply</button>
-      </div>${altsHTML(p.name, p.alts)}`;
+      </div>${altsHTML(p.name, p.alts)}
+      <div class="pg-alts"><button class="pg-alt" data-proghardno="${esc(p.name)}"
+        title="Stop offering this until you have beaten the top of the range three more times"
+        >Not now</button></div>`;
+    });
+  }
+  /* TURNED DOWN, NOT GONE. The row drops its buttons and stays on the card: a grade is a
+     record of what the app said and what you decided, and "you were offered this and said
+     no" is part of that record. */
+  const harderNo = list.filter(p=> p.kind === "harder" && p.dismissed && !p.applied);
+  if(harderNo.length){
+    h += `<div class="rev-head">Turned down, ${harderNo.length}</div>`;
+    harderNo.forEach(p=>{
+      h += `<div class="rev-line"><b>${esc(p.name)}</b><span class="num" style="font-size:var(--fs-3)">not now</span></div>`;
     });
   }
   const harderDone = list.filter(p=> p.kind === "harder" && p.applied);
@@ -61951,8 +62174,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.27";
+const NEWS_FOR = "2026.11.17.28";
 const NEWS = [
+  {k: "When the dumbbells run out, the app finally has somewhere to send you",
+   s: ["Your dumbbell RDL has sat at 50 lb for weeks, beating the top of its rep range "
+     + "every session, and the app kept saying \u201chold this load \u2014 the rack stops "
+     + "here\u201d. It had an answer the whole time and could not reach it: its own alias "
+     + "table had filed the barbell and the dumbbell Romanian deadlift as one movement, "
+     + "so it thought you were holding a barbell, and a barbell never runs out.",
+     "They are two movements now, which is what they are. At the end of the rack with "
+     + "the range beaten twice, the card offers the same pattern with room above it \u2014 "
+     + "a Smith machine RDL before a conventional deadlift, because being heavier does "
+     + "not make a deadlift a substitute for an RDL \u2014 sized from what you just lifted, "
+     + "and on the kit the rest of your week is already made of.",
+     "It is still buttons, never a change: swapping a movement is the one plan edit you "
+     + "should never find you have agreed to by accident. And \u201cnot now\u201d means it, "
+     + "until you have beaten the top of the range three more times."]},
   {k: "Two functions shared a name, and one of them was quietly winning",
    s: ["Element 26 is one file, and it had two different functions called medianOf. "
      + "JavaScript does not keep both — the later one replaces the earlier everywhere, "

@@ -274,7 +274,7 @@ item 11 - is invisible to it, which is exactly how item 11 was found by reasonin
 than by this scan. The scans are in this document rather than committed as a spec because
 their value is the judgement in the table, which a passing test cannot express.
 
-## 16. Automatic load management — A, B, C, D, E DONE; F and G open
+## 16. Automatic load management — A to G, ALL DONE (2026.11.17.23 to .28)
 
 Asked for on 2026-11-18 with eight acceptance tests, built against the real exported
 state (`tests/fixtures/state-2026-11-17.json`, 74 sessions to 2026-11-16). Tests live in
@@ -395,6 +395,90 @@ enforces — a file this size cannot be trusted to tell you when two names colli
 
 ---
 
+### F — built (2026.11.17.28), and two of the six diagnosis findings were wrong
+
+The diagnosis below the line is kept because it is most of why this landed at all. Two of
+its six findings did not survive contact with a probe, and saying so is the point of
+writing them down in the first place.
+
+**Finding 4 was wrong. There is one table, not two.** `outgrownOptions()` reads
+`EX_LIBRARY[hit.key]` and nothing else. The two `shrug:` keys around lines 9765 and 9880
+are `EX_LIBRARY.shrug` and `EX_LIBRARY_EXTRA.shrug`, and the second is MERGED INTO the
+first at load, along with a third source, `EX_CATALOG`. Nothing competes.
+
+**And Smith Machine Romanian Deadlift was already a rung** — `EX_CATALOG` has carried it
+all along, under that long spelling. So step 2 of the plan, "add the right rungs", was
+already done before it started. The reason the earlier attempt's added rung "did not
+appear" was not that it was in the wrong table: it was that NOTHING appeared.
+`exSlotFor("Dumbbell RDL")` answered with the barbell record (Finding 2, which was right),
+so `roomNow` was 3, the filter asks for room strictly greater than that, and GEAR_ROOM
+tops out at 3. Every option was filtered, including the deadlifts. Measured, not reasoned:
+
+```
+slotRDL {key:"hinge", gear:"barbell", name:"Romanian Deadlift"}   roomRDL 3   optRDL []
+```
+
+**Finding 5 was half wrong.** Conventional / Sumo / Trap Bar were not evidence of a
+missing rung; they were what the ladder returns once `roomNow` drops to 1, ordered by
+room alone — and a trap bar deadlift has exactly as much room as a Smith machine RDL, so
+the tie fell to table order. The fix is the ORDER, not the rungs: the implement words come
+out of both names and a movement that matches wins the tie, and between two that still
+tie, the gear the lifter's own last twenty sessions are made of wins. For this lifter,
+whose every other leg movement is on a Smith machine, that is what puts the Smith RDL
+first and the barbell second.
+
+**What shipped, in the order it was asked for:**
+
+1. **Identity.** `"romanian deadlift":"dumbbell rdl"` is gone from `EX_ALIASES`. The long
+   dumbbell spelling IS aliased to the short one, because that is one implement under two
+   names, and without it the split just strands `Dumbbell RDL` against a library whose own
+   entry is `Dumbbell Romanian Deadlift`. Same for the Smith machine's two spellings. No
+   session in the real export is logged as "Romanian Deadlift", so nothing was split apart
+   that a user had merged.
+2. **Order.** `movementCore()` strips implement words (and only implement words — "seated"
+   and "standing" stay, because a seated and a standing calf raise are different
+   movements), and `gearUseCounts()` breaks a remaining tie on the kit in use.
+3. **Trigger C**, the ceiling read directly rather than through a swallowed raise.
+   `atLoadCeiling()` asks whether the next step exists in the building; `beatTopRuns()`
+   asks whether the top of the range was beaten in the last two sessions AT THIS LOAD,
+   consecutively, with a session that did not beat it ENDING the run rather than being
+   skipped. Skipping is the exact mistake Rule E's replay caught. It is inserted after the
+   catch-up and before the fall-through hold; every verdict above that line is untouched.
+4. **A starting load that means something.** A dumbbell load is stored as ONE HAND and a
+   bar, carriage, stack or machine is stored whole, so sizing a Smith machine RDL from "50"
+   through e1RM without converting the basis is wrong by more than a factor of two. The
+   app had already written that conversion down once — 40% per hand, in
+   `startingLoadFor()` — and it is now a named constant used in both places. 50 lb per hand
+   for 12 reps sizes to 130 lb on a Smith RDL; the shrug case sizes to 115 lb.
+5. **"Not now" means it.** Dismissal is remembered per slot (`S.hardNo`) against the
+   number of sessions that have beaten the range, and the offer returns after three more
+   — not after a date, so a movement that goes back inside its range simply never gets
+   there. The row stays on the grade card under "Turned down", because a grade is a record
+   of what the app said and what you decided.
+
+**The replay, on the real export.** The RDL is fixed: `hold → harder`, "Move to Smith
+Machine Romanian Deadlift", starting around 130 lb, with the barbell RDL and the
+conventional deadlift as alternatives rather than the recommendation.
+
+**The shrug is NOT offered anything, and that is correct.** The user's report was that both
+movements say "Hold this load — the rack stops here". The probe says the shrug's verdict
+was never that: it was "Need 14-15 on every set at this load". Its last two sessions are
+14, 13 against 10-15, so it has not beaten its range — by the user's own trigger ("above
+the range for 2 sessions") it should not be offered a swap, and it is not. Its ladder is
+nevertheless ready and waiting (Smith, barbell, trap bar, in that order), so the session it
+does clear 15 twice, the offer appears. This is in the spec as the control: at the end of
+the same rack, with the same options, still inside its range, nothing is offered. Being at
+the ceiling is not the trigger; beating the range at the ceiling is.
+
+**Two assertions changed, both with their reason in the commit:** `dbrack`'s "it holds the
+load instead" was a proxy for "the card stops asking for a weight that is not in the
+building", and the hold was only ever what happened when the library had nothing to offer;
+`matrix.txt`'s `hinge|dumbbell` row moves from `Dumbbell Romanian Deadlift` to
+`Dumbbell RDL`, because the catalogue merge keeps the CURATED entry's name and the split is
+what lets the curated `Dumbbell RDL` survive the merge at all.
+
+---
+
 ### F — the diagnosis, written down before it is built
 
 F was attempted, found to be bigger than it looked, and **reverted twice** rather than
@@ -470,134 +554,7 @@ a user would see is a worse suggestion than the one they have now.
 5. Dismissal memory per slot: once dismissed, do not offer that slot again until the
    situation changes — the user's definition is 3 more sessions above the range.
 
-**Still open: F** (at dbMax and above the range for 2 sessions, propose a harder
-variation rather than prescribing the same thing again — `outgrownOptions()` and the
-`harder` verdict are most of it already) **and G** (every automatic change already writes
-a day-scoped row with its rule and an undo; what is missing is "Changed since last time"
-at the start of the next session for that day).
+**Still open: nothing in item 16.** A, B, C, D, E, F and G are all shipped.
 
-## 17. Flaky: `altadd.mjs`, "the movement survived the reload" — OPEN
-
-**Observed:** one failure in one full-suite run of 297, on 2026.11.17.25:
-
-```
-FAIL altadd
-     BROKEN the movement survived the reload  [Barbell Bench Press, Alternating Cable Lateral Raise]
-```
-
-**Not reproducible in isolation:** 6 consecutive standalone runs passed, plus 2 through
-`tests/run.js`. Machine load during a long serial suite is the likeliest trigger, which
-is the same shape as item 13.
-
-**What it is NOT.** The spec already retries on `fixtureLost`, the documented Chromium
-async-commit trap, and that assertion did not fail — the seed reached storage. What went
-missing was the movement ADDED through the editor afterwards: written, reloaded, gone.
-Same class, a different write.
-
-**The open question, and it is mine.** 2026.11.17.25 added a prompt that can open 400ms
-after a render on the Today tab (Rule E's injury question). It is gated to once per open,
-Today only, no active session, and no modal already present — but a modal appearing in
-the middle of a spec that drives the editor and then reloads is exactly the kind of thing
-that could land between a write and a reload. Before blaming the browser:
-
-1. Run `altadd` with the injury prompt disabled and see whether the flake survives.
-2. Check whether that spec's fixture contains a note the detector reads as an injury.
-3. Only then reach for the async-commit explanation, and reproduce under load.
-
-Nothing has been loosened to make it pass. If the prompt turns out to be the cause, the
-fix belongs in the prompt (it should not open while anything else is mid-flow), not in
-the assertion.
-
-## 15. Plan patches — QUEUED, spec in docs/plan-patches-spec.md
-
-Paste a strict JSON patch in Settings, preview it as before/after with warnings, apply it
-atomically, undo it reliably. Asked for on 2026-11-18 and deliberately queued behind load
-management rules B, C, E, F and G.
-
-The spec is kept verbatim in `docs/plan-patches-spec.md`, together with a list of the
-machinery already in the app that it should reuse rather than reinvent — the rescue
-backup for its snapshots, `planSnapOne()`/`logFixUndoNow()` for the undo shape,
-`logPlanChange()` for its change rows, `setChangeConflict()` and `loadImpossible()` for
-its warnings, and `BACKUP_FIELDS` as the basis for the allowlist that keeps it away from
-account keys and tokens.
-
-One thing in it is a real design decision rather than plumbing: slots have no stable ID
-today, and the format addresses exercises by day plus name "or by slot ID when a name
-appears twice". That ID has to be invented, and it has to survive a rename.
-
-## 14. The plan still counts one-limb work in the pre-pair unit — OPEN
-
-A button to fix this was asked for, built and then removed at the user's request
-(2026.11.17.21, reverted in .22). The feature is gone; the discrepancy it was built for
-is still here, so it is recorded rather than lost.
-
-**Measured, not assumed.** Since P1-7, `entryPerSideWanted()` returns true for any
-`isSingleArm()` entry and `startWorkout()` builds `perSide` sets, so a set of a one-limb
-movement IS a pair. `sideSets()` on a session built from a 4-set entry returns 8 — four
-per side. Two things still describe the shape before that:
-
-- **The note.** Every one-limb movement carries "alternate L/R each set", stamped on each
-  load by the migration near the top of `migrate()`. That is the pre-pair instruction
-  (set 1 left, set 2 right) and it has been untrue since P1-7 shipped.
-- **The set count.** A plan line reading 4 sets of a split squat asks for four per leg.
-  Read through the note, the same line looks like two per leg.
-
-So a person reading their own plan is out by a factor of two on exactly the movements
-where the app changed what a set means. On the user's own plan that means the Bulgarian
-Split Squat at 4 sets is 4 per leg, and "move it to 3 per side" is a CUT that takes quads
-under their floor, not the increase it appears to be.
-
-**Not fixed, deliberately.** The note could be corrected on its own — it is a description
-of what the app does, and it is wrong. The set counts could not: restating them is a
-training decision and belongs to the person, which is why it was a button rather than a
-migration. Anything built here again should keep that split, and should print per-side
-counts rather than raw set numbers, because the raw number is what carries the
-misunderstanding.
-
-## 13. Flaky: `logstill.mjs` section 1, exact scroll equality — CLOSED (2026.11.17.20)
-
-**Closed as not reproducible.** Watched from build .13 through .20, which is the whole of
-items 11, 12 and 10. It has not failed again in any full-suite run since, including the
-296-spec run on .20, and the step-1 experiment the plan below asks for has now been done:
-ten standalone runs with four CPU busy-loops saturating the machine, 10/10 pass, and the
-reading was EXACTLY equal every time (1600 → 1600), not merely within a tolerance.
-
-So the one recorded drift (1596 → 1599) stays unexplained rather than fixed, and nothing
-was changed to make it go away — no tolerance was added, no wait inserted, and the
-assertion is still exact equality. That is deliberate: a loosened assertion is how a real
-layout shift gets lost. If it returns, this section is the record of what was already
-ruled out, and step 2 below is where to start.
-
-The original entry follows, unedited.
-
-**Observed:** one failure in one full-suite run of 289 specs, 2026-11-17, on build
-2026.11.17.13:
-
-```
-FAIL logstill
-     BROKEN AND IT IS STILL THERE AFTER THE TICK  [1596 -> 1599]
-```
-
-**Not reproducible in isolation:** 14 consecutive standalone runs passed, plus 2 through
-`tests/run.js`. The runner is serial (`spawnSync` per spec), so this is not contention
-between specs inside the run; machine load during a long suite is the likeliest trigger.
-
-**What the assertion does:** compares `scrollY` before and after ticking a set for exact
-equality. The observed drift is 3px, which is sub-pixel layout settling rather than the
-round trip to the top that the spec exists to catch - that failure mode is hundreds of
-pixels, and section 2's overlay case and section 3's source scan both passed in the same
-run.
-
-**Why it is not just loosened.** Two flakes in this suite have turned out to be real
-bugs - the replay's four vacuous sections, and the "wiped session" that was Chromium's
-asynchronous localStorage commit - so a tolerance added without understanding costs the
-next one. A 3px shift on tick could also be a genuine layout shift that nobody wants,
-which is a different bug worth seeing. Before changing anything:
-
-1. Reproduce under load (run the suite with CPU contention, or loop the spec while
-   something else is busy) and record whether the drift is always ~3px or sometimes
-   larger.
-2. Find what moves. If a set row changes height by a few pixels when it gains
-   `is-logged`, that is the finding and the CSS is the fix, not the assertion.
-3. Only then decide between a small tolerance (with the reason in the commit message, per
-   the rule at the top of this doc) and waiting for scroll to settle before reading it.
+The next thing in this document is item 15, the plan patches, whose spec is in
+`docs/plan-patches-spec.md`.
