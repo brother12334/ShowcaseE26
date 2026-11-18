@@ -114,6 +114,9 @@ Nothing was loosened to make it go away.
 
 ## Where the evidence lives
 
+- [`docs/element26-fix-spec.md`](element26-fix-spec.md) — the original fix spec from the
+  audit, kept unedited. It predates the P1-7 L/R addendum, the decisions on items 1-9,
+  P1-8b and items 10-13; its own header says so.
 - `docs/open-work.md` — every item, what was found, and what was deliberately not done.
 - `tests/specs/replay.mjs` — the whole-export regression, all six outcomes at once.
 - `tests/specs/` — 297 specs. Every one carries a control that must fire, because a
