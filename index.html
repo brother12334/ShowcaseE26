@@ -7286,7 +7286,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.26";
+const APP_VERSION = "2026.11.17.27";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -19417,7 +19417,20 @@ function musclesFor(name){
    IT SUGGESTS. Every number it produces is editable before it is saved, and once the
    person changes one the suggestion has done its job and gets out of the way: nothing
    here re-derives or overwrites a value that was typed. */
-function medianOf(list){
+/* TWO FUNCTIONS CALLED medianOf ONCE LIVED IN THIS FILE, and the one further down won.
+
+   Hoisting does not merge them, it replaces: every caller of this one, including the
+   four written directly beneath it, silently got the OTHER implementation — which does
+   not filter non-finite values and rounds an even-length median to a whole number. The
+   difference is small here because each of those callers wraps the result in
+   Math.round() of its own, and that is exactly why nothing ever looked wrong.
+
+   Renamed, so the two are told apart and the callers below get the one they were written
+   against. The rounding one keeps the plain name and its own callers: a median set
+   duration in seconds and a median wake time in minutes both want a whole number.
+
+   Found by tests/specs/dupedecl.mjs, which exists to make this impossible. */
+function medianExact(list){
   const v = list.filter(x=> isFinite(x)).sort((a,b)=> a-b);
   if(!v.length) return null;
   const n = v.length;
@@ -19461,13 +19474,13 @@ function suggestProgramming(wid, name, atIdx){
   const kin = list.filter(e=> isCompound(e.name) === comp);
   const src = kin.length ? kin : list;
 
-  const sets = Math.max(1, Math.round(medianOf(src.map(e=> parseInt(e.sets, 10))) || 3));
+  const sets = Math.max(1, Math.round(medianExact(src.map(e=> parseInt(e.sets, 10))) || 3));
   // rep ranges: the median bottom and the median top across the day, kept as a range
   const ranges = src.map(e=> repRange(e.reps)).filter(Boolean);
   let reps;
   if(ranges.length){
-    const lo = Math.round(medianOf(ranges.map(r=> r[0])));
-    const hi = Math.round(medianOf(ranges.map(r=> r[1])));
+    const lo = Math.round(medianExact(ranges.map(r=> r[0])));
+    const hi = Math.round(medianExact(ranges.map(r=> r[1])));
     /* An isolation added to a day of heavy compounds takes the day's STYLE without
        taking its rep range literally: a lateral raise at 5-8 is not what a day of 5-8
        squats implies. Shifted up a band, and only in that direction. */
@@ -19490,7 +19503,7 @@ function suggestProgramming(wid, name, atIdx){
   }
   const rests = src.map(e=> Array.isArray(e.rest) ? e.rest : null).filter(Boolean);
   const rest = rests.length
-    ? [Math.round(medianOf(rests.map(r=> r[0]))), Math.round(medianOf(rests.map(r=> r[1])))]
+    ? [Math.round(medianExact(rests.map(r=> r[0]))), Math.round(medianExact(rests.map(r=> r[1])))]
     : null;
   const nKin = kin.length;
   return {sets, reps, rpe, rest,
@@ -61805,8 +61818,16 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.26";
+const NEWS_FOR = "2026.11.17.27";
 const NEWS = [
+  {k: "Two functions shared a name, and one of them was quietly winning",
+   s: ["Element 26 is one file, and it had two different functions called medianOf. "
+     + "JavaScript does not keep both — the later one replaces the earlier everywhere, "
+     + "including in the four places written directly beneath the first.",
+     "Nothing looked wrong, because those four round the answer themselves and the "
+     + "difference between the two was rounding. They are told apart now, and a new "
+     + "check refuses to let the app be built with any two top-level names the same, "
+     + "so this particular way of being silently wrong is closed."]},
   {k: "A set you left something in is no longer a reason to cut a load",
    s: ["A cut wanted set 1 short of the range at or above the effort prescribed for it. "
      + "But the ramp makes set 1's target the EASY one — on a 7-8-9 prescription an "
