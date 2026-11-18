@@ -327,6 +327,38 @@ variation rather than prescribing the same thing again — `outgrownOptions()` a
 a day-scoped row with its rule and an undo; what is missing is "Changed since last time"
 at the start of the next session for that day).
 
+## 17. Flaky: `altadd.mjs`, "the movement survived the reload" — OPEN
+
+**Observed:** one failure in one full-suite run of 297, on 2026.11.17.25:
+
+```
+FAIL altadd
+     BROKEN the movement survived the reload  [Barbell Bench Press, Alternating Cable Lateral Raise]
+```
+
+**Not reproducible in isolation:** 6 consecutive standalone runs passed, plus 2 through
+`tests/run.js`. Machine load during a long serial suite is the likeliest trigger, which
+is the same shape as item 13.
+
+**What it is NOT.** The spec already retries on `fixtureLost`, the documented Chromium
+async-commit trap, and that assertion did not fail — the seed reached storage. What went
+missing was the movement ADDED through the editor afterwards: written, reloaded, gone.
+Same class, a different write.
+
+**The open question, and it is mine.** 2026.11.17.25 added a prompt that can open 400ms
+after a render on the Today tab (Rule E's injury question). It is gated to once per open,
+Today only, no active session, and no modal already present — but a modal appearing in
+the middle of a spec that drives the editor and then reloads is exactly the kind of thing
+that could land between a write and a reload. Before blaming the browser:
+
+1. Run `altadd` with the injury prompt disabled and see whether the flake survives.
+2. Check whether that spec's fixture contains a note the detector reads as an injury.
+3. Only then reach for the async-commit explanation, and reproduce under load.
+
+Nothing has been loosened to make it pass. If the prompt turns out to be the cause, the
+fix belongs in the prompt (it should not open while anything else is mid-flow), not in
+the assertion.
+
 ## 15. Plan patches — QUEUED, spec in docs/plan-patches-spec.md
 
 Paste a strict JSON patch in Settings, preview it as before/after with warnings, apply it
