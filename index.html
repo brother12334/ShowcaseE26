@@ -70585,6 +70585,728 @@ function importJSON(e){
 }
 
 /* =====================================================================
+   PLAN PATCHES — THE CHECKER AND THE DRY RUN
+
+   A patch is a JSON document somebody pastes in. That sentence is the whole threat model:
+   it arrives from outside, it may have been written by an AI that was confident and wrong,
+   and it can rewrite a plan in one press. So this file reads it as DATA. There is no
+   expression to evaluate, no field that names a function, and no op that addresses an
+   account key, a token or a sync setting — not "refused if you try", not addressable.
+
+   THE PREVIEW AND THE APPLY ARE THE SAME CODE. The spec asks that the preview match the
+   result, and the only way to mean that is to run the ops. So a dry run swaps S for a deep
+   copy, runs the operations exactly as an apply would, collects what each one changed, and
+   puts the real S back. Nothing in here calls save() or render(); the caller does that, and
+   only after a clean run. An op that cannot be resolved — a day that does not exist, an
+   exercise that is not on the day named — fails the whole patch, because a plan half
+   changed is worse than a plan unchanged and you cannot tell by looking which half ran.
+
+   THE FORMAT REFERENCE THE USER PASTES INTO AN AI IS GENERATED FROM THE SAME TABLE THAT
+   VALIDATES. docs/patch-format.md is for a person to read; patchOpsReference() is for a
+   model to read, and it cannot drift from the checker because it IS the checker's table.
+   ===================================================================== */
+const PATCH_VERSION = 1;
+const PATCH_ENUMS = {
+  progression: ["auto", "ask", "off"],
+  deloads:     ["auto", "off"],
+  volClimb:    ["peak", "steady", "hold"],
+  units:       ["lb", "kg"],
+  barMode:     ["total", "added"],
+  setType:     ["straight", "myorep", "drop", "amrap"],
+  openingSide: ["weaker", "stronger", "left", "right", "alternate"],
+  flag:        ["injury", "illness", "unusual"]
+};
+/* The prescription fields, shared by slot.add and slot.set so the two can never disagree
+   about what a slot has. */
+const PATCH_SLOT_FIELDS = {
+  sets: "int", reps: "reps", rpe: "rpeRange", rest: "rest", load: "numOrNull",
+  setType: "enum:setType", perSide: "bool", openingSide: "enum:openingSide",
+  weakerExtraSet: "bool", note: "str"
+};
+function patchSlotFields(extra){ return Object.assign({}, PATCH_SLOT_FIELDS, extra || {}); }
+/* ref: the three ways to name a slot. `day` is always required; one of `exercise` or
+   `slotId` identifies the row within it. */
+const PATCH_REF = {day: "str", exercise: "str", slotId: "str"};
+const PATCH_OPS = {
+  "volume.floor":   {fields: {muscle: "str", to: "numOrNull"}, req: ["muscle", "to"],
+                     note: "weekly set floor (MEV) for one muscle; null hands it back to the model"},
+  "volume.target":  {fields: {muscle: "str", to: "numOrNull"}, req: ["muscle", "to"],
+                     note: "weekly set target (MAV)"},
+  "volume.ceiling": {fields: {muscle: "str", to: "numOrNull"}, req: ["muscle", "to"],
+                     note: "weekly set ceiling (MRV)"},
+  "slot.add":       {fields: patchSlotFields({day: "str", exercise: "str", at: "int"}),
+                     req: ["day", "exercise"],
+                     note: "add an exercise to a day; `at` is 1-based, default last"},
+  "slot.remove":    {fields: PATCH_REF, req: ["day"], ref: true,
+                     note: "remove a slot; its logged sessions are never touched"},
+  "slot.move":      {fields: Object.assign({at: "int"}, PATCH_REF), req: ["day", "at"], ref: true,
+                     note: "move a slot within its day; `at` is 1-based"},
+  "slot.replace":   {fields: Object.assign({to: "str", keepHistory: "bool"}, PATCH_REF),
+                     req: ["day", "to"], ref: true,
+                     note: "swap the movement; keepHistory true only when it is the SAME movement renamed"},
+  "slot.rename":    {fields: Object.assign({to: "str"}, PATCH_REF), req: ["day", "to"], ref: true,
+                     note: "rename a movement, carrying its history with it"},
+  "slot.set":       {fields: patchSlotFields(PATCH_REF), req: ["day"], ref: true, oneOf: true,
+                     note: "change the prescription on one slot; omitted fields are left alone"},
+  "day.rename":     {fields: {day: "str", to: "str"}, req: ["day", "to"], note: "rename a training day"},
+  "day.add":        {fields: {name: "str", at: "int", short: "str"}, req: ["name"],
+                     note: "add a training day to the rotation"},
+  "day.remove":     {fields: {day: "str"}, req: ["day"],
+                     note: "remove a training day; refused while it still has exercises on it"},
+  "rotation.order": {fields: {days: "strs"}, req: ["days"],
+                     note: "reorder the rotation; must name every training day exactly once"},
+  "settings.set":   {fields: {progression: "enum:progression", deloads: "enum:deloads",
+                              volClimb: "enum:volClimb", units: "enum:units", barMode: "enum:barMode"},
+                     req: [], oneOf: true, note: "only these five settings are addressable"},
+  "gym.set":        {fields: {gym: "str", dbMax: "numOrNull", dbStep: "numOrNull",
+                              plates: "numsOrNull", smith: "numOrNull", stackStep: "numOrNull",
+                              bar: "numOrNull"},
+                     req: ["gym"], oneOf: true, note: "the kit in one room"},
+  "gym.home":       {fields: {gym: "str"}, req: ["gym"], note: "the gym assumed when nothing else is known"},
+  "session.set":    {fields: {date: "date", day: "str", exercise: "str", sets: "setArr"},
+                     req: ["date", "exercise", "sets"], session: true,
+                     note: "rewrite one exercise's sets in a logged session"},
+  "session.gym":    {fields: {date: "date", gym: "str"}, req: ["date", "gym"], session: true,
+                     note: "retag which room a session was performed in"},
+  "session.flag":   {fields: {date: "date", flag: "enumOrNull:flag"}, req: ["date", "flag"], session: true,
+                     note: "mark a session injury / illness / unusual, or null to clear"}
+};
+/* ---------- types, checked exactly ---------- */
+function patchTypeOk(t, v){
+  if(t.indexOf("enumOrNull:") === 0) return v === null || PATCH_ENUMS[t.slice(11)].indexOf(v) > -1;
+  if(t.indexOf("enum:") === 0) return typeof v === "string" && PATCH_ENUMS[t.slice(5)].indexOf(v) > -1;
+  switch(t){
+    case "str":        return typeof v === "string" && v.trim() !== "";
+    case "num":        return typeof v === "number" && isFinite(v);
+    case "numOrNull":  return v === null || (typeof v === "number" && isFinite(v) && v >= 0);
+    case "int":        return typeof v === "number" && isFinite(v) && v === Math.round(v) && v >= 1;
+    case "bool":       return typeof v === "boolean";
+    case "reps":       return typeof v === "string" && /^\d+(\s*-\s*\d+)?$/.test(v.trim());
+    case "rpeRange":   return typeof v === "string" && (v === "" || /^\d+(\.\d+)?(\s*-\s*\d+(\.\d+)?)?$/.test(v.trim()));
+    case "rest":       return Array.isArray(v) && v.length === 2 && v.every(x=> typeof x === "number" && isFinite(x) && x >= 0);
+    case "nums":       return Array.isArray(v) && v.length > 0 && v.every(x=> typeof x === "number" && isFinite(x) && x > 0);
+    case "numsOrNull": return v === null || patchTypeOk("nums", v);
+    case "strs":       return Array.isArray(v) && v.length > 0 && v.every(x=> typeof x === "string" && x.trim() !== "");
+    case "date":       return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+    case "setArr":     return Array.isArray(v) && v.length > 0 && v.every(x=>
+                         x && typeof x === "object" && !Array.isArray(x)
+                         && Object.keys(x).every(k=> ["weight","reps","rpe"].indexOf(k) > -1)
+                         && (x.weight === undefined || typeof x.weight === "number")
+                         && (x.reps === undefined || typeof x.reps === "number")
+                         && (x.rpe === undefined || typeof x.rpe === "number"));
+  }
+  return false;
+}
+function patchTypeWord(t){
+  if(t.indexOf("enumOrNull:") === 0) return PATCH_ENUMS[t.slice(11)].map(x=> '"'+x+'"').join(" | ") + " | null";
+  if(t.indexOf("enum:") === 0) return PATCH_ENUMS[t.slice(5)].map(x=> '"'+x+'"').join(" | ");
+  return {str:"string", num:"number", numOrNull:"number | null", int:"whole number, 1 or more",
+          bool:"true | false", reps:'string "8-12" or "10"', rpeRange:'string "7-9" or "8" or ""',
+          rest:"[seconds, seconds]", nums:"[number, ...]", numsOrNull:"[number, ...] | null",
+          strs:"[string, ...]", date:'"YYYY-MM-DD"',
+          setArr:"[{weight, reps, rpe}, ...] all numbers"}[t] || t;
+}
+/* ---------- the parse ---------- */
+function patchParse(text){
+  const errs = [];
+  let doc = null;
+  try{ doc = JSON.parse(String(text == null ? "" : text)); }
+  catch(e){ return {ops: [], errors: ["That is not valid JSON: " + e.message]}; }
+  if(!doc || typeof doc !== "object" || Array.isArray(doc))
+    return {ops: [], errors: ["A patch is a JSON object, with e26patch, note and ops."]};
+  Object.keys(doc).forEach(k=>{
+    if(["e26patch", "note", "ops"].indexOf(k) < 0)
+      errs.push('Unknown top-level field "' + k + '". A patch has e26patch, note and ops.');
+  });
+  if(doc.e26patch !== PATCH_VERSION)
+    errs.push('This is not a version ' + PATCH_VERSION + ' patch: e26patch is '
+            + JSON.stringify(doc.e26patch) + '. Refusing rather than guessing.');
+  if(doc.note !== undefined && typeof doc.note !== "string")
+    errs.push("note must be text.");
+  if(!Array.isArray(doc.ops)) errs.push("ops must be a list, even an empty one.");
+  const ops = Array.isArray(doc.ops) ? doc.ops : [];
+  ops.forEach((o, i)=>{
+    const at = "ops[" + i + "]";
+    if(!o || typeof o !== "object" || Array.isArray(o)){ errs.push(at + " is not an object."); return; }
+    const spec = PATCH_OPS[o.op];
+    if(!spec){
+      errs.push(at + ': unknown op "' + o.op + '". The ops are: ' + Object.keys(PATCH_OPS).join(", ") + ".");
+      return;
+    }
+    Object.keys(o).forEach(k=>{
+      if(k === "op") return;
+      if(!spec.fields[k])
+        errs.push(at + ' (' + o.op + '): unknown field "' + k + '". It takes: '
+                + Object.keys(spec.fields).join(", ") + ".");
+    });
+    spec.req.forEach(k=>{
+      if(o[k] === undefined) errs.push(at + " (" + o.op + "): " + k + " is required.");
+    });
+    Object.keys(o).forEach(k=>{
+      if(k === "op" || !spec.fields[k] || o[k] === undefined) return;
+      if(!patchTypeOk(spec.fields[k], o[k]))
+        errs.push(at + " (" + o.op + "): " + k + " must be " + patchTypeWord(spec.fields[k])
+                + ", not " + JSON.stringify(o[k]) + ".");
+    });
+    if(spec.ref && o.exercise === undefined && o.slotId === undefined)
+      errs.push(at + " (" + o.op + "): name the slot with exercise or slotId.");
+    if(spec.oneOf){
+      const changing = Object.keys(o).filter(k=>
+        k !== "op" && spec.req.indexOf(k) < 0 && k !== "exercise" && k !== "slotId");
+      if(!changing.length) errs.push(at + " (" + o.op + "): nothing to change.");
+    }
+  });
+  return {ops: ops, note: typeof doc.note === "string" ? doc.note : "", errors: errs};
+}
+/* ---------- addressing: a day, and a slot within it ---------- */
+function patchDayId(name){
+  const want = nrmRaw(name);
+  const all = DAYS.concat(["finisher"]);
+  for(const id of all){ if(nrmRaw(id) === want) return id; }
+  for(const id of all){ if(nrmRaw(dayName(id)) === want) return id; }
+  return null;
+}
+function patchDayList(){ return DAYS.map(id=> dayName(id)).join(", "); }
+function patchSlotId(wid, i){ return wid + "#" + (i + 1); }
+/* The index within the day, or an error that says what to do instead. Two slots with one
+   name is not a tie to be broken quietly: the patch meant one of them and only the person
+   who wrote it knows which. */
+function patchSlotIndex(wid, o){
+  const list = (S.program || {})[wid] || [];
+  if(o.slotId !== undefined){
+    const m = String(o.slotId).split("#");
+    if(m[0] !== wid) return {err: 'slotId "' + o.slotId + '" is not on ' + dayName(wid) + "."};
+    const i = parseInt(m[1], 10) - 1;
+    if(!(i >= 0 && i < list.length))
+      return {err: 'slotId "' + o.slotId + '" is not a slot on ' + dayName(wid)
+                 + " (it has " + list.length + ")."};
+    return {i: i};
+  }
+  const hits = [];
+  list.forEach((e, i)=>{ if(e && nrm(e.name) === nrm(o.exercise)) hits.push(i); });
+  if(hits.length === 1) return {i: hits[0]};
+  if(hits.length > 1)
+    return {err: '"' + o.exercise + '" appears ' + hits.length + " times on " + dayName(wid)
+               + ". Name it with slotId instead: "
+               + hits.map(i=> patchSlotId(wid, i)).join(" or ") + "."};
+  const near = list.filter(e=> e && movementCore(e.name) === movementCore(o.exercise))
+                   .map(e=> e.name);
+  return {err: '"' + o.exercise + '" is not on ' + dayName(wid) + "."
+             + (near.length ? " Did you mean " + near.join(" or ") + "?"
+                            : " That day has: " + list.map(e=> e && e.name).join(", ") + ".")};
+}
+function patchGym(name){
+  const want = nrmRaw(name);
+  return (S.gyms || []).find(g=> g && nrmRaw(g.name) === want) || null;
+}
+/* ---------- the run: one code path for the preview and the apply ---------- */
+function patchCloneState(st){ return JSON.parse(JSON.stringify(st)); }
+function patchSessionsOn(name, wid){
+  let n = 0;
+  (S.sessions || []).forEach(s=>{
+    if(wid && s.workoutId !== wid) return;
+    if((s.entries || []).some(e=> e && nrm(e.name) === nrm(name))) n++;
+  });
+  return n;
+}
+/* Every op returns its own before/after rows, read from the state it just changed rather
+   than predicted. That is what makes the preview honest. */
+const PATCH_RUN = {
+  "volume.floor":   (o, c)=> patchVolSet(o, c, "lmFloor", "floor"),
+  "volume.target":  (o, c)=> patchVolSet(o, c, "lmMav",   "target"),
+  "volume.ceiling": (o, c)=> patchVolSet(o, c, "lmMrv",   "ceiling"),
+
+  "slot.add": (o, c)=>{
+    const wid = patchDayId(o.day);
+    if(!wid) return c.err("there is no day called \"" + o.day + "\". Your days: " + patchDayList() + ".");
+    const list = S.program[wid] = S.program[wid] || [];
+    const at = o.at === undefined ? list.length : Math.min(o.at - 1, list.length);
+    const e = {name: o.exercise, sets: 3, reps: "8-12"};
+    patchSlotWrite(e, o, c, o.exercise);
+    list.splice(at, 0, e);
+    if(patchSessionsOn(o.exercise, null) === 0 && !exSlotFor(o.exercise))
+      c.warn(o.exercise + " is a name the app has never seen, in your log or in its own "
+           + "library. It will work, but nothing will know which muscles it trains.");
+    return [{day: dayName(wid), what: o.exercise, from: "not on this day",
+             to: "position " + (at + 1) + ", " + e.sets + " x " + e.reps}];
+  },
+
+  "slot.remove": (o, c)=>{
+    const wid = patchDayId(o.day);
+    if(!wid) return c.err("there is no day called \"" + o.day + "\". Your days: " + patchDayList() + ".");
+    const hit = patchSlotIndex(wid, o);
+    if(hit.err) return c.err(hit.err);
+    const e = S.program[wid][hit.i];
+    const n = patchSessionsOn(e.name, wid);
+    if(n) c.warn("Removing " + e.name + " from " + dayName(wid) + ", which has " + n
+               + " logged session" + (n === 1 ? "" : "s") + ". The sessions stay — nothing in "
+               + "your history is removed with it — but it stops being prescribed.");
+    S.program[wid].splice(hit.i, 1);
+    return [{day: dayName(wid), what: e.name,
+             from: (parseInt(e.sets, 10) || 0) + " x " + (e.reps || "?"), to: "removed"}];
+  },
+
+  "slot.move": (o, c)=>{
+    const wid = patchDayId(o.day);
+    if(!wid) return c.err("there is no day called \"" + o.day + "\". Your days: " + patchDayList() + ".");
+    const hit = patchSlotIndex(wid, o);
+    if(hit.err) return c.err(hit.err);
+    const list = S.program[wid];
+    const to = Math.min(o.at - 1, list.length - 1);
+    const e = list.splice(hit.i, 1)[0];
+    list.splice(to, 0, e);
+    return [{day: dayName(wid), what: e.name,
+             from: "position " + (hit.i + 1), to: "position " + (to + 1)}];
+  },
+
+  "slot.replace": (o, c)=>{
+    const wid = patchDayId(o.day);
+    if(!wid) return c.err("there is no day called \"" + o.day + "\". Your days: " + patchDayList() + ".");
+    const hit = patchSlotIndex(wid, o);
+    if(hit.err) return c.err(hit.err);
+    const e = S.program[wid][hit.i], was = e.name;
+    if(o.keepHistory){
+      /* THE ONE WARNING THIS OP EXISTS TO CARRY. An alias says "these are one movement".
+         Rule A had to undo exactly this mistake made by hand, where a rename merged two
+         triceps attachments into one key and swept a day's log under another day's name.
+         Two implements are two movements, and a patch should not be able to recreate that
+         silently. */
+      const samePattern = movementCore(was) === movementCore(o.to);
+      const sameKit = equipmentOf(was) === equipmentOf(o.to);
+      if(!(samePattern && sameKit))
+        c.warn('keepHistory would file "' + was + '" and "' + o.to + '" as ONE movement with '
+             + "one history and one estimated max. "
+             + (samePattern
+                 ? "They are the same pattern on DIFFERENT implements \u2014 " + equipmentOf(was)
+                   + " and " + equipmentOf(o.to) + ". That is exactly the merge Rule A exists to "
+                   + "repair: a barbell loaded to 225 and a pair of 50s are not one movement, and "
+                   + "merging them hands both of them one wrong estimated max."
+                 : "They read as two different movements, not one renamed.")
+             + " Use keepHistory: false unless it is the same movement under another name.");
+      S.exAliases = S.exAliases || {};
+      S.exAliases[nrmRaw(was)] = o.to;
+      USER_ALIASES = S.exAliases; invalidateCanon();
+    }
+    e.name = o.to;
+    const n = patchSessionsOn(was, wid);
+    if(!o.keepHistory && n)
+      c.warn(was + " has " + n + " logged session" + (n === 1 ? "" : "s") + ", which stay with "
+           + was + ". " + o.to + " starts with no history, so its first session has nothing to "
+           + "compare against.");
+    return [{day: dayName(wid), what: "the movement in position " + (hit.i + 1),
+             from: was, to: o.to + (o.keepHistory ? " (same movement, history carried)" : " (new movement)")}];
+  },
+
+  "slot.rename": (o, c)=>{
+    const wid = patchDayId(o.day);
+    if(!wid) return c.err("there is no day called \"" + o.day + "\". Your days: " + patchDayList() + ".");
+    const hit = patchSlotIndex(wid, o);
+    if(hit.err) return c.err(hit.err);
+    const e = S.program[wid][hit.i], was = e.name;
+    S.exAliases = S.exAliases || {};
+    S.exAliases[nrmRaw(was)] = o.to;
+    USER_ALIASES = S.exAliases; invalidateCanon();
+    e.name = o.to;
+    return [{day: dayName(wid), what: "renamed", from: was, to: o.to}];
+  },
+
+  "slot.set": (o, c)=>{
+    const wid = patchDayId(o.day);
+    if(!wid) return c.err("there is no day called \"" + o.day + "\". Your days: " + patchDayList() + ".");
+    const hit = patchSlotIndex(wid, o);
+    if(hit.err) return c.err(hit.err);
+    const e = S.program[wid][hit.i];
+    return patchSlotWrite(e, o, c, e.name, wid, hit.i).map(r=>
+      Object.assign({day: dayName(wid)}, r));
+  },
+
+  "day.rename": (o, c)=>{
+    const wid = patchDayId(o.day);
+    if(!wid) return c.err("there is no day called \"" + o.day + "\". Your days: " + patchDayList() + ".");
+    const was = dayName(wid);
+    const cs = S.customSplit = S.customSplit || patchSplitNow();
+    const d = (cs.days || []).find(x=> x && x.id === wid);
+    if(!d) return c.err("that day is part of a built-in split that cannot be renamed in place.");
+    d.name = o.to;
+    applySplit();
+    return [{day: o.to, what: "the day's name", from: was, to: o.to}];
+  },
+
+  "day.add": (o, c)=>{
+    const cs = S.customSplit = S.customSplit || patchSplitNow();
+    cs.days = cs.days || [];
+    if(cs.days.some(d=> d && nrmRaw(d.name) === nrmRaw(o.name)))
+      return c.err('there is already a day called "' + o.name + '".');
+    const id = "d" + Date.now().toString(36) + cs.days.length;
+    const at = o.at === undefined ? cs.days.length : Math.min(o.at - 1, cs.days.length);
+    cs.days.splice(at, 0, {id: id, name: o.name, short: o.short || o.name.slice(0, 2).toUpperCase()});
+    cs.layout = cs.days.map(d=> d.id).concat((cs.layout || []).filter(x=> x === "rest"));
+    S.program[id] = S.program[id] || [];
+    applySplit();
+    return [{day: o.name, what: "a new training day", from: "not in your rotation",
+             to: "position " + (at + 1) + " of " + cs.days.length + ", with no exercises yet"}];
+  },
+
+  "day.remove": (o, c)=>{
+    const wid = patchDayId(o.day);
+    if(!wid) return c.err("there is no day called \"" + o.day + "\". Your days: " + patchDayList() + ".");
+    const list = (S.program || {})[wid] || [];
+    /* "Remove the day" and "throw away six slots" are different intentions, and only one
+       of them is written down. Both can be done in one patch. */
+    if(list.length)
+      return c.err(dayName(wid) + " still has " + list.length + " exercise"
+                 + (list.length === 1 ? "" : "s") + " on it ("
+                 + list.map(e=> e && e.name).join(", ") + "). Remove them in this same patch "
+                 + "first, so the preview shows you both halves.");
+    const cs = S.customSplit = S.customSplit || patchSplitNow();
+    const was = dayName(wid);
+    cs.days = (cs.days || []).filter(d=> d && d.id !== wid);
+    cs.layout = (cs.layout || []).filter(x=> x !== wid);
+    delete S.program[wid];
+    applySplit();
+    return [{day: was, what: "the training day", from: "in your rotation", to: "removed"}];
+  },
+
+  "rotation.order": (o, c)=>{
+    const cs = S.customSplit = S.customSplit || patchSplitNow();
+    const ids = o.days.map(n=> patchDayId(n));
+    const bad = o.days.filter((n, i)=> !ids[i]);
+    if(bad.length) return c.err("not a day: " + bad.join(", ") + ". Your days: " + patchDayList() + ".");
+    const have = DAYS.slice().sort().join(","), got = ids.slice().sort().join(",");
+    if(have !== got){
+      const missing = DAYS.filter(id=> ids.indexOf(id) < 0).map(dayName);
+      const twice = ids.filter((id, i)=> ids.indexOf(id) !== i).map(dayName);
+      return c.err("a rotation names every training day exactly once."
+                 + (missing.length ? " Missing: " + missing.join(", ") + "." : "")
+                 + (twice.length ? " Twice: " + twice.join(", ") + "." : ""));
+    }
+    const was = DAYS.map(dayName).join(" → ");
+    const byId = {};
+    (cs.days || []).forEach(d=> { if(d) byId[d.id] = d; });
+    cs.days = ids.map(id=> byId[id]).filter(Boolean);
+    cs.layout = ids.concat((cs.layout || []).filter(x=> x === "rest"));
+    applySplit();
+    return [{day: "the whole plan", what: "the order of the rotation",
+             from: was, to: ids.map(dayName).join(" → ")}];
+  },
+
+  "settings.set": (o, c)=>{
+    const p = trainPrefs(), rows = [];
+    Object.keys(o).forEach(k=>{
+      if(k === "op") return;
+      const was = p[k];
+      p[k] = o[k];
+      rows.push({day: "the whole plan", what: k, from: was == null ? "unset" : String(was), to: String(o[k])});
+    });
+    return rows;
+  },
+
+  "gym.set": (o, c)=>{
+    const g = patchGym(o.gym);
+    if(!g) return c.err('there is no gym called "' + o.gym + '". Yours: '
+                      + (S.gyms || []).map(x=> x && x.name).join(", ") + ".");
+    const rows = [];
+    Object.keys(o).forEach(k=>{
+      if(k === "op" || k === "gym") return;
+      const was = g[k];
+      g[k] = o[k];
+      rows.push({day: g.name, what: k, from: was == null ? "unset" : JSON.stringify(was),
+                 to: o[k] === null ? "unset" : JSON.stringify(o[k])});
+    });
+    return rows;
+  },
+
+  "gym.home": (o, c)=>{
+    const g = patchGym(o.gym);
+    if(!g) return c.err('there is no gym called "' + o.gym + '". Yours: '
+                      + (S.gyms || []).map(x=> x && x.name).join(", ") + ".");
+    const was = gymById(S.homeGym);
+    S.homeGym = g.id;
+    return [{day: "the whole plan", what: "home gym",
+             from: was ? was.name : "unset", to: g.name}];
+  },
+
+  "session.set": (o, c)=>{
+    const s = patchSession(o, c);
+    if(s && s.err) return c.err(s.err);
+    const en = (s.entries || []).find(e=> e && nrm(e.name) === nrm(o.exercise));
+    if(!en) return c.err(o.exercise + " is not in the session on " + o.date + ". It has: "
+                       + (s.entries || []).map(e=> e && e.name).join(", ") + ".");
+    const was = (en.sets || []).map(x=> x.weight + "x" + x.reps).join(", ");
+    en.sets = o.sets.map(x=> ({weight: x.weight == null ? "" : String(x.weight),
+                               reps: x.reps == null ? "" : String(x.reps),
+                               rpe: x.rpe == null ? "" : String(x.rpe), done: true}));
+    c.sessionWarn("Rewriting what you logged on " + o.date + " for " + en.name + ". A logged "
+      + "session is a record of something that happened; every rule that reads your history "
+      + "will now read this instead.");
+    return [{day: o.date + " · " + dayName(s.workoutId), what: en.name, from: was,
+             to: en.sets.map(x=> x.weight + "x" + x.reps).join(", ")}];
+  },
+
+  "session.gym": (o, c)=>{
+    const s = patchSession(o, c);
+    if(s && s.err) return c.err(s.err);
+    const g = patchGym(o.gym);
+    if(!g) return c.err('there is no gym called "' + o.gym + '".');
+    const was = gymById(s.gymId);
+    s.gymId = g.id; s.gymName = g.name;
+    c.sessionWarn("Retagging the room for " + o.date + " changes which kit the load rules "
+      + "believe that session was performed with, which can change a verdict they have "
+      + "already given.");
+    return [{day: o.date + " · " + dayName(s.workoutId), what: "the gym",
+             from: was ? was.name : (s.gymName || "unset"), to: g.name}];
+  },
+
+  "session.flag": (o, c)=>{
+    const s = patchSession(o, c);
+    if(s && s.err) return c.err(s.err);
+    S.dayFlags = S.dayFlags || {};
+    const cur = S.dayFlags[o.date] || {};
+    const was = ["injury", "illness", "unusual"].filter(k=> cur[k]).join(", ") || "none";
+    const next = {};
+    if(o.flag) next[o.flag] = true;
+    Object.keys(cur).forEach(k=>{ if(["injury","illness","unusual"].indexOf(k) < 0) next[k] = cur[k]; });
+    S.dayFlags[o.date] = next;
+    c.sessionWarn("A flag on " + o.date + " is the same mark the injury question writes: it "
+      + "takes that session out of the evidence the load-cut rule reads.");
+    return [{day: o.date, what: "flag", from: was, to: o.flag || "none"}];
+  }
+};
+/* ---------- the shared pieces the ops above lean on ---------- */
+function patchSplitNow(){
+  /* A built-in split has to become a custom one before a day can be renamed, added or
+     reordered: the built-ins are a const table and editing them would change the split for
+     everybody who picked it, including on the next launch. This copies the one in force. */
+  const s = S.customSplit || SPLITS[S.splitId] || SPLITS[DEFAULT_SPLIT];
+  const out = JSON.parse(JSON.stringify(s));
+  out.custom = true;
+  if(!out.id) out.id = S.splitId || DEFAULT_SPLIT;
+  return out;
+}
+function patchSession(o, c){
+  const list = (S.sessions || []).filter(s=> s && s.date === o.date
+    && (!o.day || s.workoutId === patchDayId(o.day)));
+  if(!list.length) return {err: "there is no session logged on " + o.date
+    + (o.day ? " for " + o.day : "") + "."};
+  if(list.length > 1) return {err: "there are " + list.length + " sessions on " + o.date
+    + " (" + list.map(s=> dayName(s.workoutId)).join(", ") + "). Add day to say which."};
+  return list[0];
+}
+function patchVolSet(o, c, key, word){
+  if(!GROUPS[o.muscle])
+    return c.err('"' + o.muscle + '" is not a muscle. They are: ' + Object.keys(GROUPS).join(", ") + ".");
+  S[key] = S[key] || {};
+  const was = S[key][o.muscle];
+  if(o.to === null) delete S[key][o.muscle]; else S[key][o.muscle] = o.to;
+  /* A floor above a ceiling is a statement the planner cannot satisfy. Reported rather than
+     refused: the pair may be being fixed by two ops in one patch, and the second has not
+     run yet when the first is checked. */
+  const fl = (S.lmFloor || {})[o.muscle], ce = (S.lmMrv || {})[o.muscle];
+  if(fl != null && ce != null && fl > ce)
+    c.warn(GROUPS[o.muscle].name + " would have a floor of " + fl + " above its ceiling of "
+         + ce + ". The planner cannot satisfy both.");
+  const A = (function(){ try{ return bodyAnalysis(); }catch(e){ return null; } })();
+  const now = A && A.win && A.win[o.muscle] != null ? Math.round(A.win[o.muscle] * 10) / 10 : null;
+  if(o.to !== null && word === "floor" && now != null && now < o.to)
+    c.warn(GROUPS[o.muscle].name + " is planned for about " + now + " sets a week, under the "
+         + "floor of " + o.to + " this sets. That is usually why you are setting it — the "
+         + "shortfall will be reported until the plan covers it.");
+  return [{day: "the whole plan", what: GROUPS[o.muscle].name + " weekly " + word,
+           from: was == null ? "the app's own model" : String(was),
+           to: o.to === null ? "the app's own model" : String(o.to)}];
+}
+/* One writer for a slot's prescription, used by slot.add and slot.set, so the two cannot
+   disagree about what a field means. Returns before/after rows. */
+function patchSlotWrite(e, o, c, label, wid, ei){
+  const rows = [];
+  /* A FIELD SET TO WHAT IT ALREADY IS IS NOT A CHANGE. logPlanChange() has always refused
+     no-op rows, and a preview that shows "4 → 4" is worse than one that shows nothing: it
+     invites somebody to read a patch of twelve ops, see twelve lines, and believe twelve
+     things moved. A patch whose every op is a no-op previews as "nothing would change". */
+  const say = (what, from, to)=>{
+    const f = from == null || from === "" ? "unset" : String(from);
+    const t = to == null || to === "" ? "unset" : String(to);
+    if(f === t) return;
+    rows.push({what: label + " · " + what, from: f, to: t});
+  };
+  if(o.sets !== undefined){
+    const was = parseInt(e.sets, 10) || 0;
+    /* The volume consequence comes from the app's own checker, not a second opinion. */
+    if(wid != null && ei != null){
+      const conflict = (function(){ try{ return setChangeConflict(wid, ei, o.sets); }catch(err){ return null; } })();
+      if(conflict && conflict.msg) c.warn(conflict.msg);
+      else if(conflict && conflict.text) c.warn(conflict.text);
+    }
+    e.sets = o.sets; say("sets", was, o.sets);
+  }
+  if(o.reps !== undefined){ const was = e.reps; e.reps = o.reps.replace(/\s+/g, ""); say("reps", was, e.reps); }
+  if(o.rpe !== undefined){
+    const was = e.rpe;
+    if(o.rpe === ""){ delete e.rpe; delete e.rpes; } else { e.rpe = o.rpe.replace(/\s+/g, ""); delete e.rpes; }
+    say("RPE target", was, o.rpe === "" ? "" : e.rpe);
+  }
+  if(o.rest !== undefined){
+    const was = Array.isArray(e.rest) ? e.rest.join("-") + "s" : e.rest;
+    e.rest = o.rest.slice(); say("rest", was, e.rest.join("-") + "s");
+  }
+  if(o.load !== undefined){
+    const was = e.weight;
+    if(o.load === null) delete e.weight; else e.weight = o.load;
+    if(o.load !== null){
+      /* A load the gear cannot make is a WARNING with the nearest one, not a block: the
+         patch may be right and the equipment profile out of date, and only the person who
+         was there knows which. roundLoadable() is the app's own answer. */
+      const near = (function(){ try{ return roundLoadable(o.load, e.name); }catch(err){ return o.load; } })();
+      if(Math.abs(near - o.load) > 0.01){
+        const rk = (function(){ try{ return rackMaxSrc(); }catch(err){ return {max: NaN, gym: ""}; } })();
+        c.warn(fmtLoad(o.load) + " on " + e.name + " is not a weight "
+             + (rk.gym ? rk.gym : "your kit") + " can make. The nearest it can is "
+             + fmtLoad(near) + ". Applying this writes " + fmtLoad(o.load)
+             + " as asked — the kit may be what is out of date.");
+      }
+    }
+    say("load", was, o.load === null ? "" : o.load);
+  }
+  if(o.setType !== undefined){ const was = e.setType; e.setType = o.setType; say("set type", was, o.setType); }
+  if(o.perSide !== undefined){
+    const was = !!e.entryPerSide;
+    e.entryPerSide = !!o.perSide; say("one limb at a time", was ? "yes" : "no", o.perSide ? "yes" : "no");
+  }
+  if(o.openingSide !== undefined){ const was = e.sideFirst; e.sideFirst = o.openingSide; say("opening side", was, o.openingSide); }
+  if(o.weakerExtraSet !== undefined){
+    const was = !!e.weakExtra;
+    e.weakExtra = !!o.weakerExtraSet; say("extra set on the weaker side", was ? "yes" : "no", o.weakerExtraSet ? "yes" : "no");
+  }
+  if(o.note !== undefined){ const was = e.note; e.note = o.note; say("note", was, o.note); }
+  return rows;
+}
+/* ---------- the run ---------- */
+function patchRun(text, opts){
+  const o = opts || {};
+  const parsed = patchParse(text);
+  if(parsed.errors.length) return {ok: false, rows: [], warnings: [], sessionWarnings: [],
+                                   errors: parsed.errors, note: parsed.note || ""};
+  const rows = [], warnings = [], sessionWarnings = [], errors = [];
+  const real = S, realAliases = USER_ALIASES;
+  if(o.dry){ S = patchCloneState(real); USER_ALIASES = S.exAliases; invalidateCanon(); }
+  try{
+    parsed.ops.forEach((op, i)=>{
+      /* THE RUN STOPS AT THE FIRST UNRESOLVABLE OP, and the message says so. Parse errors
+         are all reported together because they are statements about the document and are
+         independent of each other; a run error is not. Every op after a failed one would be
+         checked against a state that op was supposed to produce, so "Legs C does not exist"
+         following a failed day.add would be a second error with one cause, and the reader
+         cannot tell which of the two to fix. */
+      if(errors.length) return;
+      let failed = false;
+      const ctx = {
+        warn: m=> warnings.push(m),
+        sessionWarn: m=> sessionWarnings.push(m),
+        err: m=>{
+          failed = true;
+          errors.push("ops[" + i + "] (" + op.op + "): " + m
+            + (i < parsed.ops.length - 1
+                 ? "  (ops[" + (i + 1) + "] onwards were not checked: they would be read "
+                   + "against the state this op was meant to produce.)"
+                 : ""));
+          return [];
+        }
+      };
+      let got = [];
+      try{ got = PATCH_RUN[op.op](op, ctx) || []; }
+      catch(e){ failed = true; errors.push("ops[" + i + "] (" + op.op + ") could not be applied: "
+                                         + (e && e.message || e)); }
+      if(!failed) got.forEach(r=> rows.push(Object.assign({op: op.op, at: i}, r)));
+    });
+  } finally {
+    if(o.dry){ S = real; USER_ALIASES = realAliases; invalidateCanon(); try{ applySplit(); }catch(e){} }
+  }
+  return {ok: !errors.length, rows: rows, warnings: warnings,
+          sessionWarnings: sessionWarnings, errors: errors, note: parsed.note || "",
+          ops: parsed.ops.length};
+}
+function patchPreview(text){ return patchRun(text, {dry: true}); }
+/* ---------- the reference a model reads, generated from the checker's own table ---------- */
+function patchOpsReference(){
+  const L = [];
+  L.push("ELEMENT 26 PATCH FORMAT, version " + PATCH_VERSION);
+  L.push("");
+  L.push('{"e26patch": ' + PATCH_VERSION + ', "note": "why", "ops": [ ... ]}');
+  L.push("");
+  L.push("Rules: ops run in order. Unknown op, unknown field, or wrong type refuses the");
+  L.push("WHOLE patch - there is no partial apply. Numbers are numbers (\"4\" is refused).");
+  L.push("Rep and RPE ranges are strings. Loads are in the units below, and on a movement");
+  L.push("held in both hands they are ONE HAND, which is what the app stores.");
+  L.push("Days are named as they appear below. An exercise is named as it appears on its");
+  L.push("day; where one name is on a day twice, use slotId instead.");
+  L.push("");
+  L.push("OPS");
+  Object.keys(PATCH_OPS).forEach(k=>{
+    const sp = PATCH_OPS[k];
+    L.push("  " + k + (sp.session ? "   [logged session - extra warning in the preview]" : ""));
+    L.push("    " + sp.note);
+    Object.keys(sp.fields).forEach(f=>{
+      L.push("      " + f + (sp.req.indexOf(f) > -1 ? " (required)" : "")
+           + ": " + patchTypeWord(sp.fields[f]));
+    });
+  });
+  return L.join("\n");
+}
+function patchPlanSummary(){
+  const p = trainPrefs(), L = [];
+  L.push("MY PLAN RIGHT NOW");
+  L.push("units: " + (p.units || "lb") + "   bar mode: " + (p.barMode || "total")
+       + "   progression: " + (p.progression || "ask") + "   deloads: " + (p.deloads || "auto"));
+  const hg = gymById(S.homeGym);
+  L.push("home gym: " + (hg ? hg.name : "unset"));
+  L.push("");
+  L.push("DAYS, IN ROTATION ORDER");
+  DAYS.forEach(wid=>{
+    L.push("  " + dayName(wid));
+    (S.program[wid] || []).forEach((e, i)=>{
+      if(!e) return;
+      const bits = [(parseInt(e.sets, 10) || 0) + " x " + (e.reps || "?")];
+      if(e.rpe) bits.push("RPE " + e.rpe);
+      if(e.weight != null && e.weight !== "") bits.push(fmtLoad(e.weight));
+      if(Array.isArray(e.rest)) bits.push("rest " + e.rest.join("-") + "s");
+      if(e.entryPerSide) bits.push("one limb at a time");
+      L.push("    " + patchSlotId(wid, i) + "  " + e.name + "   " + bits.join(", "));
+    });
+    if(!(S.program[wid] || []).length) L.push("    (nothing on this day)");
+  });
+  L.push("");
+  L.push("VOLUME LANDMARKS I HAVE SET BY HAND (sets per week; anything absent is the app's model)");
+  ["lmFloor", "lmMav", "lmMrv"].forEach(k=>{
+    const word = k === "lmFloor" ? "floor" : k === "lmMav" ? "target" : "ceiling";
+    const o = S[k] || {};
+    const keys = Object.keys(o);
+    if(!keys.length){ L.push("  " + word + ": none"); return; }
+    L.push("  " + word + ": " + keys.map(g=> g + " " + o[g]).join(", "));
+  });
+  L.push("");
+  L.push("MUSCLE KEYS: " + Object.keys(GROUPS).join(", "));
+  L.push("");
+  L.push("GYMS AND THEIR KIT");
+  (S.gyms || []).forEach(g=>{
+    if(!g) return;
+    const bits = [];
+    ["dbMax", "dbStep", "smith", "bar", "stackStep"].forEach(k=>{
+      if(g[k] != null && g[k] !== "") bits.push(k + " " + g[k]);
+    });
+    if(Array.isArray(g.plates)) bits.push("plates " + g.plates.join("/"));
+    L.push("  " + g.name + (g.id === S.homeGym ? "  (home)" : "") + "   "
+         + (bits.length ? bits.join(", ") : "nothing recorded"));
+  });
+  if(!(S.gyms || []).length) L.push("  (no gyms set up)");
+  return L.join("\n");
+}
+function patchTemplateText(){
+  return patchOpsReference() + "\n\n" + "=".repeat(70) + "\n\n" + patchPlanSummary()
+       + "\n\n" + "=".repeat(70) + "\n\n"
+       + "Write me a patch that does the following, as JSON only, with nothing around it:\n";
+}
+
+/* =====================================================================
    THE DAILY LINE
 
    Thirty-one quotes, one per day of the month, so it changes every morning, repeats on
