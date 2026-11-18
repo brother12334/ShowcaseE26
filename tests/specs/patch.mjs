@@ -497,6 +497,73 @@ console.log("\n16 - THE SCREEN");
      /Only apply patches you trust/.test(r.empty), "warned");
 }
 
+console.log("\n18 - A PAIRED SET, IN THE SHAPE THE LOGGER ACTUALLY WRITES");
+{
+  const r = await p.evaluate(async ()=>{
+    /* A real one-limb session on this export: Pull A's single-arm hammer curl. */
+    const sess = (S.sessions || []).filter(s=> s && s.workoutId === "pullA").pop();
+    const en = (sess.entries || []).find(e=> e && /Single-Arm Cable Hammer Curl/i.test(e.name));
+    const before = JSON.parse(JSON.stringify(en.sets));
+    const out = await patchApply(JSON.stringify({e26patch: 1, note: "log it per side",
+      ops: [{op: "session.set", date: sess.date, day: dayName(sess.workoutId),
+             exercise: en.name, startSide: "R",
+             sets: [{sides: {L: {weight: 35, reps: 9, rpe: 9}, R: {weight: 35, reps: 11, rpe: 9}}},
+                    {sides: {L: {weight: 35, reps: 8, rpe: 9}, R: {weight: 35, reps: 10, rpe: 9}}}]}]}));
+    const en2 = (S.sessions.find(s=> s.id === sess.id).entries || [])
+                  .find(e=> /Single-Arm Cable Hammer Curl/i.test(e.name));
+    /* The question that matters: does the APP read it back as a pair? */
+    const ss = sideSets(en2);
+    const res = {ok: out.ok, rows: out.rows.map(x=> x.from + " -> " + x.to),
+                 perSide: entryPerSide(en2), n: ss.length,
+                 order: ss.map(x=> x.side).join(","),
+                 reps: ss.map(x=> x.reps).join(","),
+                 counts: ss.map(x=> x.count).join(","),
+                 working: sideSetsWorking(en2).length,
+                 id: out.id};
+    patchUndoRun(out.id);
+    const en3 = (S.sessions.find(s=> s.id === sess.id).entries || [])
+                  .find(e=> /Single-Arm Cable Hammer Curl/i.test(e.name));
+    res.restored = JSON.stringify(en3.sets) === JSON.stringify(before);
+    return res;
+  });
+  console.log("    " + r.rows.join("   |   "));
+  ck("the pair applies", r.ok, r.rows.join(" | "));
+  ck("and the app reads it back as a pair", r.perSide && r.n === 4,
+     r.n + " side-sets, perSide " + r.perSide);
+  ck("in the order startSide asked for", r.order === "R,L,R,L", r.order);
+  ck("with each side's own reps", r.reps === "11,9,10,8", r.reps);
+  ck("CONTROL: and each side counts as half a set, not a whole one",
+     r.counts === "0.5,0.5,0.5,0.5", r.counts);
+  ck("the preview row shows both sides", /L 35x9\/R 35x11/.test(r.rows.join(" ")),
+     r.rows.join(" | "));
+  ck("and undoing it puts the original sets back", r.restored, String(r.restored));
+}
+
+console.log("\n19 - TWO SESSIONS ON ONE DATE");
+{
+  const r = await p.evaluate(async fxday=>{
+    const src = (S.sessions || []).filter(s=> s && s.workoutId === "pullA").pop();
+    const twin = JSON.parse(JSON.stringify(src));
+    twin.id = "twin1"; twin.workoutId = "legsA";
+    twin.entries = [{name: "Leg Extension", reps: "10-15",
+                     sets: [{weight: "70", reps: "12", rpe: "8", done: true}]}];
+    S.sessions.push(twin);
+    const vague = patchPreview(JSON.stringify({e26patch: 1, ops: [
+      {op: "session.flag", date: src.date, flag: "unusual"}]}));
+    const named = patchPreview(JSON.stringify({e26patch: 1, ops: [
+      {op: "session.set", date: src.date, day: "Legs A", exercise: "Leg Extension",
+       sets: [{weight: 75, reps: 10}]}]}));
+    S.sessions = S.sessions.filter(s=> s.id !== "twin1");
+    return {vague: vague.errors, named: {ok: named.ok, rows: named.rows.map(x=> x.day)}};
+  });
+  ck("a date with two sessions and no day is refused",
+     r.vague.length === 1 && /there are 2 sessions on/.test(r.vague[0]), r.vague[0]);
+  ck("and the message names both days", /Pull A, Legs A|Legs A, Pull A/.test(r.vague[0] || ""),
+     r.vague[0]);
+  ck("CONTROL: naming the day resolves it", r.named.ok && r.named.rows.length === 1,
+     r.named.rows.join(" | "));
+}
+
 console.log("\n17 - AND THE WHOLE THING THROUGH THE REAL SCREEN");
 /* Everything above calls the functions. This taps the tile, types into the box, presses
    the buttons and reads what a person would see - which is the only test that could have

@@ -134,10 +134,20 @@ leaves it alone — there is no "reset to default" by omission.
 | `rest` | `[number, number]` | seconds, low and high; `[180, 240]` |
 | `load` | number or `null` | your units, one hand on a both-hands movement; `null` clears it |
 | `setType` | string | `"straight"`, `"myorep"`, `"drop"`, `"amrap"` |
-| `perSide` | boolean | log one limb at a time |
-| `openingSide` | string | `"weaker"`, `"stronger"`, `"left"`, `"right"`, `"alternate"` |
-| `weakerExtraSet` | boolean | one extra set on the weaker side |
+| `perSide` | boolean | log one limb at a time; the slot's set count is then per side |
 | `note` | string | the cue you see on the set row |
+
+**There is deliberately no `openingSide` and no `weakerExtraSet`.** Both shipped in the
+first version of this format and wrote properties nothing in the app reads — the checker
+accepted them, the preview drew a before-and-after row, and applying one changed nothing.
+Neither is a property of a plan line: the opening side comes from the global *opening side*
+setting and is stamped on the session when it starts, and the extra set for the weaker side
+is added by a balance check that turns itself on and retires when the sides come level.
+
+**A load on a movement that counts your bodyweight is the WHOLE load** — you plus whatever
+is added. The plan summary marks those lines `154.8 lb (incl. 139.6 bodyweight)`. A patch
+writes the whole number, so adding 5 lb to that is `159.8`, not `5`, and the part that is
+you cannot be rounded to a plate, which is why those figures are not round.
 
 ```json
 {"op": "slot.set", "day": "Legs B", "exercise": "Dumbbell RDL",
@@ -197,7 +207,7 @@ A list that is missing a day or names one twice is refused, with the difference 
 | `barMode` | string | `"total"`, `"added"` |
 
 Only these. A `settings.set` naming anything else is refused by field name — this is the op
-most likely to be handed something by an AI that sounded plausible and is not a setting.
+most likely to be handed a plausible-sounding name that is not a setting at all.
 
 ### `gym.set`
 | field | type | notes |
@@ -284,12 +294,17 @@ snapshot says "reverse only" rather than claiming something it cannot do.
 
 ---
 
-## Getting a patch from an AI
+## Writing one against your own plan
 
-Settings → **Export patch template** copies this document plus a compact summary of your
-current plan: the days, the slots with their ids, every prescription, your volume floors
-and targets, and the kit of each gym. Paste both into an AI, say what you want changed, and
-what comes back can be pasted straight in. The preview is the safety net, not the AI.
+Settings → **Copy the format and my plan** puts two things on the clipboard: a compact
+reference generated from the checker's own table — so it cannot describe an op the app
+would reject — and a summary of your current plan. The days, the slots with their ids,
+every prescription, which lines are per side, which loads include your bodyweight, your
+volume floors, and the kit of each gym. That is everything needed to write a valid patch
+without guessing at a name.
+
+This is a developer-facing format. It is JSON, it is strict, and it tells you exactly which
+op and which field it refused and why.
 
 A patch you were handed rather than wrote is still a patch: **only apply ones you trust.**
 It can change your whole plan in one press. It cannot touch your account, your keys or your

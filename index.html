@@ -7349,7 +7349,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.33";
+const APP_VERSION = "2026.11.17.34";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -62417,8 +62417,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.33";
+const NEWS_FOR = "2026.11.17.34";
 const NEWS = [
+  {k: "The patch format tells you the things you cannot see from a number",
+   s: ["Two fields in the first version of the format wrote nothing. \u201copeningSide\u201d and "
+     + "\u201cweakerExtraSet\u201d set properties no part of this app reads \u2014 the opening side "
+     + "comes from a setting and is stamped on a session when it starts, and the extra set "
+     + "for the weaker side is added by a balance check that retires itself. They are gone "
+     + "from the format rather than left to report success at doing nothing.",
+     "The copied plan now says the things a number hides. A line logged one limb at a time "
+     + "is marked \u201cper side\u201d, and says that its set count is per side. A load that counts "
+     + "you reads \u201c154.8 lb (incl. 139.8 lb bodyweight)\u201d, with the rules explaining that "
+     + "a patch writes the whole figure. A line with no load says so rather than going "
+     + "quiet, and a set type that is not straight is named.",
+     "And a session logged per side can now be rewritten per side, in the shape the logger "
+     + "really uses. Where a date has two sessions, the patch has to name the day \u2014 it is "
+     + "refused rather than guessed at."]},
   {k: "Your one-limb lines no longer describe the app as it was a month ago",
    s: ["Every single-arm and single-leg movement in your plan carried the note "
      + "\u201calternate L/R each set\u201d. That was the instruction before Element 26 started "
@@ -62458,9 +62472,11 @@ const NEWS = [
      + "behind a patch, it can be rolled back whole, which does lose what came after, so "
      + "it tells you exactly which sessions those are first. Each row in the history says "
      + "which of the two it can still promise.",
-     "\u201cCopy template for an AI\u201d gives you the format and your current plan \u2014 days, "
-     + "slots, prescriptions, floors, gyms \u2014 to paste into an assistant, so what comes "
-     + "back is something this app accepts. Only apply patches you trust: one press can "
+     "\u201cCopy the format and my plan\u201d gives you the whole format plus your current "
+     + "plan \u2014 days, slots with their ids, prescriptions, which lines are per side, which "
+     + "loads include your bodyweight, floors, gyms \u2014 which is everything needed to write "
+     + "a valid patch. It is a developer-facing format: strict JSON that tells you which op "
+     + "and which field it refused and why. Only apply patches you trust: one press can "
      + "change your whole plan."]},
   {k: "The weight it suggests for a new movement is one you can actually start on",
    s: ["It read 130 lb for a Smith machine RDL off a dumbbell RDL at 50 lb a hand, and "
@@ -70796,8 +70812,8 @@ function importJSON(e){
    PLAN PATCHES — THE CHECKER AND THE DRY RUN
 
    A patch is a JSON document somebody pastes in. That sentence is the whole threat model:
-   it arrives from outside, it may have been written by an AI that was confident and wrong,
-   and it can rewrite a plan in one press. So this file reads it as DATA. There is no
+   it arrives from outside, it may have been written by anything, and it can rewrite a plan
+   in one press. So this file reads it as DATA. There is no
    expression to evaluate, no field that names a function, and no op that addresses an
    account key, a token or a sync setting — not "refused if you try", not addressable.
 
@@ -70821,15 +70837,30 @@ const PATCH_ENUMS = {
   units:       ["lb", "kg"],
   barMode:     ["total", "added"],
   setType:     ["straight", "myorep", "drop", "amrap"],
-  openingSide: ["weaker", "stronger", "left", "right", "alternate"],
-  flag:        ["injury", "illness", "unusual"]
+  flag:        ["injury", "illness", "unusual"],
+  startSide:   ["L", "R"]
 };
 /* The prescription fields, shared by slot.add and slot.set so the two can never disagree
    about what a slot has. */
+/* TWO FIELDS WERE REMOVED FROM HERE, AND THE REASON IS WORTH KEEPING.
+
+   openingSide and weakerExtraSet shipped in the first version of this format and wrote
+   e.sideFirst and e.weakExtra - two properties NOTHING IN THIS APP READS. They were names
+   I invented while writing the op table, and the checker accepted them, the preview drew a
+   before-and-after row for them, and applying one changed precisely nothing.
+
+   The app's real mechanisms are not per-slot at all, which is why there was nothing to
+   write to: the opening side is en.startSide on a SESSION entry, derived at startWorkout()
+   from the global startSideFlip preference; the extra set for the weaker side is driven by
+   asymActiveFor(), a balance check that turns itself on and retires itself when the sides
+   come level. Neither is a property of a plan line, and a patch format that pretends
+   otherwise is worse than one that omits them - it reports success at doing nothing.
+
+   perSide stays, because entryPerSideWanted() really does read e.perSide on a plan entry
+   and really does override the name-based guess. */
 const PATCH_SLOT_FIELDS = {
   sets: "int", reps: "reps", rpe: "rpeRange", rest: "rest", load: "numOrNull",
-  setType: "enum:setType", perSide: "bool", openingSide: "enum:openingSide",
-  weakerExtraSet: "bool", note: "str"
+  setType: "enum:setType", perSide: "bool", note: "str"
 };
 function patchSlotFields(extra){ return Object.assign({}, PATCH_SLOT_FIELDS, extra || {}); }
 /* ref: the three ways to name a slot. `day` is always required; one of `exercise` or
@@ -70871,9 +70902,13 @@ const PATCH_OPS = {
                               bar: "numOrNull"},
                      req: ["gym"], oneOf: true, note: "the kit in one room"},
   "gym.home":       {fields: {gym: "str"}, req: ["gym"], note: "the gym assumed when nothing else is known"},
-  "session.set":    {fields: {date: "date", day: "str", exercise: "str", sets: "setArr"},
+  "session.set":    {fields: {date: "date", day: "str", exercise: "str", sets: "setArr",
+                              startSide: "enum:startSide"},
                      req: ["date", "exercise", "sets"], session: true,
-                     note: "rewrite one exercise's sets in a logged session"},
+                     note: "rewrite one exercise's sets in a logged session; a set is either "
+                         + "{weight,reps,rpe} or {sides:{L:{...},R:{...}}} for one-limb work. "
+                         + "`day` picks between two sessions on one date, and is REQUIRED when "
+                         + "the date has more than one"},
   "session.gym":    {fields: {date: "date", gym: "str"}, req: ["date", "gym"], session: true,
                      note: "retag which room a session was performed in"},
   "session.flag":   {fields: {date: "date", flag: "enumOrNull:flag"}, req: ["date", "flag"], session: true,
@@ -70896,12 +70931,28 @@ function patchTypeOk(t, v){
     case "numsOrNull": return v === null || patchTypeOk("nums", v);
     case "strs":       return Array.isArray(v) && v.length > 0 && v.every(x=> typeof x === "string" && x.trim() !== "");
     case "date":       return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
-    case "setArr":     return Array.isArray(v) && v.length > 0 && v.every(x=>
-                         x && typeof x === "object" && !Array.isArray(x)
-                         && Object.keys(x).every(k=> ["weight","reps","rpe"].indexOf(k) > -1)
-                         && (x.weight === undefined || typeof x.weight === "number")
-                         && (x.reps === undefined || typeof x.reps === "number")
-                         && (x.rpe === undefined || typeof x.rpe === "number"));
+    /* A SET IS EITHER ONE THING OR A PAIR, and the pair is the shape the logger really
+       writes: st.sides = {L:{weight,reps,rpe}, R:{...}}, read by sideSets() in the order
+       the entry's startSide gives. Checked against that shape rather than a convenient
+       one, because an op that writes a pair the app cannot read would apply cleanly and
+       change nothing any rule can see. */
+    case "sideObj":    return v && typeof v === "object" && !Array.isArray(v)
+                         && Object.keys(v).every(k=> ["weight","reps","rpe"].indexOf(k) > -1)
+                         && (v.weight === undefined || typeof v.weight === "number")
+                         && (v.reps === undefined || typeof v.reps === "number")
+                         && (v.rpe === undefined || typeof v.rpe === "number");
+    case "setArr":     return Array.isArray(v) && v.length > 0 && v.every(x=>{
+                         if(!x || typeof x !== "object" || Array.isArray(x)) return false;
+                         if(x.sides !== undefined){
+                           if(Object.keys(x).some(k=> k !== "sides")) return false;
+                           const sd = x.sides;
+                           if(!sd || typeof sd !== "object" || Array.isArray(sd)) return false;
+                           const keys = Object.keys(sd);
+                           if(!keys.length || keys.some(k=> k !== "L" && k !== "R")) return false;
+                           return keys.every(k=> patchTypeOk("sideObj", sd[k]));
+                         }
+                         return patchTypeOk("sideObj", x);
+                       });
   }
   return false;
 }
@@ -70912,7 +70963,9 @@ function patchTypeWord(t){
           bool:"true | false", reps:'string "8-12" or "10"', rpeRange:'string "7-9" or "8" or ""',
           rest:"[seconds, seconds]", nums:"[number, ...]", numsOrNull:"[number, ...] | null",
           strs:"[string, ...]", date:'"YYYY-MM-DD"',
-          setArr:"[{weight, reps, rpe}, ...] all numbers"}[t] || t;
+          setArr:"[{weight, reps, rpe}, ...] all numbers, or [{sides:{L:{...},R:{...}}}, ...] "
+               + "for a movement logged one limb at a time",
+          sideObj:"{weight, reps, rpe} all numbers"}[t] || t;
 }
 /* ---------- the parse ---------- */
 function patchParse(text){
@@ -71240,15 +71293,31 @@ const PATCH_RUN = {
     const en = (s.entries || []).find(e=> e && nrm(e.name) === nrm(o.exercise));
     if(!en) return c.err(o.exercise + " is not in the session on " + o.date + ". It has: "
                        + (s.entries || []).map(e=> e && e.name).join(", ") + ".");
-    const was = (en.sets || []).map(x=> x.weight + "x" + x.reps).join(", ");
-    en.sets = o.sets.map(x=> ({weight: x.weight == null ? "" : String(x.weight),
-                               reps: x.reps == null ? "" : String(x.reps),
-                               rpe: x.rpe == null ? "" : String(x.rpe), done: true}));
+    const say1 = st=> st.sides
+      ? ["L", "R"].filter(k=> st.sides[k])
+          .map(k=> k + " " + st.sides[k].weight + "x" + st.sides[k].reps).join("/")
+      : st.weight + "x" + st.reps;
+    const was = (en.sets || []).map(say1).join(", ");
+    const num = v=> v == null ? "" : String(v);
+    en.sets = o.sets.map(x=>{
+      if(!x.sides) return {weight: num(x.weight), reps: num(x.reps), rpe: num(x.rpe), done: true};
+      const sides = {};
+      ["L", "R"].forEach(k=>{
+        if(!x.sides[k]) return;
+        sides[k] = {weight: num(x.sides[k].weight), reps: num(x.sides[k].reps),
+                    rpe: num(x.sides[k].rpe), done: true};
+      });
+      return {sides: sides, done: true};
+    });
+    /* entryPerSide() reads the sets themselves, so writing pairs is enough to make the
+       entry a paired one - but the ORDER the two sides are read in comes from startSide,
+       and an entry that has never had one reads L first. Set it when the patch says so. */
+    if(o.startSide) en.startSide = o.startSide;
     c.sessionWarn("Rewriting what you logged on " + o.date + " for " + en.name + ". A logged "
       + "session is a record of something that happened; every rule that reads your history "
       + "will now read this instead.");
     return [{day: o.date + " · " + dayName(s.workoutId), what: en.name, from: was,
-             to: en.sets.map(x=> x.weight + "x" + x.reps).join(", ")}];
+             to: en.sets.map(say1).join(", ")}];
   },
 
   "session.gym": (o, c)=>{
@@ -71377,13 +71446,11 @@ function patchSlotWrite(e, o, c, label, wid, ei){
   }
   if(o.setType !== undefined){ const was = e.setType; e.setType = o.setType; say("set type", was, o.setType); }
   if(o.perSide !== undefined){
-    const was = !!e.entryPerSide;
-    e.entryPerSide = !!o.perSide; say("one limb at a time", was ? "yes" : "no", o.perSide ? "yes" : "no");
-  }
-  if(o.openingSide !== undefined){ const was = e.sideFirst; e.sideFirst = o.openingSide; say("opening side", was, o.openingSide); }
-  if(o.weakerExtraSet !== undefined){
-    const was = !!e.weakExtra;
-    e.weakExtra = !!o.weakerExtraSet; say("extra set on the weaker side", was ? "yes" : "no", o.weakerExtraSet ? "yes" : "no");
+    /* e.perSide, which entryPerSideWanted() reads - not e.entryPerSide, which was the
+       other half of the same invented-field mistake and which nothing reads either. */
+    const was = e.perSide == null ? (altStyle(e) === "side") : !!e.perSide;
+    e.perSide = !!o.perSide;
+    say("one limb at a time", was ? "yes" : "no", o.perSide ? "yes" : "no");
   }
   if(o.note !== undefined){ const was = e.note; e.note = o.note; say("note", was, o.note); }
   return rows;
@@ -71438,6 +71505,7 @@ function patchPreview(text){ return patchRun(text, {dry: true}); }
 function patchOpsReference(){
   const L = [];
   L.push("ELEMENT 26 PATCH FORMAT, version " + PATCH_VERSION);
+  L.push("A developer-facing format. Everything below is what a valid patch may contain.");
   L.push("");
   L.push('{"e26patch": ' + PATCH_VERSION + ', "note": "why", "ops": [ ... ]}');
   L.push("");
@@ -71447,6 +71515,18 @@ function patchOpsReference(){
   L.push("held in both hands they are ONE HAND, which is what the app stores.");
   L.push("Days are named as they appear below. An exercise is named as it appears on its");
   L.push("day; where one name is on a day twice, use slotId instead.");
+  L.push("");
+  L.push("LOADS ON MOVEMENTS THAT COUNT BODYWEIGHT. A line marked \"incl. N bodyweight\"");
+  L.push("stores the WHOLE load: the lifter plus whatever is added. A dip at 154.8 with a");
+  L.push("bodyweight of 139.6 is 15.2 of added weight. A patch sets the whole number, so");
+  L.push("adding 5 lb means writing 159.8, not 5 - and the part that is the lifter cannot");
+  L.push("be rounded to a plate, which is why those figures are not round.");
+  L.push("");
+  L.push("PER SIDE. A line marked \"per side\" is logged one limb at a time, and its set");
+  L.push("count is PER SIDE: 4 sets means 4 per leg, logged as 4 pairs. Changing sets on");
+  L.push("one of those changes it for each side. Which side opens, and whether the weaker");
+  L.push("side gets an extra set, are not properties of the line - they come from the two");
+  L.push("settings named below and from a balance check the app runs on its own.");
   L.push("");
   L.push("OPS");
   Object.keys(PATCH_OPS).forEach(k=>{
@@ -71465,6 +71545,15 @@ function patchPlanSummary(){
   L.push("MY PLAN RIGHT NOW");
   L.push("units: " + (p.units || "lb") + "   bar mode: " + (p.barMode || "total")
        + "   progression: " + (p.progression || "ask") + "   deloads: " + (p.deloads || "auto"));
+  /* The two side settings, here rather than on each line, because that is where they live:
+     neither is a property of a plan line, and a patch cannot change either. Printed so a
+     reader can see why a one-limb line behaves as it does. */
+  L.push("side tracking: " + ({separate: "each side tracked separately",
+                               matchWeaker: "both sides held to the weaker one",
+                               both: "both sides counted as one set"}[p.sides] || p.sides || "unset")
+       + "   opening side: " + (p.startSideFlip === false ? "always the right" : "swapped each session"));
+  const bw = bodyWeightNow();
+  L.push("bodyweight: " + (bw ? fmtLoad(bw) : "not logged"));
   const hg = gymById(S.homeGym);
   L.push("home gym: " + (hg ? hg.name : "unset"));
   L.push("");
@@ -71475,9 +71564,22 @@ function patchPlanSummary(){
       if(!e) return;
       const bits = [(parseInt(e.sets, 10) || 0) + " x " + (e.reps || "?")];
       if(e.rpe) bits.push("RPE " + e.rpe);
-      if(e.weight != null && e.weight !== "") bits.push(fmtLoad(e.weight));
+      if(e.weight != null && e.weight !== ""){
+        /* A load that counts the lifter is useless to a reader who cannot see that it
+           does: 154.8 looks like an arbitrary number until it is 139.6 of lifter and 15.2
+           of plate. bwRemembered() is the same switch the session rows read. */
+        const counts = (function(){ try{ return bwRemembered(e.name); }catch(err){ return false; } })();
+        const bwNow = counts ? bodyWeightNow() : null;
+        bits.push(fmtLoad(e.weight)
+          + (bwNow ? " (incl. " + fmtLoad(bwNow) + " bodyweight)" : counts ? " (includes bodyweight)" : ""));
+      } else bits.push("no load set");
       if(Array.isArray(e.rest)) bits.push("rest " + e.rest.join("-") + "s");
-      if(e.entryPerSide) bits.push("one limb at a time");
+      /* Read through the same function the rules read, so the template cannot disagree
+         with what the app will do with the line. */
+      const per = (function(){ try{ return entryPerSideWanted(e); }catch(err){ return false; } })();
+      if(per) bits.push("per side (the set count is per side)");
+      if(e.setType && e.setType !== "straight") bits.push(e.setType + " sets");
+      if(e.pct != null) bits.push(e.pct + "% of training max");
       L.push("    " + patchSlotId(wid, i) + "  " + e.name + "   " + bits.join(", "));
     });
     if(!(S.program[wid] || []).length) L.push("    (nothing on this day)");
@@ -71511,7 +71613,7 @@ function patchPlanSummary(){
 function patchTemplateText(){
   return patchOpsReference() + "\n\n" + "=".repeat(70) + "\n\n" + patchPlanSummary()
        + "\n\n" + "=".repeat(70) + "\n\n"
-       + "Write me a patch that does the following, as JSON only, with nothing around it:\n";
+       + "A patch that does the following, as JSON only, with nothing around it:\n";
 }
 
 /* =====================================================================
@@ -71881,12 +71983,14 @@ function patchCardHTML(){
       ranges, exercises, days, volume floors, gym kit. It is read as data — nothing in it
       is ever executed, and no patch can touch your account, your recovery key or your
       sync. <b>Only apply patches you trust</b>: one press can change your whole plan.</div>
+    <div class="set-help">The format is documented for developers: the button below copies
+      it with your current plan, which is everything needed to write a valid one.</div>
     <textarea id="ptIn" rows="6" spellcheck="false" placeholder='{"e26patch": 1, "note": "why", "ops": [ ... ]}'
       style="width:100%;font:var(--fs-3)/1.4 var(--mono);padding:10px;border-radius:var(--r-sm);
              border:1px solid var(--line);background:var(--card2);color:var(--text)">${esc(PATCH_TEXT)}</textarea>
     <div class="set-row" style="gap:8px;margin-top:9px">
       <button class="btn small" id="ptCheck">Preview</button>
-      <button class="btn ghost small" id="ptTemplate">Copy template for an AI</button>
+      <button class="btn ghost small" id="ptTemplate">Copy the format and my plan</button>
     </div>
   </div>`;
   if(PATCH_PV){
@@ -72005,7 +72109,7 @@ function patchWire(){
   const tpl = $("#ptTemplate");
   if(tpl) tpl.onclick = ()=>{
     const text = patchTemplateText();
-    const done = ()=> toast("Format and your plan copied — paste it to an AI with what you want changed", "good");
+    const done = ()=> toast("Format and your plan copied — enough to write a patch against", "good");
     try{
       if(navigator.clipboard && navigator.clipboard.writeText)
         navigator.clipboard.writeText(text).then(done, ()=> patchCopyFallback(text));
@@ -72057,7 +72161,7 @@ function patchCopyFallback(text){
     t.value = text; t.style.position = "fixed"; t.style.left = "-9999px";
     document.body.appendChild(t); t.select(); document.execCommand("copy");
     document.body.removeChild(t);
-    toast("Format and your plan copied — paste it to an AI with what you want changed", "good");
+    toast("Format and your plan copied — enough to write a patch against", "good");
   }catch(e){ toast("Could not copy. Your plan is in Settings › Your data as an export.", "bad"); }
 }
 function patchAskWire(){
