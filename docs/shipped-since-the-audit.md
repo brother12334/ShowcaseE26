@@ -18,13 +18,13 @@ The audit's own list, in order. Each one shipped with a spec that fails on the o
 | P0-2 | Counting your own bodyweight into a load read as getting stronger. |
 | P0-3 | A volume floor was cut on a gain that had not happened. Five such cuts in your log. |
 | P1-4 | Rest windows grew for reasons that were not rest, with no ceiling. |
-| P1-5 | A session that was not ordinary training still moved the prescription. |
-| P1-6 | Change rows: no-ops, duplicates, and rows labelled with a reason that contradicted them. |
-| P1-7 | The side-balance check switched itself off while the gap was still real. |
-| P1-8 | Matching the weaker side erased the gap it had just been matched to. |
-| P2-9 | A set of a one-limb movement counted as two sets. |
-| P2-10 | The report and the CSV read the same records differently. |
-| P2-11 | A load the equipment cannot produce was logged without comment. |
+| P1-5 | Rules contradicted each other: the stall protocol and the volume floor pulling opposite ways, and the plan check churning on sessions that had only just had their load or range moved. |
+| P1-6 | The planned loads drifted from the loads actually logged, and change rows recorded no-ops and duplicates. |
+| P1-7 | A set of a one-limb movement counted as a full set, and there was no way to log left and right as one set. |
+| P1-8 | The side-balance check retired while the gap was still real, and matching the weaker side erased the gap it had just been matched to. **P1-8b**, the follow-up: judge it on reps to failure, not reps logged. |
+| P2-9 | Change-log reasons were quoted from what was meant rather than derived from what happened, so rows were mislabelled. |
+| P2-10 | The report showed "blank → blank" for most programme edits while the CSV of the same rows carried the real values. |
+| P2-11 | Input hygiene: a stepper writing a change row per tap, a load the equipment cannot produce logged without comment, a pre-filled rating counted as an answer, and no way to mark a session as not ordinary training. |
 
 Two pieces of tooling came out of this stretch and have paid for themselves since:
 `tools/patch.py`, a byte-delta-guarded patcher written after two near-misses, and
