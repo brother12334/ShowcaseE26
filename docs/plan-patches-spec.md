@@ -117,3 +117,61 @@ be previewed before it's applied, and it must be reliably undoable.
 
 Build it after load management (B, C, E, F, G) is finished, unless a part of it is trivial
 to share with that work.
+
+---
+
+## Addendum: how undo will actually work (decided 2026-11-18, before any code)
+
+The spec's own §4 asks for a full pre-apply snapshot, and that is what it will get. An
+earlier note in this document implying `planSnapOne()` would carry the undo was wrong, and
+it was wrong for a reason worth writing down: `planSnapOne()` photographs ONE PLAN ENTRY.
+A patch can move volume floors, gym kit, the home gym, progression and deload settings, the
+rotation, day names, and logged sessions. Per-row snapshots cannot reverse any of those, so
+for most op types they would silently undo nothing and report success.
+
+**Two records are kept per patch, because the spec asks for two different guarantees.**
+
+1. **A full state snapshot**, taken from the raw localStorage bytes the way
+   `rescueBackupOnce()` does — same mechanism, its own key prefix, its own keep count. This
+   is what makes "restores the exact previous state, byte for byte" true, and it is true
+   whatever the op list contained, including an op added years from now.
+2. **An inverse op list**, recorded at apply time rather than inferred at undo time. Each
+   op writes down what it is about to overwrite, so the reverse is exact rather than a
+   guess from a diff. This is what makes "reverse only the patch's own changes" possible.
+
+**Which one undo uses is decided by what has happened since.**
+
+- Nothing touched since the patch → restore the snapshot wholesale. Byte for byte, as asked.
+- Sessions logged or other edits since, none of them to anything the patch touched → apply
+  the inverse ops only. The new sessions survive untouched, because they are never read.
+- Something changed since, to something the patch also changed → neither answer is safe, so
+  neither is taken silently. The preview names the slot, shows the patch's value, the
+  value now, and the value undo would write, and asks. The wholesale restore stays on offer
+  as an explicit "go back to before this patch, and lose what came after", with the list of
+  what would be lost shown first.
+
+**Storage, measured rather than assumed.** The user's real export is **848,557 bytes**.
+Ten full snapshots is 8.5 MB and `localStorage` is about 5 MB, so ten full snapshots is not
+a thing that can be done — a naive implementation would throw `QuotaExceededError` on the
+third patch, or worse, succeed until the device could no longer save a session.
+
+`CompressionStream('gzip')` is available and takes that state to **114,453 bytes**, or
+**152,604** once base64'd into a string key. So:
+
+- Inverse op lists for all 10 patches. They are kilobytes; they always fit.
+- Full snapshots, gzipped and base64'd, newest first, under an explicit byte budget rather
+  than a fixed count — about 1.5 MB buys all ten on this state, and the budget is what
+  protects a bigger one.
+- Patch history says per row which guarantee is still behind it: "full snapshot" or
+  "reverse only". A row that has aged out of its snapshot must not claim byte-for-byte.
+- `CompressionStream` missing (an old browser) → fewer snapshots fit, the budget handles it,
+  and the row still says which kind it is.
+
+**Tests this adds to §6**, beyond those already listed: a patch of every op type applied and
+undone with a byte-for-byte comparison of the raw state; an undo after a reload with the
+page's own storage round trip, not an in-memory copy, because Chromium commits
+`localStorage` asynchronously and this suite has been bitten by that; an undo with two
+sessions logged afterwards, asserting both survive and the slot still reverses; a
+since-change collision asserting the warning names the slot and nothing is written until
+confirmed; and a storage-budget test that fills the budget and asserts the oldest snapshot
+is dropped, its history row reclassified, and no write ever throws.

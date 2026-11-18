@@ -7306,7 +7306,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.28";
+const APP_VERSION = "2026.11.17.29";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -57325,6 +57325,24 @@ function loadBasisOf(name){
   const g = equipmentOf(name);
   return (g === "dumbbell" || g === "kettlebell") ? "hand" : "whole";
 }
+/* ONE SENTENCE, SAID THE SAME WAY BY BOTH DOORS. The ceiling is reachable through a raise
+   the rack swallowed and through Trigger C, and a lifter must not be told two different
+   things about where to start depending on which one fired. This was found by printing what
+   the card actually says on the real export rather than reading the code: the branch that
+   fires there computed the starting load and then never mentioned it.
+
+   And it says WHICH KIND of number it is whenever the basis changes. "50" in each hand
+   becoming "130" on a carriage is the one place this feature could put somebody under a
+   weight they did not expect, so the sentence names the bar rather than leaving the lifter
+   to infer it. */
+function ceilingStartNote(start, range, oldName, newName){
+  if(!(start > 0)) return "Rebuild from " + range[0] + " reps on it.";
+  const basisMoved = loadBasisOf(oldName) !== loadBasisOf(newName);
+  return "Start it around " + fmtLoad(start)
+       + (basisMoved ? " \u2014 the whole bar or carriage, not one hand \u2014" : " \u2014")
+       + " which should be about " + range[1] + " reps on a movement you have not done "
+       + "before, and let double progression take it from there.";
+}
 function ceilingStartLoad(newName, entry, range){
   const ws = sideSetsWorking(entry).map(x=> x.ref);
   const st = ws[ws.length - 1];
@@ -57336,7 +57354,18 @@ function ceilingStartLoad(newName, entry, range){
   if(!(want > 0)) return null;
   const from = loadBasisOf(entry.name), to = loadBasisOf(newName);
   if(from !== to) want = from === "hand" ? want / DB_HAND_OF_WHOLE : want * DB_HAND_OF_WHOLE;
-  const on = capToRack(roundLoadable(want, newName), newName);
+  /* AND A NUMBER SOMEBODY CAN PUT ON A BAR. roundLoadable() snaps to the grid the gear
+     makes, and returns the figure UNCHANGED when it does not know the grid - no plate
+     sizes named, no stack step - so this handed back 133.92857142857144 lb on a gym with
+     nothing filled in. Caught by outgrown.mjs, on a fixture with no plates, which is the
+     case a real first-run device is in.
+
+     The fallback is the one startingLoadFor() already uses for exactly this: the nearest
+     five, in whichever unit the lifter is in. A step that is occasionally the wrong size
+     still lands on a number somebody could try, which fourteen decimal places does not. */
+  const grid = roundLoadable(want, newName), step = stepInUnits(5);
+  const snapped = grid !== want ? grid : Math.max(step, Math.round(want / step) * step);
+  const on = capToRack(snapped, newName);
   return on > 0 && Math.abs(on - w) > 0.01 ? on : (on > 0 ? on : null);
 }
 function progressionFor(sess, entry){
@@ -57637,17 +57666,18 @@ function progressionFor(sess, entry){
          edit nobody should find they have agreed to by accident. */
       const opts = hardDismissed(entry.name, sess && sess.workoutId)
                  ? [] : outgrownOptions(entry.name, sess && sess.workoutId);
+      const startOn = opts.length ? ceilingStartLoad(opts[0].name, entry, range) : null;
       if(opts.length) return {
         name: entry.name, kind: "harder", to: opts[0].name, alts: opts.slice(1), step,
         outgrownAt: isNaN(load) ? from : load,
-        startAt: ceilingStartLoad(opts[0].name, entry, range),
+        startAt: startOn,
         msg: "Move to " + opts[0].name,
         sub: "You cleared " + range[1] + " reps at " + fmtLoad(from) + " and there is no "
            + "heavier one" + (isFinite(mx) && mx > 0
                ? " — " + (rk.gym ? "the rack at " + rk.gym : "your rack") + " ends at " + fmtLoad(mx)
                : "")
            + ". " + opts[0].name + " is the same pattern with room above it: "
-           + opts[0].why + ". Rebuild from " + range[0] + " reps on it."
+           + opts[0].why + ". " + ceilingStartNote(startOn, range, entry.name, opts[0].name)
       };
       return {
         name: entry.name, kind: "hold",
@@ -57872,10 +57902,7 @@ function progressionFor(sess, entry){
                  + " ends at " + fmtLoad(rk.max)
                : "")
            + ". " + opts[0].name + " is the same pattern with room above it: " + opts[0].why
-           + (start
-                ? ". Start it around " + fmtLoad(start) + " \u2014 about " + range[1]
-                  + " reps on a movement you have not done before, and take it from there."
-                : ". Rebuild from " + range[0] + " reps on it.")
+           + ". " + ceilingStartNote(start, range, entry.name, opts[0].name)
       };
     }
   }
@@ -62174,8 +62201,16 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.28";
+const NEWS_FOR = "2026.11.17.29";
 const NEWS = [
+  {k: "And it tells you what to put on the bar",
+   s: ["The swap offer worked out a starting load for the new movement and then did not "
+     + "say it \u2014 the sentence underneath still read \u201crebuild from 8 reps\u201d. One of the "
+     + "two ways into that offer had the number in its wording and the other did not, "
+     + "which is the kind of thing you only find by reading what the card actually says.",
+     "It says it now, and it says which kind of number it is: 50 lb in each hand becomes "
+     + "about 130 lb on a Smith machine, counting the carriage, not one side. That is the "
+     + "one place this could have put you under a weight you were not expecting."]},
   {k: "When the dumbbells run out, the app finally has somewhere to send you",
    s: ["Your dumbbell RDL has sat at 50 lb for weeks, beating the top of its rep range "
      + "every session, and the app kept saying \u201chold this load \u2014 the rack stops "

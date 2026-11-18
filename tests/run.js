@@ -24,7 +24,11 @@ const REQUIRED = [
   "selftest", "phase2", "phase3", "phase4", "phase5", "phase6", "phase7", "phase9",
   "streak", "share", "budget", "science", "news", "weekword", "progtidy", "volrows", "polish", "motion", "logger", "rest2", "bodymap", "history", "sheets", "navstick",
   "restdays", "daypick", "bwsay", "bwoffer", "planlook", "gradeup", "volfix", "volmodel", "volmig", "trendnoise", "volsource", "volgloss", "volclimb", "volstep", "navresearch", "research", "researchworker",
-  "level", "caps", "eating"
+  "level", "caps", "eating",
+  /* The static guards and the load rules. These are listed for the same reason as the rest:
+     a spec that silently vanishes from a clone is worse than one that fails, and these
+     three are the ones a future change is most likely to want out of the way. */
+  "dupedecl", "cssdupe", "autoload"
 ];
 
 const onDisk = existsSync(DIR)

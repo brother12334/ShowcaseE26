@@ -559,6 +559,14 @@ ck("with a starting load sized from the set, not copied from the dumbbells",
    fcase.rdl.startAt > 0 && Math.abs(fcase.rdl.startAt - fcase.rdl.load) > 0.01,
    String(fcase.rdl.startAt));
 ck("and it names the rack it read", /ends at/.test(fcase.rdl.sub || ""), fcase.rdl.sub);
+/* The gap this caught: the starting load was computed and attached to the verdict, and the
+   sentence the lifter reads still said "rebuild from 8 reps". Found by printing what the
+   card says on the real export, not by reading the code. */
+ck("and the starting load is in the sentence, not only in the object",
+   new RegExp("Start it around .*" + fcase.rdl.startAt).test(fcase.rdl.sub || ""),
+   (fcase.rdl.sub || "").slice(-170));
+ck("and says it is the whole bar, because the number changed basis",
+   /not one hand/.test(fcase.rdl.sub || ""), /not one hand/.test(fcase.rdl.sub || "") + "");
 /* THE CONTROL THAT MUST FIRE, and the one the user's own second case provides for free:
    the shrug is ALSO at 50 lb at the end of the same rack, with the same three options
    waiting in its ladder - and it has NOT beaten 10-15 (14, 13). So it must still be held

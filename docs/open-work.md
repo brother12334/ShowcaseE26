@@ -556,5 +556,30 @@ a user would see is a worse suggestion than the one they have now.
 
 **Still open: nothing in item 16.** A, B, C, D, E, F and G are all shipped.
 
+**One gap found after F passed (2026.11.17.29), by printing what the card says rather than
+reading the code.** The branch that fires on the real export computed the 130 lb starting load, put it
+on the verdict object, and then said "Rebuild from 8 reps on it" to the lifter. Trigger C's
+own copy had the sentence; the older door did not. Both now go through one
+`ceilingStartNote()`, which also names the basis change — "the whole bar or carriage, not
+one hand" — because 50 in each hand becoming 130 on a carriage is the one place this
+feature could put somebody under a weight they did not expect. Pinned by two assertions, so
+the sentence cannot drift away from the number again.
+
+**And the full suite then found a second one, which is why it is run.** `outgrown.mjs`
+builds its fixture with NO PLATE SIZES NAMED — the state a first-run device is in — and
+`roundLoadable()` returns a figure unchanged when it does not know the grid. The sized
+starting load came back as **133.92857142857144 lb**. The fallback is now the one
+`startingLoadFor()` already uses for exactly this case, the nearest five in whichever unit
+the lifter is in, and the spec asserts both that the number in the sentence is the one the
+verdict computed and that it is a number somebody could put on a bar. One assertion in that
+spec changed with it: it pinned the words "Rebuild from 8 reps", which was the only answer
+the app had to "where do I restart" when it was written; a weight is a better answer to the
+same question, and a rep count is not actionable at the rack.
+
+**And `dupedecl`, `cssdupe` and `autoload` are now in `REQUIRED` in `tests/run.js`.** They
+were not, which meant a clone missing them would have run 295 specs and said so cheerfully.
+The runner's count, for the record: 298 specs in `tests/specs` plus `tests/share-worker.mjs`,
+run last, which is where "299 specs passed" comes from.
+
 The next thing in this document is item 15, the plan patches, whose spec is in
 `docs/plan-patches-spec.md`.

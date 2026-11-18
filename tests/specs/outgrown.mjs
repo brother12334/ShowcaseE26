@@ -53,7 +53,7 @@ const runs = (ex, load, reps, n, plan)=> ev(a=>{
   save();
   const sess = S.sessions[S.sessions.length - 1];
   const row = progressionFor(sess, sess.entries[0]) || {};
-  return {kind: row.kind, msg: row.msg, sub: row.sub, to: row.to,
+  return {kind: row.kind, msg: row.msg, sub: row.sub, to: row.to, startAt: row.startAt,
           alts: (row.alts || []).map(x=> x.name),
           outgrown: row.outgrown ? {load: row.outgrown.load, n: row.outgrown.n,
                                     opts: row.outgrown.opts.map(x=> x.name)} : null};
@@ -71,7 +71,22 @@ console.log("1 - THE END OF THE RACK, WITH THE TOP OF THE RANGE CLEARED");
      /Barbell|Smith|Machine/i.test(r.to || ""), String(r.to));
   ck("with other choices behind it", r.alts.length > 0, JSON.stringify(r.alts));
   ck("it says why the rack is the problem", /no heavier one/.test(r.sub || ""), (r.sub||"").slice(0,120));
-  ck("and where to restart", /Rebuild from 8 reps/.test(r.sub || ""), (r.sub||"").slice(-60));
+  /* CORRECTED: this pinned the words "Rebuild from 8 reps". The claim it was making is
+     that the card says where to restart on the new movement, and "the bottom of the range"
+     was the only answer the app had when this was written. It now sizes a starting LOAD
+     from the set that earned the verdict, which is a better answer to the same question -
+     and a weight is what you need at the rack, where a rep count is not yet actionable.
+     So the assertion asks for a starting point and that the number in the sentence is the
+     one the verdict computed, rather than for one particular wording. The fallback is
+     still asserted below, on the machine case, where no load can be sized. */
+  ck("and where to restart, by load, matching what it worked out",
+     r.startAt > 0 && new RegExp("Start it around .*" + r.startAt).test(r.sub || ""),
+     r.startAt + " :: " + (r.sub||"").slice(-90));
+  /* THIS FIXTURE NAMES NO PLATES, which is the state a first-run device is in, and it is
+     where the sizing first handed back 133.92857142857144 lb. A load nobody can load is
+     not a starting load. */
+  ck("and it is a number somebody could put on a bar",
+     Math.abs(r.startAt * 2 - Math.round(r.startAt * 2)) < 1e-9, String(r.startAt));
 }
 
 console.log("2 - NOT WHILE THERE IS STILL RACK LEFT");
