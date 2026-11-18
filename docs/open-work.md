@@ -355,8 +355,24 @@ That explains every symptom: it breaks with no call sites because CSS needs none
 is thrown, and an unrelated path appears to change behaviour. G's classes are now
 prefixed `since-`.
 
-**A gap worth naming.** `dupedecl.mjs` catches duplicate top-level JS declarations and
-would NOT have caught this: a CSS class defined in two rules is ordinary practice, so
+**The gap, now closed (test-only; no app release, so the version stays at 2026.11.17.27).** `tests/specs/cssdupe.mjs` cuts the stylesheet at
+every banner comment — which is how this file has always separated its features — and
+fails when a class defined in one section is also defined in another. It understands
+nothing else about CSS, deliberately.
+
+172 classes already crossed a boundary when the guard was written: `.btn`, `.card`,
+`.dot` and other genuinely shared furniture, alongside some that are probably accidents
+nobody has been bitten by yet. They are grandfathered in
+`tests/fixtures/css-shared-classes.json`, which is a SNAPSHOT and not an endorsement —
+every new crossing fails, and removing an entry is how to tighten it later. The control
+plants the exact bug this exists for: a later section redefining `.chg-sub`.
+
+**What it cannot do, stated plainly.** It is blind to a class used in the HTML but never
+styled, to a collision inside one section, and to anything about specificity or cascade.
+It catches the one shape that has actually cost a day here.
+
+**The original gap, for the record.** `dupedecl.mjs` catches duplicate top-level JS
+declarations and would NOT have caught this: a CSS class defined in two rules is ordinary practice, so
 "duplicate class" cannot simply be banned. The narrower rule that would have caught it is
 "a new feature must not reuse a class prefix another feature owns", which needs a notion
 of ownership the file does not carry. Recorded rather than papered over; if this bites a
