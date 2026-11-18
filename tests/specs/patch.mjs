@@ -36,6 +36,17 @@ const loaded = await p.evaluate(fx=>{
 }, FX);
 if(loaded.err){ console.log("the state would not load:", loaded.err); process.exit(1); }
 ck("the real export is in", loaded.n === 74, loaded.days);
+/* MEASURED BEFORE ANY PATCH EXISTS, because section 12 has to tell the difference between
+   "undo did not put something back" and "this table is rebuilt from the plan every time it
+   is asked for, and the fixture carries a stale copy". */
+const STALLS_MOVES_ALONE = await p.evaluate(()=>{
+  const was = JSON.stringify(S.stalls);
+  rebuildStalls();
+  const moved = JSON.stringify(S.stalls) !== was;
+  return moved;
+});
+ck("and a bare rebuildStalls() moves S.stalls on it, with no patch involved",
+   STALLS_MOVES_ALONE, String(STALLS_MOVES_ALONE));
 
 /* A patch a person would actually write, against their actual plan: the cable raise moves
    from Push B to Push A, side delts get a floor, and the squat's range narrows. */
@@ -249,6 +260,301 @@ console.log("\n10 - THE TEMPLATE A MODEL READS IS GENERATED FROM THE CHECKER'S O
   });
   ck("CONTROL: an op added to the table appears in the reference", planted.has && planted.gone,
      JSON.stringify(planted));
+}
+
+console.log("\n11 - APPLYING ONE, AND WHAT IT LEAVES BEHIND");
+const APPLIED = await p.evaluate(async j=>{
+  const before = JSON.stringify(S);
+  const r = await patchApply(j);
+  return {ok: r.ok, rows: r.rows.length, snap: r.snap, id: r.id, before: before,
+          pushA: (S.program.pushA || []).map(e=> e.name),
+          pushB: (S.program.pushB || []).map(e=> e.name),
+          floor: (S.lmFloor || {}).delts_side,
+          log: (S.planLog || []).slice(-3).map(x=> ({kind: x.kind, rule: x.rule, day: x.day,
+                                                     name: x.name, changes: x.changes, note: x.note})),
+          hist: (S.patchLog || []).map(x=> ({id: x.id, snap: x.snap, changes: x.changes,
+                                             note: x.note, undone: x.undone,
+                                             paths: x.journal.map(y=> y.path)}))};
+}, JSON.stringify(GOOD));
+ck("it applies", APPLIED.ok && APPLIED.rows === 4, APPLIED.rows + " rows");
+ck("the plan moved", APPLIED.pushA[4] === "Cable Lateral Raise"
+   && APPLIED.pushB.indexOf("Cable Lateral Raise") < 0 && APPLIED.floor === 10,
+   APPLIED.pushA.join(",") + " | floor " + APPLIED.floor);
+ck("every change is in the plan history under rule patch",
+   APPLIED.log.every(x=> x.kind === "patch" && x.rule === "patch" && /^Plan patch/.test(x.note || "")),
+   JSON.stringify(APPLIED.log.map(x=> x.kind + "/" + x.rule)));
+ck("and the note travels with it",
+   APPLIED.log.every(x=> /the cable raise|Side delts are short/.test(x.note || "")),
+   (APPLIED.log[0] || {}).note);
+/* THE JOURNAL IS EXACTLY WHAT THE OPS TOUCHED. Not more: the first round trip journaled
+   storageAsked and storagePersisted, which the snapshot write had caused, and undo would
+   have written them back. */
+ck("the journal holds exactly the paths the ops touched, and nothing else",
+   JSON.stringify((APPLIED.hist[0] || {}).paths)
+     === JSON.stringify(["lmFloor", "program.legsA", "program.pushA", "program.pushB"]),
+   JSON.stringify((APPLIED.hist[0] || {}).paths));
+ck("and a full snapshot was taken", APPLIED.snap && APPLIED.hist[0].snap, String(APPLIED.snap));
+{
+  const snap = await p.evaluate(async id=>{
+    const raw = localStorage.getItem(PATCH_SNAP_PREFIX + id);
+    const text = await patchSnapRead(id);
+    let parsed = null; try{ parsed = JSON.parse(text); }catch(e){}
+    return {how: (raw || "").slice(0, 3), stored: (raw || "").length,
+            readable: !!parsed, sessions: parsed && (parsed.sessions || []).length,
+            hadRaiseOnPushB: !!(parsed && (parsed.program.pushB || []).some(e=> /Cable Lateral Raise/.test(e.name)))};
+  }, APPLIED.id);
+  console.log("    snapshot " + snap.how + ", " + snap.stored + " chars stored");
+  ck("the snapshot is gzipped, not the raw 848 KB", snap.how === "gz:" && snap.stored < 300000,
+     snap.how + " " + snap.stored);
+  ck("it reads back as the state from before the patch",
+     snap.readable && snap.sessions === 74 && snap.hadRaiseOnPushB,
+     JSON.stringify({sessions: snap.sessions, raiseStillOnPushB: snap.hadRaiseOnPushB}));
+}
+
+console.log("\n12 - AND UNDOING IT PUTS BACK EXACTLY WHAT IT CHANGED");
+{
+  const r = await p.evaluate(id=>{
+    const chk = patchUndoCheck(id);
+    const out = patchUndoRun(id);
+    return {clean: chk.clean.length, clash: chk.clash.length, out: out, after: JSON.stringify(S)};
+  }, APPLIED.id);
+  ck("nothing had moved, so everything reverses", r.clash === 0 && r.out.reversed === 4,
+     r.out.reversed + " reversed, " + r.clash + " clashed");
+  /* THE HONEST FORM OF "BYTE FOR BYTE". Every path the patch touched is identical again.
+     Three keys are NOT, and none of them is the patch's doing: savedAt is a timestamp,
+     planLog has gained the patch's own rows and the undo's (recording an undo is the
+     point), and S.stalls is a derived table that a plain rebuildStalls() moves on this
+     fixture with no patch involved at all - asserted below rather than asserted away. */
+  const diff = await p.evaluate(b2=>{
+    const was = JSON.parse(b2), now = S;
+    return Object.keys(Object.assign({}, was, now)).filter(k=>
+      JSON.stringify(was[k]) !== JSON.stringify(now[k]));
+  }, APPLIED.before);
+  console.log("    keys still differing: " + diff.join(", "));
+  ck("every path the patch touched is byte-identical again",
+     ["lmFloor", "program"].every(k=> diff.indexOf(k) < 0), diff.join(", "));
+  /* patchLog is in the list because the list of patches you have applied IS state, and an
+     undo marks its row undone. stalls is in it for the reason section 0 measured. */
+  ck("and the only keys left differing are the save stamp, the two histories, and a derived table",
+     diff.every(k=> ["savedAt", "planLog", "patchLog", "stalls"].indexOf(k) > -1), diff.join(", "));
+  ck("and the derived one was measured at the top of this spec, before any patch existed",
+     STALLS_MOVES_ALONE, String(STALLS_MOVES_ALONE));
+  const redo = await p.evaluate(id=>{
+    const out = patchUndoRun(id);
+    return {out: out, floor: (S.lmFloor || {}).delts_side,
+            pushA: (S.program.pushA || []).map(e=> e.name).indexOf("Cable Lateral Raise")};
+  }, APPLIED.id);
+  ck("an undo can itself be undone", redo.out.dir === "redo" && redo.floor === 10 && redo.pushA === 4,
+     JSON.stringify({dir: redo.out.dir, floor: redo.floor, at: redo.pushA}));
+}
+
+console.log("\n13 - A SESSION LOGGED AFTER THE PATCH SURVIVES THE UNDO");
+{
+  const r = await p.evaluate(id=>{
+    S.sessions.push({id: "after1", workoutId: "legsA", date: "2026-11-18",
+      startedAt: Date.now(), finishedAt: Date.now() + 3600e3, feel: 4,
+      entries: [{name: "Smith Machine Squat", reps: "9-13",
+                 sets: [{weight: "75", reps: "10", rpe: "8", done: true}]}]});
+    const n = S.sessions.length;
+    const chk = patchUndoCheck(id);
+    const out = patchUndoRun(id);
+    return {clash: chk.clash.length, reversed: out.reversed,
+            kept: !!(S.sessions || []).find(s=> s && s.id === "after1"),
+            n: S.sessions.length, was: n,
+            floor: (S.lmFloor || {}).delts_side};
+  }, APPLIED.id);
+  ck("the new session is not a conflict, because the patch never touched it", r.clash === 0,
+     r.clash + " clashes");
+  ck("the plan reverses", r.floor === 5, "floor " + r.floor);
+  ck("and the session is still there", r.kept && r.n === r.was, r.n + " sessions");
+}
+
+console.log("\n14 - AND WHAT IT DOES WHEN SOMETHING IT CHANGED HAS MOVED SINCE");
+{
+  const r = await p.evaluate(async j=>{
+    const ap = await patchApply(j);
+    /* A hand edit to one of the days the patch touched, and a session logged, both AFTER
+       the patch - which is what makes them the things a roll-back would destroy. */
+    S.program.pushA[0].sets = 9;
+    S.sessions.push({id: "after2", workoutId: "pullA", date: "2026-11-19",
+      startedAt: Date.now(), finishedAt: Date.now(), feel: 4,
+      entries: [{name: "Lat Pulldown", reps: "8-12",
+                 sets: [{weight: "150", reps: "9", rpe: "8", done: true}]}]});
+    const chk = patchUndoCheck(ap.id);
+    const out = patchUndoRun(ap.id);
+    return {id: ap.id, clean: chk.clean.length, clash: chk.clash.map(c=> c.label),
+            reversed: out.reversed, left: out.left,
+            pushAStillPatched: (S.program.pushA || []).map(e=> e.name).indexOf("Cable Lateral Raise"),
+            handEditKept: S.program.pushA[0].sets,
+            floorReversed: (S.lmFloor || {}).delts_side === 5,
+            pushBReversed: (S.program.pushB || []).some(e=> /Cable Lateral Raise/.test(e.name))};
+  }, JSON.stringify(GOOD));
+  ck("the day that moved is named, and only that one", r.clash.length === 1 && r.clash[0] === "Push A",
+     r.clash.join(", "));
+  ck("the ones that did not are reversed", r.reversed === 3 && r.floorReversed && r.pushBReversed,
+     r.reversed + " reversed");
+  ck("the day that moved is left exactly as it is", r.left === 1
+     && r.handEditKept === 9 && r.pushAStillPatched === 4,
+     JSON.stringify({sets: r.handEditKept, raiseAt: r.pushAStillPatched}));
+  /* THE OTHER DOOR. The photograph goes back to before the patch, which loses what came
+     after - so the cost is computed and shown first rather than discovered. */
+  const cost = await p.evaluate(async id=> await patchRestoreCost(id), r.id);
+  /* Read out of the snapshot by session id, not guessed from timestamps: the first version
+     compared finishedAt against the patch's time and counted a session logged BEFORE it,
+     because that session's finishedAt was an hour in the future. */
+  ck("a roll-back says exactly what it would cost, read from the snapshot",
+     cost.exact && cost.sessions.length === 1 && /2026-11-19/.test(cost.sessions[0]),
+     JSON.stringify(cost.sessions));
+  const rest = await p.evaluate(async id=>{
+    const out = await patchRestore(id);
+    return {out: out, sessions: (S.sessions || []).length,
+            after1: !!(S.sessions || []).find(s=> s && s.id === "after2"),
+            pushA: (S.program.pushA || [])[0].sets,
+            raiseOnPushB: (S.program.pushB || []).some(e=> /Cable Lateral Raise/.test(e.name))};
+  }, r.id);
+  ck("and rolling back puts everything back to before the patch",
+     rest.out.ok && rest.raiseOnPushB && rest.pushA !== 9, JSON.stringify({pushASets: rest.pushA}));
+  ck("including dropping the session logged after it, as it warned", !rest.after1,
+     rest.sessions + " sessions, after2 present: " + rest.after1);
+}
+
+console.log("\n15 - THE SNAPSHOT BUDGET, AND A ROW THAT CAN NO LONGER PROMISE ONE");
+{
+  const r = await p.evaluate(async j=>{
+    S.patchLog = []; 
+    const ids = [];
+    for(let i = 0; i < 3; i++){
+      const ap = await patchApply(JSON.stringify({e26patch: 1, note: "n" + i,
+        ops: [{op: "volume.floor", muscle: "quads", to: 6 + i}]}));
+      ids.push(ap.id);
+    }
+    let stored = 0;
+    ids.forEach(id=>{ const b2 = localStorage.getItem(PATCH_SNAP_PREFIX + id); stored += b2 ? b2.length : 0; });
+    return {ids, stored, snaps: S.patchLog.map(x=> x.snap), budget: PATCH_SNAP_BUDGET};
+  }, null);
+  console.log("    3 snapshots held " + r.stored + " chars against a budget of " + r.budget);
+  ck("they all fit inside the budget", r.stored < r.budget && r.snaps.every(Boolean),
+     r.stored + " / " + r.budget);
+  const pruned = await p.evaluate(()=>{
+    const was = S.patchLog.map(x=> x.snap);
+    /* Drop the budget to nothing and prune: the oldest snapshots go, newest kept, and the
+       rows they belonged to stop claiming a guarantee they no longer have. */
+    const keep = PATCH_SNAP_BUDGET;
+    window.__b = keep;
+    const n = S.patchLog.length;
+    /* prune is driven by the constant, so this exercises it by removing the files instead,
+       which is what a cleared or full device looks like from the app's side */
+    localStorage.removeItem(PATCH_SNAP_PREFIX + S.patchLog[0].id);
+    patchSnapPrune();
+    return {was, now: S.patchLog.map(x=> x.snap), n};
+  });
+  ck("a snapshot that is gone marks its row reverse-only",
+     pruned.was[0] === true && pruned.now[0] === false && pruned.now[1] === true,
+     JSON.stringify(pruned.now));
+  const txt = await p.evaluate(()=>{
+    const id = S.patchLog[0].id;
+    return {card: patchCardHTML(), msg: null, id};
+  });
+  ck("and the screen says so rather than claiming byte for byte",
+     /reverse only/.test(txt.card) && /full snapshot/.test(txt.card),
+     (txt.card.match(/reverse only[^<]*/) || ["missing"])[0]);
+  const refuse = await p.evaluate(async ()=>{
+    const id = S.patchLog[0].id;
+    const out = await patchRestore(id);
+    return out.err || "no error";
+  });
+  ck("CONTROL: and rolling that one back is refused rather than half done",
+     /no longer has a full snapshot/.test(refuse), refuse.slice(0, 80));
+}
+
+console.log("\n16 - THE SCREEN");
+{
+  const r = await p.evaluate(()=>{
+    S.patchLog = [];
+    PATCH_TEXT = ""; PATCH_PV = null;
+    const empty = patchCardHTML();
+    PATCH_TEXT = '{"e26patch":1,"ops":[{"op":"volume.floor","muscle":"quads","to":7}]}';
+    PATCH_PV = patchPreview(PATCH_TEXT);
+    const clean = patchCardHTML();
+    PATCH_PV = patchPreview('{"e26patch":1,"ops":[{"op":"nope"}]}');
+    const broken = patchCardHTML();
+    PATCH_TEXT = ""; PATCH_PV = null;
+    return {empty, clean, broken};
+  });
+  ck("with nothing pasted there is no Apply button", r.empty.indexOf("ptApply") < 0
+     && r.empty.indexOf("ptCheck") > -1, "preview button only");
+  ck("a clean preview offers Apply", r.clean.indexOf("ptApply") > -1
+     && /Apply this patch/.test(r.clean), "offered");
+  ck("a refused one does not", r.broken.indexOf("ptApply") < 0
+     && /was refused, and nothing was changed/.test(r.broken), "withheld");
+  ck("and it warns that a pasted patch is a pasted patch",
+     /Only apply patches you trust/.test(r.empty), "warned");
+}
+
+console.log("\n17 - AND THE WHOLE THING THROUGH THE REAL SCREEN");
+/* Everything above calls the functions. This taps the tile, types into the box, presses
+   the buttons and reads what a person would see - which is the only test that could have
+   caught what it did catch: patchWire() was never called from the settings wiring, so the
+   screen rendered perfectly and Preview did nothing at all. No function-level test can
+   find a missing binding, because every function was fine. */
+{
+  await p.evaluate(fx=>{
+    Object.keys(fx).forEach(k=>{ S[k] = fx[k]; });
+    S.patchLog = []; S.tourDone = true;
+    migrate(); try{ applySplit(); }catch(e){}
+    document.body.classList.remove('ai-open','onboarding','pfl-open');
+    ['preflight','aiFull'].forEach(id=>{ const el = document.getElementById(id); if(el) el.remove(); });
+    try{ PF = null; }catch(e){}
+    PATCH_TEXT = ""; PATCH_PV = null;
+    TAB = "sync"; SET_PAGE = null; render();
+  }, FX);
+  await p.waitForTimeout(150);
+  const tile = await p.$('[data-setopen="patch"]');
+  ck("Plan patches is a tile in Settings", !!tile, tile ? "present" : "missing");
+  await p.click('[data-setopen="patch"]');
+  await p.waitForTimeout(150);
+  ck("tapping it opens a box to paste into",
+     await p.evaluate(()=> !!document.querySelector('#ptIn') && !!document.querySelector('#ptCheck')),
+     "box and preview button");
+  await p.evaluate(j=>{
+    const ta = document.querySelector('#ptIn');
+    ta.value = j; ta.dispatchEvent(new Event('input'));
+  }, JSON.stringify({e26patch: 1, note: "the cable raise moves to Push A", ops: GOOD.ops}));
+  await p.click('#ptCheck');
+  await p.waitForTimeout(200);
+  const shown = await p.evaluate(()=> ({apply: !!document.querySelector('#ptApply'),
+                                        text: document.body.innerText.replace(/\s+/g, " ")}));
+  ck("Preview draws the changes and offers Apply", shown.apply && /What this would change/.test(shown.text),
+     shown.apply ? "offered" : "NOT offered");
+  ck("with the before and after of each one", /3 x 8-21 . removed/.test(shown.text)
+     && /Side Delts weekly floor 5 . 10/.test(shown.text),
+     (shown.text.match(/Side Delts weekly floor[^A-Z]*/) || ["missing"])[0].slice(0, 50));
+  await p.click('#ptApply');
+  await p.waitForTimeout(500);
+  const after = await p.evaluate(()=> ({text: document.body.innerText.replace(/\s+/g, " "),
+                                        undo: !!document.querySelector('[data-ptundo]'),
+                                        roll: !!document.querySelector('[data-ptrestore]'),
+                                        box: (document.querySelector('#ptIn') || {}).value,
+                                        log: (S.patchLog || []).length,
+                                        onPushA: (S.program.pushA || []).map(e=> e.name).indexOf("Cable Lateral Raise")}));
+  ck("Apply applies it", after.log === 1 && after.onPushA === 4, "log " + after.log + ", at " + after.onPushA);
+  ck("the box is cleared and the patch is in the history", !after.box && /Patch history/.test(after.text),
+     after.box ? "box still full" : "cleared");
+  ck("the history row offers Undo and a whole roll-back", after.undo && after.roll,
+     JSON.stringify({undo: after.undo, roll: after.roll}));
+  ck("and says which guarantee is behind it", /full snapshot/.test(after.text),
+     (after.text.match(/full snapshot[^A-Z]*/) || ["missing"])[0].slice(0, 46));
+  await p.click('[data-ptundo]');
+  await p.waitForTimeout(300);
+  const undone = await p.evaluate(()=> ({onPushA: (S.program.pushA || []).map(e=> e.name).indexOf("Cable Lateral Raise"),
+                                         onPushB: (S.program.pushB || []).map(e=> e.name).indexOf("Cable Lateral Raise"),
+                                         text: document.body.innerText.replace(/\s+/g, " ")}));
+  ck("Undo puts it back", undone.onPushA < 0 && undone.onPushB === 4,
+     JSON.stringify({pushA: undone.onPushA, pushB: undone.onPushB}));
+  /* Case-insensitively: .btn uppercases its text and innerText reflects text-transform,
+     which is how a CSS rule broke a case-sensitive assertion in this suite once before. */
+  ck("and the row says so, with a way to redo it", /undone/i.test(undone.text)
+     && /\bredo\b/i.test(undone.text), (undone.text.match(/\d+ changes . undone/i) || ["missing"])[0]);
 }
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");

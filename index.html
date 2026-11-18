@@ -1971,6 +1971,49 @@ button.side-chip.sc-set::after{
 }
 .pg-apply.done,.pg-apply:disabled{background:var(--card2);color:var(--faint);box-shadow:inset 0 0 0 1px var(--line)}
 
+/* ================= PLAN PATCHES =================
+   Its own class prefix, pt-, because the stylesheet guard exists and because the last
+   feature to borrow another's prefix cost a day. Nothing here is a new colour or a new
+   shape: a patch preview is a list of before and after, which this file already draws in
+   three other places, and it should look like those. */
+.pt-day{font:var(--fs-1) var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--acc);margin:11px 0 5px}
+/* THE MOVE TEXT WRAPS, THE NAME DOES NOT GET CRUSHED. At 390 px "not on this day →
+   position 5, 3 x 12-20" is wider than half the row, and with the move held on one line the
+   name beside it was squeezed into three. Seen on a screenshot of the real screen, not
+   reasoned about: the name keeps at least half the row and the move falls onto its own
+   line underneath when it needs to. */
+.pt-row{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;
+  gap:2px 10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:var(--fs-3)}
+.pt-row:last-child{border-bottom:none}
+.pt-what{color:var(--dim);flex:1 1 50%;min-width:50%}
+.pt-move{font-family:var(--mono);color:var(--faint);text-align:right;flex:1 1 auto}
+.pt-to{color:var(--text)}
+.pt-note{font-size:var(--fs-3);color:var(--dim);font-style:italic;margin:0 0 6px}
+.pt-err{font-size:var(--fs-3);color:var(--bad);font-family:var(--mono);line-height:1.5;
+  padding:6px 0;border-bottom:1px solid var(--line)}
+.pt-err:last-of-type{border-bottom:none}
+.pt-warn{font-size:var(--fs-3);color:var(--dim);line-height:1.45;margin-top:8px;
+  padding-left:10px;border-left:2px solid var(--warn,var(--acc-line))}
+.pt-sess{margin-top:10px;padding:9px 11px;border:1px solid rgba(201,79,79,.3);
+  border-radius:var(--r-sm);background:linear-gradient(180deg,rgba(201,79,79,.08),transparent)}
+.pt-sess-k{font:var(--fs-1) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--bad)}
+.pt-hist{padding:10px 0;border-bottom:1px solid var(--line)}
+.pt-hist:last-child{border-bottom:none}
+.pt-hist-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:var(--fs-3)}
+.pt-hist-n{font-size:var(--fs-3);color:var(--dim);font-style:italic;margin-top:3px}
+.pt-hist-g{font:var(--fs-1) var(--mono);letter-spacing:.08em;color:var(--faint);margin-top:4px}
+.pt-done{opacity:.6}
+.pt-lose{margin-top:10px;padding:9px 11px;border:1px solid rgba(201,79,79,.3);
+  border-radius:var(--r-sm)}
+.pt-lose-k{font:var(--fs-1) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--bad)}
+/* THE GUARD CAUGHT THIS ONE WHILE IT WAS BEING WRITTEN. The rule here was
+   `.pt-bad .set-name{color:var(--bad)}`, which defines a class another feature owns from
+   inside this section - a descendant selector is still a definition, and `.set-name` is
+   the settings card's. Its own class instead. */
+.pt-head-bad{font-family:var(--disp);font-size:var(--fs-4);font-weight:700;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--bad);margin-bottom:6px}
+
 /* ================= TIME AND DATE INPUTS =================
    iOS Safari gives input[type=time] and [type=date] an intrinsic width from the native
    control and then largely ignores `width:100%`, so with padding and a border added on
@@ -7306,7 +7349,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.30";
+const APP_VERSION = "2026.11.17.31";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -45805,6 +45848,9 @@ function setGroups(){
     {k:"gym", icon:"barbell", title:"In the gym", sub:"Pounds or kilos, and what the number you write for a barbell means.",
      val: unitWord() + (p.barWeight ? " · " + fmtLoad(p.barWeight) + " bar" : ""),
      body: prefsGymHTML},
+    {k:"patch", icon:"doc", title:"Plan patches", sub:"Paste a change, read what it would do, apply it, take it back.",
+     val: (S.patchLog || []).length ? ((S.patchLog || []).length === 1 ? "1 applied" : (S.patchLog || []).length + " applied") : "none yet",
+     body: patchCardHTML},
     {k:"where", icon:"pin", title:"Where you train", sub:"The plates and dumbbells you have, the gyms Element 26 knows about, and whether it checks.",
      val: S.geo === "on" ? (gyms === 1 ? "1 gym" : gyms + " gyms")
         : (S.geo === "off" ? "off" : geoReady() ? "not set up" : "not available"),
@@ -45894,7 +45940,7 @@ function setGroupRowHTML(g){
    as a wall and hunted. Three short sections give the hunt a first step: is this about
    training, about the day around it, or about the app itself. */
 const SET_SECTIONS = [
-  {t:"Training",   keys:["sess", "screen", "plan", "targets", "gym"]},
+  {t:"Training",   keys:["sess", "screen", "plan", "targets", "gym", "patch"]},
   {t:"Day to day", keys:["day", "remind", "where"]},
   {t:"The app",    keys:["acct", "data", "help"]}
 ];
@@ -47946,6 +47992,13 @@ function bind(){
   });
   const setB = $("#setBack");
   if(setB) setB.onclick = ()=>{ SET_PAGE = null; render(); window.scrollTo(0, 0); };
+  /* The patch screen's own wiring. Its card is drawn by the settings group's body(), like
+     every other one, but its controls are not data-attributes handled above — a textarea
+     that has to keep what you typed across a redraw, a Preview that runs the checker, and
+     an Apply that only exists after a clean one. Found missing by driving the real screen:
+     the tile opened, the box took the paste, and Preview did nothing at all, because
+     nothing had ever bound it. */
+  if(SET_PAGE === "patch"){ try{ patchWire(); }catch(e){} }
   /* Out of Settings entirely, back to the screen its icon lives on. */
   const setT = $("#setToToday");
   if(setT) setT.onclick = ()=> goTab("today");
@@ -62256,8 +62309,28 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.30";
+const NEWS_FOR = "2026.11.17.31";
 const NEWS = [
+  {k: "Paste a change to your plan, see exactly what it would do, and take it back",
+   s: ["Settings \u203a Plan patches takes a JSON document that changes your plan \u2014 loads, "
+     + "rep ranges, exercises, whole days, volume floors, the kit in a gym \u2014 and shows "
+     + "you every change as before and after, grouped by day, before anything happens. "
+     + "Apply only appears after a clean preview, and a patch applies completely or not "
+     + "at all: there is no half-applied plan to untangle.",
+     "It is read as data. Nothing in a patch is ever executed, and there is no operation "
+     + "that can reach your account, your recovery key or your sync \u2014 not \u201crefused if "
+     + "you try\u201d, but no way to name them at all. Anything it does not recognise refuses "
+     + "the whole patch and says which line and why.",
+     "Undo is two things, because you asked for two guarantees. It reverses the patch's "
+     + "own changes and leaves everything you have done since \u2014 sessions logged after a "
+     + "patch are never touched by undoing it. And while there is still a full snapshot "
+     + "behind a patch, it can be rolled back whole, which does lose what came after, so "
+     + "it tells you exactly which sessions those are first. Each row in the history says "
+     + "which of the two it can still promise.",
+     "\u201cCopy template for an AI\u201d gives you the format and your current plan \u2014 days, "
+     + "slots, prescriptions, floors, gyms \u2014 to paste into an assistant, so what comes "
+     + "back is something this app accepts. Only apply patches you trust: one press can "
+     + "change your whole plan."]},
   {k: "The weight it suggests for a new movement is one you can actually start on",
    s: ["It read 130 lb for a Smith machine RDL off a dumbbell RDL at 50 lb a hand, and "
      + "that was too brave. Two things pushed it up. It treated a pair of 50s as worth "
@@ -71304,6 +71377,574 @@ function patchTemplateText(){
   return patchOpsReference() + "\n\n" + "=".repeat(70) + "\n\n" + patchPlanSummary()
        + "\n\n" + "=".repeat(70) + "\n\n"
        + "Write me a patch that does the following, as JSON only, with nothing around it:\n";
+}
+
+/* =====================================================================
+   PLAN PATCHES — APPLYING ONE, AND TAKING IT BACK
+
+   The spec asks for two guarantees that pull against each other. "Undo restores the exact
+   previous state, byte for byte" wants a photograph. "If I have logged things since, the
+   undo must not wipe them" wants surgery. A single mechanism cannot be both, so there are
+   two, and which one runs is decided by what has happened since rather than by a setting.
+
+   THE JOURNAL. Before the ops run, every top-level key of S is serialised; after they run,
+   the same again, and what differs is the journal. `program` is indexed per DAY, `sessions`
+   per SESSION ID and `gyms` per GYM ID, so a patch that changed Legs A does not read as a
+   conflict because Push B was edited by hand afterwards, and a patch that never touched
+   your sessions can be reversed with any number of new ones logged since — those paths are
+   not in its journal, so undo never looks at them.
+
+   Indexing sessions by id rather than by position matters: a session logged after the patch
+   appends to the array and would shift every index after it. An id does not move.
+
+   WHAT IT MEANS FOR AN OP TO BE REVERSIBLE. Nothing. No op declares an inverse, because an
+   op that forgot to would be a silent data loss, and nineteen hand-written inverses is
+   nineteen chances to forget. The journal is computed by diffing the state, so an op cannot
+   escape it — including an op added years from now by somebody who never reads this.
+
+   THE SNAPSHOT is the other guarantee: the raw bytes of the stored state, gzipped, under a
+   BYTE BUDGET rather than a fixed count. The real export is 848 KB and localStorage is
+   about 5 MB, so "keep the last ten snapshots" is 8.5 MB of a 5 MB box — a naive version
+   throws on the third patch or, worse, succeeds until the device can no longer save a
+   session. Gzipped that state is 114 KB, 153 KB once base64'd into a string, so ten fit
+   inside 1.5 MB with room to spare. When one ages out, its history row says so: a row that
+   no longer has a snapshot behind it must not claim byte-for-byte.
+   ===================================================================== */
+const PATCH_LOG_KEEP = 10;
+const PATCH_SNAP_PREFIX = "ironlog.patchsnap.";
+const PATCH_SNAP_BUDGET = 1500000;        // characters of stored snapshot, across all rows
+/* The structures worth indexing finer than "the whole key", and what identifies one row of
+   each. Everything else is journaled whole, which is right for a settings object and for a
+   table of volume landmarks. */
+/* KEYS THAT MOVE ON THEIR OWN. A save stamps the time; a sync records when it last ran;
+   asking the browser to keep our storage records that we asked. None of them is ever what
+   a patch meant to change, and a journal that holds them would have undo write them back —
+   quietly resurrecting a stale sync pointer to reverse a rep range. */
+const PATCH_VOLATILE = {savedAt:1, pointer:1, cloudAt:1, storageAsked:1, storagePersisted:1,
+                        seenNews:1, lastReview:1, dataIssues:1};
+function patchStateIndex(){
+  const ix = {};
+  Object.keys(S).forEach(k=>{
+    if(PATCH_VOLATILE[k]) return;
+    if(k === "program"){
+      Object.keys(S.program || {}).forEach(w=>{ ix["program." + w] = JSON.stringify(S.program[w]); });
+      return;
+    }
+    if(k === "sessions"){
+      (S.sessions || []).forEach(s=>{ if(s && s.id) ix["sessions#" + s.id] = JSON.stringify(s); });
+      return;
+    }
+    if(k === "gyms"){
+      (S.gyms || []).forEach(g=>{ if(g && g.id) ix["gyms#" + g.id] = JSON.stringify(g); });
+      return;
+    }
+    ix[k] = JSON.stringify(S[k]);
+  });
+  return ix;
+}
+function patchDiff(before, after){
+  const paths = {};
+  Object.keys(before).forEach(k=> paths[k] = 1);
+  Object.keys(after).forEach(k=> paths[k] = 1);
+  const out = [];
+  Object.keys(paths).sort().forEach(k=>{
+    const a = before[k] === undefined ? null : before[k];
+    const b = after[k] === undefined ? null : after[k];
+    if(a !== b) out.push({path: k, was: a, now: b});
+  });
+  return out;
+}
+/* Writing one journalled path back. A null means the path did not exist, and restoring it
+   means removing what is there — which is how an added day, an added gym or a slot list
+   that the patch created is undone. */
+function patchJournalSet(path, json){
+  const v = json === null ? null : JSON.parse(json);
+  if(path.indexOf("program.") === 0){
+    const w = path.slice(8);
+    S.program = S.program || {};
+    if(v === null) delete S.program[w]; else S.program[w] = v;
+    return;
+  }
+  if(path.indexOf("sessions#") === 0){
+    const id = path.slice(9);
+    S.sessions = S.sessions || [];
+    const i = S.sessions.findIndex(s=> s && s.id === id);
+    if(v === null){ if(i >= 0) S.sessions.splice(i, 1); return; }
+    if(i >= 0) S.sessions[i] = v; else S.sessions.push(v);
+    return;
+  }
+  if(path.indexOf("gyms#") === 0){
+    const id = path.slice(5);
+    S.gyms = S.gyms || [];
+    const i = S.gyms.findIndex(g=> g && g.id === id);
+    if(v === null){ if(i >= 0) S.gyms.splice(i, 1); return; }
+    if(i >= 0) S.gyms[i] = v; else S.gyms.push(v);
+    return;
+  }
+  if(v === null) delete S[path]; else S[path] = v;
+}
+/* A readable name for a path, for the one screen where a conflict has to be explained. */
+function patchPathLabel(path){
+  if(path.indexOf("program.") === 0) return dayName(path.slice(8));
+  if(path.indexOf("sessions#") === 0){
+    const s = (S.sessions || []).find(x=> x && x.id === path.slice(9));
+    return s ? "the session on " + s.date : "a logged session";
+  }
+  if(path.indexOf("gyms#") === 0){
+    const g = (S.gyms || []).find(x=> x && x.id === path.slice(5));
+    return g ? g.name : "a gym";
+  }
+  return {lmFloor: "volume floors", lmMav: "volume targets", lmMrv: "volume ceilings",
+          prefs: "your settings", homeGym: "the home gym", dayFlags: "session flags",
+          customSplit: "the split", splitId: "the split", exAliases: "exercise names",
+          planLog: "plan history", stalls: "stall tracking", stallsV2: "stall tracking"}[path] || path;
+}
+/* ---------- the snapshot ---------- */
+function patchB64(bytes){
+  let s = "";
+  for(let i = 0; i < bytes.length; i += 8192)
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(s);
+}
+function patchUnB64(s){
+  const bin = atob(s), out = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function patchSnapWrite(id){
+  try{
+    const raw = localStorage.getItem(dataKey());
+    if(raw == null) return false;
+    let body = "raw:" + raw;
+    if(typeof CompressionStream === "function"){
+      try{
+        const gz = new Blob([raw]).stream().pipeThrough(new CompressionStream("gzip"));
+        body = "gz:" + patchB64(new Uint8Array(await new Response(gz).arrayBuffer()));
+      }catch(e){}
+    }
+    localStorage.setItem(PATCH_SNAP_PREFIX + id, body);
+    return true;
+  }catch(e){ return false; }        // out of room is not a reason to refuse the patch
+}
+async function patchSnapRead(id){
+  const body = localStorage.getItem(PATCH_SNAP_PREFIX + id);
+  if(body == null) return null;
+  if(body.indexOf("raw:") === 0) return body.slice(4);
+  if(body.indexOf("gz:") !== 0) return null;
+  if(typeof DecompressionStream !== "function") return null;
+  const st = new Blob([patchUnB64(body.slice(3))]).stream()
+               .pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(st).text();
+}
+function patchSnapDrop(id){
+  try{ localStorage.removeItem(PATCH_SNAP_PREFIX + id); }catch(e){}
+}
+/* Oldest first, until the budget is met. The row it belonged to is marked rather than
+   removed: the journal is still there, so undo still works — it just cannot promise to put
+   back something it never photographed. */
+function patchSnapPrune(){
+  const log = S.patchLog || [];
+  let total = 0;
+  log.forEach(r=>{
+    if(!r || !r.snap) return;
+    const b = localStorage.getItem(PATCH_SNAP_PREFIX + r.id);
+    total += b ? b.length : 0;
+    if(!b) r.snap = false;
+  });
+  for(let i = 0; i < log.length && total > PATCH_SNAP_BUDGET; i++){
+    const r = log[i];
+    if(!r || !r.snap) continue;
+    const b = localStorage.getItem(PATCH_SNAP_PREFIX + r.id);
+    total -= b ? b.length : 0;
+    patchSnapDrop(r.id);
+    r.snap = false;
+  }
+}
+/* ---------- applying ---------- */
+/* Every change a patch makes goes into the plan history the same way the app's own changes
+   do, under its own day, with the reason and the rule id. A change made by patch has to be
+   as traceable as one the app made itself, or "where did this 4 come from" has one answer
+   for most of the plan and none for the part somebody pasted. */
+function patchLogRows(res, note){
+  const byDay = {};
+  res.rows.forEach(r=>{
+    const k = (r.day || "") + "|" + (r.what || "");
+    (byDay[k] = byDay[k] || {day: r.day, rows: []}).rows.push(r);
+  });
+  res.rows.forEach(r=>{
+    const wid = r.day && r.day !== "the whole plan" ? patchDayId(r.day) : null;
+    const what = String(r.what || "").replace(/^.*? · /, "");
+    const name = r.day && r.day !== "the whole plan" && /·/.test(r.what || "")
+               ? String(r.what).split(" · ")[0] : (r.what || "");
+    logPlanChange("patch", wid, name,
+      [what + ": " + r.from + " → " + r.to],
+      {rule: "patch", note: note ? "Plan patch — " + note : "Plan patch"});
+  });
+}
+/* What has to be rerun because the plan moved. Not a render: the caller does that. */
+function patchAfter(touchedSessions){
+  /* bodyAnalysis() is computed on every call rather than cached, so the volume figures
+     need no invalidation — they are already read fresh. What does need rerunning is the
+     stall tracking, which is derived and stored, and the paired-session regrade, but only
+     when a session was actually rewritten. */
+  try{ rebuildStalls(); }catch(e){}
+  if(touchedSessions){ try{ regradePairedSessions(); }catch(e){} }
+  try{ save(); }catch(e){}
+  try{ queueSync(); }catch(e){}
+}
+async function patchApply(text){
+  /* The dry run is the gate. It is the same code the real run uses, so "the preview was
+     clean" and "the ops resolve" are the same statement rather than two hopes. */
+  const dry = patchRun(text, {dry: true});
+  if(!dry.ok) return {ok: false, errors: dry.errors, rows: [], warnings: [], sessionWarnings: []};
+  const id = "p" + Date.now().toString(36);
+  /* The backup comes BEFORE the write, which is the whole point of a backup, and a failure
+     to take one does not refuse the patch: the journal is the primary undo and it is
+     computed, not stored ahead of time. The history row says which guarantees it has. */
+  const snap = await patchSnapWrite(id);
+  /* AND THE JOURNAL'S "BEFORE" IS TAKEN AFTER THE SNAPSHOT, not before it. Writing the
+     snapshot touches localStorage, which made the browser's storage-persistence request
+     fire, which set two flags on S — and they landed in the journal as though the patch
+     had changed them. Measured, not reasoned: the first round trip journaled
+     storageAsked and storagePersisted alongside the rep range. */
+  const before = patchStateIndex();
+  const real = patchRun(text, {dry: false});
+  if(!real.ok){
+    /* Cannot happen while the dry run is the same code, so if it ever does, the state is
+       put back from the photograph rather than left half changed. */
+    const raw = await patchSnapRead(id);
+    if(raw){ try{ localStorage.setItem(dataKey(), raw); S = load(); USER_ALIASES = S.exAliases;
+                   invalidateCanon(); applySplit(); }catch(e){} }
+    patchSnapDrop(id);
+    return {ok: false, rows: [], warnings: [], sessionWarnings: [],
+            errors: real.errors.concat(["Nothing was changed."])};
+  }
+  const journal = patchDiff(before, patchStateIndex());
+  const touchedSessions = journal.some(j=> j.path.indexOf("sessions#") === 0);
+  patchLogRows(real, dry.note);
+  S.patchLog = Array.isArray(S.patchLog) ? S.patchLog : [];
+  S.patchLog.push({id: id, at: Date.now(), date: todayStr(), note: dry.note || "",
+                   ops: dry.ops, changes: real.rows.length, journal: journal,
+                   snap: snap, undone: false, sessions: touchedSessions});
+  while(S.patchLog.length > PATCH_LOG_KEEP){
+    const gone = S.patchLog.shift();
+    if(gone) patchSnapDrop(gone.id);
+  }
+  patchSnapPrune();
+  patchAfter(touchedSessions);
+  return Object.assign({id: id, snap: snap}, real);
+}
+/* ---------- undo, and the question it has to ask first ---------- */
+function patchEntry(id){ return (S.patchLog || []).find(r=> r && r.id === id) || null; }
+/* Which of a patch's changes are still exactly as it left them. A path that has moved since
+   is not reversible without deciding whose edit wins, and that is not a decision to take
+   quietly. `undone` flips the direction: reversing an undo is a redo. */
+function patchUndoCheck(id){
+  const e = patchEntry(id);
+  if(!e) return {err: "That patch is no longer in your history."};
+  const ix = patchStateIndex();
+  const from = e.undone ? "was" : "now", to = e.undone ? "now" : "was";
+  const clean = [], clash = [];
+  (e.journal || []).forEach(j=>{
+    const cur = ix[j.path] === undefined ? null : ix[j.path];
+    (cur === j[from] ? clean : clash).push({path: j.path, label: patchPathLabel(j.path),
+                                            was: j[from], to: j[to], cur: cur});
+  });
+  return {entry: e, clean: clean, clash: clash, dir: e.undone ? "redo" : "undo",
+          snap: !!e.snap && !e.undone};
+}
+/* Reversing the paths that still match, newest first. Anything that has moved since is left
+   exactly as it is and named in the result, so the screen can say what it did not touch
+   rather than implying it undid everything. */
+function patchUndoRun(id, opts){
+  const o = opts || {};
+  const chk = patchUndoCheck(id);
+  if(chk.err) return chk;
+  const e = chk.entry;
+  const list = o.force ? chk.clean.concat(chk.clash) : chk.clean;
+  for(let i = list.length - 1; i >= 0; i--) patchJournalSet(list[i].path, list[i].to);
+  try{ USER_ALIASES = S.exAliases; invalidateCanon(); applySplit(); }catch(err){}
+  e.undone = !e.undone;
+  const kind = e.undone ? "patch-undo" : "patch-redo";
+  logPlanChange(kind, null, "Plan patch",
+    [(e.undone ? "undone" : "redone") + ": " + list.length + " change"
+     + (list.length === 1 ? "" : "s")],
+    {rule: "patch", note: (e.undone ? "Undid" : "Redid") + " the patch of " + e.date
+          + (e.note ? " — " + e.note : "")});
+  patchAfter(e.sessions);
+  return {ok: true, reversed: list.length, left: o.force ? 0 : chk.clash.length,
+          clash: o.force ? [] : chk.clash, dir: chk.dir};
+}
+/* THE OTHER DOOR: the photograph. Everything goes back to the moment before the patch,
+   including anything logged since, which is why it is never the automatic answer and why
+   the screen lists what would be lost before offering it. */
+async function patchRestore(id){
+  const e = patchEntry(id);
+  if(!e) return {err: "That patch is no longer in your history."};
+  if(!e.snap) return {err: "That patch no longer has a full snapshot behind it — only the "
+                         + "list of what it changed. Undo can still reverse those changes."};
+  const raw = await patchSnapRead(id);
+  if(raw == null) return {err: "The snapshot for that patch could not be read."};
+  try{
+    rescueBackupOnce("before restoring the patch of " + e.date);
+    localStorage.setItem(dataKey(), raw);
+    S = load();
+    USER_ALIASES = S.exAliases; invalidateCanon(); applySplit();
+    try{ rebuildStalls(); }catch(err){}
+    try{ save(); queueSync(); }catch(err){}
+    return {ok: true, restored: true};
+  }catch(err){ return {err: "The restore failed: " + (err && err.message || err)}; }
+}
+/* What a restore would cost, in the only terms that matter: the sessions that are in your
+   data now and are NOT in the photograph.
+
+   The first version compared each session's finishedAt against the patch's timestamp, which
+   is a guess dressed as a fact — a session can carry a finishedAt in the future, an edited
+   one keeps its original time, an imported one has whatever its source said. A test caught
+   it naming a session logged BEFORE the patch, because that session's finishedAt was an
+   hour ahead. For a button that destroys data the answer is read from the thing that will
+   actually be written, so the snapshot is opened and the two session lists compared by id.
+   Exact, and worth the wait on a button nobody presses twice a day. */
+async function patchRestoreCost(id){
+  const e = patchEntry(id);
+  if(!e) return null;
+  const out = {sessions: [], since: Math.round((Date.now() - e.at) / 86400000), exact: false};
+  if(!e.snap) return out;
+  let snap = null;
+  try{ snap = JSON.parse(await patchSnapRead(id) || "null"); }catch(err){}
+  if(!snap) return out;
+  const had = {};
+  (snap.sessions || []).forEach(s=>{ if(s && s.id) had[s.id] = 1; });
+  (S.sessions || []).forEach(s=>{
+    if(s && s.id && !had[s.id]) out.sessions.push(s.date + " · " + dayName(s.workoutId));
+  });
+  out.exact = true;
+  return out;
+}
+/* =====================================================================
+   PLAN PATCHES — THE SCREEN
+
+   Three states, and the order matters: paste, read what it would do, then and only then a
+   button that does it. Apply is not offered before a clean preview, because the preview is
+   the only thing standing between a plan and a document somebody else wrote.
+   ===================================================================== */
+let PATCH_TEXT = "", PATCH_PV = null, PATCH_BUSY = false, PATCH_ASK = null;
+function patchRowsHTML(pv){
+  let h = "", day = null;
+  pv.rows.forEach(r=>{
+    if(r.day !== day){ h += `<div class="pt-day">${esc(r.day)}</div>`; day = r.day; }
+    h += `<div class="pt-row"><span class="pt-what">${esc(r.what)}</span>
+      <span class="pt-move"><b>${esc(r.from)}</b> → <b class="pt-to">${esc(r.to)}</b></span></div>`;
+  });
+  return h;
+}
+function patchCardHTML(){
+  const log = (S.patchLog || []).slice().reverse();
+  let h = `<div class="set-block">
+    <div class="set-name">Paste a patch</div>
+    <div class="set-help">A patch is a JSON document that changes your plan: loads, rep
+      ranges, exercises, days, volume floors, gym kit. It is read as data — nothing in it
+      is ever executed, and no patch can touch your account, your recovery key or your
+      sync. <b>Only apply patches you trust</b>: one press can change your whole plan.</div>
+    <textarea id="ptIn" rows="6" spellcheck="false" placeholder='{"e26patch": 1, "note": "why", "ops": [ ... ]}'
+      style="width:100%;font:var(--fs-3)/1.4 var(--mono);padding:10px;border-radius:var(--r-sm);
+             border:1px solid var(--line);background:var(--card2);color:var(--text)">${esc(PATCH_TEXT)}</textarea>
+    <div class="set-row" style="gap:8px;margin-top:9px">
+      <button class="btn small" id="ptCheck">Preview</button>
+      <button class="btn ghost small" id="ptTemplate">Copy template for an AI</button>
+    </div>
+  </div>`;
+  if(PATCH_PV){
+    const pv = PATCH_PV;
+    if(pv.errors.length){
+      h += `<div class="set-block">
+        <div class="pt-head-bad">This patch was refused, and nothing was changed</div>
+        ${pv.errors.map(e=> `<div class="pt-err">${esc(e)}</div>`).join("")}
+        <div class="set-help">A patch applies completely or not at all. Fix the op named
+          above and preview it again.</div>
+      </div>`;
+    } else if(!pv.rows.length){
+      h += `<div class="set-block"><div class="set-name">Nothing would change</div>
+        <div class="set-help">${pv.ops} op${pv.ops === 1 ? "" : "s"} read cleanly, and every
+          one of them asks for something that is already true.</div></div>`;
+    } else {
+      h += `<div class="set-block">
+        <div class="set-name">What this would change, ${pv.rows.length}</div>
+        ${pv.note ? `<div class="pt-note">${esc(pv.note)}</div>` : ""}
+        ${patchRowsHTML(pv)}
+        ${pv.warnings.map(w=> `<div class="pt-warn">${esc(w)}</div>`).join("")}
+        ${pv.sessionWarnings.length ? `<div class="pt-sess">
+            <div class="pt-sess-k">This patch edits what you logged</div>
+            ${pv.sessionWarnings.map(w=> `<div class="pt-warn">${esc(w)}</div>`).join("")}
+          </div>` : ""}
+        <div class="set-row" style="gap:8px;margin-top:11px">
+          <button class="btn small" id="ptApply"${PATCH_BUSY ? " disabled" : ""}>${
+            PATCH_BUSY ? "Applying…" : "Apply this patch"}</button>
+          <button class="btn ghost small" id="ptDrop">Discard</button>
+        </div>
+      </div>`;
+    }
+  }
+  h += `<div class="set-block">
+    <div class="set-name">Patch history</div>`;
+  if(!log.length){
+    h += `<div class="set-help">Nothing applied yet. Every patch you apply is kept here with
+      what it changed, and can be taken back.</div>`;
+  } else {
+    h += `<div class="set-help">The last ${PATCH_LOG_KEEP} patches. <b>Undo</b> reverses the
+      patch's own changes and leaves anything you have done since. A patch that still has a
+      full snapshot behind it can also be rolled back whole — which does lose what came
+      after, so it says what that is first.</div>`;
+    log.forEach(r=>{
+      const chk = patchUndoCheck(r.id);
+      const moved = chk.clash ? chk.clash.length : 0;
+      h += `<div class="pt-hist${r.undone ? " pt-done" : ""}">
+        <div class="pt-hist-h"><b>${esc(r.date)}</b>
+          <span class="num">${r.changes} change${r.changes === 1 ? "" : "s"}${
+            r.undone ? " · undone" : ""}</span></div>
+        ${r.note ? `<div class="pt-hist-n">${esc(r.note)}</div>` : ""}
+        <div class="pt-hist-g">${r.snap && !r.undone
+            ? "full snapshot · can be restored byte for byte"
+            : "reverse only · no snapshot behind this row"}${
+            moved ? " · " + moved + " of its changes have moved since" : ""}</div>
+        <div class="set-row" style="gap:8px;margin-top:7px">
+          <button class="btn ghost small" data-ptundo="${esc(r.id)}">${
+            r.undone ? "Redo" : "Undo"}</button>
+          ${r.snap && !r.undone
+            ? `<button class="btn ghost small" data-ptrestore="${esc(r.id)}">Roll back whole</button>`
+            : ""}
+        </div>
+      </div>`;
+    });
+  }
+  h += `</div>`;
+  return h;
+}
+/* The one screen where a conflict has to be explained rather than resolved. */
+function patchAskHTML(){
+  const a = PATCH_ASK;
+  if(!a) return "";
+  if(a.kind === "clash"){
+    return `<div class="sheet-h">Some of this patch has moved since</div>
+      <div class="sub">${a.clash.length} of the ${a.total} things this patch changed are no
+        longer as it left them — something else has changed them since. Undo will reverse
+        the ${a.total - a.clash.length} that still match and leave these exactly as they
+        are:</div>
+      ${a.clash.map(c=> `<div class="pt-row"><span class="pt-what">${esc(c.label)}</span></div>`).join("")}
+      <div class="set-row" style="gap:8px;margin-top:12px">
+        <button class="btn small" id="ptClashGo">Reverse the ${a.total - a.clash.length} that match</button>
+        <button class="btn ghost small" id="ptClashNo">Leave it alone</button>
+      </div>`;
+  }
+  if(a.kind === "restore"){
+    const cost = a.cost || {sessions: []};
+    return `<div class="sheet-h">Roll back to before this patch</div>
+      <div class="sub">This puts every part of your data back to the moment before the patch
+        of ${esc(a.date)}${a.note ? " — " + esc(a.note) : ""}, which was
+        ${cost.since} day${cost.since === 1 ? "" : "s"} ago.</div>
+      ${cost.sessions.length
+        ? `<div class="pt-lose"><div class="pt-lose-k">You would lose ${cost.sessions.length}
+             session${cost.sessions.length === 1 ? "" : "s"} logged since then</div>
+           ${cost.sessions.map(s=> `<div class="pt-row"><span class="pt-what">${esc(s)}</span></div>`).join("")}
+           <div class="set-help">Undo instead reverses only the patch's own changes and
+             keeps these.</div></div>`
+        : `<div class="sub">Nothing has been logged since, so there is nothing to lose.</div>`}
+      <div class="set-row" style="gap:8px;margin-top:12px">
+        <button class="btn small" id="ptRestoreGo">Roll back${
+          cost.sessions.length ? " and lose " + cost.sessions.length : ""}</button>
+        <button class="btn ghost small" id="ptRestoreNo">Cancel</button>
+      </div>`;
+  }
+  return "";
+}
+function patchWire(){
+  const ta = $("#ptIn");
+  if(ta) ta.oninput = ()=>{ PATCH_TEXT = ta.value; };
+  const chk = $("#ptCheck");
+  if(chk) chk.onclick = ()=>{
+    PATCH_TEXT = ta ? ta.value : PATCH_TEXT;
+    PATCH_PV = PATCH_TEXT.trim() ? patchPreview(PATCH_TEXT) : null;
+    if(!PATCH_TEXT.trim()) toast("Paste a patch first");
+    render();
+  };
+  const tpl = $("#ptTemplate");
+  if(tpl) tpl.onclick = ()=>{
+    const text = patchTemplateText();
+    const done = ()=> toast("Format and your plan copied — paste it to an AI with what you want changed", "good");
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(text).then(done, ()=> patchCopyFallback(text));
+      else patchCopyFallback(text);
+    }catch(e){ patchCopyFallback(text); }
+  };
+  const drop = $("#ptDrop");
+  if(drop) drop.onclick = ()=>{ PATCH_PV = null; render(); };
+  const ap = $("#ptApply");
+  if(ap) ap.onclick = async ()=>{
+    if(PATCH_BUSY) return;
+    PATCH_BUSY = true; ap.disabled = true; ap.textContent = "Applying…";
+    const r = await patchApply(PATCH_TEXT);
+    PATCH_BUSY = false;
+    if(!r.ok){ PATCH_PV = r; render(); toast("Nothing was changed", "bad"); return; }
+    PATCH_TEXT = ""; PATCH_PV = null;
+    render();
+    toast(r.changes === 1 ? "1 change applied" : r.rows.length + " changes applied", "good");
+  };
+  document.querySelectorAll("[data-ptundo]").forEach(btn=> btn.onclick = ()=>{
+    const id = btn.dataset.ptundo;
+    const chk2 = patchUndoCheck(id);
+    if(chk2.err){ toast(chk2.err, "bad"); return; }
+    if(chk2.clash.length){
+      PATCH_ASK = {kind: "clash", id: id, clash: chk2.clash,
+                   total: chk2.clean.length + chk2.clash.length};
+      showModal(patchAskHTML()); patchAskWire();
+      return;
+    }
+    const out = patchUndoRun(id);
+    render();
+    toast(out.dir === "undo" ? "Patch undone" : "Patch reapplied", "good");
+  });
+  document.querySelectorAll("[data-ptrestore]").forEach(btn=> btn.onclick = async ()=>{
+    const id = btn.dataset.ptrestore, e = patchEntry(id);
+    if(!e) return;
+    btn.disabled = true;
+    /* The cost is read out of the snapshot, so the sheet waits for it rather than opening
+       with a number it has not checked. */
+    PATCH_ASK = {kind: "restore", id: id, date: e.date, note: e.note,
+                 cost: await patchRestoreCost(id)};
+    btn.disabled = false;
+    showModal(patchAskHTML()); patchAskWire();
+  });
+}
+function patchCopyFallback(text){
+  try{
+    const t = document.createElement("textarea");
+    t.value = text; t.style.position = "fixed"; t.style.left = "-9999px";
+    document.body.appendChild(t); t.select(); document.execCommand("copy");
+    document.body.removeChild(t);
+    toast("Format and your plan copied — paste it to an AI with what you want changed", "good");
+  }catch(e){ toast("Could not copy. Your plan is in Settings › Your data as an export.", "bad"); }
+}
+function patchAskWire(){
+  const go = $("#ptClashGo");
+  if(go) go.onclick = ()=>{
+    const out = patchUndoRun(PATCH_ASK.id);
+    hideModal(); PATCH_ASK = null; render();
+    toast(out.reversed + " reversed, " + out.left + " left as they are");
+  };
+  const no = $("#ptClashNo");
+  if(no) no.onclick = ()=>{ hideModal(); PATCH_ASK = null; };
+  const rg = $("#ptRestoreGo");
+  if(rg) rg.onclick = async ()=>{
+    rg.disabled = true; rg.textContent = "Rolling back…";
+    const out = await patchRestore(PATCH_ASK.id);
+    hideModal(); PATCH_ASK = null;
+    if(out.err){ toast(out.err, "bad"); return; }
+    render();
+    toast("Rolled back to before that patch", "good");
+  };
+  const rn = $("#ptRestoreNo");
+  if(rn) rn.onclick = ()=>{ hideModal(); PATCH_ASK = null; };
 }
 
 /* =====================================================================

@@ -615,5 +615,76 @@ were not, which meant a clone missing them would have run 295 specs and said so 
 The runner's count, for the record: 298 specs in `tests/specs` plus `tests/share-worker.mjs`,
 run last, which is where "299 specs passed" comes from.
 
-The next thing in this document is item 15, the plan patches, whose spec is in
-`docs/plan-patches-spec.md`.
+---
+
+## 15. Plan patches — SHIPPED (2026.11.17.31)
+
+Asked for in full; the spec is in `docs/plan-patches-spec.md`, the format in
+`docs/patch-format.md`, the tests in `tests/specs/patch.mjs` (seventeen sections).
+
+**The preview IS the apply.** The spec asked that the preview match the result, and the
+only way to mean that is to not have two implementations. A dry run swaps `S` for a deep
+copy, runs the ops exactly as an apply would, collects what each one changed by READING the
+state it just changed rather than predicting it, and puts the real `S` back. Asserted both
+ways: the dry run's rows and a real run's rows are byte-identical, and the whole state is
+unchanged after a preview — 847,719 bytes compared, not a field list.
+
+**The journal, not nineteen hand-written inverses.** Before the ops run every top-level key
+of `S` is serialised; after, the same again; what differs is the journal. `program` is
+indexed per DAY, `sessions` per SESSION ID, `gyms` per GYM ID — so a patch that changed
+Legs A is not in conflict because Push B was edited afterwards, and a patch that never
+touched sessions can be undone with any number logged since, because those paths are not in
+its journal. Sessions are indexed by id rather than position because a session logged after
+the patch appends and would shift every index after it.
+
+No op declares an inverse. An op that forgot to would be silent data loss, and nineteen
+hand-written inverses is nineteen chances to forget; the journal is computed by diffing, so
+an op cannot escape it — including one added years from now.
+
+**Two things the journal got wrong first, both caught by measurement.** It held
+`storageAsked` and `storagePersisted`, which the SNAPSHOT WRITE had caused by touching
+localStorage — undo would have written them back. The "before" index is now taken after the
+snapshot, and a `PATCH_VOLATILE` list keeps save stamps and sync pointers out regardless.
+And `patchRestoreCost()` compared each session's `finishedAt` against the patch's timestamp,
+which named a session logged BEFORE the patch because its `finishedAt` was an hour ahead. It
+now opens the snapshot and compares session ids — exact, and worth the wait on a button
+that destroys data.
+
+**"Byte for byte", stated honestly.** After apply-then-undo every path the patch touched is
+identical again. Three keys are not, and none is the patch's doing: `savedAt` is a
+timestamp, `planLog` and `patchLog` have gained the rows that record the patch and its undo
+(recording an undo is the point), and `S.stalls` is derived — a bare `rebuildStalls()`
+moves it on this fixture with no patch involved, which the spec measures at the top before
+any patch exists rather than asserting away.
+
+**Storage, measured.** The real export is 848,557 bytes; ten full snapshots is 8.5 MB
+against a ~5 MB localStorage. `CompressionStream('gzip')` takes it to 114,453 bytes, 153,607
+once base64'd — the number the spec actually observes. Snapshots live under a byte budget
+rather than a fixed count, and a row whose snapshot has aged out says "reverse only" instead
+of claiming something it cannot do. Rolling that row back is refused rather than half done.
+
+**What a patch cannot address at all.** The spec walks all 76 fields of all 19 ops and
+asserts none names an account, key, token, or sync, cloud or share setting. Not "refused if
+you try" — not addressable.
+
+**The reference an AI reads is generated from the checker's own table**, so it cannot drift
+from what the app accepts; a control plants an op in the table and asserts it appears in the
+reference.
+
+**Two bugs only the real screen could find.** `patchWire()` was never called from the
+settings wiring: the tile opened, the box took the paste, and Preview did nothing, because
+nothing had ever bound it — every function was fine, so no function-level test could have
+caught it. And a screenshot showed the Push A row crushing the exercise name into three
+lines while the move text held one line; the name now keeps half the row. Section 17 drives
+the real screen end to end for exactly this reason.
+
+**The stylesheet guard earned its keep immediately.** The first draft styled `.pt-bad
+.set-name` — a descendant selector is still a definition, and `.set-name` belongs to the
+settings card. Caught on the first run, before the feature shipped.
+
+**Still open:** nothing in item 15.
+
+---
+
+The remaining open items in this document are 14 (the one-limb pre-pair unit) and 17 (the
+`altadd` flake).
