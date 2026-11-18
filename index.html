@@ -7286,7 +7286,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.22";
+const APP_VERSION = "2026.11.17.23";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -15434,6 +15434,23 @@ function repsToFailure(st){
   if(!isFinite(rpe) || rpe <= 0 || rpe > 10) return reps;
   return reps + Math.max(0, Math.min(4, 10 - rpe));   // past 4 in reserve it is a warm-up
 }
+/* RULE D — EPLEY RUN BACKWARDS: the load that should produce `reps` at `rpe`.
+
+   Needed where a cut overshot and the next session comes in miles inside the range. The
+   audited case is the Smith shoulder press: the plan was cut 95 → 60, and 60 then went
+   for 11, 14 and 17 reps against a 9-13 range. The smallest step up from 60 is 62.5,
+   which would spend another whole session proving the same thing. Sized off the set
+   actually performed, the load that puts the BOTTOM of the range at the prescribed
+   effort is around 70 — one session's correction instead of four.
+
+   The cap mirrors est1RM's: past four reps in reserve the set stops being evidence about
+   a maximum at all. */
+function loadForRepsAt(e1rm, reps, rpe){
+  if(!(e1rm > 0) || !(reps > 0)) return 0;
+  const inReserve = isFinite(rpe) && rpe > 0 && rpe <= 10 ? Math.max(0, Math.min(4, 10 - rpe)) : 0;
+  const rtf = Math.min(reps + inReserve, E1RM_RTF_CAP);
+  return e1rm / (1 + rtf / 30);
+}
 // One set's estimated one-rep max, as a TRUE load and against reps taken to failure.
 function e1rmOfSet(st, add){
   const w = setLoad(st, add);
@@ -22141,6 +22158,18 @@ function runOneTimeSeeds(){
   try{
     if(seedHomeGym()) dirty = true;
   }catch(e){ try{ console.error("Element 26: the home gym seed threw", e); }catch(e2){} }
+  /* RULE A — and the alias that merged two attachments is undone once, here rather
+     than in migrate(), for the same reason the stall rebuild is: this walks the
+     programme and the log through functions whose constants are still in their
+     temporal dead zone while migrate() runs. */
+  try{
+    if(!S.attachSplitV1){
+      const n = splitAttachmentAliases();
+      S.attachSplitV1 = {at: Date.now(), renamed: n};
+      if(n) try{ console.warn("Element 26 split " + n + " entries off a merged attachment alias"); }catch(e2){}
+      dirty = true;
+    }
+  }catch(e){ try{ console.error("Element 26: the attachment split threw", e); }catch(e2){} }
   try{
     if(!S.exCompoundSeeded){ seedCompoundFlags(); dirty = true; }
   }catch(e){ S.exCompoundSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
@@ -46853,6 +46882,103 @@ function logFixApply(scope){
   save(); queueSync();
   return undo.sets.length;
 }
+/* =====================================================================
+   RULE A — TWO ATTACHMENTS ARE TWO EXERCISES, AND AN ALIAS CANNOT SAY OTHERWISE
+
+   The audited case, and the reason this exists: a rename in the program editor wrote
+   S.exAliases["overhead cable triceps extension"] = "Overhead Cable Triceps Extension
+   (V-bar)". From that moment the straight bar and the V-bar canonicalised to ONE key,
+   so every history lookup, PR check and e1RM read them as one movement. They are not:
+   the attachment changes the leverage and the loads do not transfer.
+
+   Worse, the rename swept the LOG. It walked every session and renamed every entry with
+   the old name, including the ones on the other day — which is how the Push A straight
+   bar came to be labelled "(V-bar)" from Aug 2 to Oct 1 while Push B, the slot the
+   rename was actually about, carried the same name for the same months.
+
+   Both halves are undone here, and both are prevented in planEditSave() below.
+
+   WHAT COUNTS AS AN ATTACHMENT SPLIT: one name is the other plus a trailing
+   parenthetical, and the two share a table key. tableKey() strips the parenthetical and
+   settles tricep/triceps, so "OVERHEAD CABLE TRICEP EXTENSION (V-bar)" is recognised as
+   the same base as "Overhead Cable Triceps Extension" — which matters, because that
+   exact casing is in the log. */
+const ATTACH_TAIL = /\s*\(([^()]+)\)\s*$/;
+function attachQualOf(name){
+  const m = ATTACH_TAIL.exec(String(name || ""));
+  return m ? m[1].trim() : "";
+}
+/* THE NAME WITH ITS ATTACHMENT TAKEN OFF, which is the only stable way to ask whether
+   two names share a movement. tableKey() keeps the qualifier once the alias merging the
+   two is gone — correctly, since by then they ARE two exercises — so comparing
+   tableKey(a) to tableKey(b) answers "no" the moment the repair has worked, and the
+   repair would then never run. Stripping first asks the question that does not move. */
+function attachBaseKey(name){
+  return tableKey(String(name || "").replace(ATTACH_TAIL, "").trim());
+}
+function differsOnlyByAttachment(a, b){
+  if(!a || !b) return false;
+  const qa = attachQualOf(a), qb = attachQualOf(b);
+  if(!!qa === !!qb) return false;              // both plain, or both qualified: not this
+  const ka = attachBaseKey(a);
+  return !!ka && ka === attachBaseKey(b);
+}
+/* The one-time repair. Returns how many entries were relabelled, 0 when there is
+   nothing to do — which is every install but the one this happened on. */
+function splitAttachmentAliases(){
+  const al = S.exAliases;
+  if(!al || typeof al !== "object") return 0;
+  const pairs = Object.keys(al)
+    .filter(k=> differsOnlyByAttachment(k, al[k]))
+    .map(k=> ({key: k, target: al[k]}));
+  if(!pairs.length) return 0;
+  const undo = {at: Date.now(), aliases: {}, renamed: []};
+  pairs.forEach(pr=>{ undo.aliases[pr.key] = pr.target; delete al[pr.key]; });
+  USER_ALIASES = S.exAliases;
+  try{ invalidateCanon(); }catch(e){}
+  try{ invalidateTableOrigin(); }catch(e){}
+  /* AND THE LOG GOES BACK TO THE SLOT'S OWN NAME. Not by date and not by guesswork: an
+     entry is relabelled only where the day it sits on PRESCRIBES the other spelling of
+     the same base. Push A's plan says "Overhead Cable Triceps Extension", so the Push A
+     entries labelled "(V-bar)" are the swept ones and go back; Push B's plan says
+     "(V-bar)", so Push B is left exactly as it is. A day that prescribes neither is
+     left alone too. */
+  const bases = {};
+  pairs.forEach(pr=>{ bases[attachBaseKey(pr.key)] = 1; });
+  (S.sessions || []).forEach(sess=>{
+    if(!sess || !sess.workoutId) return;
+    const plan = S.program[sess.workoutId] || [];
+    (sess.entries || []).forEach((en, ei)=>{
+      if(!en || !en.name || !bases[attachBaseKey(en.name)]) return;
+      const want = plan.find(e=> e && e.name && differsOnlyByAttachment(e.name, en.name));
+      if(!want) return;
+      undo.renamed.push({id: sess.id, ei, was: en.name});
+      en.name = want.name;
+      sess.edited = Date.now();
+    });
+  });
+  S.attachFixUndo = undo;
+  return undo.renamed.length;
+}
+function undoAttachmentSplit(){
+  const u = S.attachFixUndo;
+  if(!u) return 0;
+  let n = 0;
+  (u.renamed || []).forEach(c=>{
+    const sess = (S.sessions || []).find(x=> x.id === c.id);
+    const en = sess && (sess.entries || [])[c.ei];
+    if(!en) return;
+    en.name = c.was; n++;
+  });
+  if(!S.exAliases || typeof S.exAliases !== "object") S.exAliases = {};
+  Object.keys(u.aliases || {}).forEach(k=>{ S.exAliases[k] = u.aliases[k]; });
+  USER_ALIASES = S.exAliases;
+  try{ invalidateCanon(); }catch(e){}
+  try{ invalidateTableOrigin(); }catch(e){}
+  delete S.attachFixUndo;
+  save(); queueSync();
+  return n;
+}
 function logFixUndoNow(){
   const u = S.logFixUndo;
   if(!u) return 0;
@@ -47159,7 +47285,20 @@ function settingsShareHTML(){
 function settingsDataHTML(){
   const u = S.logFixUndo;
   const bu = S.bwFixUndo;
-  return setBlock("Been logging wrong?",
+  const au = S.attachFixUndo;
+  /* RULE A — shown only where it actually did something, and only while it can still
+     be taken back. Renaming logged entries is the app editing your record, so it says
+     so in the one place the app's other record-edits are listed. */
+  return (au && (au.renamed || []).length
+    ? setBlock("Two attachments, told apart",
+        "A rename had made two different attachments of one movement share a history — and "
+        + "had relabelled the other day's sets to match. They are separate again, and the "
+        + "sets that were swept are back under the name their own day prescribes.",
+        `<div class="lf-undo">${au.renamed.length} logged entr${au.renamed.length===1?"y":"ies"} put back
+          ${esc(fmtDateShort(dayStr(au.at)))}
+          <button class="linklike" id="attachFixUndoBtn">undo that</button></div>`)
+    : "")
+  + setBlock("Been logging wrong?",
     "A barbell or Smith weight is written as the whole load \u2014 never as one end of it. If you have been typing what is on one side, those sets are about half of what you really lifted, and your estimated maxes have been reading low ever since. This finds them, shows you what each one becomes, and fixes them.",
     `<div class="btn-row" style="margin-top:0">
       <button class="btn ghost small" id="logFixBtn" style="flex:1">Check my logged weights</button>
@@ -49625,6 +49764,12 @@ function bind(){
     row.classList.add("fc-hit");
     setTimeout(()=> row.classList.remove("fc-hit"), 1700);
   });
+  const afU = $("#attachFixUndoBtn");
+  if(afU) afU.onclick = ()=>{
+    const n = undoAttachmentSplit();
+    render();
+    toast(n ? n + " entr" + (n === 1 ? "y" : "ies") + " put back as they were" : "Nothing to undo");
+  };
   const lfU = $("#logFixUndoBtn");
   if(lfU) lfU.onclick = ()=>{
     const n = logFixUndoNow();
@@ -53401,17 +53546,36 @@ function openExEditor(wid, idx){
     const renamed = !isNew && !!oldName && nrm(oldName) !== nrm(ne.name);
     if(renamed){
       const oldKey = nrmRaw(oldName);
+      /* RULE A — RENAMING ONE SLOT'S ATTACHMENT IS NOT A RENAME OF THE MOVEMENT.
+
+         Saying "this one is the V-bar" is a statement about THIS slot. Treated as an
+         ordinary rename it did two things it had no business doing: it swept every
+         logged entry of that name on every other day, which is how Push A's straight
+         bar came to be labelled "(V-bar)" for two months; and it registered an alias,
+         which made the two attachments one key for every lookup in the app.
+
+         So an attachment split stays local: the sweep is limited to this day, and no
+         alias is written. A plain rename — a typo, a wording change — behaves
+         exactly as it always did. */
+      const attachSplit = differsOnlyByAttachment(oldName, ne.name);
       let moved = 0;
       S.sessions.forEach(s=>{
+        if(attachSplit && s.workoutId !== wid) return;
         let touched = false;
         (s.entries||[]).forEach(en=>{
           if(nrmRaw(en.name) === oldKey){ en.name = ne.name; touched = true; moved++; }
         });
         if(touched) s.edited = Date.now();
       });
-      S.exAliases[oldKey] = ne.name;
-      USER_ALIASES = S.exAliases; invalidateTableOrigin();
-      if(moved) toast("Renamed, and "+moved+" logged entr"+(moved===1?"y":"ies")+" came with it");
+      if(!attachSplit){
+        S.exAliases[oldKey] = ne.name;
+        USER_ALIASES = S.exAliases;
+      }
+      invalidateTableOrigin();
+      try{ invalidateCanon(); }catch(e){}
+      if(moved) toast("Renamed, and "+moved+" logged entr"+(moved===1?"y":"ies")+
+        (attachSplit ? " on this day came with it" : " came with it"));
+      else if(attachSplit) toast("Renamed. Its own history stays with this day");
     }
     /* Photographed before the write, so a hand edit can be put back like anything the
        Body tab does. Keyed on the name the entry ENDS UP with, since that is what a
@@ -54292,6 +54456,54 @@ function priorSessionFor(sess){
    session in a new slot it is the only one. It is wrong wherever the question is about
    PROGRESS within a slot — the other day is at a different load by design, so comparing
    across them reports a change that never happened. */
+/* RULE D — HOW OFTEN THE TOP OF THE RANGE HAS ACTUALLY BEEN CLEARED ON THIS SLOT.
+
+   Walks this slot's own last three exposures, newest first, and asks each the same
+   question the current session was asked: did the LAST working set reach the top of the
+   range, at or below the effort prescribed for it. Nothing else — no "every set within
+   a rep", which is the clause that refused Nov 16's shoulder press.
+
+   Same slot only. A movement trained on two days has two prescriptions and two
+   histories, and borrowing one day's good session to raise the other day's load is the
+   audited P0-1 bug wearing a different hat.
+
+   Sessions that are not evidence are skipped rather than counted as misses: an injury
+   day neither earns a raise nor denies one, and counting it as a miss would mean one bad
+   week quietly freezes a lift for a month. `of` reports how many real exposures were
+   found, so a movement with only one session behind it says so instead of failing a
+   test it has not had the chance to take. */
+const TOP_REPEAT_WINDOW = 3;
+function topClearedRecently(exName, wid, range, sess){
+  const k = nrm(exName);
+  if(!k || !range) return {hits: 0, of: 0, dates: []};
+  const earlier = (S.sessions || [])
+    .filter(s=> s && s.workoutId === wid && (!sess || s.id !== sess.id))
+    .filter(s=> !sess || s.startedAt < sess.startedAt)
+    .sort((a,b)=> b.startedAt - a.startedAt);
+  const seen = [];
+  /* The session in hand is the first of the three, and it is a hit by construction:
+     this is only ever called once the current session has cleared the top. */
+  if(sess) seen.push({sess, hit: true});
+  for(const s of earlier){
+    if(seen.length >= TOP_REPEAT_WINDOW) break;
+    const en = (s.entries || []).find(e=> e && nrm(e.name) === k);
+    if(!en) continue;
+    if(sessionNotEvidence(s)) continue;
+    const ws = sideSetsWorking(en);
+    if(!ws.length) continue;
+    const grp = atTopLoadSets(en);
+    const at = (grp && grp.at.length) ? grp.at : null;
+    const lastAt = at ? at[at.length - 1] : null;
+    const st = lastAt ? lastAt.st : ws[ws.length - 1].ref || ws[ws.length - 1];
+    const r = parseFloat(st && st.reps) || 0;
+    const e = parseFloat(st && st.rpe) || 0;
+    const t = lastAt ? rpeTargetFor(en, lastAt.i) : null;
+    const okRpe = (t == null || !e) ? true : e <= t + RPE_TOL;
+    seen.push({sess: s, hit: r >= range[1] && okRpe});
+  }
+  return {hits: seen.filter(x=> x.hit).length, of: seen.length,
+          dates: seen.filter(x=> x.hit).map(x=> x.sess.date)};
+}
 function priorEntryFor(sess, exName, occ, opts){
   occ = occ || 0;
   const k = nrm(exName);
@@ -56776,6 +56988,17 @@ function progressionFor(sess, entry){
     const t = rpeTargetFor(entry, x.i), e = parseFloat(x.st.rpe) || 0;
     return (t == null || !e) ? true : e <= t + RPE_TOL;
   });
+  /* RULE D — AND THE SAME QUESTION ASKED OF THE LAST SET ALONE, which is the set the
+     rule is written about. The every-set form above stays, because the explanation it
+     gives when a raise is refused is still the useful one; but it must not be what
+     decides a raise. Nov 16's shoulder press is why: three sets at 60 for 11, 14 and 17
+     against targets of RPE 7, 8 and 9, logged at 8, 8 and 9. The last set met its target
+     exactly and the first beat its by one, so "every set at its target" said no to a
+     session that went four reps past the top of the range. */
+  const lastAtTarget = (()=>{
+    const t = tRpe, e = rpe;
+    return (t == null || !e) ? true : e <= t + RPE_TOL;
+  })();
   /* The last set at the load is at the top of the range, and none of the ones before it
      is more than a rep short of it.
 
@@ -56788,7 +57011,21 @@ function progressionFor(sess, entry){
      citing a range the log had never reached. Both have to be satisfied, so the snapshot
      still protects you and a stale top can no longer buy a raise. */
   const planRange = repRange(planned && planned.reps);
-  const clearsRange = rr2 => reps >= rr2[1] && atSets.every(x=> (parseFloat(x.st.reps) || 0) >= rr2[1] - 1);
+  /* RULE D — WHAT EARNS A RAISE, AND WHERE THE EVIDENCE COMES FROM.
+
+     The old test asked one session to carry the whole case: the last set at the top of
+     the range AND every set at that load within a rep of it. That second clause is why
+     Nov 16's shoulder press — 60 lb for 11, 14 and 17 reps against a 9-13 range, the
+     last set four reps PAST the top at RPE 9 — came back "Need 12-13 on every set at
+     this load". A session that beats the top of the range by four reps is not a session
+     that failed to earn more weight.
+
+     The guard it provided was real, though: one fluky last set should not move a plan.
+     So the guard moves from WITHIN a session to ACROSS sessions. The per-session test is
+     the last working set reaching the top at or below the prescribed effort, and the
+     repeat test is that the same thing happened in 2 of the last 3 exposures of this
+     slot. One good last set proves nothing; two out of three is a pattern. */
+  const clearsRange = rr2 => reps >= rr2[1];
   const clearedTop = clearsRange(range) && (!planRange || clearsRange(planRange));
   /* L3. What to call these sets in a sentence, so the message is about the sets the
      verdict was actually read off. */
@@ -56823,10 +57060,100 @@ function progressionFor(sess, entry){
   /* What the programme prescribes, read once: two branches below need it. */
   const planW = (planned && planned.weight != null && planned.weight !== "")
     ? parseFloat(planned.weight) : NaN;
-  if(clearedTop && atTarget){
+  /* RULE D — THE SECOND SESSION. Counted over this slot's own last three exposures,
+     this one included, and only over sessions that are evidence at all: an injury day or
+     a deload neither earns a raise nor denies one. */
+  /* A SET LOGGED AT ZERO ON A MOVEMENT THAT CARRIES YOU IS NOT A SET AT ZERO.
+
+     Dips and pull-ups logged before the bodyweight correction existed sit in the log at
+     "0", which is not a load — it is the load missing. Sized off that, a raise reads
+     "add weight next time: 0 lb → 139.8 lb", which is the app offering to add a person
+     to a dip. The reps are real and everything else may use them; the one thing that
+     may not is a decision about what to LOAD, because the number it would be relative to
+     is not there. Settings has the repair for these ("Dips and pull-ups logged without
+     you"), and until it is run this holds. */
+  const zeroOnBw = (parseFloat(load) === 0) && isBodyweightMove(entry.name);
+  if(clearedTop && zeroOnBw) return {
+    name: entry.name, kind: "hold",
+    msg: "Logged without your bodyweight",
+    sub: "These sets are recorded at 0, which on " + exNounFor(entry.name).toLowerCase()
+       + " is the load missing rather than a load of nothing — so there is nothing to "
+       + "add weight to. Settings → Your data can put your bodyweight back into them, "
+       + "and the raise becomes a real number."
+  };
+  const topRepeat = clearedTop && lastAtTarget
+    ? topClearedRecently(entry.name, sess && sess.workoutId, range, sess) : null;
+  /* RULE D — AND ONE SESSION IS ENOUGH WHEN IT IS NOT A CLOSE CALL.
+
+     Two of the last three guards against a last set that merely touches the top. A set
+     that goes three or more reps PAST the top is not that: there is no reading of 17
+     reps against a top of 13 in which the load is still the right load, and making it
+     wait another session means another session at a weight everybody can already see is
+     too light. This is the clause that makes the audited shoulder press correct itself
+     in one session instead of four. */
+  const blewPast = clearedTop && lastAtTarget && reps >= range[1] + 3;
+  /* AND THE OLD TEST SURVIVES AS A THIRD ROUTE, because it was never wrong — only too
+     narrow to be the only one.
+
+     Every set at the load within a rep of the top, every one of them at its own
+     prescribed effort, is a session that has earned the weight on its own evidence. The
+     audited pulldown is exactly that: 135 lb for 9, 10, 9 and 10 against a 5-10 range,
+     at RPE 7, 8, 8 and 9 against targets of 7, 8, 8 and 9. Under "2 of the last 3" alone
+     that raise disappears, because the session before it stopped at 8 reps — and a rule
+     that cannot see four sets at the top of the range is not an improvement.
+
+     What the three routes exclude together is the thing the repeat test was added for: a
+     single flukey last set, with the sets before it well short. That fails all three. */
+  const consistent = clearedTop && atTarget
+    && atSets.every(x=> (parseFloat(x.st.reps) || 0) >= range[1] - 1);
+  const earnedRaise = clearedTop && lastAtTarget
+    && (blewPast || consistent || !topRepeat || topRepeat.hits >= 2);
+  if(clearedTop && lastAtTarget && !earnedRaise){
+    /* It happened once. That is worth saying — it is the first half of the case — and
+       it is not worth changing the plan over. */
+    return {
+      name: entry.name, kind: "hold", oneOff: true, trigger,
+      msg: "One more session like that and the weight goes up",
+      sub: "The last set hit " + reps + " reps at " + fmtLoad(isNaN(load) ? null : load)
+         + ", the top of " + range[0] + "-" + range[1]
+         + (tRpe != null ? " at RPE " + (rpe || tRpe) + " against a target of " + tRpe : "")
+         + ". A raise wants it in two of the last three sessions on this day, so one "
+         + "good last set cannot move the plan on its own"
+         + (topRepeat && topRepeat.of > 1
+            ? " — " + topRepeat.hits + " of the last " + topRepeat.of + " so far." : ".")
+    };
+  }
+  if(earnedRaise){
     const from = isNaN(load) ? (target.weight == null ? null : target.weight) : load;
-    const to = step.bodyweight && from == null ? step.amount
+    let to = step.bodyweight && from == null ? step.amount
              : (from == null ? null : stepUpLoad(entry, from, step.amount, entry.name));
+    /* RULE D — SIZED OFF THE SET, NOT OFF THE GRID, WHEN THE SET IS MILES PAST THE TOP.
+
+       One step up from a load that produced four reps past the top of the range is still
+       a load that is too light; it just takes another session to find that out. Where
+       the overshoot is three reps or more, the jump is sized so the BOTTOM of the range
+       lands at the effort the last set was prescribed — which is what the range asks
+       for — and the ordinary step is the floor under it, never the ceiling. The usual
+       rounding and the rack ceiling still apply after, so this can only ever ask for a
+       weight that exists. */
+    /* THE ESTIMATE CHOOSES HOW MANY STEPS, NEVER THE NUMBER ITSELF.
+
+       The first version of this handed the e1RM figure to roundLoadableOn() and used
+       whatever came back — which, on a movement whose grid the app does not know,
+       is the figure itself: it proposed a preacher curl at 28.947368421052637 lb. A
+       prescription is a weight somebody has to load, so the estimate is only allowed to
+       pick a multiple of the step this movement already progresses by. Everything after
+       that is the ordinary machinery: the same stepUpLoad() the normal raise uses, and
+       the same rack ceiling. */
+    if(blewPast && from > 0 && to != null && !step.bodyweight && step.amount > 0){
+      const e1 = est1RM(load, repsToFailure(last));
+      const want = loadForRepsAt(e1, range[0], tRpe != null ? tRpe : rpe);
+      if(want > from + step.amount){
+        const n = Math.max(1, Math.round((want - from) / step.amount));
+        const sized = capToRack(stepUpLoad(entry, from, n * step.amount, entry.name), entry.name);
+        if(isFinite(sized) && sized > to) to = sized;
+      }
+    }
     /* AN INCREASE HAS TO BE AN INCREASE, AND A BACK-OFF SET IS NOT A WORKING SET.
 
        This judges the LAST set, which is right for earning a raise and wrong when the
@@ -56991,7 +57318,7 @@ function progressionFor(sess, entry){
              " after it " + (grp.backoffs === 1 ? "was" : "were") + " not counted.)" : "")
     };
   }
-  if(clearedTop && !atTarget){
+  if(clearedTop && !lastAtTarget){
     return {
       name: entry.name, kind: "hold",
       msg: "Hold this load one more session",
@@ -60901,8 +61228,32 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.22";
+const NEWS_FOR = "2026.11.17.23";
 const NEWS = [
+  {k: "A session that beats the top of the range now earns the weight",
+   s: ["A raise used to need every set at the load within a rep of the top, every one of "
+     + "them at its own prescribed effort. So the Smith shoulder press on Nov 16 — 60 lb "
+     + "for 11, 14 and 17 reps against a 9-13 range — came back “Need 12-13 on every "
+     + "set at this load”, four reps past the top of the range.",
+     "What earns a raise now is the LAST working set reaching the top at or below the "
+     + "effort prescribed for it, backed by any one of three things: it happened in two "
+     + "of the last three sessions on that day, or every set at that load was within a "
+     + "rep of the top, or the top was beaten by three reps or more. A single lucky last "
+     + "set, with the sets before it well short, still earns nothing — it says so, and "
+     + "says what it is waiting for.",
+     "Where a set goes well past the top, the jump is sized from what that set says your "
+     + "maximum is, rather than one step at a time: a load cut too far corrects itself in "
+     + "one session instead of four. The figure is still a multiple of the step the "
+     + "movement progresses by, so it is always a weight you can actually load."]},
+  {k: "Two attachments of one movement no longer share a history",
+   s: ["Renaming an exercise to name its attachment — “(V-bar)” — used to register it "
+     + "as another name for the same movement, so the straight bar and the V-bar became "
+     + "one key for every lookup in the app. It also renamed the logged sets on OTHER "
+     + "days to match, which is how one day's history came to be labelled with the other "
+     + "day's attachment for two months.",
+     "Both are undone, and the sets that were swept are back under the name their own "
+     + "day prescribes — listed in Settings → Your data, with an undo. Renaming an "
+     + "attachment now stays on the day you renamed it and writes no alias."]},
   {k: "Standing Cable Hip Abduction is now known to be one leg at a time",
    s: ["Its name says nothing about a limb, so nothing in the app could tell, and no "
      + "session recorded which leg did the work. Its side-balance check has been living "
@@ -67378,7 +67729,7 @@ const BACKUP_FIELDS = [
      where the rest days go and when the tests are — so they travel with it. */
   "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
-  "exAliases","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
+  "exAliases","attachFixUndo","attachSplitV1","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   /* The rebuild marker travels with the counters it describes: a backup carrying
      slot-keyed stalls without it would be rebuilt again on restore, harmlessly but
      pointlessly, and one carrying OLD counters with it would keep them for ever. */

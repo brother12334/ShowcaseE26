@@ -619,16 +619,27 @@ const delt = await p.evaluate(()=>{
   /* The control: the audited movement, its own slot, a session that clears 20 reps at
      RPE 8 against a 12-20 range. */
   const fly = (s.entries || []).filter(e=> /Rear Delt Fly/i.test(e.name))[0];
-  let control = null;
-  if(fly){
+  /* `reps` is the LAST set; `before` is what the sets ahead of it did. The two are
+     separate because the rule has three routes into a raise and they have to be told
+     apart: all three sets at the top is a consistent session and earns one outright,
+     which is not the case this control is for. */
+  const controlAt = (reps, before)=>{
+    if(!fly) return null;
     const win = JSON.parse(JSON.stringify(fly));
     const load = (findProgramEntryWhere(fly.name, s.workoutId) || {e:{}}).e.weight || 30;
-    win.sets = [1,2,3].map(()=> ({weight: String(load), reps: "21", rpe: "8", done: true}));
-    try{ control = progressionFor(Object.assign({}, s, {entries: [win]}), win); }
-    catch(e){ control = {err: String(e)}; }
-  }
+    const mk = r => ({weight: String(load), reps: String(r), rpe: "8", done: true});
+    win.sets = [mk(before == null ? reps : before), mk(before == null ? reps : before), mk(reps)];
+    try{ return progressionFor(Object.assign({}, s, {entries: [win]}), win); }
+    catch(e){ return {err: String(e)}; }
+  };
   const planned = fly ? findProgramEntryWhere(fly.name, s.workoutId) : null;
-  return {out, date: s.date, control,
+  return {out, date: s.date,
+          /* one good last set, the two before it well short of the top */
+          control: controlAt(21, 13),
+          /* three sets at the top: strong on its own evidence */
+          controlEven: controlAt(21, 21),
+          /* and one that goes clear past it */
+          controlFar: controlAt(24, 13),
           range: planned && planned.e ? planned.e.reps : null};
 });
 (delt.out || []).forEach(x=> console.log("    " + x.name + " → " + x.kind
@@ -644,11 +655,33 @@ ck("and it is a verdict, not a shrug", (delt.out || []).every(x=> !!x.kind),
    the same slot, the same rule \u2014 with a session that plainly clears the top of the
    range at target RPE. If that does not earn an increase, the rule is switched off and
    this section is measuring silence. */
-console.log("    control: " + JSON.stringify(delt.control));
-ck("a session that DOES clear the top of the range earns one",
-   delt.control && delt.control.kind === "up", JSON.stringify(delt.control));
+/* UPDATED FOR RULE D, AND THE OLD EXPECTATION WAS WRONG BECAUSE THE RULE MOVED.
+
+   This used to assert that one session clearing the top by a single rep earns a raise.
+   That was the rule at the time: the last set at the top, and every set at that load
+   within a rep of it. Rule D moves the guard from WITHIN a session to ACROSS sessions
+   - the last set at the top at or below target RPE, in 2 of the last 3 exposures - so
+   one such session is now deliberately the first half of a case, not a whole one.
+
+   Both halves are controlled, because the point of this block is that the rule can say
+   yes as well as no. At +1 rep it holds and SAYS it is waiting for a second session; at
+   +3 it is no longer a close call and the raise lands in one, which is the clause that
+   fixes the audited shoulder press. */
+console.log("    13, 13, 21 (one good last set): " + (delt.control || {}).kind);
+console.log("    21, 21, 21 (consistent):        " + (delt.controlEven || {}).kind);
+console.log("    13, 13, 24 (well past the top): " + (delt.controlFar || {}).kind);
+ck("one good last set, with the sets before it short, does not move the plan",
+   delt.control && delt.control.kind === "hold" && delt.control.oneOff === true,
+   JSON.stringify(delt.control && delt.control.kind));
+ck("and it says what it is waiting for",
+   delt.control && /two of the last three/i.test(delt.control.sub || ""),
+   (delt.control && delt.control.sub || "").slice(0, 90));
+ck("three sets at the top earns one on its own evidence",
+   delt.controlEven && delt.controlEven.kind === "up", JSON.stringify(delt.controlEven && delt.controlEven.kind));
+ck("a session well past the top earns one on its own",
+   delt.controlFar && delt.controlFar.kind === "up", JSON.stringify(delt.controlFar && delt.controlFar.kind));
 ck("so the refusal above is the rule working, not the rule absent",
-   delt.control && delt.control.kind === "up"
+   delt.controlFar && delt.controlFar.kind === "up"
    && (delt.out || []).every(x=> x.kind !== "up"), "");
 console.log("    (" + ran.kinds.up + " load increases were earned elsewhere in the replay)");
 ck("and increases do happen on this history", ran.kinds.up > 0, String(ran.kinds.up));
