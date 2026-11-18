@@ -321,6 +321,39 @@ excludes the session from cuts immediately and asks once; the answer becomes a r
    29 slots. Landing at the bottom on set 1 is double progression working. One to three
    reps SHORT is the pattern; 29 became 8.
 
+### G — built, reverted, and the one clue worth keeping
+
+G was built to the agreed shape and **reverted** because it broke `cutsay`, reproducibly
+and not as a flake. It is recorded here rather than left in a branch.
+
+**What was built.** `changesSinceLastTrained(wid)` reading the plan log since the end of
+your last session on that day, in two scopes — rows keyed to the day, and plan-wide rows
+keyed to no day (`PLAN_WIDE_KINDS`: targets, rule, deload, schedule, week, ease, built),
+because a volume floor, a deload, the progression setting, a gym's kit and the home gym
+change what the next session asks for and belong to no single day. A dayless row that is
+NOT one of those kinds is excluded rather than guessed about. A panel above Start on the
+Today card, a one-line tap target at the top of a live session, `S.seenChanges[wid]` as a
+per-day seen timestamp, and the panel still reachable once seen.
+
+**What broke.** `cutsay` sections 2 and 3: the card that explains a set cut the live
+session has not taken ("this session still has 4 — a row you have already written in is
+never deleted for you") stopped appearing. Confirmed against the previous build: that
+file passes, the G build fails.
+
+**THE CLUE, and it is the surprising part.** Removing BOTH call sites — the Today panel
+and the live-session line — did not fix it. The build still fails with nothing calling
+any of the new code. So the breakage is in the DEFINITIONS block, not in what renders it,
+and a probe of the cut path showed `applyFlag()` returning false with no `setsCut` written
+and no `TAB_ERR` raised. Something about inserting that block between `PLAN_RULES` and
+`planLoadNum()` changes the behaviour of the flag-applying path.
+
+**Where to start next time.** Bisect the inserted block rather than the call sites: add
+`PLAN_WIDE_KINDS` alone, then each function, running `cutsay` between each. The likely
+shapes are a name that collides with something assigned rather than declared, or a
+const/TDZ interaction with code that runs during module evaluation — the trap this
+codebase has now hit three times (`RESCUE_BACKUP_PREFIX`, `rebuildStalls` in `migrate()`,
+and whatever this turns out to be). Nothing was loosened and no assertion was touched.
+
 ---
 
 ### F — the diagnosis, written down before it is built
