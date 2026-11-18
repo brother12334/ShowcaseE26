@@ -274,43 +274,34 @@ item 11 - is invisible to it, which is exactly how item 11 was found by reasonin
 than by this scan. The scans are in this document rather than committed as a spec because
 their value is the judgement in the table, which a passing test cannot express.
 
-## 14. The plan still counted one-limb work in the pre-pair unit — DONE (2026.11.17.21)
+## 14. The plan still counts one-limb work in the pre-pair unit — OPEN
 
-Found while building the "both sides in each set" button the user asked for, and worth
-recording because the button turned out to be the smaller half of it.
+A button to fix this was asked for, built and then removed at the user's request
+(2026.11.17.21, reverted in .22). The feature is gone; the discrepancy it was built for
+is still here, so it is recorded rather than lost.
 
-**What was true.** Since P1-7 a set of a one-limb movement IS a pair: `entryPerSideWanted()`
-returns true for any `isSingleArm()` entry, and `startWorkout()` builds `perSide` sets. But
-two things still described the shape before that:
+**Measured, not assumed.** Since P1-7, `entryPerSideWanted()` returns true for any
+`isSingleArm()` entry and `startWorkout()` builds `perSide` sets, so a set of a one-limb
+movement IS a pair. `sideSets()` on a session built from a 4-set entry returns 8 — four
+per side. Two things still describe the shape before that:
 
-- **The note.** Every one-limb movement carried "alternate L/R each set", stamped on every
-  load by the migration at the top of `migrate()`. That sentence is the pre-pair
-  instruction — set 1 left, set 2 right — and it had been untrue since P1-7 shipped.
-- **The set count.** A plan line reading 4 sets of a split squat produces four PAIRS, which
-  is four per leg. Read through the note, the same line looks like two per leg. Measured,
-  not assumed: `sideSets()` on a session built from a 4-set entry returns 8, four per side.
+- **The note.** Every one-limb movement carries "alternate L/R each set", stamped on each
+  load by the migration near the top of `migrate()`. That is the pre-pair instruction
+  (set 1 left, set 2 right) and it has been untrue since P1-7 shipped.
+- **The set count.** A plan line reading 4 sets of a split squat asks for four per leg.
+  Read through the note, the same line looks like two per leg.
 
-So a person reading their own plan was out by a factor of two on exactly the movements
-where the app had quietly changed what a set means. The user's request — "3 per leg instead
-of 4 alternating sets" — was itself made through that misreading, which is why the preview
-prints per-side counts rather than raw set numbers.
+So a person reading their own plan is out by a factor of two on exactly the movements
+where the app changed what a set means. On the user's own plan that means the Bulgarian
+Split Squat at 4 sets is 4 per leg, and "move it to 3 per side" is a CUT that takes quads
+under their floor, not the increase it appears to be.
 
-**Built.** `bothSidesPlan()` surveys with no side effects, `applyBothSides()` writes, and
-`openBothSides()` shows every line before anything moves. The note is rewritten only where
-it is the app's own sentence; a note a person typed keeps their words and loses only the
-stamped half. `e.perSide = true` is written outright so a name table that changes its mind
-cannot un-convert a plan, and the stamper now produces the pair sentence for a converted
-entry instead of putting the old one back on the next load. Set changes go through
-`setChangeConflict()` (P1-5) and a floor or ceiling breach is SHOWN, not applied silently
-and not silently refused. Every row is logged under its day (P0-1).
-
-**And one real gap it surfaced.** `Standing Cable Hip Abduction` names no limb, so
-`isSingleArm()` read it as bilateral: no `startSide`, no sides recorded on anything logged
-since. Its P1-8 asymmetry check is live and correct, reading the L/R rows the OLD
-alternating log left behind — it would have starved on new data. Declared in `UNILATERAL`
-now, with the seated machine named as NOT unilateral beside it.
-
-Tests: `bothsides.mjs`, six sections, each with a bilateral control in the same plan.
+**Not fixed, deliberately.** The note could be corrected on its own — it is a description
+of what the app does, and it is wrong. The set counts could not: restating them is a
+training decision and belongs to the person, which is why it was a button rather than a
+migration. Anything built here again should keep that split, and should print per-side
+counts rather than raw set numbers, because the raw number is what carries the
+misunderstanding.
 
 ## 13. Flaky: `logstill.mjs` section 1, exact scroll equality — CLOSED (2026.11.17.20)
 

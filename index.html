@@ -7286,7 +7286,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.21";
+const APP_VERSION = "2026.11.17.22";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -8846,11 +8846,11 @@ const UNILATERAL = {
   "single-leg rdl": true,
   "single-leg calf raise": true,
   /* THE ONE THE TEXT FALLBACK COULD NEVER CATCH. "Standing Cable Hip Abduction" says
-     nothing about one leg, so it was read as bilateral: no side was marked, no startSide
-     assigned, and nothing in a new session recorded which leg did the work. The
-     asymmetry check on it is live and correct \u2014 it is reading the L/R rows the OLD
-     alternating log left behind, and would have starved on everything logged since.
-     The seated machine is both legs at once and is named here as not. */
+     nothing about one leg, so it was read as bilateral: no side was marked, and nothing
+     logged since recorded which leg did the work. Its P1-8 asymmetry check is live and
+     correct only because it is reading the L/R rows the OLD alternating log left behind
+     — it would have starved on new data. The seated machine is both legs at once and
+     is named here as not. */
   "standing cable hip abduction": true,
   "standing hip abduction": true,
   "cable hip abduction": true,
@@ -14237,20 +14237,8 @@ function migrate(){
       const style = altStyle(e);
       if(!style) return;
       const n = String(e.note||"").trim();
-      /* A movement the person has converted to pairs gets the PAIR sentence, and a
-         note already carrying either sentence is left exactly as it is. Without this
-         the stamp runs on the next load and quietly puts "alternate L/R each set" back
-         on top of the conversion. */
-      const paired = e.perSide === true;
-      const want = style === "cross" ? ALT_CROSS_NOTE
-                 : paired ? pairSideNote(e.name) : altSideNote(e.name);
-      if(style === "cross" ? /crosses? on top|arm on top/i.test(n)
-                           : (paired ? PAIR_NOTE_RE.test(n) : /alternate\s+l\s*\/\s*r/i.test(n))) return;
-      /* Converted, and still carrying the old sentence: replace it rather than append,
-         or the note ends up saying both things at once. */
-      if(paired && ALT_NOTE_RE.test(n)){
-        e.note = n.replace(ALT_NOTE_RE, want); noted = true; return;
-      }
+      const want = style === "cross" ? ALT_CROSS_NOTE : altSideNote(e.name);
+      if(style === "cross" ? /crosses? on top|arm on top/i.test(n) : /alternate\s+l\s*\/\s*r/i.test(n)) return;
       e.note = n ? n.replace(/\s*·\s*$/,"") + " · " + want : want;
       noted = true;
     };
@@ -17210,20 +17198,6 @@ function limbWord(name){
   if(byMuscle) return byMuscle;
   return "arm";
 }
-/* P1-7 \u2014 THE NOTE FOR A MOVEMENT LOGGED AS PAIRS, which is a different instruction
-   from the alternating one and has to read like one. "Alternate L/R each set" describes
-   the pre-pair shape: set 1 left, set 2 right, three sets meaning two on one side. A
-   pair is one set covering both, so the count a person reads is per side. */
-function pairSideNote(name){
-  const limb = limbWord(name);
-  return limb === "leg"  ? "one leg at a time, both legs in each set"
-       : limb === "side" ? "one side at a time, both sides in each set"
-       : "one arm at a time, both arms in each set";
-}
-const PAIR_NOTE_RE = /both (?:arms|legs|sides) in each set/i;
-/* The app's own alternating sentence, in any of its three limb wordings. Only this is
-   ever rewritten: a note a person typed, or one an imported document carried, is theirs. */
-const ALT_NOTE_RE = /(?:single (?:arm|leg)|one side at a time), alternate L\/R each set/i;
 /* The one canonical note a one-limb movement carries, in that movement's own words. */
 function altSideNote(name){
   const limb = limbWord(name);
@@ -33330,21 +33304,6 @@ function prefsSessionHTML(){
         {v:"matchWeaker", t:"Match weaker", d:"Holds both sides to the weaker one, so the gap closes."},
         {v:"both",        t:"Together",     d:"One set counts as covering both limbs."}
       ], "data-prefsides", p.sides);
-    /* P1-7 — THE PLAN STILL COUNTS IN THE OLD UNIT. The choice above is about how the
-       two sides are TREATED; this is about what one set of the movement IS. Only shown
-       while there is something it would actually change. */
-    if(p.sides !== "both" && bothSidesPlan().length){
-      h += `<div class="set-block">
-        <div class="set-name">Both sides in each set</div>
-        <div class="set-help">A set of a one-limb movement is logged as a pair now — left,
-          right, one rest — but your plan still reads "alternate L/R each set", which is
-          the shape before that. So a line reading 4 sets is already asking for 4 per leg,
-          not the 2 the note implies. This restates them in the unit they are really in:
-          ${BOTH_SIDES_TARGET} sets, ${BOTH_SIDES_TARGET} per side. You see exactly what
-          changes, per side, before anything does.</div>
-        <button type="button" class="btn ghost small" id="bothSidesAll" style="width:100%">Show me what would change…</button>
-      </div>`;
-    }
     /* ONLY ONCE THERE IS SOMETHING TO ORDER. This decides which limb gets the fresh set,
        which is meaningless until you have actually done a one-limb set — before that it
        is a question about a thing that has never happened, sitting among settings that
@@ -33357,136 +33316,6 @@ function prefsSessionHTML(){
     }
   }
   return h;
-}
-/* =====================================================================
-   BOTH SIDES IN EACH SET, ACROSS THE WHOLE PLAN
-
-   Since P1-7 a set of a one-limb movement IS a pair: left and right inside one set,
-   one rest, one tick. The plan never caught up. Two things were left describing the
-   shape the app stopped using:
-
-     THE NOTE still says "alternate L/R each set", which is the pre-pair instruction —
-     set 1 left, set 2 right. It is now simply untrue of how the set is logged.
-
-     THE SET COUNT is still an alternating count. Four sets of a split squat meant two
-     per leg; as pairs it would mean four per leg, which is twice the work nobody asked
-     for. Every converted movement has to be restated in the unit the plan now means,
-     and the person has to choose that number rather than inherit it by arithmetic.
-
-   So this is a survey and an apply, not a migration. The note is a description and
-   could be corrected silently; the set count is a training decision and may not be.
-   Nothing here runs on its own. */
-const BOTH_SIDES_TARGET = 3;
-/* What WOULD change, with no side effects, so the same function can draw the preview
-   and then do the work. One row per exercise that has something to do. */
-function bothSidesPlan(target){
-  const want = Math.max(1, parseInt(target, 10) || BOTH_SIDES_TARGET);
-  const rows = [];
-  DAYS.concat(["finisher"]).forEach(wid=>{
-    (S.program[wid] || []).forEach((e, ei)=>{
-      /* The ⇄ variant of a slot is a real exercise on a real day and is converted with
-         it; it carries no index of its own, so a set-count conflict is judged on the
-         slot it belongs to. */
-      [[e, false], [e.alt, true]].forEach(pair=>{
-        const x = pair[0], isAlt = pair[1];
-        if(!x || !x.name) return;
-        if(!entryPerSideWanted(x)) return;
-        const sets = parseInt(x.sets, 10) || 0;
-        const note = String(x.note || "");
-        const toNote = ALT_NOTE_RE.test(note) ? note.replace(ALT_NOTE_RE, pairSideNote(x.name))
-                     : (note || pairSideNote(x.name));
-        const noteMoves = toNote !== note;
-        const setsMove = !isAlt && sets !== want;
-        if(!setsMove && !noteMoves && x.perSide === true) return;
-        rows.push({wid, ei, isAlt, name: x.name, sets, toSets: isAlt ? sets : want,
-                   setsMove, note, toNote, noteMoves,
-                   already: x.perSide === true,
-                   conflict: setsMove ? setChangeConflict(wid, ei, want) : null});
-      });
-    });
-  });
-  return rows;
-}
-/* The write. `rows` is whatever bothSidesPlan() returned and the person has seen. */
-function applyBothSides(rows){
-  let n = 0;
-  (rows || []).forEach(r=>{
-    const slot = (S.program[r.wid] || [])[r.ei];
-    const x = slot && (r.isAlt ? slot.alt : slot);
-    if(!x || x.name !== r.name) return;         // the plan moved under the preview
-    const said = [];
-    if(r.setsMove){
-      said.push(r.sets + " → " + r.toSets + " sets");
-      x.sets = r.toSets;
-    }
-    if(r.noteMoves) x.note = r.toNote;
-    /* WRITTEN DOWN RATHER THAN INFERRED. entryPerSideWanted() already answers yes for
-       these from the name, but the person has now SAID it, and a name table that
-       changes its mind later must not quietly un-convert their plan. */
-    const wasPaired = x.perSide === true;
-    x.perSide = true;
-    if(!wasPaired) said.push("both sides in each set");
-    if(!said.length) return;
-    n++;
-    /* P0-1 — the day is named. A plan row filed under nothing is the audited bug. */
-    logPlanChange("programme", r.wid, r.name, said,
-      {note: "You set your one-limb movements to both sides in each set."});
-  });
-  if(n){ save(); queueSync(); }
-  return n;
-}
-function openBothSides(){
-  const rows = bothSidesPlan();
-  if(!rows.length){
-    showModal(`<h3>Nothing to change</h3>
-      <p>Every one-limb movement in your plan is already set to both sides in each set,
-         at ${BOTH_SIDES_TARGET} sets.</p>
-      <button class="btn" id="closeModal">Close</button>`);
-    return;
-  }
-  const conflicts = rows.filter(r=> r.conflict);
-  /* THE COUNTS ARE SAID PER SIDE, AND THAT IS NOT A PRESENTATION CHOICE.
-
-     These movements have been logged as pairs since P1-7: one set is left AND right.
-     The note still says "alternate L/R each set", which is the shape before that, where
-     four sets meant two per leg. So a plan reading "4 sets" has in fact been asking for
-     four per leg, and anybody reading the note believes it is two. Printing the raw
-     number alone would carry that misunderstanding straight into the decision. */
-  const perSideWord = n => "per " + (limbWord(n) === "leg" ? "leg" : limbWord(n) === "side" ? "side" : "arm");
-  const h = `<h3>Both sides in each set</h3>
-    <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">One set of
-      these is already left AND right — one set, one rest. The note still says
-      “alternate L/R each set”, which is the older shape where four sets meant two a
-      side, so the counts below are what these have actually been asking for. Nothing you
-      have already logged changes.</div>
-    <div class="gym-list">${rows.map(r=>`<div class="gym-row">
-      <div style="min-width:0">
-        <b>${esc(r.name)}</b>${r.isAlt ? `<span class="sm" style="color:var(--faint)"> (the ⇄ variant)</span>` : ""}
-        <span class="sub" style="display:block;margin-top:2px">${esc(dayName(r.wid))} · ${
-          r.setsMove ? `${r.sets} → <b>${r.toSets}</b> ${esc(perSideWord(r.name))}`
-                     : `${r.sets} ${esc(perSideWord(r.name))}, unchanged`}</span>
-        ${r.noteMoves ? `<span class="sub" style="display:block;color:var(--faint)">“${esc(r.toNote)}”</span>` : ""}
-        ${r.conflict ? `<span class="sub" style="display:block;color:var(--warn)">${esc(r.conflict.say)}</span>` : ""}
-      </div>
-    </div>`).join("")}</div>
-    ${conflicts.length ? `<div class="set-says" style="margin-top:12px">${conflicts.length === 1
-      ? "One of these takes a muscle outside the range the Body tab is holding it in."
-      : conflicts.length + " of these take a muscle outside the range the Body tab is holding it in."}
-      Element 26 will not make that change behind your back, so it is shown rather than
-      hidden — going ahead is you overruling it, which is allowed.</div>` : ""}
-    <div class="btn-row" style="margin-top:16px">
-      <button class="btn small" id="bsGo" style="flex:1">Change ${rows.length} exercise${rows.length === 1 ? "" : "s"}</button>
-    </div>
-    <div class="btn-row" style="margin-top:8px">
-      <button class="btn ghost small" id="closeModal" style="flex:1">Leave it as it is</button>
-    </div>`;
-  showModal(h);
-  const go = document.querySelector("#modal #bsGo");
-  if(go) go.onclick = ()=>{
-    const n = applyBothSides(rows);
-    hideModal(); render();
-    toast(n ? n + " exercise" + (n === 1 ? "" : "s") + ": both sides in each set" : "Nothing changed", "good");
-  };
 }
 /* Does the PLAN contain one-limb work, and have you actually LOGGED any? Two different
    questions, and the second is the one "which side first" waits on. */
@@ -48763,8 +48592,6 @@ function bind(){
     /* A clock already running has to change shape now, not at the next rest. */
     if(S.active && S.active.restTimer){ showRestUI(S.active.restTimer.min); scheduleRestAlert(); }
   });
-  const bsAll = document.getElementById("bothSidesAll");
-  if(bsAll) bsAll.onclick = ()=> openBothSides();
   document.querySelectorAll("[data-prefsides]").forEach(b=> b.onclick=()=> setPref("sides", b.dataset.prefsides,
     b.dataset.prefsides === "both" ? "A set now covers both limbs"
       : b.dataset.prefsides === "matchWeaker" ? "Both sides held to the weaker one"
@@ -61074,23 +60901,14 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.21";
+const NEWS_FOR = "2026.11.17.22";
 const NEWS = [
-  {k: "Your plan can now say “both sides in each set”, and mean it",
-   s: ["A set of a one-limb movement has been logged as a PAIR since the L/R work went "
-     + "in: left, right, one set, one rest. Your plan never caught up. It still said "
-     + "“alternate L/R each set”, which is the older shape, and it still counted sets "
-     + "in the older unit.",
-     "That gap matters more than it sounds. A line reading 4 sets of a split squat is "
-     + "ALREADY asking for 4 per leg — the note saying “alternate” is what makes it "
-     + "look like 2. Settings, under How training is run, now has “Both sides in each "
-     + "set”: it restates every one-limb movement in your plan at 3 sets, 3 per side, "
-     + "and shows you exactly what moves, per side, before anything changes. A set "
-     + "count that would take a muscle under its floor is shown rather than hidden.",
-     "Standing Cable Hip Abduction is now known to be one leg at a time. Its name says "
-     + "nothing about a limb, so nothing in the app could tell — which meant no new "
-     + "session recorded which leg did the work, while its side-balance check was "
-     + "living off the rows your older log left behind."]},
+  {k: "Standing Cable Hip Abduction is now known to be one leg at a time",
+   s: ["Its name says nothing about a limb, so nothing in the app could tell, and no "
+     + "session recorded which leg did the work. Its side-balance check has been living "
+     + "off the L/R rows your older log left behind and would have run out of them.",
+     "The seated hip abduction machine is both legs at once, and is now named as such "
+     + "so it is never confused with the standing cable version."]},
   {k: "A session is now read in the light of the gym it was done at",
    s: ["Your loads were judged against the kit in the room you are standing in now, "
      + "whenever the session happened. One afternoon somewhere with a heavier carriage "
