@@ -321,38 +321,61 @@ excludes the session from cuts immediately and asks once; the answer becomes a r
    29 slots. Landing at the bottom on set 1 is double progression working. One to three
    reps SHORT is the pattern; 29 became 8.
 
-### G — built, reverted, and the one clue worth keeping
+**G — built, broken, explained, and built again (2026.11.17.27).**
 
-G was built to the agreed shape and **reverted** because it broke `cutsay`, reproducibly
-and not as a flake. It is recorded here rather than left in a branch.
+**G — transparency (2026.11.17.27).** `changesSinceLastTrained(wid)` collects the plan
+log since the end of your last session on that day, in two scopes: rows keyed to the day,
+and plan-wide rows keyed to no day at all (`PLAN_WIDE_KINDS`: volume targets, rules,
+deload, schedule, week, ease, built). The second scope exists because a volume floor, a
+deload, the progression setting, a gym's kit and the home gym change what the next
+session asks for and are keyed to nothing, so a day-scoped list would never show them. A
+dayless row that is NOT one of those kinds is left out rather than guessed about — it is
+usually a log repair, which is not news about today.
 
-**What was built.** `changesSinceLastTrained(wid)` reading the plan log since the end of
-your last session on that day, in two scopes — rows keyed to the day, and plan-wide rows
-keyed to no day (`PLAN_WIDE_KINDS`: targets, rule, deload, schedule, week, ease, built),
-because a volume floor, a deload, the progression setting, a gym's kit and the home gym
-change what the next session asks for and belong to no single day. A dayless row that is
-NOT one of those kinds is excluded rather than guessed about. A panel above Start on the
-Today card, a one-line tap target at the top of a live session, `S.seenChanges[wid]` as a
-per-day seen timestamp, and the panel still reachable once seen.
+Shown in two places, per the user's instruction: a panel above Start on the Today card,
+where it can still be acted on, and a one-line tap target at the top of a live session
+("3 changes since your last Push A") for starting without looking at Today. Seen state is
+`S.seenChanges[wid]`, a timestamp per day, so reading Push A cannot hide Legs B. Once
+seen neither reappears, and both stay reachable — the one-liner opens the same panel in
+a sheet.
 
-**What broke.** `cutsay` sections 2 and 3: the card that explains a set cut the live
-session has not taken ("this session still has 4 — a row you have already written in is
-never deleted for you") stopped appearing. Confirmed against the previous build: that
-file passes, the G build fails.
+Tests: `autoload.mjs` section G, which also controls that a dayless log-repair row is
+excluded and that marking one day read leaves another day's unseen.
 
-**THE CLUE, and it is the surprising part.** Removing BOTH call sites — the Today panel
-and the live-session line — did not fix it. The build still fails with nothing calling
-any of the new code. So the breakage is in the DEFINITIONS block, not in what renders it,
-and a probe of the cut path showed `applyFlag()` returning false with no `setsCut` written
-and no `TAB_ERR` raised. Something about inserting that block between `PLAN_RULES` and
-`planLoadNum()` changes the behaviour of the flag-applying path.
+**And the cause, found afterwards: a CSS class-name collision.** `.chg-row`, `.chg-sub`
+and `.chg-why` already existed — they are the change-chip classes on the exercise card,
+and `.chg-sub` is the element holding "this session still has 4 — a row you have already
+written in is never deleted for you". G reused the same `chg-` prefix, and its `.chg-sub`
+rule added `text-transform:uppercase`. `innerText` reflects `text-transform`, so the
+sentence rendered as "THIS SESSION STILL HAS 4" and `cutsay`'s case-sensitive
+`/still has \d+/` stopped matching. It also silently restyled the real change chips, so
+this was a visible regression and not only a test failure.
 
-**Where to start next time.** Bisect the inserted block rather than the call sites: add
-`PLAN_WIDE_KINDS` alone, then each function, running `cutsay` between each. The likely
-shapes are a name that collides with something assigned rather than declared, or a
-const/TDZ interaction with code that runs during module evaluation — the trap this
-codebase has now hit three times (`RESCUE_BACKUP_PREFIX`, `rebuildStalls` in `migrate()`,
-and whatever this turns out to be). Nothing was loosened and no assertion was touched.
+That explains every symptom: it breaks with no call sites because CSS needs none, nothing
+is thrown, and an unrelated path appears to change behaviour. G's classes are now
+prefixed `since-`.
+
+**A gap worth naming.** `dupedecl.mjs` catches duplicate top-level JS declarations and
+would NOT have caught this: a CSS class defined in two rules is ordinary practice, so
+"duplicate class" cannot simply be banned. The narrower rule that would have caught it is
+"a new feature must not reuse a class prefix another feature owns", which needs a notion
+of ownership the file does not carry. Recorded rather than papered over; if this bites a
+third time, the cheap version is a spec that lists every class prefix with more than one
+owner.
+
+**A second bug found on the way, unrelated.** `index.html` declared `medianOf`
+TWICE, with two different bodies — one filtering non-finite values and returning an
+exact median, one doing neither and rounding — and the later won everywhere by
+hoisting. `tests/specs/dupedecl.mjs`, written to catch exactly this class of bug, found
+it on its first run. With the two split, the entire G block plus both call sites passes
+`cutsay` unchanged.
+
+So the clue recorded at the time was right and pointed the wrong way: the breakage really
+was independent of G's call sites, because it was independent of G. Inserting 4 KB of new
+top-level declarations was enough to disturb whatever fragile arithmetic the duplicate was
+feeding, and removing the duplicate made G harmless. The lesson is the one the check now
+enforces — a file this size cannot be trusted to tell you when two names collide.
+
 
 ---
 

@@ -2211,6 +2211,26 @@ button.side-chip.sc-set::after{
    the input, drawn by us.
 
    A 22px box inside a 44px hit area, because a checkbox is still a tap target. */
+/* RULE G — the changes panel. A copper rule down the left edge rather than a tinted
+   block, for the same reason the open pair uses one: a fill reads as a container and a
+   rule reads as "this is about you". */
+.since-card{border-left:3px solid var(--acc);padding-left:13px}
+.since-head{font:var(--fs-3) var(--mono);text-transform:uppercase;letter-spacing:.08em;
+  color:var(--dim);margin-bottom:9px}
+.since-sub{font:var(--fs-3) var(--mono);text-transform:uppercase;letter-spacing:.08em;
+  color:var(--faint);margin:12px 0 7px;padding-top:9px;border-top:1px solid var(--line)}
+.since-row{padding:7px 0;border-top:1px solid var(--line)}
+.since-row:first-of-type{border-top:0;padding-top:0}
+.since-what{font-size:var(--fs-5);line-height:1.4}
+.since-why{font-size:var(--fs-4);color:var(--dim);margin-top:3px;line-height:1.45}
+.since-when{font:var(--fs-3) var(--mono);color:var(--faint);margin-top:3px}
+/* The one-liner at the top of a live session: a full-width tap target, quiet enough not
+   to compete with the set you are about to do. */
+.since-note{display:block;width:100%;min-height:44px;margin:0 0 10px;padding:11px 13px;
+  border:1px solid var(--line);border-left:3px solid var(--acc);border-radius:var(--r);
+  background:var(--card2);color:var(--dim);font:inherit;font-size:var(--fs-4);
+  text-align:left;cursor:pointer}
+.since-note:active{background:var(--card)}
 .togglerow{display:flex;align-items:center;gap:11px;margin:14px 0;font-size:var(--fs-5)}
 .togglerow input[type="checkbox"]{
   -webkit-appearance:none;appearance:none;flex:0 0 auto;position:relative;
@@ -35886,6 +35906,10 @@ function viewToday(){
   const exCount = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher).length;
   const setCount = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher)
     .reduce((n, x)=> n + ((x.chosen.sets) || 0), 0);
+  /* RULE G — BEFORE START, WHERE IT CAN STILL BE ACTED ON. Above the day card rather
+     than inside it: a load that moved is news about the session you are deciding to
+     begin, not a detail of the card describing it. */
+  h += changesPanelHTML(wid, {onlyUnseen: true});
   h += `<div class="card day-open">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span class="dot" style="background:${m.color};width:17px;height:17px"></span>
@@ -36188,7 +36212,10 @@ function viewWorkoutTab(){
   const h = `<div class="hdr"><h1><span class="dot" style="background:${m.color};width:13px;height:13px;
       display:inline-block;margin-right:9px;vertical-align:middle"></span>${esc(m.name.toUpperCase())}</h1>
     <span class="hdr-r"><span class="date num">from ${esc(started)}</span></span></div>`;
-  return h + sessionBarHTML() + viewActiveSession();
+  /* RULE G — AND A LINE AT THE TOP OF THE SESSION ITSELF, for starting without looking
+     at Today. One line, not the panel: mid-session is the wrong place for a list of
+     plan edits, and the right place for knowing there is one. It stays until seen. */
+  return h + changesNoteHTML(a.workoutId) + sessionBarHTML() + viewActiveSession();
 }
 /* THE ONE SET THE WHOLE SESSION IS ON: the first not-done set of the first movement
    with work left in it. Both things that mean "here" — the live row and the rest
@@ -48794,6 +48821,22 @@ function bind(){
     /* A clock already running has to change shape now, not at the next rest. */
     if(S.active && S.active.restTimer){ showRestUI(S.active.restTimer.min); scheduleRestAlert(); }
   });
+  /* RULE G — "Got it" marks this day read; the one-liner opens the same panel in a
+     sheet so a session already under way does not have to leave the screen. */
+  document.querySelectorAll("[data-chgseen]").forEach(b=> b.onclick = ()=>{
+    markChangesSeen(b.dataset.chgseen);
+    hideModal(); render();
+  });
+  document.querySelectorAll("[data-chgopen]").forEach(b=> b.onclick = ()=>{
+    const wid = b.dataset.chgopen;
+    const body = changesPanelHTML(wid);
+    if(!body) return;
+    showModal(`<h3>Changed since your last ${esc(dayName(wid))}</h3>${body}
+      <button class="btn ghost" id="closeModal" style="margin-top:10px">Close</button>`);
+    const m = document.getElementById("modal");
+    const seen = m && m.querySelector("[data-chgseen]");
+    if(seen) seen.onclick = ()=>{ markChangesSeen(wid); hideModal(); render(); };
+  });
   document.querySelectorAll("[data-prefsides]").forEach(b=> b.onclick=()=> setPref("sides", b.dataset.prefsides,
     b.dataset.prefsides === "both" ? "A set now covers both limbs"
       : b.dataset.prefsides === "matchWeaker" ? "Both sides held to the weaker one"
@@ -52235,6 +52278,96 @@ const PLAN_RULES = {
   "log.derived":"Read back from your sessions: this happened before Element 26 kept a"
               + " record of plan changes, so no reason was written down."
 };
+/* =====================================================================
+   RULE G — WHAT CHANGED SINCE YOU LAST TRAINED THIS DAY
+
+   Every automatic change already writes a row: under its own day, with the rule that
+   made it, the sessions it read, and a snapshot to put it back. What was missing is the
+   one moment that matters — standing in the gym about to repeat a day, when a load has
+   moved since you were last here and nothing says so until you are looking at a number
+   that is not the one you remember.
+
+   TWO SCOPES, because the rules have two shapes. Most changes are keyed to a day and
+   only concern that day. The rest are plan-wide — a volume floor, the progression
+   setting, a deload, a gym's kit, which gym is home — and are keyed to no day at all,
+   so a day-scoped panel would never show them even though every one of them changes
+   what the next session asks for. Both are collected; they are shown apart, because
+   "your Push A bench went up" and "you changed how progression works" are not the same
+   kind of news.
+
+   SEEN IS PER DAY AND PER TIMESTAMP, never a blanket "dismiss all": marking Push A read
+   must not hide a change to Legs B you have not seen. */
+const PLAN_WIDE_KINDS = {targets:1, rule:1, deload:1, schedule:1, week:1, ease:1, built:1};
+function lastSessionOn(wid){
+  let best = null;
+  (S.sessions || []).forEach(s=>{
+    if(!s || s.workoutId !== wid) return;
+    if(!best || s.startedAt > best.startedAt) best = s;
+  });
+  return best;
+}
+/* `since` defaults to the end of the last session on this day, which is the question
+   being asked: what moved while I was away from it. With no such session the window is
+   everything, because nothing here has been seen yet. */
+function changesSinceLastTrained(wid, since){
+  if(!wid) return {day: [], wide: [], since: 0, seenAt: 0};
+  const last = lastSessionOn(wid);
+  const from = since != null ? since
+    : (last ? (last.finishedAt || last.startedAt || 0) : 0);
+  const rows = (S.planLog || []).filter(c=> c && c.at > from);
+  const day = rows.filter(c=> c.day === wid);
+  /* Plan-wide: no day of its own, and of a kind that reaches every day. A row with no
+     day that is NOT one of those kinds is left out rather than guessed about — it is
+     usually a log repair, which is not news about today's session. */
+  const wide = rows.filter(c=> !c.day && PLAN_WIDE_KINDS[c.kind]);
+  const seenAt = ((S.seenChanges || {})[wid]) || 0;
+  return {day, wide, since: from, seenAt,
+          unseen: day.concat(wide).filter(c=> c.at > seenAt).length};
+}
+function markChangesSeen(wid){
+  if(!wid) return;
+  if(!S.seenChanges || typeof S.seenChanges !== "object") S.seenChanges = {};
+  S.seenChanges[wid] = Date.now();
+  save(); queueSync();
+}
+/* One change in a sentence: what moved, and why. The row already carries both; this is
+   only the reading of it. */
+function changeLineHTML(c){
+  const what = ((c.changes || []).map(x=>
+    typeof x === "string" ? x
+      : [x.field || x.key, x.from, "→", x.to].filter(v=> v != null && v !== "").join(" ")
+  ).join(" · ")) || c.kind;
+  const why = c.note || PLAN_RULES[c.rule] || "";
+  return `<div class="since-row">
+    <div class="since-what"><b>${esc(c.name || "Your plan")}</b> ${esc(what)}</div>
+    ${why ? `<div class="since-why">${esc(why)}</div>` : ""}
+    <div class="since-when">${esc(fmtDateShort(c.date || dayStr(c.at)))}${
+      c.rule ? " · " + esc(c.rule) : ""}</div>
+  </div>`;
+}
+/* The one-liner. Counts the same rows the panel would show and says how many. */
+function changesNoteHTML(wid){
+  const r = changesSinceLastTrained(wid);
+  if(!r.unseen) return "";
+  const n = r.unseen;
+  return `<button type="button" class="since-note" data-chgopen="${esc(wid)}">
+    ${n} change${n === 1 ? "" : "s"} since your last ${esc(dayName(wid))} · tap to view</button>`;
+}
+function changesPanelHTML(wid, opts){
+  const r = changesSinceLastTrained(wid);
+  const all = r.day.concat(r.wide);
+  if(!all.length) return "";
+  if(opts && opts.onlyUnseen && !r.unseen) return "";
+  return `<div class="card chg-card">
+    <div class="since-head">Changed since your last ${esc(dayName(wid))}</div>
+    ${r.day.length ? r.day.map(changeLineHTML).join("") : ""}
+    ${r.wide.length ? `<div class="since-sub">And across your whole plan</div>`
+      + r.wide.map(changeLineHTML).join("") : ""}
+    <div class="btn-row" style="margin-top:10px">
+      <button class="btn ghost small" data-chgseen="${esc(wid)}" style="flex:1">Got it</button>
+    </div>
+  </div>`;
+}
 /* One side of a "from → to" pair as a number that can be compared with the other.
    Bodyweight loads are their own scale — "bw+10" against a plain 30 is not a comparison
    anybody can make — so the scale travels with the number and a mismatch reads as
@@ -61828,6 +61961,20 @@ const NEWS = [
      + "difference between the two was rounding. They are told apart now, and a new "
      + "check refuses to let the app be built with any two top-level names the same, "
      + "so this particular way of being silently wrong is closed."]},
+  {k: "You see what changed before you start the day again",
+   s: ["Element 26 edits your plan between sessions — a load synced to what you lifted, "
+     + "a weight earned, a cut — and every one of those has always been written down "
+     + "in your plan history. What it never did was tell you at the moment it matters: "
+     + "standing in the gym about to repeat a day, looking at a number that is not the "
+     + "one you remember.",
+     "The Today card now carries a panel above Start listing what moved since you last "
+     + "trained that day, each with its reason. Start without looking and there is a "
+     + "line at the top of the session saying how many there are, until you have read "
+     + "them.",
+     "Plan-wide changes are in there too — a volume floor, a deload, your progression "
+     + "setting, a gym's kit, which gym is home. Those belong to no single day, so a "
+     + "day-scoped list would never have shown them, and every one changes what the "
+     + "session in front of you asks for."]},
   {k: "A set you left something in is no longer a reason to cut a load",
    s: ["A cut wanted set 1 short of the range at or above the effort prescribed for it. "
      + "But the ramp makes set 1's target the EASY one — on a 7-8-9 prescription an "
@@ -68369,7 +68516,7 @@ const BACKUP_FIELDS = [
      where the rest days go and when the tests are — so they travel with it. */
   "setup","splitId","customSplit","splitLayout","testWeeks","program","pointer","cycleStart","cycleDone",
   "cycleManual","restDays","restLog","skipLog","restDeleted","restAuto","lastCycle","lastReview","reviewPending","checkins","easeOff","sleepPend","sleepAsked","exNotes","tourDone","sidesDefaultV2","flags","cloudAt","importSrc",
-  "exAliases","attachFixUndo","attachSplitV1","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
+  "exAliases","attachFixUndo","attachSplitV1","seenChanges","stalls","deload","blockStart","planStart","tms","meso","programWeek","builtPlan","streakMarks","shareOpts","shareSeen","wakeTime","sleepTarget","remindAt","remindBed","remindWake",
   /* The rebuild marker travels with the counters it describes: a backup carrying
      slot-keyed stalls without it would be rebuilt again on restore, harmlessly but
      pointlessly, and one carrying OLD counters with it would keep them for ever. */

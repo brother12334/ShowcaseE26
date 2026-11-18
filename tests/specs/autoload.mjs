@@ -475,6 +475,63 @@ ck("the pulldown is no longer cut off a set left in the tank",
 ck("CONTROL: the cuts with genuinely hard first sets still fire",
    fired.some(x=> /Rear Delt/.test(x)) && fired.some(x=> /Preacher/.test(x)), fired.join(" | "));
 
+console.log("\nG. CHANGED SINCE LAST TIME  (Rule G)");
+const chg = await p.evaluate(()=>{
+  const wid = "legsA";
+  const last = lastSessionOn(wid);
+  const at = (last.finishedAt || last.startedAt) + 1000;
+  /* One change on that day, and one plan-wide change with no day of its own. */
+  S.planLog.push({at, date: "2026-11-16", day: wid, kind: "programme",
+                  name: "Smith Machine Squat", changes: ["70 lb \u2192 80 lb"],
+                  rule: "sync", note: "Synced to your log."});
+  S.planLog.push({at: at + 1, date: "2026-11-16", day: null, kind: "targets",
+                  name: "Quads", changes: ["8.1 \u2192 9 sets"], rule: "lm.raise",
+                  note: "Floor raised."});
+  /* And one with no day that is NOT plan-wide: a log repair, which is not news. */
+  S.planLog.push({at: at + 2, date: "2026-11-16", day: null, kind: "revert",
+                  name: "Something", changes: ["x \u2192 y"]});
+  const before = changesSinceLastTrained(wid);
+  const panel = changesPanelHTML(wid, {onlyUnseen: true});
+  const note  = changesNoteHTML(wid);
+  markChangesSeen(wid);
+  const after = changesSinceLastTrained(wid);
+  const panelAfter = changesPanelHTML(wid, {onlyUnseen: true});
+  const noteAfter  = changesNoteHTML(wid);
+  /* Still reachable once seen, which is the condition on "does not reappear". */
+  const reachable = changesPanelHTML(wid);
+  /* A different day must not have been marked read by that. */
+  const otherUnseen = changesSinceLastTrained("pushB").unseen;
+  return {before: {day: before.day.length, wide: before.wide.length, unseen: before.unseen},
+          after: {unseen: after.unseen},
+          hadPanel: !!panel, hadNote: !!note, noteText: (note||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim(),
+          panelAfter: !!panelAfter, noteAfter: !!noteAfter, reachable: !!reachable,
+          mentionsWide: /whole plan/i.test(panel || ""),
+          mentionsSquat: /Smith Machine Squat/.test(panel || ""),
+          mentionsRepair: /Something/.test(panel || ""),
+          otherUnseen, seenKey: Object.keys(S.seenChanges || {})};
+});
+console.log("    " + JSON.stringify(chg.before) + "  note: " + chg.noteText);
+/* CORRECTED: this asserted exactly one day row. Earlier sections of this same spec apply
+   real plan syncs on legsA, so the log already carries rows for that day by the time G
+   runs - the count is 4, and all four are genuine. What matters is that the injected one
+   is among them and that the note's number matches what the panel shows. */
+ck("the day's own changes are picked up", chg.before.day >= 1, String(chg.before.day));
+ck("including the one just written", chg.mentionsSquat, String(chg.mentionsSquat));
+ck("so is a plan-wide one with no day", chg.before.wide === 1, String(chg.before.wide));
+ck("CONTROL: a dayless row that is not plan-wide is left out", !chg.mentionsRepair,
+   String(chg.mentionsRepair));
+ck("the panel appears before Start", chg.hadPanel, String(chg.hadPanel));
+ck("and separates the plan-wide ones", chg.mentionsWide, String(chg.mentionsWide));
+ck("the live-session line says how many, and agrees with the panel",
+   chg.hadNote && new RegExp("^" + chg.before.unseen + " changes? since your last").test(chg.noteText)
+   && chg.before.unseen === chg.before.day + chg.before.wide,
+   chg.noteText + "  (day " + chg.before.day + " + wide " + chg.before.wide + ")");
+ck("once seen, neither comes back", !chg.panelAfter && !chg.noteAfter && chg.after.unseen === 0,
+   JSON.stringify({panel: chg.panelAfter, note: chg.noteAfter, unseen: chg.after.unseen}));
+ck("but it stays reachable", chg.reachable, String(chg.reachable));
+ck("CONTROL: marking one day read does not hide another day's",
+   chg.otherUnseen > 0 || chg.seenKey.length === 1, JSON.stringify({otherUnseen: chg.otherUnseen, keys: chg.seenKey}));
+
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");
