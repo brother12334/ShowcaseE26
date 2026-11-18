@@ -159,10 +159,177 @@ ups.row.forEach(x=> console.log("    row       " + x));
 ck("the Oct 26 lat pulldown 5 lb increase still happens",
    ups.pulldown.some(x=> /2026-10-26 .* 135->140/.test(x)), ups.pulldown.join(" | "));
 ck("and the Nov 7 one", ups.pulldown.some(x=> /2026-11-07 .* 140->145/.test(x)), ups.pulldown.join(" | "));
-ck("the Pull A row earns one too", ups.row.length > 0, ups.row.join(" | "));
+/* CORRECTED: an earlier version of this asserted that the Pull A row earns an increase
+   too. It does not, and did not before the rule changed either - the 8th acceptance test
+   names the lat pulldown's 5 lb increases, and the row's are not among them. The
+   assertion came from a build whose sized jumps were unclamped: the row's proposal at
+   170 sat above the plan's 165 and so read as a raise, and once the jump was bounded it
+   landed exactly ON 165, which is the plan already saying it. A proposal at or below
+   what the plan prescribes is not a raise - that is the back-off-set rule, and it is
+   right. What matters here is that nothing the old rule earned was lost. */
+ck("the Pull A row is left where its plan already is", ups.row.length === 0,
+   ups.row.join(" | ") || "none, as before");
 ck("CONTROL: every prescribed load is a weight that exists", !ups.unrounded.length,
    ups.unrounded.join(" | ") || "all round");
 ck("and increases still happen across the log", ups.n >= 25, String(ups.n));
+
+console.log("\nD3. A BIG JUMP LANDS INSIDE THE RANGE, AND SAYS WHEN IT PASSES THE CAP");
+/* Two things have to be true of every raise sized off a set that beat the top of the
+   range by 3 or more. It must land somewhere the range is reachable — a jump that
+   predicts 5 reps against an 8-10 range has swapped one wrong load for another — and
+   where it exceeds the per-movement jump cap it must say so, rather than slipping past
+   because the cap is measured on a step this clause did not take.
+
+   Predicted with the app's OWN sizing arithmetic rather than a copy of it: an earlier
+   version of this check used est1RM, whose cap is deliberately lower, and reported
+   failures the code had already excluded. */
+const far = await p.evaluate(()=>{
+  const rows = [];
+  S.sessions.forEach(s=>{
+    (buildProgression(s) || []).forEach(v=>{
+      if(v.kind !== "up" || !(v.from > 0) || v.to == null) return;
+      const en = (s.entries || []).find(e=> e.name === v.name);
+      if(!en) return;
+      const grp = atTopLoadSets(en);
+      const at = (grp && grp.at.length) ? grp.at : null;
+      const lastAt = at ? at[at.length - 1] : null;
+      const st = lastAt ? lastAt.st : null;
+      if(!st) return;
+      const pe = findProgramEntryWhere(v.name, s.workoutId);
+      const rr = repRange((pe && pe.e && pe.e.reps) || en.reps);
+      if(!rr) return;
+      const reps = parseFloat(st.reps) || 0;
+      if(reps < rr[1] + 3) return;
+      const t = rpeTargetFor(en, lastAt.i);
+      const e1 = sizeE1RM(parseFloat(st.weight) || 0, reps, parseFloat(st.rpe) || 0);
+      rows.push({date: s.date, name: v.name, from: v.from, to: v.to, range: rr,
+                 pct: Math.round((v.to - v.from) / v.from * 1000) / 10,
+                 cap: Math.round((isCompound(v.name) ? JUMP_CAP_COMPOUND : JUMP_CAP_ISO) * 100),
+                 predict: Math.round(repsAtLoad(e1, v.to, t == null ? 9 : t) * 10) / 10,
+                 sized: !!v.sizedFrom,
+                 saysOverCap: !!(v.sizedFrom && v.sizedFrom.overCap),
+                 saysSo: /past the \d/.test(v.sub || "")});
+    });
+  });
+  return rows;
+});
+far.forEach(r=> console.log("    " + r.date + "  " + r.name.slice(0,26).padEnd(26)
+  + " " + r.from + "->" + r.to + "  " + r.pct + "% (cap " + r.cap + "%)  predicts "
+  + r.predict + " of " + r.range[0] + "-" + r.range[1] + (r.sized ? "  SIZED" : "  step")));
+ck("there are big-overshoot increases to judge", far.length >= 5, String(far.length));
+const sized = far.filter(r=> r.sized);
+ck("and some of them were sized off the set", sized.length >= 1, String(sized.length));
+ck("every sized jump lands at or above the bottom of its range",
+   sized.every(r=> r.predict >= r.range[0] - 0.5),
+   sized.filter(r=> r.predict < r.range[0] - 0.5).map(r=> r.name + " " + r.predict).join(" | ") || "all in range");
+ck("and none of them overshoots past the top either",
+   sized.every(r=> r.predict <= r.range[1] + 0.5),
+   sized.filter(r=> r.predict > r.range[1] + 0.5).map(r=> r.name + " " + r.predict).join(" | ") || "all in range");
+ck("a sized jump past the per-movement cap is flagged as such",
+   sized.filter(r=> r.pct > r.cap).every(r=> r.saysOverCap),
+   sized.filter(r=> r.pct > r.cap && !r.saysOverCap).map(r=> r.name).join(" | ") || "all flagged");
+ck("and says so in words, with both figures",
+   sized.filter(r=> r.saysOverCap).every(r=> r.saysSo),
+   sized.filter(r=> r.saysOverCap && !r.saysSo).map(r=> r.name).join(" | ") || "all said");
+ck("no sized jump is more than the hard ceiling on one step up",
+   sized.every(r=> r.pct <= 20 + 1e-9), sized.map(r=> r.pct + "%").join(" "));
+const sp2 = far.find(r=> /Shoulder Press/.test(r.name));
+ck("THE AUDITED CASE: the Nov 16 shoulder press predicts inside 9-13",
+   sp2 && sp2.predict >= 9 && sp2.predict <= 13, sp2 ? sp2.predict + " reps" : "not found");
+
+console.log("\nC. THE PLAN KEEPS UP WITH THE LOG  (Rule C)");
+const sync = await p.evaluate(()=>{
+  const by = {};
+  ["pushA","pullA","legsA","pushB","pullB","legsB"].forEach(w=>{
+    const s = [...S.sessions].reverse().find(x=> x.workoutId === w);
+    if(!s) return;
+    planSyncPlan(s).forEach(r=>{ by[w + "|" + r.name] = r; });
+  });
+  /* THE CAP, ON A CASE THE LOG DOES NOT CONTAIN. Their row sets are at 50, which is
+     also the rack limit, so the live data cannot tell a cap apart from a coincidence.
+     This asks the same question of a load that IS over the rack. */
+  /* THE RACK CEILING, ON A CASE THE LOG DOES NOT CONTAIN.
+
+     Their row sets are at 50, which is also the rack limit, so the live data cannot tell
+     a cap apart from a coincidence. This puts 55 into the two most recent Pull B
+     sessions that carry the movement and moves the plan off 55, so the sync has real
+     drift to act on - an earlier version mutated only the newest session, and the
+     two-session rule correctly refused it, which looked like the cap failing when it was
+     the guard working. */
+  const probe = (()=>{
+    const ss = S.sessions.filter(x=> x.workoutId === "pullB"
+      && (x.entries || []).some(e=> /Single-Arm Dumbbell Row/.test(e.name)))
+      .slice(-2);
+    if(ss.length < 2) return {err: "fixture has fewer than 2 such sessions"};
+    const keep = [];
+    ss.forEach(x=>{
+      const en = x.entries.find(e=> /Single-Arm Dumbbell Row/.test(e.name));
+      keep.push({en, sets: JSON.parse(JSON.stringify(en.sets))});
+      sideSetsWorking(en).forEach(y=>{ const st = y.ref || y; st.weight = "55"; });
+    });
+    const pe = (S.program.pullB || []).find(e=> /Single-Arm Dumbbell Row/.test(e.name));
+    const wasW = pe.weight;
+    pe.weight = 40;
+    const r = planSyncFor(pe.name, "pullB", ss[ss.length - 1]);
+    pe.weight = wasW;
+    keep.forEach(k=>{ k.en.sets = k.sets; });
+    return r || {err: "no row returned"};
+  })();
+  return {by, probe, dbMax: trainPrefs().dbMax};
+});
+Object.keys(sync.by).sort().forEach(k=>{
+  const r = sync.by[k];
+  console.log("    " + k.padEnd(46) + " " + (r.from == null ? "blank" : r.from) + " -> " + r.to + "  [" + r.why + "]");
+});
+const got = (w, n)=> sync.by[w + "|" + n];
+ck("Legs B Seated Leg Curl syncs to 160", (got("legsB","Seated Leg Curl")||{}).to === 160,
+   String((got("legsB","Seated Leg Curl")||{}).to));
+ck("Leg Extension syncs to 50", (got("legsA","Leg Extension")||{}).to === 50,
+   String((got("legsA","Leg Extension")||{}).to));
+ck("the rear delt fly comes back to the 32.5 you lift", (got("pullA","Cable Reverse Rear Delt Fly")||{}).to === 32.5,
+   String((got("pullA","Cable Reverse Rear Delt Fly")||{}).to));
+ck("the incline curl to 25", (got("pullA","Incline Dumbbell Curl")||{}).to === 25,
+   String((got("pullA","Incline Dumbbell Curl")||{}).to));
+ck("and the Legs A squat back up to the 80 you squat",
+   (got("legsA","Smith Machine Squat")||{}).to === 80, String((got("legsA","Smith Machine Squat")||{}).to));
+ck("every blank plan load is filled from the log",
+   ["pushA|Dumbbell Lateral Raise","pushB|Weighted Chest Dips","pushB|Cable Lateral Raise",
+    "pushB|Overhead Cable Triceps Extension (V-bar)","pullB|Lat Pulldown",
+    "legsB|Standing Calf Raise (Smith)","legsB|Captain's Chair Leg Raise"]
+     .every(k=> sync.by[k] && sync.by[k].why === "blank"),
+   Object.keys(sync.by).filter(k=> sync.by[k].why === "blank").length + " filled");
+/* RULE C's OWN GUARD: one session of disagreement is not drift. */
+ck("CONTROL: nothing is synced off a single session",
+   Object.keys(sync.by).every(k=> sync.by[k].why === "blank" || sync.by[k].n >= 2),
+   Object.keys(sync.by).map(k=> sync.by[k].why + ":" + sync.by[k].n).join(" "));
+ck("Single-Arm DB Row is never prescribed above the rack",
+   sync.probe && sync.probe.to === sync.dbMax,
+   sync.probe && sync.probe.err ? sync.probe.err
+     : (sync.probe ? "55 logged -> " + sync.probe.to + " (rack " + sync.dbMax + ")" : "no probe"));
+
+console.log("\nC2. SYNCING IS A CORRECTION, AND IS NEVER CALLED PROGRESS");
+const cRows = await p.evaluate(()=>{
+  const s = [...S.sessions].reverse().find(x=> x.workoutId === "legsA");
+  const before = JSON.parse(JSON.stringify(S.program.legsA));
+  const rows = planSyncPlan(s);
+  const n = applyPlanSync(rows);
+  const log = (S.planLog || []).slice(-n);
+  const after = (S.program.legsA || []).map(e=> e.name + "=" + e.weight);
+  S.program.legsA = before;                     // leave the fixture as it was found
+  return {n, after,
+          days: log.map(r=> r.wid || r.day || "(none)"),
+          rules: log.map(r=> r.rule || "(none)"),
+          notes: log.map(r=> String(r.note || "")),
+          undoable: log.filter(r=> (r.undo || []).length).length};
+});
+console.log("    " + cRows.after.join("  |  "));
+console.log("    " + cRows.notes[0]);
+ck("the changes are written to the plan log", cRows.n >= 2, String(cRows.n));
+ck("P0-1: each under its own day", cRows.days.every(d=> d === "legsA"), cRows.days.join(","));
+ck("each carries the rule that made it", cRows.rules.every(r=> r === "sync"), cRows.rules.join(","));
+ck("P2-9: and none is called progression",
+   cRows.notes.every(t=> !/progress|double progression|cleared the top/i.test(t)), cRows.notes.join(" | "));
+ck("and every one can be put back", cRows.undoable === cRows.n, cRows.undoable + "/" + cRows.n);
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;

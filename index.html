@@ -7286,7 +7286,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.23";
+const APP_VERSION = "2026.11.17.24";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -15445,11 +15445,51 @@ function repsToFailure(st){
 
    The cap mirrors est1RM's: past four reps in reserve the set stops being evidence about
    a maximum at all. */
+/* THE CAP THAT IS RIGHT FOR A REPORTED MAXIMUM AND WRONG FOR SIZING A JUMP.
+
+   E1RM_RTF_CAP stops a 25-rep set claiming a one-rep max, which is correct where the
+   figure is shown to somebody as their strength. It is the wrong cap here. Nov 16's
+   shoulder press was 17 reps at RPE 9 — 18 to failure — read as 15, which says the
+   max is 90 rather than 96 and solves for 67.5 lb. With a 10 lb Smith step the choices
+   are 60 and 70, and against the understated 90 the 70 reads as too heavy: it predicts
+   7.6 reps against a 9-13 range. Against the set's own 18 it predicts 10.1, inside the
+   range, and is the same 70.
+
+   So the sizing arithmetic runs on its own cap, and uses it for BOTH directions — the
+   estimate and the prediction — so the two cannot disagree with each other. Nothing
+   here is ever reported as a maximum. */
+/* Twenty, not twenty-five and not fifteen. Past about twenty reps to failure Epley is
+   extrapolating well beyond anything it was fitted on, and a jump sized off a 30-rep set
+   is arithmetic pretending to be evidence. */
+const SIZE_RTF_CAP = 20;
+/* AND A HARD CEILING ON THE JUMP ITSELF, whatever the estimate says.
+
+   A load far enough below its range that the estimate wants 30% more is a load nobody
+   should move 30% in one session: the estimate is least reliable exactly where the set
+   was furthest from the range, and the downside of overshooting is a session of failed
+   sets. So the sizing takes the largest step it can up to this, and the rest of the
+   correction happens next session with better evidence. The audited shoulder press is
+   16.7% and lands comfortably inside. */
+const SIZED_JUMP_MAX = 0.20;
+function sizeRtf(reps, rpe){
+  const inReserve = isFinite(rpe) && rpe > 0 && rpe <= 10 ? Math.max(0, Math.min(4, 10 - rpe)) : 0;
+  return Math.min((parseFloat(reps) || 0) + inReserve, SIZE_RTF_CAP);
+}
+function sizeE1RM(w, reps, rpe){
+  const rtf = sizeRtf(reps, rpe);
+  return (w > 0 && rtf > 0) ? w * (1 + rtf / 30) : 0;
+}
 function loadForRepsAt(e1rm, reps, rpe){
   if(!(e1rm > 0) || !(reps > 0)) return 0;
+  return e1rm / (1 + sizeRtf(reps, rpe) / 30);
+}
+/* And the same model run forwards: the reps this load should produce at that effort.
+   Used to check a proposed jump before it is offered — a raise that lands under the
+   bottom of the range is not a raise, it is a different exercise. */
+function repsAtLoad(e1rm, w, rpe){
+  if(!(e1rm > 0) || !(w > 0)) return 0;
   const inReserve = isFinite(rpe) && rpe > 0 && rpe <= 10 ? Math.max(0, Math.min(4, 10 - rpe)) : 0;
-  const rtf = Math.min(reps + inReserve, E1RM_RTF_CAP);
-  return e1rm / (1 + rtf / 30);
+  return 30 * (e1rm / w - 1) - inReserve;
 }
 // One set's estimated one-rep max, as a TRUE load and against reps taken to failure.
 function e1rmOfSet(st, add){
@@ -51634,6 +51674,25 @@ function finishWorkout(){
      is only one of the answers. On "auto" the increases are written into the programme
      here, at the moment they were earned, and the session card reports them as done
      rather than asking again. On "hold" nothing is written and nothing is suggested. */
+  /* RULE C — THE SYNC RUNS FIRST, AND THAT ORDER MATTERS.
+
+     A raise is measured against the load you lifted, not against the plan, so syncing
+     before it cannot manufacture one. The reverse order can: a plan corrected after a
+     raise has been written would overwrite the new figure with the old logged one, and
+     the increase would silently vanish on the next render.
+
+     Only on "auto". On "ask" the drift is still found and still offered — that is the
+     catch-up verdict on the grade card — but nothing is written without being asked,
+     because a setting that says ask is a setting that says ask. */
+  if(trainPrefs().progression === "auto" && !sessionNotEvidence(sessObj)){
+    try{
+      const rows = planSyncPlan(sessObj);
+      if(rows.length){
+        applyPlanSync(rows);
+        sessObj.planSync = rows.map(r=> ({name: r.name, from: r.from, to: r.to, why: r.why}));
+      }
+    }catch(e){ try{ console.error("Element 26: the plan sync threw", e); }catch(e2){} }
+  }
   if(trainPrefs().progression === "auto" && !sessionNotEvidence(sessObj)){
     sessObj.progression.filter(p=> p.kind === "up" && p.to != null).forEach(p=>{
       if(applyProgression(p.name, p.to, null, progReason(p), {wid: sessObj.workoutId})) p.auto = true;
@@ -57145,15 +57204,45 @@ function progressionFor(sess, entry){
        pick a multiple of the step this movement already progresses by. Everything after
        that is the ordinary machinery: the same stepUpLoad() the normal raise uses, and
        the same rack ceiling. */
+    let sizedPast = null;
     if(blewPast && from > 0 && to != null && !step.bodyweight && step.amount > 0){
-      const e1 = est1RM(load, repsToFailure(last));
-      const want = loadForRepsAt(e1, range[0], tRpe != null ? tRpe : rpe);
-      if(want > from + step.amount){
-        const n = Math.max(1, Math.round((want - from) / step.amount));
+      const atRpe = tRpe != null ? tRpe : rpe;
+      const e1 = sizeE1RM(load, reps, rpe);
+      const want = loadForRepsAt(e1, range[0], atRpe);
+      /* ROUNDED DOWN, NOT TO NEAREST. `want` is the load that puts the BOTTOM of the
+         range at the prescribed effort, so it is a ceiling and not a target: one step
+         past it and the first set of the next session is already under the range. An
+         earlier cut of this rounded to nearest and proposed jumps that predicted 5 and
+         7 reps against 8-10 ranges. Floor can only ever land at or under `want`, which
+         is the side of the line a prescription belongs on. */
+      let n = Math.floor((want - from) / step.amount + 1e-9);
+      /* Clamped to the ceiling above, counted in whole steps so the result stays a
+         weight the gear can make. */
+      const maxSteps = Math.floor((from * SIZED_JUMP_MAX) / step.amount + 1e-9);
+      if(maxSteps >= 1 && n > maxSteps) n = maxSteps;
+      if(n >= 1){
         const sized = capToRack(stepUpLoad(entry, from, n * step.amount, entry.name), entry.name);
-        if(isFinite(sized) && sized > to) to = sized;
+        /* AND CHECKED FORWARDS BEFORE IT IS OFFERED. Rounding, the rack ceiling and the
+           bar grid all move the number after the arithmetic, so the last word is what
+           the chosen load is actually predicted to do. */
+        if(isFinite(sized) && sized > to && repsAtLoad(e1, sized, atRpe) >= range[0] - 0.5){
+          to = sized;
+          sizedPast = {e1, want, predict: repsAtLoad(e1, sized, atRpe)};
+        }
       }
     }
+    /* RULE D — AND THIS CLAUSE IS ALLOWED PAST THE PER-MOVEMENT CAP, ON PURPOSE.
+
+       The cap exists because the smallest step the GEAR offers can be a huge fraction of
+       a light load, and a 50% jump is a different exercise. That is a statement about a
+       jump nobody chose. This jump is chosen, from a set that went three or more reps
+       past the top of the range, and sized so the bottom of the range lands at the
+       prescribed effort — the audited shoulder press is 16.7% and is the correct
+       answer. So it may exceed the cap, and where it does it says so rather than
+       slipping past unmeasured. */
+    const sizedPct = sizedPast && from > 0 ? (to - from) / from : 0;
+    const sizedCap = isCompound(entry.name) ? JUMP_CAP_COMPOUND : JUMP_CAP_ISO;
+    const sizedOverCap = !!sizedPast && sizedPct > sizedCap + 1e-9;
     /* AN INCREASE HAS TO BE AN INCREASE, AND A BACK-OFF SET IS NOT A WORKING SET.
 
        This judges the LAST set, which is right for earning a raise and wrong when the
@@ -57307,7 +57396,24 @@ function progressionFor(sess, entry){
         : "Add weight next time: " + (bwSay(entry, from, true) || fmtLoad(from))
           + " → " + (bwSay(entry, to, true) || fmtLoad(to))
           + loadMakeupNote(entry, to),
-      sub: (atSets.length > 1
+      sizedFrom: sizedPast ? {predict: Math.round(sizedPast.predict * 10) / 10,
+                              pct: Math.round(sizedPct * 1000) / 10,
+                              overCap: sizedOverCap,
+                              cap: Math.round(sizedCap * 100)} : null,
+      sub: (sizedPast
+             ? "The last set hit " + reps + " reps at " + fmtLoad(isNaN(load) ? null : load)
+               + ", " + (reps - range[1]) + " past the top of " + range[0] + "-" + range[1]
+               + ", so the jump is sized from that set rather than taken one step at a time: "
+               + fmtLoad(to) + " should put you around "
+               + Math.round(sizedPast.predict) + " reps, back inside the range"
+               + (sizedOverCap
+                  ? ". That is " + (Math.round(sizedPct * 1000) / 10) + "%, past the "
+                    + Math.round(sizedCap * 100) + "% a "
+                    + (isCompound(entry.name) ? "compound" : "isolation")
+                    + " normally jumps by — deliberately, because the load is that far out"
+                  : "")
+             : "") +
+           (sizedPast ? "" : atSets.length > 1
              ? "All " + atSets.length + " sets at " + fmtLoad(isNaN(load) ? null : load) +
                " were within a rep of " + range[1] + ", and the last one hit " + reps
              : "The set at " + fmtLoad(isNaN(load) ? null : load) + " hit " + reps +
@@ -59164,6 +59270,111 @@ function topLoggedLoad(name, days){
 /* H3 \u2014 WRITING A REP STRETCH INTO THE PLAN. The load does not move; the top of the
    range does, and the entry remembers what the range was so the next raise can put it
    back. */
+/* =====================================================================
+   RULE C \u2014 THE PLAN KEEPS UP WITH THE LOG, WITHOUT BEING ASKED
+
+   Four slots in the audited export had drifted and stayed drifted: the Legs B leg curl
+   planned at 75 while every session ran 160, the Legs A leg extension at 70 against a
+   logged 50, the incline curl at 30 against 25, the rear delt fly at 30 for three months
+   against 32.5. Five more carried no planned load at all. None of that is a judgement
+   call \u2014 the log is the record of what happened and the plan is a note about what to
+   do, so where they disagree about a load you have already lifted, the note is wrong.
+
+   Two things keep this from being a licence to rewrite the plan:
+
+     TWO SESSIONS, NOT ONE, before a load that merely differs is adopted. One session at
+     a different weight is a dumbbell somebody else left on the rack, a machine taken, a
+     bad day. Two in a row is what you are actually doing. A BLANK is adopted from one,
+     because there is nothing there to contradict.
+
+     IT RECORDS, IT NEVER PRESCRIBES. The figure written is a load out of the log, capped
+     at what the rack holds and rounded to what the gear makes. It can move a plan down
+     as readily as up, and it is never a step beyond anything performed \u2014 that is what
+     Rule D is for, and the two are kept apart on purpose so a correction can never be
+     read as progress. */
+const SYNC_LOOKBACK = 3;
+function recentSlotLoads(name, wid, sess, n){
+  const k = nrm(name);
+  const out = [];
+  const list = (S.sessions || [])
+    .filter(s=> s && s.workoutId === wid && (!sess || s.startedAt <= sess.startedAt))
+    .sort((a,b)=> b.startedAt - a.startedAt);
+  for(const s of list){
+    if(out.length >= (n || SYNC_LOOKBACK)) break;
+    const en = (s.entries || []).find(e=> e && nrm(e.name) === k);
+    if(!en) continue;
+    const add = entryBarAdd(en);
+    let top = 0;
+    sideSetsWorking(en).forEach(x=>{
+      const st = x.ref || x;
+      const w = setLoad(st, add);
+      if(w > top) top = w;
+    });
+    if(top > 0) out.push({w: top, sess: s});
+  }
+  return out;
+}
+function planSyncFor(name, wid, sess){
+  const where = findProgramEntryWhere(name, wid);
+  const e = where && where.e;
+  if(!e || where.alt) return null;
+  const loads = recentSlotLoads(name, wid, sess, SYNC_LOOKBACK);
+  if(!loads.length) return null;
+  const planW = (e.weight == null || e.weight === "") ? null : parseFloat(e.weight);
+  const raw = loads[0].w;
+  /* Capped and rounded before it is compared, not after: the plan should end up holding
+     a weight the gym can make, and a 55 lb proposal on a rack that stops at 50 is 50. */
+  const to = roundLoadableOn(e, capToRack(raw, name), name);
+  if(!(to > 0)) return null;
+  if(planW == null){
+    return {wid, name, from: null, to, why: "blank", n: 1,
+            say: "Your plan had no load on this. You worked at " + fmtLoad(raw)
+               + (Math.abs(to - raw) > 0.01 ? ", which your kit makes as " + fmtLoad(to) : "") + "."};
+  }
+  if(Math.abs(planW - to) < 0.01) return null;
+  /* TWO SESSIONS IN A ROW that disagree with the plan. They do not have to be the same
+     weight as each other \u2014 drifting upward over two sessions is still drift \u2014 only
+     both different from what the plan says. */
+  const disagree = loads.slice(0, 2).filter(x=> Math.abs(parseFloat(x.w) - planW) >= 0.01);
+  if(disagree.length < 2) return null;
+  return {wid, name, from: planW, to, why: "drift", n: disagree.length,
+          say: "Your plan says " + fmtLoad(planW) + " and your last "
+             + disagree.length + " sessions on this day were at "
+             + disagree.map(x=> fmtLoad(x.w)).join(" and ") + "."};
+}
+function planSyncPlan(sess){
+  if(!sess || !sess.workoutId) return [];
+  const out = [];
+  const seen = {};
+  (sess.entries || []).forEach(en=>{
+    if(!en || !en.name) return;
+    const k = nrm(en.name);
+    if(seen[k]) return;
+    seen[k] = 1;
+    const r = planSyncFor(en.name, sess.workoutId, sess);
+    if(r) out.push(r);
+  });
+  return out;
+}
+function applyPlanSync(rows){
+  let n = 0;
+  (rows || []).forEach(r=>{
+    const where = findProgramEntryWhere(r.name, r.wid);
+    const e = where && where.e;
+    if(!e) return;
+    const was = e.weight;
+    const undo = where.alt ? null : [planSnapOne(r.wid, e, e.name)];
+    e.weight = r.to;
+    n++;
+    /* P0-1 under its own day, P2-9 with a reason derived from what happened rather than
+       quoted from what was meant: this is never called progression, in either direction. */
+    logPlanChange("programme", r.wid, r.name,
+      [(was == null || was === "" ? "no load" : fmtLoad(parseFloat(was))) + " \u2192 " + fmtLoad(r.to)],
+      {note: (r.why === "blank" ? "Filled in from your log. " : "Synced to your log. ") + r.say,
+       rule: "sync", undo});
+  });
+  return n;
+}
 function applyRepStretch(name, newReps, reason, wid){
   const where = findProgramEntryWhere(name, wid);
   const e = where && where.e;
@@ -61228,8 +61439,23 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.23";
+const NEWS_FOR = "2026.11.17.24";
 const NEWS = [
+  {k: "Your plan keeps up with what you actually lift",
+   s: ["Four loads in your plan had drifted and stayed drifted — the Legs B leg curl "
+     + "said 75 while every session ran 160, the Legs A leg extension said 70 against a "
+     + "logged 50, the rear delt fly said 30 for three months against 32.5 — and seven "
+     + "more carried no planned load at all.",
+     "Where the plan and the log disagree about a weight you have already lifted, the "
+     + "plan is now corrected to the log: after TWO sessions in a row at a different "
+     + "weight, or after one where the plan had no load on it. The figure written is "
+     + "capped at what your rack holds and rounded to what your gear makes, so it is "
+     + "always a weight you can load.",
+     "It records, it never prescribes. It can move a load down as readily as up, it is "
+     + "never a step beyond anything you have performed, and it is never called "
+     + "progression — the change says “Synced to your log” and names the sessions it "
+     + "read. Automatic while progression is set to add weight on its own; on “ask” it "
+     + "stays an offer, as it always was."]},
   {k: "A session that beats the top of the range now earns the weight",
    s: ["A raise used to need every set at the load within a rep of the top, every one of "
      + "them at its own prescribed effort. So the Smith shoulder press on Nov 16 — 60 lb "

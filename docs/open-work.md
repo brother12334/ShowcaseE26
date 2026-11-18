@@ -274,6 +274,23 @@ item 11 - is invisible to it, which is exactly how item 11 was found by reasonin
 than by this scan. The scans are in this document rather than committed as a spec because
 their value is the judgement in the table, which a passing test cannot express.
 
+## 15. Plan patches — QUEUED, spec in docs/plan-patches-spec.md
+
+Paste a strict JSON patch in Settings, preview it as before/after with warnings, apply it
+atomically, undo it reliably. Asked for on 2026-11-18 and deliberately queued behind load
+management rules B, C, E, F and G.
+
+The spec is kept verbatim in `docs/plan-patches-spec.md`, together with a list of the
+machinery already in the app that it should reuse rather than reinvent — the rescue
+backup for its snapshots, `planSnapOne()`/`logFixUndoNow()` for the undo shape,
+`logPlanChange()` for its change rows, `setChangeConflict()` and `loadImpossible()` for
+its warnings, and `BACKUP_FIELDS` as the basis for the allowlist that keeps it away from
+account keys and tokens.
+
+One thing in it is a real design decision rather than plumbing: slots have no stable ID
+today, and the format addresses exercises by day plus name "or by slot ID when a name
+appears twice". That ID has to be invented, and it has to survive a rename.
+
 ## 14. The plan still counts one-limb work in the pre-pair unit — OPEN
 
 A button to fix this was asked for, built and then removed at the user's request
