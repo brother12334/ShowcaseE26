@@ -686,5 +686,72 @@ settings card. Caught on the first run, before the feature shipped.
 
 ---
 
+---
+
+## 18. A stall counter stranded by a rename — FIXED (2026.11.17.32)
+
+Found by the user reading a line in item 15's spec: `S.stalls` moved on a bare
+`rebuildStalls()`, and since item 11 the stored counters should always equal a fresh
+rebuild. The question asked was whether the fixture simply predates item 11's migration.
+It does not.
+
+**What was measured, before anything was changed.** The fixture is already in item 11's V2
+shape (`arms|incline dumbbell curl`, `stallsV2: 2`); `migrate()` changes `S.stalls` not at
+all; a rebuild is idempotent — rebuild twice, byte-identical. So nothing is time-dependent
+and nothing is stale-schema. Exactly one key differed:
+
+```
+pushA|overhead cable tricep extension:       undefined -> {n:0, dates:["2026-11-11"]}
+pushA|overhead cable tricep extension v-bar: {n:0, ...} -> undefined
+```
+
+**The cause.** The export's `attachSplitV1` is unset, so Rule A's attachment split runs at
+first render. While the alias was live, `nrm("Overhead Cable Triceps Extension")`
+canonicalised to the V-bar name, and that is what the counter was stored under. Rule A
+removes the alias, the entry canonicalises to its own name again, and the stored key now
+points at a movement Push A does not have. Rule A relabels the log and rebuilds nothing.
+
+**Blast radius, swept rather than assumed.** Every top-level object was searched for a key
+built from the pre-split name: two hits, both in `stalls`, and one of them (`pushB`) is
+legitimately still the V-bar. No other stored table carries it. On this export the damage
+is nil because the counter was `n:0` — a slot at `n:2` would have silently started again
+from zero and the stall protocol would not have fired when it should.
+
+**The general shape, which is why the fix is a hook and not a line.** `nrm()` is
+`canonEx()`, which reads the alias table, so anything that edits an alias changes what every
+name in the app canonicalises to. Computed state is fine; STORED state keyed by that answer
+is, from that instant, filed under a name that no longer exists. Six paths can do it: the
+attachment split, its undo, the program editor's rename, a sync that merges a remote alias
+table, and the plan patch's `slot.rename` and history-keeping `slot.replace`. **The last two
+would have reintroduced this exact bug the day item 15 shipped.**
+
+`exerciseKeysChanged(why)` re-points `USER_ALIASES`, invalidates the canon cache and
+`_EX_SLOT_IX` — which is built from `EX_LIBRARY` through `canonEx` and cached, and had to be
+nulled by hand to make Rule F's control honest — and rebuilds the counters. Anything stored
+and name-derived added later belongs in it, not in six call sites.
+
+**And the devices that already ran the split.** Rebuilding inside
+`splitAttachmentAliases()` reaches every install from here on and none of the ones where it
+has already happened: their flag is set, so it never runs again. `S.stallKeyFixV1` rebuilds
+once for everybody. A rebuild derives from the log, so it is safe on installs that were
+never affected.
+
+**`tests/specs/exkey.mjs` checks the INVARIANT, not the hook** — stored `S.stalls` equals a
+fresh rebuild — after a real boot, after the editor's rename, after `undoAttachmentSplit()`,
+after a patch rename, after a history-keeping swap, and after undoing such a patch. Section
+3 finds whatever slot carries the highest count in the CURRENT programme (the first draft
+picked the global maximum, which sits on a retired split, and skipped itself), requires
+`n >= 2`, renames it, and asserts the count survives under the new key. Section 4 performs a
+rename with the hook bypassed and asserts the invariant catches it.
+
+**Two assertions in `patch.mjs` changed with it, and the correction is the good kind.** It
+asserted that a bare `rebuildStalls()` MOVES `S.stalls` — true at the time, and the honest
+explanation for `stalls` appearing in the post-undo diff. The expectation inverts: after a
+boot the counters already equal a rebuild, so the allowed-difference list loses a member and
+is now exactly `savedAt`, `planLog`, `patchLog` — the save stamp and the two histories that
+exist to record the patch and its undo.
+
+---
+
 The remaining open items in this document are 14 (the one-limb pre-pair unit) and 17 (the
 `altadd` flake).

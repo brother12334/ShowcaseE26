@@ -36,17 +36,20 @@ const loaded = await p.evaluate(fx=>{
 }, FX);
 if(loaded.err){ console.log("the state would not load:", loaded.err); process.exit(1); }
 ck("the real export is in", loaded.n === 74, loaded.days);
-/* MEASURED BEFORE ANY PATCH EXISTS, because section 12 has to tell the difference between
-   "undo did not put something back" and "this table is rebuilt from the plan every time it
-   is asked for, and the fixture carries a stale copy". */
-const STALLS_MOVES_ALONE = await p.evaluate(()=>{
+/* CORRECTED, and the correction is the good kind. This asserted that a bare
+   rebuildStalls() MOVES S.stalls on this fixture, which was true and was the honest
+   explanation for stalls turning up in section 12's post-undo diff. It was true because
+   Rule A's attachment split relabelled the log and rebuilt nothing, leaving a counter filed
+   under a name the alias table no longer produces. exerciseKeysChanged() fixed that at
+   2026.11.17.32, so the expectation inverts: after a boot the stored counters must already
+   equal a rebuild, and section 12's allowed list loses a member. */
+const STALLS_STABLE = await p.evaluate(()=>{
   const was = JSON.stringify(S.stalls);
   rebuildStalls();
-  const moved = JSON.stringify(S.stalls) !== was;
-  return moved;
+  return JSON.stringify(S.stalls) === was;
 });
-ck("and a bare rebuildStalls() moves S.stalls on it, with no patch involved",
-   STALLS_MOVES_ALONE, String(STALLS_MOVES_ALONE));
+ck("and a bare rebuildStalls() changes nothing after a boot",
+   STALLS_STABLE, String(STALLS_STABLE));
 
 /* A patch a person would actually write, against their actual plan: the cable raise moves
    from Push B to Push A, side delts get a floor, and the squat's range narrows. */
@@ -334,11 +337,14 @@ console.log("\n12 - AND UNDOING IT PUTS BACK EXACTLY WHAT IT CHANGED");
   ck("every path the patch touched is byte-identical again",
      ["lmFloor", "program"].every(k=> diff.indexOf(k) < 0), diff.join(", "));
   /* patchLog is in the list because the list of patches you have applied IS state, and an
-     undo marks its row undone. stalls is in it for the reason section 0 measured. */
-  ck("and the only keys left differing are the save stamp, the two histories, and a derived table",
-     diff.every(k=> ["savedAt", "planLog", "patchLog", "stalls"].indexOf(k) > -1), diff.join(", "));
-  ck("and the derived one was measured at the top of this spec, before any patch existed",
-     STALLS_MOVES_ALONE, String(STALLS_MOVES_ALONE));
+     undo marks its row undone. Both histories exist to record the patch and its undo, which
+     is the point of them. Nothing else differs - stalls left this list at .32, when the
+     counters stopped going stale across a key change. */
+  ck("and the only keys left differing are the save stamp and the two histories",
+     diff.length === 3 && diff.every(k=> ["savedAt", "planLog", "patchLog"].indexOf(k) > -1),
+     diff.join(", "));
+  ck("the counters are among the things undo put back exactly",
+     STALLS_STABLE && diff.indexOf("stalls") < 0, diff.join(", "));
   const redo = await p.evaluate(id=>{
     const out = patchUndoRun(id);
     return {out: out, floor: (S.lmFloor || {}).delts_side,

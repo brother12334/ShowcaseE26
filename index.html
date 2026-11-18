@@ -7349,7 +7349,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.31";
+const APP_VERSION = "2026.11.17.32";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -22302,6 +22302,19 @@ function runOneTimeSeeds(){
       dirty = true;
     }
   }catch(e){ try{ console.error("Element 26: the attachment split threw", e); }catch(e2){} }
+  /* AND THE DEVICES THAT ALREADY RAN THE SPLIT. Rebuilding inside splitAttachmentAliases()
+     fixes it for every install from here on and reaches none of the ones where it has
+     already happened - their flag is set, so it never runs again. Those counters are filed
+     under names the alias table no longer produces, and nothing else would ever notice. A
+     rebuild is idempotent and derives from the log, so this is safe to run once for
+     everybody, including the installs that were never affected. */
+  try{
+    if(!S.stallKeyFixV1){
+      S.stallKeyFixV1 = {at: Date.now()};
+      rebuildStalls();
+      dirty = true;
+    }
+  }catch(e){ try{ console.error("Element 26: the stall key repair threw", e); }catch(e2){} }
   try{
     if(!S.exCompoundSeeded){ seedCompoundFlags(); dirty = true; }
   }catch(e){ S.exCompoundSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
@@ -47115,6 +47128,9 @@ function splitAttachmentAliases(){
     });
   });
   S.attachFixUndo = undo;
+  /* After the relabel, not before: the counters are rebuilt from the log, and the log is
+     what this function has just changed. */
+  exerciseKeysChanged("attachment split");
   return undo.renamed.length;
 }
 function undoAttachmentSplit(){
@@ -47129,9 +47145,7 @@ function undoAttachmentSplit(){
   });
   if(!S.exAliases || typeof S.exAliases !== "object") S.exAliases = {};
   Object.keys(u.aliases || {}).forEach(k=>{ S.exAliases[k] = u.aliases[k]; });
-  USER_ALIASES = S.exAliases;
-  try{ invalidateCanon(); }catch(e){}
-  try{ invalidateTableOrigin(); }catch(e){}
+  exerciseKeysChanged("attachment split undone");
   delete S.attachFixUndo;
   save(); queueSync();
   return n;
@@ -53888,10 +53902,8 @@ function openExEditor(wid, idx){
       });
       if(!attachSplit){
         S.exAliases[oldKey] = ne.name;
-        USER_ALIASES = S.exAliases;
       }
-      invalidateTableOrigin();
-      try{ invalidateCanon(); }catch(e){}
+      exerciseKeysChanged("rename in the program editor");
       if(moved) toast("Renamed, and "+moved+" logged entr"+(moved===1?"y":"ies")+
         (attachSplit ? " on this day came with it" : " came with it"));
       else if(attachSplit) toast("Renamed. Its own history stays with this day");
@@ -58192,6 +58204,37 @@ function stallKey(wid, name){ return String(wid || "") + "|" + nrm(name); }
    keep a sync from an older device from seeding nonsense. */
 function stallKeyHasSlot(k){ return typeof k === "string" && k.indexOf("|") > 0; }
 
+/* ======================================================================
+   WHEN AN EXERCISE'S KEY CHANGES
+
+   nrm() is canonEx(), which reads the alias table. So anything that edits an alias changes
+   what every name in the app canonicalises to - and every piece of STORED state keyed by
+   that answer is, from that instant, filed under a name that no longer exists. Computed
+   state is fine. Stored state is not.
+
+   THE BUG THAT BOUGHT THIS FUNCTION. Rule A's attachment split relabels the log and
+   rebuilt nothing, so on the real export the Push A triceps counter stayed filed under the
+   V-bar name it had been merged with, and the slot that actually exists had no counter at
+   all. It was n:0 there, so nothing was visible - a slot at n:2 would have silently started
+   again from zero and the stall protocol would not have fired when it should.
+
+   SIX PATHS CAN DO THIS and there will be more: the attachment split, its undo, the
+   program editor's rename, a sync that merges a remote alias table, and the plan patch's
+   rename and history-keeping swap. The last two would have reintroduced this exact bug the
+   day they shipped. So they all call this, and tests/specs/exkey.mjs checks the INVARIANT -
+   stored S.stalls equals a fresh rebuild - rather than checking that each one remembered.
+
+   Anything stored and name-derived added later belongs in here, not in six call sites. */
+function exerciseKeysChanged(why){
+  try{ USER_ALIASES = S.exAliases; }catch(e){}
+  try{ invalidateCanon(); }catch(e){}
+  try{ invalidateTableOrigin(); }catch(e){}
+  /* Built once from EX_LIBRARY through canonEx and cached, so it answers with the old
+     canonical form until it is dropped. Found by hand while writing Rule F's control,
+     which had to null it to make the measurement honest; it belongs here. */
+  try{ _EX_SLOT_IX = null; }catch(e){}
+  try{ rebuildStalls(); }catch(e){}
+}
 function rebuildStalls(){
   const before = Object.keys(S.stalls || {}).length;
   S.stalls = {};
@@ -62309,8 +62352,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.31";
+const NEWS_FOR = "2026.11.17.32";
 const NEWS = [
+  {k: "A stall counter no longer loses its place when an exercise gets renamed",
+   s: ["Element 26 counts the sessions where a slot did not move, and offers to do "
+     + "something about it at three. That counter was filed under the exercise's name \u2014 "
+     + "so when a name changed, the count was left behind under the old one and the slot "
+     + "quietly started again from zero.",
+     "Renaming is more common than it sounds: the repair that separated your two triceps "
+     + "attachments renamed entries, and so does swapping a movement while keeping its "
+     + "history, or editing a name in the program editor. Every one of those now moves the "
+     + "counters with the name, and this version rebuilds them once on your device to "
+     + "repair anything already left behind. Your logged sessions are the source either "
+     + "way; nothing was ever lost, only miscounted."]},
   {k: "Paste a change to your plan, see exactly what it would do, and take it back",
    s: ["Settings \u203a Plan patches takes a JSON document that changes your plan \u2014 loads, "
      + "rep ranges, exercises, whole days, volume floors, the kit in a gym \u2014 and shows "
@@ -69178,7 +69232,11 @@ async function pullFromGist(){
     S.rpeSugSkip = Object.assign({}, S.rpeSugSkip||{}, remote.rpeSugSkip||{});
     S.exAliases = Object.assign({}, remote.exAliases||{}, S.exAliases||{});
     S.stalls = mergeStalls(S.stalls, remote.stalls);
-    USER_ALIASES = S.exAliases; invalidateTableOrigin();
+    /* A REMOTE ALIAS ORPHANS LOCAL KEYS THE SAME WAY A LOCAL ONE DOES. The merged map
+       above is the union of two devices' counters; the rebuild that follows re-derives
+       them from the log, which is the authority, under whatever the names canonicalise to
+       NOW that the remote aliases are in. */
+    exerciseKeysChanged("aliases merged from another device");
     S.restDeleted = [...new Set([...(S.restDeleted||[]), ...(remote.restDeleted||[])])];
       S.skipLog = [...new Set([...(S.skipLog||[]), ...(remote.skipLog||[])])]
         .filter(d=> restTombstones().indexOf(d) < 0).sort();
@@ -70958,9 +71016,9 @@ const PATCH_RUN = {
              + " Use keepHistory: false unless it is the same movement under another name.");
       S.exAliases = S.exAliases || {};
       S.exAliases[nrmRaw(was)] = o.to;
-      USER_ALIASES = S.exAliases; invalidateCanon();
     }
     e.name = o.to;
+    if(o.keepHistory) exerciseKeysChanged("patch: slot.replace keeping history");
     const n = patchSessionsOn(was, wid);
     if(!o.keepHistory && n)
       c.warn(was + " has " + n + " logged session" + (n === 1 ? "" : "s") + ", which stay with "
@@ -70978,8 +71036,8 @@ const PATCH_RUN = {
     const e = S.program[wid][hit.i], was = e.name;
     S.exAliases = S.exAliases || {};
     S.exAliases[nrmRaw(was)] = o.to;
-    USER_ALIASES = S.exAliases; invalidateCanon();
     e.name = o.to;
+    exerciseKeysChanged("patch: slot.rename");
     return [{day: dayName(wid), what: "renamed", from: was, to: o.to}];
   },
 
