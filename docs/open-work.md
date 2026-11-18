@@ -321,6 +321,83 @@ excludes the session from cuts immediately and asks once; the answer becomes a r
    29 slots. Landing at the bottom on set 1 is double progression working. One to three
    reps SHORT is the pattern; 29 became 8.
 
+---
+
+### F — the diagnosis, written down before it is built
+
+F was attempted, found to be bigger than it looked, and **reverted twice** rather than
+shipped. Everything learned is here so the next attempt starts from it rather than from
+scratch. Nothing below is in the code.
+
+**The user's two real cases.** Dumbbell RDL (Legs B) and Dumbbell Shrug (Pull A), both
+planned at 50 lb, which is exactly `dbMax` at Palma Vista. The RDL's last sessions ran 13,
+13, 12 against an 8-12 range; the shrug 14, 13 against 10-15. What they get today is
+"Hold this load — the rack stops here", session after session.
+
+**Finding 1 — `EX_ALIASES` merges the barbell and dumbbell RDL.** The built-in table
+carries `"romanian deadlift":"dumbbell rdl"`. A barbell loaded to 225 and a pair of 50s
+are therefore one movement with one history, one estimated max and one ladder. It is the
+same implement-merging mistake Rule A fixed in a user's own aliases — the triceps
+attachments — sitting in the app's own table.
+
+**Finding 2 — and that merge is WHY the RDL is stuck.** `exSlotIndex()` builds three
+lookups and keeps the FIRST record written for each key (`if(!exact[c]) exact[c] = rec`).
+"Romanian Deadlift" comes before "Dumbbell RDL" in the hinge ladder, so with the two
+aliased together `exSlotFor("Dumbbell RDL")` answers with the **barbell** record — gear
+`barbell`, already the top of its ladder, nothing above it to offer. The app believes the
+lifter is holding a barbell, so of course it has nothing heavier to suggest.
+
+**Finding 3 — splitting them strands a third key.** With the barbell merge removed,
+`"Dumbbell Romanian Deadlift"` canonicalises to itself rather than to `dumbbell rdl`, so
+the long spelling of one implement becomes a separate movement. The fix is to alias the
+long spelling to the short one — same implement, unlike the barbell. This was caught by
+the F1 test, not by reading the code.
+
+**Finding 4 — there are two libraries keyed alike, and the obvious one is not the one
+that matters.** `shrug:` appears at two separate places in `index.html` (around lines
+9745 and 9880). A `Smith Machine RDL` rung added to the `EX_LIBRARY.hinge` ladder did not
+appear in `outgrownOptions()` output at all, while the options that DID appear
+(Conventional, Sumo, Trap Bar Deadlift) are not in that ladder. **So
+`outgrownOptions()` is fed from the other table. Identify which, with certainty, before
+adding any rung.**
+
+**Finding 5 — what the ladder offers for an RDL is the wrong movement pattern.** With the
+split in place the suggestions are Conventional / Sumo / Trap Bar Deadlift. None is a
+substitute for a Romanian deadlift. The rungs the user actually wants, and which their
+gym has, are **Smith Machine RDL** for the hinge and **Smith Machine Shrug / Cable Shrug**
+for the shrug (the shrug ladder already carries these three — Cable, Smith, Trap Bar —
+so the shrug needs no new rung, only a rule that lets the ceiling verdict be heard).
+
+**Finding 6 — two specs fail on the split alone, and both are correct to.**
+
+```
+FAIL dbrack   BROKEN  it holds the load instead ::
+              {"kind":"harder","msg":"Move to Conventional Deadlift", ...}
+FAIL phase2   BROKEN  every slot and gear picks exactly what the curated table says ::
+              hinge|dumbbell|Dumbbell RDL (112 vs 112)
+```
+
+`dbrack` asserts the rack-stops-here hold, which is the stuck behaviour — but its
+replacement is a bad suggestion, so the spec is right to complain until the rungs are
+fixed. `phase2` pins every slot/gear pair against a curated table, which the split moves.
+Neither is a flake; both are the suite doing its job. **This is why step 1 cannot ship on
+its own:** removing the alias unlocks a ladder whose rungs are wrong, and the first thing
+a user would see is a worse suggestion than the one they have now.
+
+**The order F must land in, as one piece:**
+
+1. Find which table feeds `outgrownOptions()` (Finding 4) and prove it with a probe.
+2. Add the right rungs there: Smith Machine RDL above the dumbbell one; confirm the shrug
+   already has Cable/Smith/Trap Bar.
+3. Split the RDL alias (Findings 1-3), including the long-spelling alias, and reconcile
+   `phase2`'s curated expectations and `dbrack`'s assertion — each with its reason in the
+   commit message, per the rule at the top of this document.
+4. The ceiling rule itself: at rack max AND the top of the range beaten in 2 sessions,
+   the harder-variation verdict outranks the plain hold, with a starting load sized from
+   the e1RM and rounded on the new movement's own gear.
+5. Dismissal memory per slot: once dismissed, do not offer that slot again until the
+   situation changes — the user's definition is 3 more sessions above the range.
+
 **Still open: F** (at dbMax and above the range for 2 sessions, propose a harder
 variation rather than prescribing the same thing again — `outgrownOptions()` and the
 `harder` verdict are most of it already) **and G** (every automatic change already writes
