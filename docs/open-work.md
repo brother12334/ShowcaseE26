@@ -274,7 +274,21 @@ item 11 - is invisible to it, which is exactly how item 11 was found by reasonin
 than by this scan. The scans are in this document rather than committed as a spec because
 their value is the judgement in the table, which a passing test cannot express.
 
-## 13. Flaky: `logstill.mjs` section 1, exact scroll equality
+## 13. Flaky: `logstill.mjs` section 1, exact scroll equality — CLOSED (2026.11.17.20)
+
+**Closed as not reproducible.** Watched from build .13 through .20, which is the whole of
+items 11, 12 and 10. It has not failed again in any full-suite run since, including the
+296-spec run on .20, and the step-1 experiment the plan below asks for has now been done:
+ten standalone runs with four CPU busy-loops saturating the machine, 10/10 pass, and the
+reading was EXACTLY equal every time (1600 → 1600), not merely within a tolerance.
+
+So the one recorded drift (1596 → 1599) stays unexplained rather than fixed, and nothing
+was changed to make it go away — no tolerance was added, no wait inserted, and the
+assertion is still exact equality. That is deliberate: a loosened assertion is how a real
+layout shift gets lost. If it returns, this section is the record of what was already
+ruled out, and step 2 below is where to start.
+
+The original entry follows, unedited.
 
 **Observed:** one failure in one full-suite run of 289 specs, 2026-11-17, on build
 2026.11.17.13:
