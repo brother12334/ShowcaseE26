@@ -40,7 +40,12 @@ await ctx.addInitScript(()=>{
 await p.goto(APP_URL,{waitUntil:'domcontentloaded'});
 await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
 
-const seed = ()=> p.evaluate(()=>{
+/* WHICH PASS'S FIXTURE THIS IS. Set before each seed and written into the state, so the
+   cold boot can tell "my fixture arrived" from "I am reading the PREVIOUS pass's bytes".
+   See the comment on fixtureLost below: that is the whole of item 17. */
+let SEED_TAG = "";
+const seed = ()=> p.evaluate(tag=>{
+  S.seedTag = tag;
   const sp=document.getElementById('splash'); if(sp) sp.remove();
   try{OB=null}catch(e){} hideModal(); document.body.classList.remove('ai-open','onboarding');
   S.setup={name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()};
@@ -51,8 +56,9 @@ const seed = ()=> p.evaluate(()=>{
     startedAt:Date.now()-5400e3, finishedAt:Date.now()-1800e3,
     entries:[{name:"Barbell Bench Press", sets:[
       {reps:8, weight:135, done:true},{reps:8, weight:135, done:true},{reps:7, weight:135, done:true}]}]}];
+  S.seedTag = tag;
   save();
-});
+}, SEED_TAG);
 await seed();
 let bad=0;
 const ck=(what,ok,got)=>{ console.log((ok?"  ok   ":"  BROKEN ")+what+(got===undefined?"":"  ["+got+"]")); if(!ok) bad++; };
@@ -128,12 +134,29 @@ const reloadAndProbe = async ()=>{
      fact about the browser, not about the app, and a spec that cannot tell the two apart
      reports the app as losing data. The fixture is required to be there before anything
      is asserted; the boot is retried, and a fixture that never arrives fails loudly. */
-  let booted = 0;
+  /* ITEM 17 — AND "A FIXTURE" IS NOT THE SAME AS "MY FIXTURE".
+
+     This asked only whether any sessions had arrived, which the PREVIOUS pass's leftovers
+     satisfy perfectly: one session, named entries, nothing to tell them apart. So when the
+     clear-and-reseed between the two movements did not reach storage in time, the cold
+     boot read pass one's bytes, the guard was happy, and the spec asserted that pass two's
+     movement had been lost - reporting the app as losing data when what had happened is
+     that the harness read a commit that was one pass out of date.
+
+     That is exactly the failure recorded on 2026.11.17.25: the names it printed were pass
+     one's final entries, down to the movement. The tag makes the guard able to tell them
+     apart, so a stale read is a retry rather than an accusation. */
+  let booted = 0, tag = null;
   for(let attempt = 0; attempt < 4; attempt++){
     await p.goto(APP_URL,{waitUntil:"domcontentloaded"});
     await p.waitForFunction(()=> typeof S!=='undefined' && !!S, null, {timeout:20000});
-    booted = await p.evaluate(()=> (S.sessions || []).length);
-    if(booted) break;
+    const got = await p.evaluate(()=> ({n: (S.sessions || []).length, tag: S.seedTag || null}));
+    booted = got.n; tag = got.tag;
+    if(booted && tag === SEED_TAG) break;
+    if(booted && tag !== SEED_TAG)
+      console.log("    read a fixture tagged " + JSON.stringify(tag) + " while expecting "
+                + JSON.stringify(SEED_TAG) + " - a stale commit, rebuilding");
+    booted = 0;
     await p.goto("about:blank", {waitUntil:"load"});
   }
   if(!booted){
@@ -167,6 +190,7 @@ const reloadAndProbe = async ()=>{
 
 for(const name of ["Alternating Cable Lateral Raise", "Single-Arm Dumbbell Row"]){
   console.log("\n=== " + name + " ===");
+  SEED_TAG = name;
   /* Start each movement from empty, and go out through about:blank for the same reason
      as above: the write has to be committed before the next boot reads it. */
   await p.goto(APP_URL,{waitUntil:"domcontentloaded"});

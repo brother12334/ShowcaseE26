@@ -755,7 +755,57 @@ exist to record the patch and its undo.
 
 ---
 
-## 17. Flaky: `altadd.mjs`, "the movement survived the reload" — OPEN
+## 17. Flaky: `altadd.mjs`, "the movement survived the reload" — CAUSE FOUND IN THE SPEC (2026-11-18), reproduction still owed
+
+**Worked through in the order the original entry sets out. Step 2 killed step 1, and my own
+recorded hypothesis with it.**
+
+**Step 2 first, because it is free.** `injuryAskDue()` requires `noteLooksInjured(s.note)` on
+one of the last twelve sessions. This spec seeds exactly one session, built as
+`{name, sets:[{reps, weight, done}]}` — no `note` field anywhere, and no `exNotes`. So
+`openInjuryAsk()` returns false before it draws anything, and the modal I blamed cannot open
+in this spec at all. Step 1, "run it with the injury prompt disabled", would have proved
+nothing: it is already effectively disabled. **The hypothesis recorded here was wrong, and it
+was mine.**
+
+**Step 3, and the cause is in the spec rather than the app or the browser.** The recorded
+failure was:
+
+```
+BROKEN the movement survived the reload  [Barbell Bench Press, Alternating Cable Lateral Raise]
+```
+
+That list is **pass one's exact final state**. The spec runs two passes — `Alternating Cable
+Lateral Raise`, then `Single-Arm Dumbbell Row` — clearing storage between them, and the
+second pass was asserting against the first pass's data.
+
+The guard could not do its job. Between passes the spec clears and reseeds, then asks "did
+the fixture reach storage?" by checking `(S.sessions || []).length`. **The previous pass's
+leftovers satisfy that perfectly**: one session, named entries, nothing to tell them apart.
+So when the clear-and-reseed did not commit in time — Chromium commits `localStorage`
+asynchronously, and a long serial suite is exactly when it is slowest — the cold boot read
+pass one's bytes, the guard was satisfied, and the spec reported the app as losing data when
+the harness had read a commit one pass out of date.
+
+**Tightened, not loosened.** The seed writes `S.seedTag`, and the boot requires its own tag
+rather than merely "some fixture". A stale read is now a logged retry:
+
+```
+read a fixture tagged "Alternating Cable Lateral Raise" while expecting
+"Single-Arm Dumbbell Row" - a stale commit, rebuilding
+```
+
+**Still owed: a reproduction.** This has not been seen to fire. The mechanism is proven to
+exist — the guard demonstrably cannot distinguish the two fixtures, which is a static fact
+about the code — and the observed failure matches it down to the movement named. That is
+strong circumstantial evidence and not the same as watching the retry line appear. The
+remaining step is the original entry's own step 3: run `altadd` repeatedly under CPU
+contention and record whether it ever fires. Until it does, this stays recorded as explained
+rather than closed.
+
+The original entry follows, unedited.
+
+### The original entry
 
 **Observed:** one failure in one full-suite run of 297, on 2026.11.17.25:
 
