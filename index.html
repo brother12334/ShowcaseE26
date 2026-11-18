@@ -2183,10 +2183,23 @@ button.side-chip.sc-set::after{
 .modal .rpe-scale{font-family:var(--mono);font-size:var(--fs-4);line-height:2;color:var(--text)}
 .field{margin-bottom:12px}
 .field label{display:block;color:var(--dim);font:var(--fs-3) var(--mono);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
-.field input,.field textarea{
+.field input,.field textarea,.field select{
   width:100%;padding:13px;border-radius:var(--r);border:1px solid var(--line);
   background:var(--card2);color:var(--text);font-size:var(--fs-5);font-family:inherit;
 }
+/* A SELECT ON A SHEET IS STILL OURS. Left to itself a dropdown is drawn by the platform
+   — a light chrome bar with a blue chevron on a dark copper sheet, and the loudest
+   thing on it. Same control, same semantics, drawn like the inputs beside it, with the
+   chevron put back by hand because `appearance:none` takes it away. */
+.field select{
+  appearance:none;-webkit-appearance:none;min-height:46px;cursor:pointer;
+  padding-right:34px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),
+                   linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+  background-position:calc(100% - 18px) calc(50% + 1px),calc(100% - 13px) calc(50% + 1px);
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+}
+.field select:focus{border-color:var(--acc);outline:none}
 .field .duo{display:flex;gap:8px}
 .field .duo input{flex:1}
 /* H — THE ONE CONTROL THAT WAS NOT OURS.
@@ -7273,7 +7286,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.19";
+const APP_VERSION = "2026.11.17.20";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -22113,6 +22126,9 @@ function runOneTimeSeeds(){
     }
   }catch(e){ try{ console.error("Element 26: the stall rebuild threw", e); }catch(e2){} }
   try{
+    if(seedHomeGym()) dirty = true;
+  }catch(e){ try{ console.error("Element 26: the home gym seed threw", e); }catch(e2){} }
+  try{
     if(!S.exCompoundSeeded){ seedCompoundFlags(); dirty = true; }
   }catch(e){ S.exCompoundSeeded = {at: Date.now(), n: 0, failed: String((e && e.message) || e)}; dirty = true; }
   try{
@@ -33364,6 +33380,12 @@ function openGymKit(id){
     <div class="set-says">A rack that ends at ${esc(fmtLoad(g.dbMax != null ? g.dbMax : (p.dbMax != null ? p.dbMax : (kg ? 40 : 100))))}
       makes every suggestion past it a weight that is not in the building. Told, Element 26 stops there.</div>
 
+    <div class="rev-head" style="margin-top:16px">Cable stacks</div>
+    <div class="field"><label>Gap from one pin to the next</label>
+      <input id="gkStackStep" inputmode="decimal" ${num(g.stackStep, usual(p.stackStep))}></div>
+    <div class="set-says">A stack with 2.5 ${esc(unitWord())} add-ons and one without are different
+      rooms. Told, Element 26 stops calling the loads you actually used impossible here.</div>
+
     <div class="rev-head" style="margin-top:16px">Plates</div>
     <div class="field"><label>Smallest plate, one side</label>
       <input id="gkPlStep" inputmode="decimal" ${num(g.plateStep, usual(p.plateStep))}></div>
@@ -33404,6 +33426,7 @@ function openGymKit(id){
     g.dbStep = readNum("#gkDbStep");
     g.dbMax = readNum("#gkDbMax");
     g.plateStep = readNum("#gkPlStep");
+    g.stackStep = readNum("#gkStackStep");
     g.plates = GYM_KIT.plates ? GYM_KIT.plates.slice() : null;
     /* If this is the gym you are standing in, the session has to agree with it now. */
     if(S.active && S.active.gymId === g.id) applyGymGear(g);
@@ -33413,7 +33436,7 @@ function openGymKit(id){
   };
   const cl = m.querySelector("#gkClear");
   if(cl) cl.onclick = ()=>{
-    ["dbStep","dbMax","plateStep","plates"].forEach(k=> delete g[k]);
+    ["dbStep","dbMax","plateStep","stackStep","plates"].forEach(k=> delete g[k]);
     GYM_KIT = null;
     save(); queueSync(); hideModal(); render();
     toast(g.name + " uses your usual kit");
@@ -36280,7 +36303,7 @@ function viewActiveSession(){
        answers. */
     h += restNoteLineHTML(en);
     h += plateLineHTML(en, last);
-    h += impossibleLineHTML(en);
+    h += impossibleLineHTML(en, a);
     if(en.warm) h += warmupHTML(en, en.warm, {workoutId: a.workoutId, anyDay, occ});
     if(en.startSide) h += altHintHTML(en.altStyle||"side", en.startSide, en.sets.length, en.name);
     h += asymHintHTML(en);
@@ -44186,7 +44209,9 @@ function viewHistory(){
         s.feel ? ' \u00b7 ' + feelIcon(s.feel) + ' ' + esc(FEEL_WORDS[s.feel-1]) : ''}</div>
       <div class="hn">${sessNotables(s, HCTX).map(n=>
         `<span class="hn-b hn-${n.k}">${n.k === "pr" ? ICON.pr + " " : ""}${esc(n.t)}</span>`).join("")}</div>
-      ${s.gymName && gymList().length > 1 ? `<div class="sub" style="margin-top:3px;color:var(--faint)">at ${esc(s.gymName)}</div>` : ""}
+      ${((lab)=> lab && gymList().length > 1
+        ? `<div class="sub" style="margin-top:3px;color:var(--faint)">at ${esc(lab)}</div>` : ""
+        )(sessionGymLabel(s))}
       ${s.note?`<div class="sub" style="margin-top:4px;font-style:italic">"${esc(s.note)}"</div>`:""}
       <div class="detail">${((ssm)=> s.entries.map((e,i)=>
         `<div class="exline"><b>${ssm[i]?`<span class="ss-tag">${ssm[i].letter}${ssm[i].pos}</span> `:""}${esc(e.name)}</b>${
@@ -45458,12 +45483,15 @@ function gymsCardHTML(){
   if(gs.length){
     h += `<div class="gym-list">` + gs.map(g=>{
       const bits = [];
+      const home = S.homeGym === g.id;
+      if(home) bits.push("home gym");
       if(g.n) bits.push(g.n + " session" + (g.n === 1 ? "" : "s"));
       if(g.bar != null) bits.push("bar " + fmtLoad(g.bar));
       if(g.smith != null) bits.push("carriage " + fmtLoad(g.smith));
       if(g.dbStep != null) bits.push("db " + fmtLoad(g.dbStep) + " steps");
       if(g.dbMax != null) bits.push("rack to " + fmtLoad(g.dbMax));
       if(g.plateStep != null) bits.push("plate " + fmtLoad(g.plateStep));
+      if(g.stackStep != null) bits.push("stack " + fmtLoad(g.stackStep) + " steps");
       if(Array.isArray(g.plates) && g.plates.length) bits.push(g.plates.length + " plate sizes");
       return `<div class="gym-row">
         <div style="min-width:0">
@@ -45471,12 +45499,25 @@ function gymsCardHTML(){
           <span class="sub" style="display:block;margin-top:2px">${bits.length ? esc(bits.join(" \u00b7 ")) : "not trained at yet"}</span>
         </div>
         <span class="icon-btns">
+          <button data-gymhome="${esc(g.id)}" aria-label="${home ? "Stop treating " + esc(g.name) + " as home" : "Make " + esc(g.name) + " my home gym"}"
+            title="${home ? "Your home gym" : "Make this my home gym"}" aria-pressed="${home}"
+            style="${home ? "color:var(--acc)" : ""}">${home ? "\u2605" : "\u2606"}</button>
           <button data-gymkit="${esc(g.id)}" aria-label="Equipment at ${esc(g.name)}" title="Equipment">${ICON.barbell || "\u2696"}</button>
           <button data-gymren="${esc(g.id)}" aria-label="Rename ${esc(g.name)}">\u270e</button>
           <button data-gymdel="${esc(g.id)}" aria-label="Forget ${esc(g.name)}">\u2715</button>
         </span>
       </div>`;
     }).join("") + `</div>`;
+  }
+  if(gs.length){
+    const hg = homeGym();
+    h += `<div class="set-says" style="margin-top:8px">${hg
+      ? `\u2605 marks your home gym, ${esc(hg.name)}. Sessions logged before you set gyms
+         up carry no gym at all, and those are read as ${esc(hg.name)} \u2014 shown as
+         \u201c${esc(hg.name)} (assumed)\u201d, so you can see where the app is guessing.
+         Tag one in the session editor and it stops guessing about that one.`
+      : `No home gym set. Tap \u2606 on the one you train at most, and sessions logged
+         before you set gyms up will be read as that gym rather than as nowhere.`}</div>`;
   }
   h += `<div class="btn-row" style="margin-top:12px">`;
   if(on){
@@ -48870,6 +48911,14 @@ function bind(){
     save(); queueSync(); render();
     toast("Forgotten — that one runs as written here now", "good");
   });
+  document.querySelectorAll("#app [data-gymhome]").forEach(b=> b.onclick = ()=>{
+    const g = gymById(b.dataset.gymhome);
+    if(!g) return;
+    const was = S.homeGym === g.id;
+    setHomeGym(was ? null : g.id);
+    render();
+    toast(was ? g.name + " is no longer your home gym" : g.name + " is your home gym", "good");
+  });
   document.querySelectorAll("#app [data-gymkit]").forEach(b=> b.onclick = ()=>{
     GYM_KIT = null; openGymKit(b.dataset.gymkit);
   });
@@ -50018,6 +50067,106 @@ function gymList(){
   if(!Array.isArray(S.gyms)) S.gyms = [];
   return S.gyms;
 }
+/* ======================================================================
+   WHICH GYM WAS THIS SESSION AT, AND WHAT WAS IN THE ROOM
+
+   A session has recorded its gym for a while, and almost nothing read it. The equipment
+   profile is global: arriving at another gym copies that gym's kit into trainPrefs() and
+   leaves it there, so "what kit does the app think you have" has always meant "the last
+   gym you were at". Every judgement about a load \u2014 is this weight reachable, what was
+   the last one, what should the next one be \u2014 was therefore made against that one
+   profile, whichever gym the session in question actually happened in.
+
+   THE HOME GYM IS SAID, NOT INFERRED. It would be easy to call the gym with the most
+   sessions home, and wrong: train somewhere else for a month and the app would quietly
+   decide you had moved, re-judging years of training against a room you were visiting.
+   S.homeGym is set once, deliberately.
+
+   AN UNTAGGED SESSION IS ASSUMED TO BE HOME, AND SAYS SO. Everything logged before gyms
+   existed carries no gymId, and those sessions were overwhelmingly at home \u2014 treating
+   them as unknown would throw away most of the log for exactly the checks it is needed
+   for. So they are counted as home for progression and for the impossible-load check,
+   and labelled "(assumed)" wherever a gym is shown, so the assumption is visible rather
+   than silent. Retagging a session in the editor settles it, and it stops being assumed. */
+function homeGym(){
+  const id = S.homeGym;
+  return id ? gymById(id) : null;
+}
+/* THE ONE TIME IT IS ALLOWED TO LOOK AT THE LOG. An existing user has a home gym and has
+   never been asked which it is, and "nothing is home until you say so" would mean every
+   session before gyms existed is unlabelled forever. So the answer is guessed ONCE, from
+   where the most sessions were logged, and then written down \u2014 after which it is a
+   setting like any other and the log can never move it again. The stamp is checked
+   against `undefined`, not falsiness, so deliberately clearing it stays cleared. */
+function seedHomeGym(){
+  if(S.homeGym !== undefined) return false;
+  const tally = {};
+  (S.sessions || []).forEach(s=>{ if(s && s.gymId) tally[s.gymId] = (tally[s.gymId] || 0) + 1; });
+  let best = null, n = 0;
+  Object.keys(tally).forEach(id=>{ if(tally[id] > n && gymById(id)){ best = id; n = tally[id]; } });
+  S.homeGym = best;
+  return true;
+}
+function setHomeGym(id){
+  S.homeGym = id || null;
+  save(); queueSync();
+}
+/* {gym, id, name, assumed}. `gym` may be null where nothing is known at all \u2014 no tag on
+   the session and no home gym set \u2014 and every caller has to be able to live with that,
+   because it is the state every new install is in. */
+function sessionGym(sess){
+  /* NO SESSION IS NOT AN UNTAGGED SESSION. The home-gym assumption is about a session
+     that was logged without a gym on it; asked about nothing at all \u2014 which is how
+     every live check and every bare caller asks \u2014 the answer is that nothing is known,
+     so kitFor(null) stays exactly trainPrefs() and a check made mid-workout is judged
+     against the room you are standing in rather than against home. */
+  if(!sess) return {gym: null, id: null, name: "", assumed: false};
+  const tagged = sess && sess.gymId ? gymById(sess.gymId) : null;
+  if(tagged) return {gym: tagged, id: tagged.id, name: tagged.name || "", assumed: false};
+  if(sess && sess.gymId){
+    /* Tagged with a gym that has since been deleted. The name was copied onto the
+       session when it was filed, so it can still be said. */
+    return {gym: null, id: sess.gymId, name: sess.gymName || "", assumed: false};
+  }
+  const home = homeGym();
+  if(home) return {gym: home, id: home.id, name: home.name || "", assumed: true};
+  return {gym: null, id: null, name: "", assumed: false};
+}
+/* What to call it on screen. The "(assumed)" is not decoration: it is the difference
+   between a fact and a guess the app is acting on. */
+function sessionGymLabel(sess){
+  const g = sessionGym(sess);
+  if(!g.name) return "";
+  return g.assumed ? g.name + " (assumed)" : g.name;
+}
+/* Two sessions are at the same gym when their resolved gyms are, assumed or not \u2014 which
+   is the point of assuming: an untagged session and a home-tagged one are the same room. */
+function sameGymAs(a, b){
+  const x = sessionGym(a), y = sessionGym(b);
+  if(!x.id || !y.id) return x.id === y.id;      // both unknown counts as the same unknown
+  return x.id === y.id;
+}
+/* THE KIT THAT WAS IN THE ROOM, for the session given. Falls back field by field to the
+   global preferences, which is what a gym record means: only what is different about
+   this room. With no session, or no gym for it, this is exactly trainPrefs() and every
+   existing caller behaves as it always did. */
+function kitFor(sess){
+  const p = trainPrefs();
+  const g = sessionGym(sess).gym;
+  const pick = (k, pk)=> (g && g[k] !== undefined && g[k] !== null && g[k] !== "")
+    ? g[k] : p[pk];
+  return {
+    stackStep: pick("stackStep", "stackStep"),
+    dbStep: pick("dbStep", "dbStep"),
+    dbMax: pick("dbMax", "dbMax"),
+    plateStep: pick("plateStep", "plateStep"),
+    barWeight: pick("bar", "barWeight"),
+    smithWeight: pick("smith", "smithWeight"),
+    barMode: p.barMode,
+    gym: g, gymName: sessionGym(sess).name, assumed: sessionGym(sess).assumed
+  };
+}
+
 function gymById(id){ return gymList().find(g=> g && g.id === id) || null; }
 /* One reading, with a hard ceiling on how long it may take. getCurrentPosition can hang
    indefinitely on a device that has been refused location at the OS level without ever
@@ -50230,7 +50379,12 @@ const GYM_GEAR = [
   {k:"dbMax",     p:"dbMax",      say: v=> v == null ? "no rack limit" : "rack to " + fmtLoad(v)},
   {k:"plateStep", p:"plateStep",  say: v=> v == null ? "plate steps unset" : "smallest plate " + fmtLoad(v)},
   {k:"plates",    p:"plates",     arr:true,
-   say: v=> v == null ? "the usual plates" : v.length + " plate sizes"}
+   say: v=> v == null ? "the usual plates" : v.length + " plate sizes"},
+  /* THE CABLE STACK, WHICH WAS NEVER HERE. A stack that moves in 5s and one with 2.5 lb
+     add-ons are different rooms, and with no per-gym value every session was judged
+     against whichever one was set globally — so one of the two gyms was always being
+     told its loads were impossible. */
+  {k:"stackStep", p:"stackStep",  say: v=> v == null ? "stack steps unset" : "stack in " + fmtLoad(v) + " steps"}
 ];
 const sameGear = (a, b)=> Array.isArray(a) || Array.isArray(b)
   ? JSON.stringify(Array.isArray(a) ? a : null) === JSON.stringify(Array.isArray(b) ? b : null)
@@ -53623,6 +53777,44 @@ function editSetRowsHTML(sess, en, ei){
   return h;
 }
 
+/* RETAGGING A SESSION, which is the only way an untagged one stops being a guess.
+
+   The gym is read when you tap Start, from one location reading, and that is the only
+   moment the app ever gets to ask. Everything before gyms existed, every session started
+   with location off, and every time the reading was wrong lands here \u2014 and the gym is
+   not cosmetic: it decides which bar weight, which rack limit and which stack step the
+   session is judged against, so getting it wrong misreads the training.
+
+   Saving goes through setEditSaved(), so retagging rescores the session and rebuilds the
+   stall counters against the kit that was actually in the room. */
+function sessGymFieldHTML(s){
+  const gs = gymList();
+  const info = sessionGym(s);
+  if(!gs.length){
+    return info.name ? `<div class="field"><label>Which gym was this?</label>
+      <div class="set-says" style="margin-top:2px">Filed at ${esc(info.name)}, which is no longer
+        in your list of gyms.</div></div>` : "";
+  }
+  const opts = [`<option value=""${s.gymId ? "" : " selected"}>Not recorded</option>`]
+    .concat(gs.map(g=> `<option value="${attrSafe(g.id)}"${s.gymId === g.id ? " selected" : ""}>${
+      esc(g.name)}${S.homeGym === g.id ? " (home)" : ""}</option>`));
+  /* A gym that has been deleted since, kept so that choosing something else is a
+     decision rather than the only option on the list. */
+  if(s.gymId && !gymById(s.gymId)) opts.push(
+    `<option value="${attrSafe(s.gymId)}" selected>${esc(info.name || "a gym you have forgotten")}</option>`);
+  const says = info.assumed
+    ? `Nothing was recorded for this one, so Element 26 reads it as <b>${esc(info.name)}</b> and
+       says so wherever it shows up. Pick the gym and it stops guessing about this session.`
+    : s.gymId
+      ? `Filed at <b>${esc(info.name)}</b>. Bar and carriage weights, the rack limit and the
+         stack step for this session are read from that gym.`
+      : `Not recorded, and no home gym is set, so this session is judged against your
+         current kit settings.`;
+  return `<div class="field"><label>Which gym was this?</label>
+    <select id="sessGymEdit">${opts.join("")}</select>
+    <div class="set-says">${says}</div>
+  </div>`;
+}
 function renderSessEditor(s){
   let h = `<h3>Edit session, ${esc(dayName(s.workoutId))}, ${fmtDate(s.date)}</h3>
   <div class="field"><label>Session note</label><input id="sessNoteEdit" value="${esc(s.note||"")}" placeholder="optional"></div>
@@ -53651,7 +53843,8 @@ function renderSessEditor(s){
       : `Injury, illness, or anything that makes this session a poor guide to your
          training. It stays in your history either way; Element 26 just stops learning
          from it.`}</div>
-  </div>`;
+  </div>
+  ${sessGymFieldHTML(s)}`;
   if(s.entries.length){
     h += `<div class="sub" style="margin:2px 0 6px">Use ↑ ↓ to put the exercises back in the order you actually did them.</div>`;
     /* ONE WRAPPER ROUND THE WHOLE LOT, carrying the session id. Every set handler in
@@ -53807,6 +54000,20 @@ function renderSessEditor(s){
     setEditSaved(s);
   });
 
+
+  const gy = $("#modal #sessGymEdit");
+  if(gy) gy.onchange = ()=>{
+    const id = gy.value || "";
+    const g = id ? gymById(id) : null;
+    if(!id){
+      delete s.gymId; delete s.gymName;
+    } else {
+      s.gymId = id;
+      s.gymName = g ? (g.name || "") : (s.gymName || "");
+    }
+    setEditSaved(s);
+    toast(id ? "Filed at " + ((g && g.name) || "that gym") : "Gym cleared from this session", "good");
+  };
 
   const ne = $("#sessNoteEdit");
   if(ne) ne.onchange = ()=>{ s.note = ne.value.trim(); s.edited = Date.now(); save(); queueSync(); };
@@ -55671,24 +55878,48 @@ function loggedLoadRecently(name, days){
    used 32.5, and the same movement on two days of a split has two different loads — so
    "the last load" without a day is a question with two right answers. Through the
    adapter, because a paired set holds its loads on its sides. */
-function lastLoggedLoad(name, wid){
+/* THE LAST LOAD, FROM A ROOM WITH THE SAME KIT IN IT.
+
+   This walked the whole log newest-first and returned the heaviest working set, so a
+   single session at another gym — heavier carriage, dumbbells that go up in tens — set
+   the starting point for the next session at home, silently, and the session after that
+   read as a regression that never happened.
+
+   `opts.gym` is the session whose gym the answer should match. Sessions at that gym are
+   preferred; a different one is used only where the slot has no history there at all,
+   and the answer then says so, so a caller can take it as an estimate and refuse to let
+   it prescribe. Cross-gym data may inform; it may not instruct.
+
+   Still returns a bare number unless asked for detail, so no existing caller changes
+   behaviour except by being given a gym to care about. */
+function lastLoggedLoad(name, wid, opts){
   const key = nrm(name);
   if(!key) return null;
-  for(let i = (S.sessions || []).length - 1; i >= 0; i--){
-    const s = S.sessions[i];
-    if(!s) continue;
-    if(wid && s.workoutId !== wid) continue;
-    let found = null;
-    (s.entries || []).forEach(en=>{
-      if(nrm(en.name) !== key) return;
-      sideSetsWorking(en).forEach(x=>{
-        const w = parseFloat(x.weight) || 0;
-        if(w > 0 && (found == null || w > found)) found = w;
+  const want = opts && opts.gym ? sessionGym(opts.gym).id : undefined;
+  const detail = !!(opts && opts.detail);
+  const scan = (sameGymOnly)=>{
+    for(let i = (S.sessions || []).length - 1; i >= 0; i--){
+      const s = S.sessions[i];
+      if(!s) continue;
+      if(wid && s.workoutId !== wid) continue;
+      if(sameGymOnly && want !== undefined && sessionGym(s).id !== want) continue;
+      let found = null;
+      (s.entries || []).forEach(en=>{
+        if(nrm(en.name) !== key) return;
+        sideSetsWorking(en).forEach(x=>{
+          const w = parseFloat(x.weight) || 0;
+          if(w > 0 && (found == null || w > found)) found = w;
+        });
       });
-    });
-    if(found != null) return found;
-  }
-  return null;
+      if(found != null) return {w: found, sess: s};
+    }
+    return null;
+  };
+  const hit = (want === undefined ? null : scan(true)) || scan(false);
+  if(!hit) return null;
+  if(!detail) return hit.w;
+  return {w: hit.w, crossGym: want !== undefined && sessionGym(hit.sess).id !== want,
+          gym: sessionGymLabel(hit.sess), date: hit.sess.date};
 }
 function progressionStepRaw(e){
   const n = nrm(e && e.name);
@@ -55724,7 +55955,11 @@ function progressionStepRaw(e){
       return st(5, {unit: U, bodyweight: true,
               why: "bodyweight movement: add external load once the top of the range clears on the first two sets"});
     }
-    const lw = lastLoggedLoad(e && e.name);
+    /* ASKED FROM WHERE YOU ARE STANDING. The only thing this number decides is how big
+       a step to offer, but "a light load, so a small step" read off a session at a gym
+       with different dumbbells is the wrong step for this room. With no session open,
+       sessionGym(null) knows nothing and the scan is the whole log, as it always was. */
+    const lw = lastLoggedLoad(e && e.name, null, {gym: S.active || null});
     const gear = equipmentOf(e && e.name);
     /* It is a loaded movement with the number missing, so it is stepped like one. The
        class rules below all key off the name, and the name is all there is here. */
@@ -60653,8 +60888,25 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.19";
+const NEWS_FOR = "2026.11.17.20";
 const NEWS = [
+  {k: "A session is now read in the light of the gym it was done at",
+   s: ["Your loads were judged against the kit in the room you are standing in now, "
+     + "whenever the session happened. One afternoon somewhere with a heavier carriage "
+     + "and 2.5 lb stack add-ons re-judged the whole log, and the sessions either side "
+     + "of it read as a plateau and a jump that never happened.",
+     "The cable stack step is now a per-gym setting like the dumbbells and the plates, a "
+     + "set you have already logged is only called impossible if it was impossible AT "
+     + "THAT GYM, and the starting point for your next session comes from the same room "
+     + "where there is history there — falling back to another gym only when there is "
+     + "not, and saying so when it does.",
+     "You can also set the gym on a session after the fact, in the session editor, and "
+     + "the gym is now on the report and in the CSV export.",
+     "Sessions logged before gyms existed carry none, and those are read as your HOME "
+     + "GYM — marked with a star in Settings, and shown as “(assumed)” wherever the "
+     + "gym appears, so you can see where Element 26 is guessing rather than reading. "
+     + "The home gym is a setting, not a tally: training somewhere else for a month "
+     + "cannot move it."]},
   {k: "Deleting a session now corrects the stall counters",
    s: ["A stall counter is a running total over your sessions in order, so taking one out "
      + "of the middle cannot be undone in place \u2014 the runs either side of it may now be "
@@ -63169,10 +63421,14 @@ function loadSeenSessions(name, w){
    used in exactly one session is the typo case this was built for. Shown either way, and
    the log left alone either way. */
 const LOAD_TRUST_SESSIONS = 2;
-function loadImpossible(name, w){
+/* `sess` is the session the load was logged in, so the question is judged against the
+   kit that was in THAT room rather than against whatever profile happens to be loaded
+   now. Without one this is exactly what it always was, which covers every live call: the
+   set you are typing is in the session you are in. */
+function loadImpossible(name, w, sess){
   const v = parseFloat(w);
   if(!(v > 0)) return null;                      // an empty box is not a claim
-  const p = trainPrefs();
+  const p = kitFor(sess);
   const eq = equipmentOf(name);
   const seen = loadSeenSessions(name, v);
   const trusted = seen >= LOAD_TRUST_SESSIONS;
@@ -63180,7 +63436,7 @@ function loadImpossible(name, w){
     why: "You have logged this in " + seen + " sessions, so it is a weight you can reach"
        + " \u2014 but " + what + " Element 26 has the kit down as something else."});
   if(eq === "dumbbell" || eq === "kettlebell"){
-    const max = parseFloat(rackMaxNow());
+    const max = parseFloat(sess ? p.dbMax : rackMaxNow());
     if(isFinite(max) && max > 0 && v > max + 0.001){
       if(trusted) return profileSay("the heaviest dumbbell on file is " + fmtLoad(max) + ", so");
       return {kind: "rack", limit: r1(max), seen,
@@ -63205,7 +63461,8 @@ function loadImpossible(name, w){
     /* ONLY WHERE THE NUMBER CLAIMS TO INCLUDE THE BAR. Logging plates only, 35 on a
        bench press is an ordinary entry and saying otherwise would be nonsense. */
     if(p.barMode !== "total") return null;
-    const imp = parseFloat(implementWeight(name));
+    const imp = parseFloat(sess ? (eq === "smith" ? p.smithWeight : p.barWeight)
+                                : implementWeight(name));
     if(isFinite(imp) && imp > 0 && v < imp - 0.001){
       if(trusted) return profileSay("the " + (eq === "smith" ? "carriage" : "bar")
         + " is on file as " + fmtLoad(imp) + " on its own, so");
@@ -63220,7 +63477,7 @@ function loadImpossible(name, w){
 /* Every logged set of one entry that the equipment profile says could not have happened.
    Read through the side adapter, so a paired unilateral set is checked a side at a time
    and the row can be named the way the screen names it. */
-function entryImpossible(en){
+function entryImpossible(en, sess){
   if(!en || !en.name) return [];
   const out = [];
   sideSets(en).forEach(x=>{
@@ -63231,7 +63488,7 @@ function entryImpossible(en){
        object happened to carry. */
     const w = x.weight;
     if(w == null || w === "") return;
-    const bad = loadImpossible(en.name, w);
+    const bad = loadImpossible(en.name, w, sess);
     if(bad) out.push(Object.assign({si: x.si, side: x.side, w: parseFloat(w)}, bad));
   });
   return out;
@@ -63240,8 +63497,8 @@ function entryImpossible(en){
    be noticed and resolved, and four identical warnings down one card is how a message
    gets scrolled past. Quiet, because nothing is wrong with your training — two of the
    app's own facts disagree. */
-function impossibleLineHTML(en){
-  const bad = entryImpossible(en);
+function impossibleLineHTML(en, sess){
+  const bad = entryImpossible(en, sess);
   if(!bad.length) return "";
   /* BOTH SIDES OF ONE PAIR AT ONE WEIGHT IS ONE THING TO SAY. "set 2 L at 55 lb and set
      2 R at 55 lb" is the adapter's view of a unilateral set read out loud; a person did
@@ -67108,7 +67365,10 @@ const BACKUP_FIELDS = [
      pointlessly, and one carrying OLD counters with it would keep them for ever. */
   "stallsV2",
   "asymRetired","asymRetest","askWhy","lmFloor","lmFloorAt","restCeilV1","pairGradeV2","lmMav","lmMrv","lmCal","lmScale","lmSuggest","volAck","priorTrainingWeeks","priorAsked","expManual","exCompound","exCompoundSeeded","sore","joint","jointSeeded","dayFlags","lmCalObs","lmCalSeeded","lmCalRun","lmWhy","indexPin","cycleLog","afterDeload","declined","quiet","prefs","importMeta","experience","sex","logFixUndo",
-  "viewMode","cycleV2","picks","gearAsked","gyms","geo","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
+  "viewMode","cycleV2","picks","gearAsked","gyms","geo",
+  /* Which gym is home. Said once, deliberately, and never inferred from session counts
+     — see homeGym(). A backup without it would re-open that question on a restore. */
+  "homeGym","exMuscles","rpeSugSkip","maxes","bodyLog","hurts","reviews","sessions","savedAt",
   /* P0-2 \u2014 where the log changed convention. A fact about how the numbers in
      `sessions` are to be READ, so a backup carrying the sessions without it restores a
      log whose loads can no longer be compared with each other. bwEx, just below, learned
@@ -67839,6 +68099,12 @@ function buildReportInner(){
       if(ci.sleep) metaBits.push("Sleep: "+esc(ci.sleep)+" h");
       if(ci.energy) metaBits.push("Energy: "+esc(ci.energy)+"/10");
     }
+    /* WHERE IT WAS DONE. A report that says 100 kg on the 3rd and 100 kg on the 17th,
+       with no mention that the second one was on a carriage weighing 7 kg more, reads as
+       a plateau that did not happen. Untagged sessions say so — "(assumed)" is the home
+       gym being guessed, not recorded, and a reader may discount it. */
+    const gymSay = sessionGymLabel(s);
+    if(gymSay) metaBits.push("Gym: " + esc(gymSay));
     if(s.quality) metaBits.push("Quality score: "+s.quality.total+"/"+s.quality.max+" ("+s.quality.grade.replace("−","-")+")");
     if(s.note) metaBits.push("Note: "+esc(s.note));
     const ssm = supersetMap(s.entries);
@@ -68026,21 +68292,31 @@ function buildCSV(){
   }));
   const header = ["Exercise"];
   for(let i=1;i<=maxSets;i++) header.push("Set "+i);
+  /* TWO COLUMNS AT THE END, carried on the session's own header row rather than repeated
+     down every exercise row, because the gym is a fact about the afternoon and not about
+     the movement. The flag is separate from the label so a spreadsheet can filter on it:
+     "Palma Vista (assumed)" is prose, "assumed" is a value. */
+  header.push("Gym", "Gym assumed");
+  const WIDTH = header.length;
+  const pad = r =>{ const row = r.slice(); while(row.length < WIDTH) row.push(""); return row; };
   const rows = [header];
   if(S.restLog && S.restLog.length){
     S.restLog.slice().sort().forEach(d=>{
-      rows.push([d+", REST DAY", ...Array(Math.max(0,maxSets)).fill("")]);
+      rows.push(pad([d+", REST DAY"]));
     });
-    rows.push(Array(maxSets+1).fill(""));
+    rows.push(pad([]));
   }
   if(S.skipLog && S.skipLog.length){
     S.skipLog.slice().sort().forEach(d=>{
-      rows.push([d+", SKIPPED", ...Array(Math.max(0,maxSets)).fill("")]);
+      rows.push(pad([d+", SKIPPED"]));
     });
-    rows.push(Array(maxSets+1).fill(""));
+    rows.push(pad([]));
   }
   sessions.forEach(s=>{
-    rows.push([s.date+", "+dayName(s.workoutId).toUpperCase(), s.note||"", ...Array(Math.max(0,maxSets-1)).fill("")]);
+    const head = pad([s.date+", "+dayName(s.workoutId).toUpperCase(), s.note||""]);
+    head[WIDTH-2] = sessionGymLabel(s);
+    head[WIDTH-1] = sessionGym(s).assumed ? "assumed" : "";
+    rows.push(head);
     s.entries.forEach(e=>{
       /* THROUGH THE ADAPTER, OR A ONE-LIMB MOVEMENT IS NOT IN THE FILE AT ALL. A paired
          set holds its numbers on its two sides, so this read nothing and the entry was
@@ -68050,9 +68326,9 @@ function buildCSV(){
       if(!sets.length) return;
       const row = [e.name];
       for(let i=0;i<maxSets;i++) row.push(sets[i] ? fmtSetShort(sets[i], e) : "");
-      rows.push(row);
+      rows.push(pad(row));
     });
-    rows.push(Array(maxSets+1).fill(""));
+    rows.push(pad([]));
   });
   /* FORMULA INJECTION. This file is written to a GitHub repo and then opened in Excel
      or Sheets, and a cell beginning = + - or @ is not text to a spreadsheet, it is code:

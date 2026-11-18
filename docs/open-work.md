@@ -93,7 +93,7 @@ scan in `impossibleLoadCheck` (debt 4) and the by-name stall counter (debt 5, no
 classification was wrong: debt 1 disproved it and debt 2 confirmed it.** Both were live.
 See the two rules above, which came out of them.
 
-## 10. A session's gym, and what should be read in its light
+## 10. A session's gym, and what should be read in its light — DONE (2026.11.17.20)
 
 Asked for after the Oct 17 session turned out to have been done at a different gym. The
 pieces that exist and the pieces that do not:
@@ -142,6 +142,54 @@ an analysis of one can separate sessions by gym. That is a requirement of the it
 than a nicety: the audited export's own blind spot was that nothing in it said where Oct
 17 happened, so no amount of reading it could have found what took four exchanges to
 establish by hand.
+
+**Built**
+
+- `stackStep` is a per-gym field, in `GYM_GEAR` and in *Kit at &lt;gym&gt;*, so a stack with
+  2.5 lb add-ons and one without are two rooms instead of one global number.
+- `sessionGym(sess)` → `{gym, id, name, assumed}`, and `sessionGymLabel(sess)`, which is
+  the only thing any screen should print. `kitFor(sess)` is the gym's kit falling back
+  field by field to `trainPrefs()`, which is what a gym record means: only what is
+  different about this room.
+- `loadImpossible(name, w, sess)` judges against that session's kit. Called without a
+  session it behaves exactly as it did, because `sessionGym(null)` knows nothing — see
+  below.
+- `lastLoggedLoad(name, wid, opts)` prefers the gym of `opts.gym`, falls back to any gym
+  only where the slot has no history there, and with `opts.detail` says
+  `{w, crossGym, gym, date}` so a caller can estimate from a cross-gym load without
+  prescribing from it.
+- A gym control in the session editor (`sessGymFieldHTML`), saving through
+  `setEditSaved()` so retagging rescores the session and rebuilds the stall counters
+  against the kit that was actually in the room.
+- The gym on the report's session meta line and in two CSV columns — `Gym` and
+  `Gym assumed` — carried on the session's own row, because the gym is a fact about the
+  afternoon rather than about the movement.
+- History prints `sessionGymLabel(s)` instead of the raw `gymName`.
+
+**The judgement call, and how it was settled**
+
+Untagged sessions are read as the home gym and say so. `S.homeGym` is an explicit
+setting, starred in the gym list; `seedHomeGym()` is the one and only place allowed to
+look at the log, it runs once, and after it has written an answer the log can never move
+it again — so training elsewhere for a month cannot quietly relocate you. An untagged
+session shows as "&lt;home&gt; (assumed)" in History, the session editor, the report and the
+CSV, with `assumed` in its own CSV column so a spreadsheet can filter on it. Retagging in
+the editor settles that session and it stops being assumed. Untagged sessions count as
+home-gym evidence for progression and for the impossible-load check. A load seen in more
+than one session still trusts the log over the kit, as built in P2-11b.
+
+**The trap inside this one, worth remembering**
+
+`sessionGym(null)` must answer "nothing is known", NOT "home". The first version did fall
+through to the home gym for a null session, which made `kitFor(null)` the home gym's kit
+rather than `trainPrefs()` — so a check made mid-workout at another gym would have been
+judged against home. `sessgym.mjs` §2 caught it as a control, not as the assertion it was
+aiming at. The assumption is about *a session logged without a gym*; no session at all is
+not a session.
+
+Tests: `sessgym.mjs`, seven sections, each with a control that must fire — the same load
+at the other gym, the same reader with the home gym taken away, the same question with no
+session at all.
 
 ## 11. The stall counter is keyed by name — DONE (2026.11.17.18)
 
