@@ -753,5 +753,173 @@ exist to record the patch and its undo.
 
 ---
 
-The remaining open items in this document are 14 (the one-limb pre-pair unit) and 17 (the
-`altadd` flake).
+---
+
+## 17. Flaky: `altadd.mjs`, "the movement survived the reload" — OPEN
+
+**Observed:** one failure in one full-suite run of 297, on 2026.11.17.25:
+
+```
+FAIL altadd
+     BROKEN the movement survived the reload  [Barbell Bench Press, Alternating Cable Lateral Raise]
+```
+
+**Not reproducible in isolation:** 6 consecutive standalone runs passed, plus 2 through
+`tests/run.js`. Machine load during a long serial suite is the likeliest trigger, which
+is the same shape as item 13.
+
+**What it is NOT.** The spec already retries on `fixtureLost`, the documented Chromium
+async-commit trap, and that assertion did not fail — the seed reached storage. What went
+missing was the movement ADDED through the editor afterwards: written, reloaded, gone.
+Same class, a different write.
+
+**The open question, and it is mine.** 2026.11.17.25 added a prompt that can open 400ms
+after a render on the Today tab (Rule E's injury question). It is gated to once per open,
+Today only, no active session, and no modal already present — but a modal appearing in
+the middle of a spec that drives the editor and then reloads is exactly the kind of thing
+that could land between a write and a reload. Before blaming the browser:
+
+1. Run `altadd` with the injury prompt disabled and see whether the flake survives.
+2. Check whether that spec's fixture contains a note the detector reads as an injury.
+3. Only then reach for the async-commit explanation, and reproduce under load.
+
+Nothing has been loosened to make it pass. If the prompt turns out to be the cause, the
+fix belongs in the prompt (it should not open while anything else is mid-flow), not in
+the assertion.
+
+---
+
+## 14. The plan still counts one-limb work in the pre-pair unit — NOTE FIXED (2026.11.17.33), counts left alone deliberately
+
+**The note is corrected; the set counts are not, and that split was the user's own.** The
+original entry below says the note "could be corrected on its own — it is a description of
+what the app does, and it is wrong" while the counts "belong to the person". That is exactly
+what shipped: seven one-limb lines, the app's sentence rewritten, every set count left as it
+stands. The Bulgarian split squat still reads 4, and is still 4 per leg.
+
+**Measured before anything was changed**, because the note's claim had to be shown false
+rather than assumed so: a session built from the plan turned 2 planned sets into 2 sets and
+`sideSets()` returned 4, with no L/R stamped on either. The sentence describes a behaviour
+P1-7 removed.
+
+**Only this app's own exact sentence is rewritten.** `fixPairNoteV1` is built in the shape
+of `fixLimbNoteV1`, which solved the same problem for a different wrong word: a substring
+swap on a known string, so a note somebody typed and a note an imported document supplied
+are text the app did not write and are left word for word. Both are controls in the spec —
+including a typed note that contains the phrase "alternate L/R each set" itself.
+
+**The trap this nearly shipped with.** The stamper skips a line that already carries a side
+note, and it recognised the OLD wording only. The load after the rewrite would have appended
+"alternate L/R each set" to a line this version had just corrected, for ever. `hasSideNote()`
+now recognises both wordings, and the spec runs a second `migrate()` and asserts nothing
+moves.
+
+**One-limb lines on the real export, after:**
+
+| Day | Movement | Sets | Sentence |
+|---|---|---|---|
+| Pull A | Single-Arm Cable Hammer Curl | 2 | single arm, both arms in each set |
+| Legs A | Dumbbell Bulgarian Split Squat | 4 | single leg, both legs in each set |
+| Push B | Cable Lateral Raise | 3 | single arm, both arms in each set |
+| Pull B | Single-Arm Dumbbell Row | 3 | single arm, both arms in each set |
+| Pull B | Single-Arm Cable Pulldown | 2 | single arm, both arms in each set |
+| Pull B | Preacher Curl | 2 | single arm, both arms in each set |
+| Legs B | Standing Cable Hip Abduction | 3 | single leg, both legs in each set |
+
+Tests: `tests/specs/pairnote.mjs`. **Still open in this item: nothing.** The per-side count
+display the original entry suggests ("should print per-side counts rather than raw set
+numbers") was considered and deliberately not built — the user asked for the wording only,
+and restating a count on screen is the training decision this item has always kept separate.
+
+The original entry follows, unedited.
+
+### The original entry
+
+A button to fix this was asked for, built and then removed at the user's request
+(2026.11.17.21, reverted in .22). The feature is gone; the discrepancy it was built for
+is still here, so it is recorded rather than lost.
+
+**Measured, not assumed.** Since P1-7, `entryPerSideWanted()` returns true for any
+`isSingleArm()` entry and `startWorkout()` builds `perSide` sets, so a set of a one-limb
+movement IS a pair. `sideSets()` on a session built from a 4-set entry returns 8 — four
+per side. Two things still describe the shape before that:
+
+- **The note.** Every one-limb movement carries "alternate L/R each set", stamped on each
+  load by the migration near the top of `migrate()`. That is the pre-pair instruction
+  (set 1 left, set 2 right) and it has been untrue since P1-7 shipped.
+- **The set count.** A plan line reading 4 sets of a split squat asks for four per leg.
+  Read through the note, the same line looks like two per leg.
+
+So a person reading their own plan is out by a factor of two on exactly the movements
+where the app changed what a set means. On the user's own plan that means the Bulgarian
+Split Squat at 4 sets is 4 per leg, and "move it to 3 per side" is a CUT that takes quads
+under their floor, not the increase it appears to be.
+
+**Not fixed, deliberately.** The note could be corrected on its own — it is a description
+of what the app does, and it is wrong. The set counts could not: restating them is a
+training decision and belongs to the person, which is why it was a button rather than a
+migration. Anything built here again should keep that split, and should print per-side
+counts rather than raw set numbers, because the raw number is what carries the
+misunderstanding.
+
+---
+
+## 13. Flaky: `logstill.mjs` section 1, exact scroll equality — CLOSED (2026.11.17.20)
+
+**Closed as not reproducible.** Watched from build .13 through .20, which is the whole of
+items 11, 12 and 10. It has not failed again in any full-suite run since, including the
+296-spec run on .20, and the step-1 experiment the plan below asks for has now been done:
+ten standalone runs with four CPU busy-loops saturating the machine, 10/10 pass, and the
+reading was EXACTLY equal every time (1600 → 1600), not merely within a tolerance.
+
+So the one recorded drift (1596 → 1599) stays unexplained rather than fixed, and nothing
+was changed to make it go away — no tolerance was added, no wait inserted, and the
+assertion is still exact equality. That is deliberate: a loosened assertion is how a real
+layout shift gets lost. If it returns, this section is the record of what was already
+ruled out, and step 2 below is where to start.
+
+The original entry follows, unedited.
+
+**Observed:** one failure in one full-suite run of 289 specs, 2026-11-17, on build
+2026.11.17.13:
+
+```
+FAIL logstill
+     BROKEN AND IT IS STILL THERE AFTER THE TICK  [1596 -> 1599]
+```
+
+**Not reproducible in isolation:** 14 consecutive standalone runs passed, plus 2 through
+`tests/run.js`. The runner is serial (`spawnSync` per spec), so this is not contention
+between specs inside the run; machine load during a long suite is the likeliest trigger.
+
+**What the assertion does:** compares `scrollY` before and after ticking a set for exact
+equality. The observed drift is 3px, which is sub-pixel layout settling rather than the
+round trip to the top that the spec exists to catch - that failure mode is hundreds of
+pixels, and section 2's overlay case and section 3's source scan both passed in the same
+run.
+
+**Why it is not just loosened.** Two flakes in this suite have turned out to be real
+bugs - the replay's four vacuous sections, and the "wiped session" that was Chromium's
+asynchronous localStorage commit - so a tolerance added without understanding costs the
+next one. A 3px shift on tick could also be a genuine layout shift that nobody wants,
+which is a different bug worth seeing. Before changing anything:
+
+1. Reproduce under load (run the suite with CPU contention, or loop the spec while
+   something else is busy) and record whether the drift is always ~3px or sometimes
+   larger.
+2. Find what moves. If a set row changes height by a few pixels when it gains
+   `is-logged`, that is the finding and the CSS is the fix, not the assertion.
+3. Only then decide between a small tolerance (with the reason in the commit message, per
+   the rule at the top of this doc) and waiting for scroll to settle before reading it.
+
+---
+
+## A note on this document's own history
+
+**Sections 13, 14 and 17 were deleted by accident in `1b6fbd3` and restored here, from
+`02e3ac7`, unedited.** The Rule F rewrite replaced the paragraph that ended item 16 and,
+in doing so, dropped everything that followed it. Nothing was lost — the text above is the
+same text — but it was gone from the working copy for five commits, and the two open items
+it describes were only findable in git. Recorded because a document whose job is to keep
+what would otherwise be forgotten is the worst possible place to silently lose three
+sections.

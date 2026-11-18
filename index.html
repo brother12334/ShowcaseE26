@@ -7349,7 +7349,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.32";
+const APP_VERSION = "2026.11.17.33";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -8673,7 +8673,41 @@ const GLOSSARY = {
 /* The one canonical note every one-limb-at-a-time movement carries, so the
    instruction reads identically on Tricep Kickback, Preacher Curl, Spider Curl,
    the Alternating Lateral Raise and anything you add later. */
-const ALT_ARM_NOTE = "single arm, alternate L/R each set";
+/* ITEM 14 — THE NOTE THAT DESCRIBED THE APP AS IT WAS BEFORE P1-7.
+
+   "alternate L/R each set" is the pre-pair instruction: set 1 left, set 2 right. Since
+   P1-7 a set of a one-limb movement IS a pair - entryPerSideWanted() returns true for any
+   of them, startWorkout() builds perSide sets, and sideSets() on a 4-set entry returns 8.
+   Measured on the real export before this was changed: 2 planned sets built 2 sets and
+   sideSets() returned 4, with no L/R stamped on either.
+
+   So a person reading their own plan line was out by a factor of two on exactly the
+   movements where the app had changed what a set means. The Bulgarian split squat at 4
+   sets is 4 PER LEG; read through the old note it looks like two per leg, and "move it to
+   3 per side" reads as an increase when it is a cut that takes quads under their floor.
+
+   Only the sentence changes. The set counts are a training decision and stay exactly as
+   they are, and anything a person typed or an imported document said is never touched -
+   only this app's own exact sentence is rewritten. */
+const ALT_ARM_NOTE = "single arm, both arms in each set";
+const ALT_LEG_NOTE = "single leg, both legs in each set";
+const ALT_SIDE_NOTE = "one side at a time, both sides in each set";
+/* The sentences this app used to write, kept so they can be recognised and replaced. They
+   are data, not history: a note that still carries one of them is a note this app wrote
+   and has since learned is wrong. */
+const ALT_NOTE_LEGACY = ["single arm, alternate L/R each set",
+                         "single leg, alternate L/R each set",
+                         "one side at a time, alternate L/R each set"];
+/* Does this note already carry a side instruction of ours, in either wording? The stamp
+   below uses it to leave an already-noted line alone - and without the new wording in here
+   it would cheerfully append the OLD sentence to a line this version had just corrected,
+   on the very next load. */
+function hasSideNote(n){
+  const t = String(n || "");
+  return ALT_NOTE_LEGACY.some(x=> t.indexOf(x) > -1)
+      || [ALT_ARM_NOTE, ALT_LEG_NOTE, ALT_SIDE_NOTE].some(x=> t.indexOf(x) > -1)
+      || /alternate\s+l\s*\/\s*r/i.test(t);
+}
 
 function ex(name,sets,reps,rpe,weight,note){ return {name,sets,reps,rpe,weight,note}; }
 
@@ -14315,7 +14349,7 @@ function migrate(){
       if(!style) return;
       const n = String(e.note||"").trim();
       const want = style === "cross" ? ALT_CROSS_NOTE : altSideNote(e.name);
-      if(style === "cross" ? /crosses? on top|arm on top/i.test(n) : /alternate\s+l\s*\/\s*r/i.test(n)) return;
+      if(style === "cross" ? /crosses? on top|arm on top/i.test(n) : hasSideNote(n)) return;
       e.note = n ? n.replace(/\s*·\s*$/,"") + " · " + want : want;
       noted = true;
     };
@@ -14347,6 +14381,30 @@ function migrate(){
     });
     S.fixLimbNoteV1 = true;
     saveQuiet();   // no queueSync from inside migrate(); the next real change carries it
+  }
+  /* ITEM 14 — AND THE LINES ALREADY CARRYING THE OLD SENTENCE ARE CORRECTED.
+
+     Built in the shape of fixLimbNoteV1 above, which solved the same problem for a
+     different wrong word: ONLY this app's exact sentence is replaced. A note somebody
+     typed, and a note an imported document supplied, read as text this app did not write
+     and is left exactly as it is - which is why the replacement is a substring swap on a
+     known string rather than a regex over the whole note.
+
+     The set counts are not touched. Restating them is a training decision and belongs to
+     the person: the same 4 sets of a split squat is 4 per leg before and after. */
+  if(!S.fixPairNoteV1 && S.program){
+    const repair = e=>{
+      if(!e || !e.name || !e.note) return;
+      const old = altSideNoteLegacy(e.name), want = altSideNote(e.name);
+      if(e.note.indexOf(old) < 0 || old === want) return;
+      e.note = e.note.split(old).join(want);
+    };
+    Object.keys(S.program).forEach(k=>{
+      if(!Array.isArray(S.program[k])) return;
+      S.program[k].forEach(e=>{ repair(e); if(e.alt) repair(e.alt); });
+    });
+    S.fixPairNoteV1 = true;
+    saveQuiet();
   }
   /* A SESSION THAT NEVER HAPPENED.
 
@@ -17335,9 +17393,16 @@ function limbWord(name){
 /* The one canonical note a one-limb movement carries, in that movement's own words. */
 function altSideNote(name){
   const limb = limbWord(name);
-  return limb === "leg"  ? "single leg, alternate L/R each set"
-       : limb === "side" ? "one side at a time, alternate L/R each set"
+  return limb === "leg"  ? ALT_LEG_NOTE
+       : limb === "side" ? ALT_SIDE_NOTE
        : ALT_ARM_NOTE;
+}
+/* The same sentence as it USED to read, for the one migration that has to find it. */
+function altSideNoteLegacy(name){
+  const limb = limbWord(name);
+  return limb === "leg"  ? ALT_NOTE_LEGACY[1]
+       : limb === "side" ? ALT_NOTE_LEGACY[2]
+       : ALT_NOTE_LEGACY[0];
 }
 /* =====================================================================
    A SLOT THAT OFFERS A CHOICE
@@ -62352,8 +62417,20 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.32";
+const NEWS_FOR = "2026.11.17.33";
 const NEWS = [
+  {k: "Your one-limb lines no longer describe the app as it was a month ago",
+   s: ["Every single-arm and single-leg movement in your plan carried the note "
+     + "\u201calternate L/R each set\u201d. That was the instruction before Element 26 started "
+     + "logging both sides inside one set \u2014 since then a set of a one-limb movement has "
+     + "BEEN a pair, and the note has been describing something the app stopped doing.",
+     "It matters for reading your own plan. Your Bulgarian split squat says 4 sets, and "
+     + "that is 4 per leg. Read through the old note the same line looks like two per leg, "
+     + "which makes \u201cmove it to 3 per side\u201d read as an increase when it is a cut.",
+     "The sentence now reads \u201csingle leg, both legs in each set\u201d, in that movement's "
+     + "own words. Nothing else changed: the set counts are a training decision and are "
+     + "exactly as you left them, and anything you typed yourself, or that came in with an "
+     + "imported programme, is untouched \u2014 only this app's own sentence was rewritten."]},
   {k: "A stall counter no longer loses its place when an exercise gets renamed",
    s: ["Element 26 counts the sessions where a slot did not move, and offers to do "
      + "something about it at three. That counter was filed under the exercise's name \u2014 "
