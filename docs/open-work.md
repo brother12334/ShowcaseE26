@@ -755,6 +755,42 @@ exist to record the patch and its undo.
 
 ---
 
+## 22. Settings > Storage — SHIPPED (2026.11.17.40)
+
+Asked for as item 1 of the storage work and deliberately deferred behind the data-loss fix.
+
+**Two rules shape the whole screen.** The export is at the top, before anything else,
+because every other control on it removes something — a person about to free space should
+be offered the file first, not after discovering which button was the wrong one. And
+nothing protected is deletable from here AT ALL: not disabled, not behind a confirmation,
+not present. Sessions, plan, settings, gyms, volume landmarks, plan history and account are
+listed, because an honest answer to "what is taking the room" has to include them, and that
+is all they are.
+
+**The breakdown is a partition of the same keys the total is summed from**, so the spec can
+assert they are equal rather than close. That assertion failed on its first run by 110
+bytes: `storageSizeOf()` returned the length of a key's own NAME for a key that does not
+exist, and the breakdown asks after a `.why` companion for every backup. A key that is not
+there costs nothing now, which also removed a `< 64` fudge from an earlier assertion.
+
+**Freeing a patch snapshot here is the same function as freeing it from the patch screen** —
+`patchFreeSnap()`, through `storageFreeKey()` — so the history row is updated identically
+and the undo keeps working. Two doors, one behaviour, asserted from this side as well.
+
+**The 80% warning now carries somewhere to go.** `toast()` gained an optional `go`, called
+after the dismissal it already did; the storage warning uses it to open this screen. It is
+the only caller, and a warning about a screen should be able to open it.
+
+Tests: `storage.mjs` section 7 — the breakdown adds up to the total, your training data is
+listed and has no deletable item, no delete button on the screen names a protected key, the
+export appears before the first delete control in the markup, freeing a snapshot leaves the
+patch undoable, and the usage figure moves as soon as something is freed.
+
+**Still open from the storage work:** IndexedDB, which has far more room than
+localStorage's ~5 MB.
+
+---
+
 ## 21. Research stopped working, and it was the storage fix — FIXED (2026.11.17.39)
 
 **Reported as "research is no longer working, it says couldn't reach the research service".**

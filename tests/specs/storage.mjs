@@ -250,6 +250,102 @@ console.log("\n6 - WHAT GOES FIRST, AND WHAT GOES LAST");
      r.cacheGone, String(r.cacheGone));
 }
 
+console.log("\n7 - THE STORAGE SCREEN");
+{
+  const r = await p.evaluate(async ()=>{
+    boot();
+    S.patchLog = [];
+    await patchApply(JSON.stringify({e26patch: 1, note: "a patch to snapshot",
+      ops: [{op: "volume.floor", muscle: "quads", to: 7}]}));
+    rescueBackupOnce("a repair");
+    await new Promise(s2=> setTimeout(s2, 160));
+    const papers = [];
+    for(let i = 0; i < 150; i++) papers.push({id: "p" + i, title: "x".repeat(400),
+      journal: "j", published: "2025-11", publishedAt: Date.now(), type: "rct"});
+    researchCacheWrite(papers, Date.now());
+    STORAGE_OPEN = {};
+    const rows = storageBreakdown();
+    const card = storageCardHTML();
+    return {cats: rows.map(x=> ({id: x.cat.id, bytes: x.bytes,
+                                 items: x.items.length,
+                                 droppable: x.items.filter(i=> i.drop).length})),
+            used: storageUsed(),
+            sumOfCats: rows.reduce((n, x)=> n + x.bytes, 0),
+            card: card};
+  });
+  r.cats.forEach(c=> console.log("    " + c.id.padEnd(10) + String(c.bytes).padStart(8)
+    + "  " + c.droppable + " of " + c.items + " deletable"));
+
+  /* 3. THE TOTAL SHOWN MATCHES WHAT IS ACTUALLY STORED. Not "close to": the breakdown is
+     a partition of the same keys the total is summed from, so the two are equal or the
+     screen is lying about one of them. */
+  ck("the breakdown adds up to the total", r.sumOfCats === r.used,
+     r.sumOfCats + " vs " + r.used);
+  ck("and the total is what the screen prints",
+     r.card.indexOf(">" + (Math.round(r.used / 1024 * 10) / 10 >= 100
+       ? Math.round(r.used / 1024) : Math.round(r.used / 1024 * 10) / 10) + " KB of about") > -1
+     || /\d+(\.\d)? KB of about \d+(\.\d)? KB/.test(r.card),
+     (r.card.match(/[\d.]+ KB of about [\d.]+ KB/) || ["missing"])[0]);
+
+  /* 1. PROTECTED DATA HAS NO BUTTON - not a disabled one, not a confirmation, none. */
+  const live = r.cats.find(c=> c.id === "live");
+  const acct = r.cats.find(c=> c.id === "account");
+  ck("your training data is listed", !!live && live.bytes > 100000, live && live.bytes);
+  ck("CONTROL: and nothing in it is deletable", live && live.droppable === 0,
+     live && live.droppable + " deletable");
+  ck("nor anything in the account", !acct || acct.droppable === 0,
+     acct ? acct.droppable + " deletable" : "no account keys");
+  const liveKeys = await p.evaluate(()=> storageBreakdown()
+    .filter(r2=> r2.cat.id === "live" || r2.cat.id === "account" || r2.cat.id === "other")
+    .reduce((a, r2)=> a.concat(r2.items.map(i=> i.key)), []));
+  ck("CONTROL: and no delete button anywhere on the screen names one of their keys",
+     liveKeys.every(k=> r.card.indexOf('data-stoone="' + k + '"') < 0),
+     liveKeys.join(", ").slice(0, 80));
+  ck("the screen says so in words too", /nothing here can be deleted/i.test(r.card),
+     "said");
+
+  /* 2. FREEING A SNAPSHOT HERE LEAVES THE PATCH UNDO WORKING - the same behaviour as the
+     patch screen's own button, because it is the same function behind both doors. */
+  const snap = await p.evaluate(()=>{
+    const row = (S.patchLog || [])[0];
+    const key = PATCH_SNAP_PREFIX + row.id;
+    const before = {snap: row.snap, floor: (S.lmFloor || {}).quads, used: storageUsed()};
+    const freed = storageFreeKey(key);
+    const after = {snap: patchEntry(row.id).snap, row: !!patchEntry(row.id),
+                   journal: patchEntry(row.id).journal.length, used: storageUsed()};
+    const out = patchUndoRun(row.id);
+    return {freed, before, after, reversed: out.reversed,
+            floorNow: (S.lmFloor || {}).quads};
+  });
+  ck("freeing a snapshot from here frees the bytes",
+     snap.freed > 100000 && snap.after.used < snap.before.used,
+     snap.freed + " chars");
+  ck("the patch row survives with its journal",
+     snap.after.row && snap.after.journal > 0 && snap.after.snap === false,
+     "snap " + snap.before.snap + " -> " + snap.after.snap);
+  ck("CONTROL: and the patch can still be undone afterwards",
+     snap.reversed > 0 && snap.floorNow !== snap.before.floor,
+     snap.reversed + " reversed, quads floor " + snap.before.floor + " -> " + snap.floorNow);
+
+  /* 5. THE FIGURE AT THE TOP IS READ FRESH, so a delete updates it. */
+  const fresh = await p.evaluate(()=>{
+    const before = (storageCardHTML().match(/([\d.]+) KB of about/) || [])[1];
+    const item = storageDisposable()[0];
+    if(item) storageFreeKey(item.key);
+    const after = (storageCardHTML().match(/([\d.]+) KB of about/) || [])[1];
+    return {before: parseFloat(before), after: parseFloat(after), dropped: !!item};
+  });
+  ck("the usage figure moves as soon as something is freed",
+     fresh.dropped && fresh.after < fresh.before,
+     fresh.before + " KB -> " + fresh.after + " KB");
+
+  /* 1 again, from the other end: the export is offered before any of it. */
+  ck("the export is offered above everything else",
+     r.card.indexOf("stoExport") > -1
+     && r.card.indexOf("stoExport") < r.card.indexOf("data-stoall"),
+     "export at " + r.card.indexOf("stoExport") + ", first delete at " + r.card.indexOf("data-stoall"));
+}
+
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");

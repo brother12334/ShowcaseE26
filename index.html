@@ -1971,6 +1971,27 @@ button.side-chip.sc-set::after{
 }
 .pg-apply.done,.pg-apply:disabled{background:var(--card2);color:var(--faint);box-shadow:inset 0 0 0 1px var(--line)}
 
+/* ================= STORAGE =================
+   Its own prefix: st- was taken by the status rows, and the guard that catches a feature
+   borrowing another's namespace earned its keep the first time it ran. */
+.sto-bar{height:8px;border-radius:999px;background:var(--card2);overflow:hidden;margin:4px 0 7px;
+  box-shadow:inset 0 0 0 1px var(--line)}
+.sto-fill{display:block;height:100%;background:var(--acc);border-radius:999px}
+.sto-tight{background:var(--bad)}
+.sto-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.sto-name{font-family:var(--disp);font-size:var(--fs-4);font-weight:700;text-transform:uppercase;
+  letter-spacing:.05em}
+.sto-size{font-family:var(--mono);color:var(--dim)}
+.sto-safe{font:var(--fs-1) var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--faint);margin-top:7px}
+.sto-items{margin-top:9px;border-top:1px solid var(--line)}
+.sto-item{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.sto-item:last-child{border-bottom:none}
+.sto-item-b{flex:1 1 auto;min-width:0}
+.sto-item-n{font-size:var(--fs-3);color:var(--text)}
+.sto-item-w{font-size:var(--fs-2);color:var(--faint);line-height:1.4;margin-top:2px}
+.sto-item-s{font-family:var(--mono);color:var(--dim);font-size:var(--fs-3);flex-shrink:0}
+
 /* ================= PLAN PATCHES =================
    Its own class prefix, pt-, because the stylesheet guard exists and because the last
    feature to borrow another's prefix cost a day. Nothing here is a new colour or a new
@@ -7353,7 +7374,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.39";
+const APP_VERSION = "2026.11.17.40";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -14979,7 +15000,15 @@ function storageMeasureQuota(){
 /* A key's cost. Characters rather than bytes: browsers count localStorage in UTF-16 code
    units, and every key this app writes is ASCII or JSON-escaped, so the two agree. */
 function storageSizeOf(k){
-  try{ return (localStorage.getItem(k) || "").length + String(k).length; }catch(e){ return 0; }
+  try{
+    const v = localStorage.getItem(k);
+    /* A KEY THAT IS NOT THERE COSTS NOTHING. This returned the length of the key's own
+       NAME for a missing key, so every lookup of an absent one - and the breakdown asks
+       after a ".why" companion for every backup - added a few phantom characters. The
+       breakdown came out 110 bytes heavier than the total it is a partition of, which is
+       the kind of discrepancy that makes a reader distrust both numbers. */
+    return v == null ? 0 : v.length + String(k).length;
+  }catch(e){ return 0; }
 }
 function storageAllKeys(){
   const out = [];
@@ -15108,8 +15137,9 @@ function storageWarnIfTight(){
   if(used < STORAGE_QUOTA * STORAGE_WARN_FRACTION) return;
   STORAGE_WARNED = true;
   try{
-    toast("Storage is " + Math.round(used / STORAGE_QUOTA * 100) + "% full — Settings › "
-        + "Storage has what is taking the room", "warn", {ms: 6000});
+    toast("Storage is " + Math.round(used / STORAGE_QUOTA * 100) + "% full — tap to see "
+        + "what is taking the room", "warn",
+        {ms: 8000, go: ()=>{ TAB = "sync"; SET_PAGE = "storage"; render(); window.scrollTo(0, 0); }});
   }catch(e){}
 }
 /* THE ALERT IS THE ONE THIS APP ALREADY HAS. saveFailedModal() is sticky, hands over the
@@ -15348,7 +15378,10 @@ function toast(msg, kind, opts){
     el.classList.add("out");
     setTimeout(()=> el.remove(), 220);
   };
-  el.onclick = close;
+  /* A WARNING ABOUT A SCREEN SHOULD BE ABLE TO OPEN IT. Tapping still dismisses, as every
+     toast in this app always has; `go` adds the one thing the storage warning needed, which
+     is a way to act on it that is not "find Settings yourself". */
+  el.onclick = ()=>{ close(); if(typeof opts.go === "function"){ try{ opts.go(); }catch(e){} } };
   host.appendChild(el);
   /* Three at once is the most that can be read before the first has gone. Beyond that
      the oldest leaves early rather than the newest being dropped, because the newest is
@@ -46258,6 +46291,10 @@ function setGroups(){
     {k:"gym", icon:"barbell", title:"In the gym", sub:"Pounds or kilos, and what the number you write for a barbell means.",
      val: unitWord() + (p.barWeight ? " · " + fmtLoad(p.barWeight) + " bar" : ""),
      body: prefsGymHTML},
+    {k:"storage", icon:"disc", title:"Storage", sub:"What is on this device, what it costs, and what can go.",
+     val: (function(){ try{ const u = storageUsed();
+       return Math.round(u / STORAGE_QUOTA * 100) + "% used"; }catch(e){ return "\u2014"; } })(),
+     body: storageCardHTML},
     {k:"patch", icon:"doc", title:"Plan patches", sub:"Paste a change, read what it would do, apply it, take it back.",
      val: (S.patchLog || []).length ? ((S.patchLog || []).length === 1 ? "1 applied" : (S.patchLog || []).length + " applied") : "none yet",
      body: patchCardHTML},
@@ -46352,7 +46389,7 @@ function setGroupRowHTML(g){
 const SET_SECTIONS = [
   {t:"Training",   keys:["sess", "screen", "plan", "targets", "gym", "patch"]},
   {t:"Day to day", keys:["day", "remind", "where"]},
-  {t:"The app",    keys:["acct", "data", "help"]}
+  {t:"The app",    keys:["acct", "data", "storage", "help"]}
 ];
 /* THE BOXES ARE BACK, WITHOUT THE THREE GAUGES THAT MEANT NOTHING.
 
@@ -48410,6 +48447,7 @@ function bind(){
      the tile opened, the box took the paste, and Preview did nothing at all, because
      nothing had ever bound it. */
   if(SET_PAGE === "patch"){ try{ patchWire(); }catch(e){} }
+  if(SET_PAGE === "storage"){ try{ storageWire(); }catch(e){} }
   /* Out of Settings entirely, back to the screen its icon lives on. */
   const setT = $("#setToToday");
   if(setT) setT.onclick = ()=> goTab("today");
@@ -62749,8 +62787,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.39";
+const NEWS_FOR = "2026.11.17.40";
 const NEWS = [
+  {k: "Settings \u203a Storage: what is on your device, and what can go",
+   s: ["A new screen shows what this app is keeping and what each part costs: your "
+     + "training data, the rescue backups, the patch snapshots, the caches and the saved "
+     + "research library, against the device's own limit.",
+     "The export is at the top, before anything else on the screen, because everything "
+     + "else on it removes something. Your sessions, plan, settings, gyms, volume "
+     + "landmarks, plan history and account have no delete button at all \u2014 not a "
+     + "disabled one, not one behind a confirmation. They are listed because an honest "
+     + "answer to \u201cwhat is taking the room\u201d has to include them, and that is all.",
+     "Everything else can go, one item at a time or a category at once, and each one says "
+     + "what you lose before it goes. Freeing a patch snapshot here does exactly what "
+     + "freeing it from the patch screen does: the undo keeps working, only the whole "
+     + "roll-back goes. And the 80% warning now takes you straight here."]},
   {k: "Research stopped losing its library to a backup",
    s: ["Freeing space for a backup threw away the research cache first, every time. That "
      + "cache is the only offline copy of the papers you have saved or opened, and it is "
@@ -72711,6 +72762,206 @@ function patchAskWire(){
   };
   const rn = $("#ptRestoreNo");
   if(rn) rn.onclick = ()=>{ hideModal(); PATCH_ASK = null; };
+}
+
+/* =====================================================================
+   SETTINGS > STORAGE
+
+   What is on the device, what it costs, and which of it may go. The screen exists because
+   the alternative is what happened: a box quietly filling until a save failed, with no way
+   to see what was taking the room or to do anything about it short of clearing site data,
+   which takes the training log with it.
+
+   TWO RULES SHAPE THE WHOLE SCREEN.
+
+   The export is at the top, before anything else, because every other control here removes
+   something. A person who is about to free space should have been offered the file first,
+   not after they have discovered which button was the wrong one.
+
+   And nothing protected is deletable from here AT ALL - not disabled, not behind a
+   confirmation, not present. Sessions, the plan, the settings, the gyms, the volume
+   landmarks, the plan history and the account have no button. They are listed, because
+   "what is taking the room" has to include them to be an honest answer, and that is all.
+   ===================================================================== */
+const STORAGE_CATS = [
+  {id: "live",      label: "Your training data",
+   what: "Sessions, plan, settings, gyms, volume landmarks and plan history."},
+  {id: "account",   label: "Account and device",
+   what: "Your ID, recovery key and this device's own settings."},
+  {id: "rescue",    label: "Rescue backups",
+   what: "A copy taken before an automatic repair, in case the repair was wrong."},
+  {id: "patchsnap", label: "Patch snapshots",
+   what: "The roll-back-whole half of a patch's undo. Freeing one keeps the undo."},
+  {id: "cache",     label: "Caches and logs",
+   what: "Rebuilt or re-sent on their own."},
+  {id: "research",  label: "Saved research",
+   what: "The offline copy of every paper you have saved or opened."},
+  {id: "other",     label: "Other",
+   what: "Anything else stored by this app on this device."}
+];
+let STORAGE_ASK = null, STORAGE_OPEN = {};
+/* A readable name for one item, which is not the same as what losing it costs. */
+function storageItemLabel(k){
+  const s = String(k);
+  if(s.indexOf(RESCUE_BACKUP_PREFIX) === 0){
+    const at = storageItemAge(s);
+    const why = (()=>{ try{ return localStorage.getItem(s + ".why") || ""; }catch(e){ return ""; } })();
+    return (at ? fmtDateShort(dayStr(at)) : "a backup") + (why ? " · " + why : "");
+  }
+  if(s.indexOf(PATCH_SNAP_PREFIX) === 0){
+    const row = patchEntry(s.slice(PATCH_SNAP_PREFIX.length));
+    return row ? (row.date + (row.note ? " · " + row.note : "")) : "a patch with no row left";
+  }
+  if(s === RESEARCH_CACHE_KEY){
+    const n = (()=>{ try{ return (JSON.parse(localStorage.getItem(s) || "{}").papers || []).length; }
+                     catch(e){ return 0; } })();
+    return n ? n + " paper" + (n === 1 ? "" : "s") : "the research library";
+  }
+  if(s === ERR_KEY) return "the error log";
+  if(s === REPORT_QUEUE_KEY) return "reports waiting to be sent";
+  if(s === dataKey()) return "this profile's training data";
+  return s;
+}
+function storageBreakdown(){
+  const by = {};
+  STORAGE_CATS.forEach(c=> by[c.id] = {cat: c, bytes: 0, items: []});
+  storageAllKeys().forEach(k=>{
+    if(/\.why$/.test(k)) return;                 // counted with the backup it belongs to
+    const c = storageCategoryOf(k);
+    const row = by[c.id] || (by[c.id] = {cat: {id: c.id, label: c.label, what: ""}, bytes: 0, items: []});
+    const bytes = storageSizeOf(k) + storageSizeOf(k + ".why");
+    row.bytes += bytes;
+    row.items.push({key: k, bytes: bytes, drop: !!c.drop, at: storageItemAge(k),
+                    label: storageItemLabel(k), loses: storageItemLoses(k)});
+  });
+  Object.keys(by).forEach(id=> by[id].items.sort((a, b)=> b.bytes - a.bytes));
+  return STORAGE_CATS.map(c=> by[c.id]).filter(r=> r && r.items.length);
+}
+function storageCardHTML(){
+  const used = storageUsed(), quota = STORAGE_QUOTA;
+  const pct = quota > 0 ? Math.min(100, Math.round(used / quota * 100)) : 0;
+  const rows = storageBreakdown();
+  const free = rows.filter(r=> r.items.some(i=> i.drop)).reduce((n, r)=> n + r.bytes, 0);
+  let h = `<div class="set-block">
+    <div class="set-name">Before anything else</div>
+    <div class="set-help">Everything on this screen removes something. The export is one
+      file with your whole log, programme and settings in it, and importing it anywhere
+      brings all of it back.</div>
+    <button class="btn small" id="stoExport">Export raw data</button>
+  </div>
+  <div class="set-block">
+    <div class="set-name">${esc(fmtKB(used))} of about ${esc(fmtKB(quota))}</div>
+    <div class="sto-bar"><span class="sto-fill${pct >= 80 ? " sto-tight" : ""}"
+      style="width:${pct}%"></span></div>
+    <div class="set-help">${pct}% used. ${free > 0
+      ? esc(fmtKB(free)) + " of it can be freed from this screen."
+      : "Nothing on this device can be freed from here."}</div>
+  </div>`;
+  rows.forEach(r=>{
+    const can = r.items.filter(i=> i.drop);
+    const open = !!STORAGE_OPEN[r.cat.id];
+    h += `<div class="set-block">
+      <div class="sto-head">
+        <div class="sto-name">${esc(r.cat.label)}</div>
+        <div class="sto-size num">${esc(fmtKB(r.bytes))}</div>
+      </div>
+      <div class="set-help">${esc(r.cat.what)}</div>
+      ${can.length ? "" : `<div class="sto-safe">Kept always · nothing here can be deleted
+        from this screen</div>`}
+      ${can.length ? `<div class="set-row" style="gap:8px;margin-top:8px">
+        <button class="btn ghost small" data-stoall="${esc(r.cat.id)}">${
+          r.cat.id === "patchsnap" ? "Free all" : "Delete all"}</button>
+        <button class="btn ghost small" data-stoopen="${esc(r.cat.id)}">${
+          open ? "Hide the list" : "Show " + can.length + " item" + (can.length === 1 ? "" : "s")}</button>
+      </div>` : ""}
+      ${can.length && open ? `<div class="sto-items">${can.map(i=> `<div class="sto-item">
+          <div class="sto-item-b"><div class="sto-item-n">${esc(i.label)}</div>
+            <div class="sto-item-w">${esc(i.loses)}</div></div>
+          <div class="sto-item-s num">${esc(fmtKB(i.bytes))}</div>
+          <button class="btn ghost small" data-stoone="${esc(i.key)}">${
+            r.cat.id === "patchsnap" ? "Free" : "Delete"}</button>
+        </div>`).join("")}</div>` : ""}
+    </div>`;
+  });
+  return h;
+}
+/* The sheet says what goes and what it costs, item by item, and never asks whether you are
+   sure - a question that carries no information. */
+function storageAskHTML(){
+  const a = STORAGE_ASK;
+  if(!a) return "";
+  const bytes = a.items.reduce((n, i)=> n + i.bytes, 0);
+  const snaps = a.items.filter(i=> i.key.indexOf(PATCH_SNAP_PREFIX) === 0).length;
+  const one = a.items.length === 1 ? a.items[0] : null;
+  return `<div class="sheet-h">${one ? (snaps ? "Free this snapshot" : "Delete this")
+                                     : "Free " + esc(fmtKB(bytes))}</div>
+    <div class="sub">${esc(fmtKB(bytes))} comes back. Your sessions, plan, settings, gyms,
+      volume landmarks, plan history and account are not touched by this — nothing on this
+      screen can touch them.</div>
+    <div class="pt-lose">
+      <div class="pt-lose-k">What you lose</div>
+      ${a.items.slice(0, 8).map(i=> `<div class="pt-row">
+        <span class="pt-what">${esc(i.label)}</span>
+        <span class="pt-move">${esc(i.loses)}</span></div>`).join("")}
+      ${a.items.length > 8 ? `<div class="pt-row"><span class="pt-what">… and ${
+        a.items.length - 8} more</span></div>` : ""}
+      ${snaps ? `<div class="pt-row"><span class="pt-what">${snaps === 1 ? "That patch" : "Those patches"}
+        can still be undone — only rolling back whole goes.</span></div>` : ""}
+    </div>
+    <div class="set-row" style="gap:8px;margin-top:12px">
+      <button class="btn small" id="stoGo">${snaps && snaps === a.items.length
+        ? "Free " + esc(fmtKB(bytes)) : "Delete and free " + esc(fmtKB(bytes))}</button>
+      <button class="btn ghost small" id="stoNo">Cancel</button>
+    </div>`;
+}
+/* Freeing one item. A patch snapshot goes through patchFreeSnap() so the history row is
+   updated the same way it is from the patch screen - two doors, one behaviour. */
+function storageFreeKey(key){
+  const s = String(key);
+  if(s.indexOf(PATCH_SNAP_PREFIX) === 0) return patchFreeSnap(s.slice(PATCH_SNAP_PREFIX.length));
+  const n = storageSizeOf(s) + storageSizeOf(s + ".why");
+  return storageDropItem(s) ? n : 0;
+}
+function storageWire(){
+  const ex = $("#stoExport");
+  if(ex) ex.onclick = ()=>{
+    try{ exportRaw(); }catch(e){ toast("The export failed: " + (e && e.message || e), "bad"); }
+  };
+  document.querySelectorAll("[data-stoopen]").forEach(btn=> btn.onclick = ()=>{
+    const id = btn.dataset.stoopen;
+    STORAGE_OPEN[id] = !STORAGE_OPEN[id];
+    render();
+  });
+  document.querySelectorAll("[data-stoone]").forEach(btn=> btn.onclick = ()=>{
+    const k = btn.dataset.stoone;
+    const it = storageBreakdown().reduce((f, r)=> f || r.items.find(i=> i.key === k), null);
+    if(!it) return;
+    STORAGE_ASK = {items: [it]};
+    showModal(storageAskHTML()); storageAskWire();
+  });
+  document.querySelectorAll("[data-stoall]").forEach(btn=> btn.onclick = ()=>{
+    const id = btn.dataset.stoall;
+    const row = storageBreakdown().find(r=> r.cat.id === id);
+    if(!row) return;
+    const items = row.items.filter(i=> i.drop);
+    if(!items.length) return;
+    STORAGE_ASK = {items};
+    showModal(storageAskHTML()); storageAskWire();
+  });
+}
+function storageAskWire(){
+  const go = $("#stoGo");
+  if(go) go.onclick = ()=>{
+    let n = 0;
+    ((STORAGE_ASK && STORAGE_ASK.items) || []).forEach(i=>{ n += storageFreeKey(i.key); });
+    hideModal(); STORAGE_ASK = null;
+    try{ save(); }catch(e){}
+    /* The figure at the top is read fresh on every draw, so a redraw IS the update. */
+    render();
+    toast(n ? "Freed " + fmtKB(n) : "Nothing to free", "good");
+  };
+  const no = $("#stoNo");
+  if(no) no.onclick = ()=>{ hideModal(); STORAGE_ASK = null; };
 }
 
 /* =====================================================================

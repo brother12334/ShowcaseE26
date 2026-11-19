@@ -720,10 +720,8 @@ console.log("\n20 - DELETING A ROW FROM THE HISTORY, WHICH IS NOT UNDOING IT");
   }, FX);
   console.log("    freed " + freed.n + " chars, storage " + freed.before.used
             + " -> " + freed.after.used);
-  /* storageSizeOf() counts the key's own name as well as its value, so a key that is gone
-     reads as the length of its name rather than zero. */
   ck("freeing a snapshot frees the bytes", freed.n > 100000
-     && freed.after.bytes < 64
+     && freed.after.bytes === 0
      && freed.before.used - freed.after.used > 100000,
      freed.n + " chars, " + (freed.before.used - freed.after.used) + " off storage");
   ck("the row stays, with its journal", freed.after.row && freed.after.journal > 0,
