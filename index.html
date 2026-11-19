@@ -713,6 +713,12 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 .set-help{font-size:var(--fs-3);color:var(--dim);line-height:1.5;margin-bottom:10px}
 .set-says{margin:8px 2px 0;font-size:var(--fs-3);color:var(--faint);line-height:1.5}
 .set-danger .set-name{color:var(--bad)}
+/* One room's line in the plate reconciliation. */
+.pd-row{border-top:1px solid var(--line);padding:9px 0}
+.pd-row:first-of-type{border-top:0}
+.pd-row b{display:block;font-size:var(--fs-4)}
+.pd-row .num{display:block;color:var(--acc);font-size:var(--fs-3);margin-top:2px}
+.pd-row .sub{display:block;margin:1px 0 0;font-size:var(--fs-2);color:var(--faint)}
 .focus-name{font-size:var(--fs-9)!important;line-height:1.1}
 .bar-wrap{display:flex;align-items:center;justify-content:center;margin:16px 0 6px;min-height:70px}
 .bar-end{height:8px;width:22px;background:#6d6d75;border-radius:var(--r-xs);flex-shrink:0}
@@ -7388,7 +7394,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.42";
+const APP_VERSION = "2026.11.17.43";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -22718,6 +22724,17 @@ function runOneTimeSeeds(){
   if(SEEDS_RUN) return;
   SEEDS_RUN = true;
   let dirty = false;
+  /* ITEM 25 — the plate reconciliation, once. Here rather than in migrate() for the same
+     reason as the stall rebuild below: this reaches trainPrefs() and fmtLoad, and migrate()
+     runs while the file is still being evaluated. */
+  if(!S.plateDeriveV1){
+    S.plateDeriveV1 = 1;
+    try{
+      const rows = plateDeriveScan();
+      if(rows.length) S.plateDeriveAsk = rows;
+    }catch(e){}
+    dirty = true;
+  }
   /* ITEM 11 — STALL COUNTERS ARE REBUILT ONCE, FROM THE LOG. Every counter written
      before this was keyed by exercise name alone and conflated the slots a movement sits
      in; one cannot be split back into two, because nothing recorded which sessions
@@ -33718,9 +33735,10 @@ function barWeightPickHTML(p){
     <div class="set-says">Warm-up percentages come off this, and so does every load the
       app works out for you. <b>Plates are a separate question</b> \u2014 a bar weight on its own
       cannot turn a load into a plate count, so the smallest pair you own is asked for under
-      <b>Gym kit</b>.${trainPrefs().plateStep > 0
-        ? " Yours is set to " + esc(fmtLoad(trainPrefs().plateStep)) + " a side."
-        : ` <button type="button" class="linklike" data-platefix="1">Set that now</button>`}</div>
+      <b>Gym kit</b>.${(()=>{ const st = smallestPlate();
+        return st > 0
+          ? " Yours is " + esc(fmtLoad(st)) + " a side, so the bar moves in " + esc(fmtLoad(st * 2)) + "."
+          : ` <button type="button" class="linklike" data-platefix="1">Set that now</button>`; })()}</div>
   </div>`;
 }
 let BARW_OPEN = false;
@@ -34094,12 +34112,30 @@ function gymGearHTML(){
   const kg = inKg();
   const pl = p.plateStep, db = p.dbStep;
   const base = kg ? 10 : 30;
-  return setBlock("The smallest plate you can put on each side of a bar",
-      "So Element 26 only ever suggests a weight you can actually load.",
-      stepChoiceHTML("plateStep", "data-plstep", PLATE_STEPS[kg ? "kg" : "lb"], pl) +
-      `<div class="set-says">${pl > 0
-        ? "One on each side, so the bar goes up <b>" + fmtLoad(pl * 2) + "</b> at a time. It will never suggest half of that."
-        : "Not set, so it suggests exact numbers \u2014 which can mean a jump your gym can\u2019t make."}</div>`)
+  /* THE PLATES ARE THE QUESTION. THE JUMP IS THE ANSWER, AND IS NOT EDITABLE.
+
+     This used to be a chip row for "smallest plate" whose value beat the plate list and
+     had its own editor, while the global plate list had none — so the screen could say
+     "Not set, so it suggests exact numbers your rack can't make" while the app was in
+     fact rounding perfectly well off plates ticked elsewhere. That sentence was simply
+     untrue for anybody who had named their plates.
+
+     The old chip row is kept, but only for somebody with no plates named at all, whose
+     stored step is the only thing standing between them and no rounding. */
+  const owned = platesOwned(p);
+  const jump = smallestPlate();
+  return setBlock("The plates you have, each side",
+      "A bar takes one on each end, so these decide every weight Element 26 can suggest.",
+      `<div class="gk-plates">${PLATE_PICK[kg ? "kg" : "lb"].map(v=>
+        `<button type="button" class="gk-pl${owned.indexOf(v) > -1 ? " on" : ""}"
+          data-prefpl="${v}" aria-pressed="${owned.indexOf(v) > -1}">${stepNum(v)}</button>`).join("")}</div>`
+      + (owned.length ? "" :
+        `<div class="set-help" style="margin:12px 0 0">Nothing ticked. Until you do, Element 26
+          falls back to the smallest plate you told it about once:</div>`
+        + stepChoiceHTML("plateStep", "data-plstep", PLATE_STEPS[kg ? "kg" : "lb"], pl))
+      + `<div class="set-says">${jump > 0
+        ? plateJumpSay() + " One on each end, and it will never suggest half of that."
+        : "Nothing ticked and no step remembered, so a suggested weight can land on a number your rack cannot make."}</div>`)
     + setBlock("The gap from one dumbbell to the next on the rack", "",
       stepChoiceHTML("dbStep", "data-dbstep", DB_STEPS[kg ? "kg" : "lb"], db) +
       `<div class="set-says">${db > 0
@@ -36278,6 +36314,7 @@ function viewToday(){
   let h = `<div class="hdr"><h1>${brandMark()}</h1><span class="hdr-r">${moonBtn}${setBtn}<span class="date num">${fmtDate(todayStr())}</span></span></div>`;
   /* ABOVE EVERYTHING. If a record in your log could not be read, that is the first thing
      worth knowing about today. */
+  h += plateDeriveCardHTML();
   h += dataIssueCardHTML();
   if(skChip) h += `<div style="margin:-4px 2px 12px">${skChip}</div>`;
 
@@ -49892,6 +49929,20 @@ function bind(){
     toast(word + ": " + fmtLoad(trainPrefs()[key]) + " " + unitWord());
   });
   stepChip("data-plstep", "plateStep", "Smallest plate");
+  /* THE GLOBAL PLATE LIST HAD NO EDITOR AT ALL until now: only each gym's own list could
+     be changed, while the global one decided every suggested load. */
+  document.querySelectorAll("#app [data-prefpl]").forEach(b=> b.onclick = ()=>{
+    const v = parseFloat(b.getAttribute("data-prefpl"));
+    if(!isFinite(v) || v <= 0) return;
+    const p2 = trainPrefs();
+    const list = platesOwned(p2);
+    const i = list.indexOf(v);
+    if(i > -1) list.splice(i, 1); else list.push(v);
+    p2.plates = list.length ? list.sort((a, b)=> b - a) : null;
+    save(); queueSync(); render();
+    const st = smallestPlate();
+    toast(st > 0 ? "The bar moves in " + fmtLoad(st * 2) : "No plates ticked");
+  });
   stepChip("data-dbstep", "dbStep", "Dumbbell gap");
   stepChip("data-stkstep", "stackStep", "Stack step");
   const smW = $("#prefSmithW");
@@ -62902,8 +62953,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.42";
+const NEWS_FOR = "2026.11.17.43";
 const NEWS = [
+  {k: "The bar moves by the plates you own",
+   s: ["Element 26 kept a separate \u201csmallest plate\u201d number alongside the plates you had "
+     + "ticked, and the two could disagree. The number won, it had an editor, and the "
+     + "plate list did not \u2014 so the thing you could change was the one that could be "
+     + "wrong about the room.",
+     "It is worked out from your plates now: a bar takes one on each end, so the smallest "
+     + "jump is two of your smallest plate. The screen says which, and you cannot type "
+     + "over it \u2014 you change the plates instead, and the plates are editable at last. "
+     + "The old number is still used if you have never ticked any.",
+     "If any of your gyms had a number that disagreed, Today says so once, names the gym, "
+     + "and gives both figures. Nothing already logged is touched."]},
   {k: "The buttons you cannot undo are finally red",
    s: ["Erase my training data, Delete account, Delete session and Delete exercise have "
      + "been rendering in the ordinary text colour, identical to the Export or Cancel "
@@ -65916,12 +65978,92 @@ const PLATE_SETS_KG = [25, 20, 15, 10, 5, 2.5, 1.25];
    fuller way made the app ask more, not less.
 
    One function now, and the smallest plate on a named tree IS your smallest plate. */
+/* THE PLATES YOU OWN DECIDE THE JUMP. THE JUMP IS NOT A SEPARATE FACT.
+
+   plateStep used to win over the plate list, and the two could disagree: you could tick
+   2.5s and separately be told the bar moves in 10s, with nothing reconciling them. Worse,
+   plateStep had an editor and the global plate list did not, so the number somebody could
+   change was the one that could be wrong about the room.
+
+   Derived now. A bar takes a plate on each end, so the smallest change it can make is two
+   of the smallest plate you have, and that is arithmetic rather than a preference.
+   plateStep survives as a FALLBACK only — for somebody who named a step and never named
+   plates, whose answer would otherwise be thrown away. See item 25 in docs/open-work.md
+   for the one-time reconciliation, which is the approved exception to "no behaviour
+   changes" in the Settings redesign. */
 function smallestPlate(){
   const p = trainPrefs();
-  if(p.plateStep > 0) return p.plateStep;
-  const named = Array.isArray(p.plates)
-    ? p.plates.map(Number).filter(x=> isFinite(x) && x > 0) : [];
-  return named.length ? Math.min.apply(null, named) : 0;
+  const named = platesOwned(p);
+  if(named.length) return Math.min.apply(null, named);
+  return p.plateStep > 0 ? p.plateStep : 0;
+}
+function platesOwned(src){
+  const list = src && Array.isArray(src.plates) ? src.plates : null;
+  return list ? list.map(Number).filter(x=> isFinite(x) && x > 0) : [];
+}
+/* What the smallest plate would be for ONE GYM's record, used only by the reconciliation
+   below. The load engine itself still reads the global set — see item 26. */
+function smallestPlateAt(g){
+  const named = platesOwned(g);
+  if(named.length) return Math.min.apply(null, named);
+  return (g && g.plateStep > 0) ? g.plateStep : 0;
+}
+/* THE SENTENCE THE SCREEN SHOWS INSTEAD OF A BOX. "Smallest jump: 5 lb, a pair of 2.5s"
+   says the number, the arithmetic and the thing in the room, in that order. */
+/* WHAT THE SWITCH ACTUALLY CHANGES, PER GYM, BEFORE IT CHANGES IT.
+
+   Every place that stores a plateStep is compared against the plates recorded beside it.
+   Where they agree, nothing is said — which is the common case, and a prompt about a
+   change that is not a change is how people learn to dismiss prompts unread. Where they
+   disagree, the room is named and both numbers are given.
+
+   It reports rather than acts. The derivation is already live by the time this runs; this
+   exists so the one person whose bar starts moving in a different size finds out from the
+   app rather than from a prescription. */
+function plateDeriveScan(){
+  const out = [];
+  const p = trainPrefs();
+  const was = p.plateStep > 0 ? p.plateStep : 0;
+  const now = smallestPlate();
+  if(was > 0 && now > 0 && was !== now)
+    out.push({where: "Your usual kit", was: was, now: now});
+  (Array.isArray(S.gyms) ? S.gyms : []).forEach(g=>{
+    if(!g) return;
+    const gw = g.plateStep > 0 ? g.plateStep : 0;
+    const gn = smallestPlateAt(g);
+    if(gw > 0 && gn > 0 && gw !== gn)
+      out.push({where: g.name || "A gym", was: gw, now: gn});
+  });
+  return out;
+}
+function plateDeriveCardHTML(){
+  const rows = Array.isArray(S.plateDeriveAsk) ? S.plateDeriveAsk : [];
+  if(!rows.length) return "";
+  return `<div class="card" style="border-color:var(--warn)">
+    <h3 style="margin:0 0 6px">The bar now moves by the plates you own</h3>
+    <div class="sub" style="margin:0 0 10px">Element 26 used to keep a separate
+      \u201csmallest plate\u201d number that could disagree with the plates you had ticked. It is
+      worked out from the plates now, because a bar takes one on each end and that is
+      arithmetic rather than a setting. ${rows.length === 1 ? "One place" : rows.length + " places"}
+      had a number that disagreed:</div>
+    ${rows.map(r=> `<div class="pd-row">
+      <b>${esc(r.where)}</b>
+      <span class="num">${esc(fmtLoad(r.was * 2))} \u2192 ${esc(fmtLoad(r.now * 2))} a jump</span>
+      <span class="sub">smallest plate ${esc(stepNum(r.was))} \u2192 ${esc(stepNum(r.now))}</span>
+    </div>`).join("")}
+    <div class="sub" style="margin:10px 2px 0;color:var(--faint);font-size:var(--fs-3)">
+      Nothing you have logged is changed. This only affects the weights Element 26
+      suggests from here on. If a gym's plate list is wrong, fix it under
+      <b>Where you train</b>.</div>
+    <div class="btn-row" style="margin-top:12px">
+      <button class="btn ghost small" id="pdSeen" style="flex:1">Got it</button>
+    </div>
+  </div>`;
+}
+function plateJumpSay(){
+  const st = smallestPlate();
+  if(!(st > 0)) return "";
+  return "Smallest jump: <b>" + fmtLoad(st * 2) + "</b>, a pair of " + stepNum(st) + "s.";
 }
 function plateBreakdown(total, name){
   const p = trainPrefs();
@@ -71080,6 +71222,8 @@ function bindRescue(){
     const ok = exportBadRecords();
     try{ toast(ok ? "Saved" : "Could not save — screenshot this screen", ok ? "good" : "warn"); }catch(e){}
   };
+  const pd = $("#pdSeen");
+  if(pd) pd.onclick = ()=>{ delete S.plateDeriveAsk; save(); render(); };
   const seen = $("#dataIssueSeen");
   if(seen) seen.onclick = ()=>{
     /* Marked read, never deleted: the record is the audit trail. */

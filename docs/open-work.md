@@ -755,6 +755,64 @@ exist to record the patch and its undo.
 
 ---
 
+## 26. `smallestPlate()` ignores the gym you are standing in — OPEN
+
+`kitFor(sess)` merges a gym's own `plateStep` over the global one, and the gym kit editor
+lets you record each gym's `plates` list. **Neither reaches the load engine.**
+`smallestPlate()` reads `trainPrefs()` only, and `loadStepFor()` calls it with no session
+and no gym. So a gym's plate list and its plate step are both stored, both displayed on the
+"Where you train" screen, and both ignored when a weight is suggested — training at Lotus
+Gym gets Palma Vista's grid.
+
+Not fixed with item 25 on purpose: making the engine gym-aware changes the rounding at
+every gym that is not your usual one, which is a real behaviour change beyond the exception
+granted for the derivation. Needs a decision, then a spec that prescribes at two gyms with
+different plates in the same run.
+
+## 25. The bar's jump is derived from the plates you own — DONE (2026.11.17.43)
+
+**Asked for as:** "Plate step: derive it from owned plates. Smallest bar jump = 2 × the
+smallest plate owned, shown read-only. Migration: where my stored plateStep disagrees with
+my plates, show me once what changes and why, per gym, before switching. Same logic for the
+Smith machine." An approved exception to the redesign's no-behaviour-changes rule.
+
+### What was actually wrong, measured first
+
+`smallestPlate()` read `if(p.plateStep > 0) return p.plateStep;` **before** looking at the
+plate list, so a separate number overrode the plates, and the two could disagree with
+nothing reconciling them. Worse, the asymmetry: `plateStep` had an editor and the **global
+plate list had none** — only each gym's list could be changed, while the global one decided
+every suggested load. The field somebody could change was the one that could be wrong.
+
+**The engine was already doing the right thing for this export, and the screen was lying
+about it.** Probed against the Nov 17 fixture before any change: `prefs.plateStep` is
+`null`, `prefs.plates` is `[45, 35, 25, 10, 5, 2.5]`, so `smallestPlate()` already fell
+through to 2.5 and `loadStepFor()` already returned **5 lb for a barbell and 5 lb for a
+Smith** — they share one branch, so "same logic for the Smith" needed no separate work, only
+a spec to pin it. Meanwhile the Settings screen said *"Not set, so it suggests exact numbers
+— which can mean a jump your gym can't make"*, which was false, and `barWeightPickHTML`
+offered *"Set that now"* for a value already derived.
+
+### The change
+
+- `smallestPlate()` takes the plate list first; `plateStep` survives as a **fallback** for
+  somebody who named a step and never named plates, whose answer would otherwise be discarded.
+- The global plate list **gets an editor at last** (`data-prefpl`), and is what you change.
+- The jump is shown and not typeable: *"Smallest jump: **5 lb**, a pair of 2.5s."*
+- Both untrue sentences replaced with the derived figure.
+
+### The reconciliation reports nothing for this export, and that is the point
+
+`plateDeriveScan()` compares each stored `plateStep` against the plates recorded beside it,
+for the usual kit and for every gym. On the real export **nothing disagrees** — Palma Vista
+has no step and 2.5s, Lotus has 2.5 and 2.5s, Uptown has neither — so Today stays silent. A
+prompt about a change that is not a change is how people learn to dismiss prompts unread.
+
+The spec's control plants a genuine disagreement (usual kit says 10, Lotus says 25, both
+own 2.5s) and requires the card to appear, name both rooms, and give both jumps.
+
+**Spec:** `tests/specs/platestep.mjs`, 30 assertions in 6 sections.
+
 ## 24. "The research said 429" — FIXED (2026.11.17.41)
 
 **Reported as `The reaserch said "429"`.** Item 21 fixed the cause of the asking; this is the
