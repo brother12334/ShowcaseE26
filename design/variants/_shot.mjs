@@ -14,17 +14,11 @@ await p.evaluate(fx=>{
   Object.keys(S).forEach(k=>{delete S[k]});
   Object.keys(fx).forEach(k=>{S[k]=JSON.parse(JSON.stringify(fx[k]))});
   S.tourDone=true; migrate(); try{applySplit()}catch(e){}
-  TAB='sync'; SET_PAGE='where'; render();
+  TAB='sync'; SET_PAGE='sess'; render();
   try{ OB=null }catch(e){} try{ PF=null }catch(e){}
   ['preflight','aiFull','splash'].forEach(id=>{const el=document.getElementById(id); if(el) el.remove();});
   document.body.classList.remove('ai-open','onboarding','pfl-open');
   const nav=document.querySelector('nav'); if(nav) nav.style.display='none';
 }, FX);
-const blk = await p.evaluateHandle(()=>{
-  return [...document.querySelectorAll('#app .set-block')]
-    .find(el=> /The plates you have/.test(el.textContent));
-});
-const el = blk.asElement();
-if(el) await el.screenshot({path: appFile('design/variants/shots/live_where.png')});
-else await p.screenshot({path: appFile('design/variants/shots/live_where.png'), fullPage:true});
+await p.screenshot({path: appFile('design/variants/shots/live_sess.png'), fullPage:true});
 await b.close(); console.log('shot');
