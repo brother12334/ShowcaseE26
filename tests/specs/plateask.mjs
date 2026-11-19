@@ -78,16 +78,30 @@ console.log("\n3 - AND IT USES EXACTLY THE PLATES YOU NAMED");
      JSON.stringify({smallest: r.smallest, step: r.step}));
 }
 
-console.log("\n4 - THE CHIP ANSWER STILL WINS WHERE IT IS GIVEN");
+/* THIS SECTION ASSERTED THE OPPOSITE, AND THE OLD EXPECTATION WAS THE OLD RULE.
+   smallestPlate() used to return plateStep before it looked at the plate list, so a
+   number typed once beat the plates actually ticked -- and the plates had no editor at
+   all, so the field somebody could change was the one that could be wrong about the room.
+   The jump a bar can make is two of the smallest plate in it, which is arithmetic rather
+   than a preference, so the list wins now. Approved as an exception to the redesign's
+   no-behaviour-changes rule. A disagreement like the one below is not discarded silently:
+   plateDeriveScan() reports it once, per gym, with both figures. */
+console.log("\n4 - THE PLATES WIN OVER A NUMBER TYPED BESIDE THEM");
 {
   const r = await ev(()=>{
     S.prefs.plateStep = 1.25; S.prefs.plates = [45, 25, 10]; save();
     const small = (typeof smallestPlate === "function") ? smallestPlate() : trainPrefs().plateStep;
-    return {smallest: small, gap: plateGapFor("Barbell Bench Press", 135)};
+    return {smallest: small, gap: plateGapFor("Barbell Bench Press", 135),
+            stored: trainPrefs().plateStep,
+            scan: (typeof plateDeriveScan === "function") ? plateDeriveScan().length : -1};
   });
-  ck("an explicit smallest plate is not overridden by the tree",
-     r.smallest === 1.25, String(r.smallest));
+  ck("a stored 1.25 does not override a ticked set whose smallest is 10",
+     r.smallest === 10, String(r.smallest));
+  ck("CONTROL: the old number is still stored, it is simply not in charge",
+     r.stored === 1.25, String(r.stored));
   ck("and nothing is being asked for", r.gap === null, JSON.stringify(r.gap));
+  ck("CONTROL: the disagreement is reported rather than swallowed",
+     r.scan === 1, String(r.scan));
 }
 
 console.log("\n5 - THE OTHER HALF OF THE QUESTION IS STILL ASKED");

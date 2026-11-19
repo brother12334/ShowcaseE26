@@ -85,8 +85,12 @@ console.log("4 - THE BAR SETTING SAYS PLATES ARE A SEPARATE QUESTION");
     const t = document.body.innerText;
     const link = !!document.querySelector('[data-platefix]');
     trainPrefs().plateStep = 2.5; save(); render();
+    /* "Yours is set to 2.5 lb a side" became "Yours is 2.5 lb a side, so the bar moves
+       in 5 lb": the figure is derived from the plates now, and "is set to" described a
+       stored setting that no longer decides anything. Matching the jump as well, because
+       naming the consequence is the half that is actually useful on this screen. */
     return {unset: /Plates are a separate question/.test(t), offered: link,
-            set: /Yours is set to/.test(document.body.innerText)};
+            set: /Yours is .* a side, so the bar moves in/.test(document.body.innerText)};
   });
   ck("the bar question says plates are asked elsewhere", r.unset, String(r.unset));
   ck("with a way to answer it from there", r.offered, String(r.offered));
@@ -101,10 +105,16 @@ console.log("5 - AND THAT WAY LANDS ON THE PAGE THAT HAS IT");
     const link = document.querySelector('[data-platefix]');
     if(!link) return {none:true};
     link.click();
-    return {page: SET_PAGE, asks: /smallest plate you can put on each side/i.test(document.body.innerText)};
+    /* The heading changed with the plate derivation ("The smallest plate you can put on
+       each side of a bar" -> "The plates you have, each side"), so this matched text that
+       no longer exists. Checked by the CONTROL it is really after as well: the page has
+       to carry the plate picker, not merely a sentence about plates. */
+    return {page: SET_PAGE, asks: /plates you have, each side/i.test(document.body.innerText),
+            picker: document.querySelectorAll('#app [data-prefpl]').length};
   });
   ck("it goes to Where you train", r.page==="where", r.page);
   ck("which is the page carrying the plate question", r.asks, String(r.asks));
+  ck("CONTROL: and carrying the control, not just the words", r.picker > 0, String(r.picker));
 }
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");

@@ -102,11 +102,11 @@ const sess_A = ()=>
 const sess_B = ()=>
   heroW("HOW YOUR TRAINING IS RUN","Asks before adding weight, tracks RPE, adds its own warm-ups",
     "Three decisions do most of the work. The rest are grouped under them.")
++ seg(PROG,"ask")
++ says("<b>Ask me</b> — offered on the grade card with a one-tap Apply. Legs A squat is <b>80 lb</b>; clear the target and the next session offers <b>85</b>.")
 + sec("Progression")
 + group(
-    item("When a weight is ready to go up","",seg(PROG,"ask"),
-      "<b>Ask me</b> — offered on the grade card with a one-tap Apply.")
-  + item("How fast the number of sets climbs","",
+    item("How fast the number of sets climbs","",
       seg([{v:"peak",t:"Speed up"},{v:"off",t:"One at a time"}],"peak"),
       "Up to <b>3 sets</b> a block while a muscle keeps improving, easing off when it stops.")
   + item("Deload weeks","",seg([{v:"auto",t:"Suggest one"},{v:"planOnly",t:"Leave it to me"}],"auto"),
@@ -169,6 +169,7 @@ const screen_A = ()=>
     <p class="sd-hero-s" style="margin-top:13px">The session: all of it on one page — what you
       have done, what you are on, and what is left.</p></div>`
 + seg([{v:"regular",t:"The session"},{v:"focus",t:"Gym mode"}],"regular")
++ says("<b>Gym mode</b> is one exercise at a time with bigger controls, and there is a switch for it on the session itself — so you can change your mind mid-workout.")
 + sec("While a set rests")
 + group(
     item("The rest clock","",seg([{v:"up",t:"Count up"},{v:"down",t:"Count down"}],"down"),
@@ -260,11 +261,10 @@ const gym_B = ()=>
   + item("The number you write down","",
       seg([{v:"total",t:"Bar + plates"},{v:"plates",t:"Plates only"}],"total"),
       "A 45 lb bar with a 45 on each end is <b>135</b>, not 90 and never 45."))
-+ sec("Measuring yourself")
-+ group(
++ more("Measuring yourself — bodyweight and the tape", group(
     tog("Track your bodyweight","A weigh-in log on the Body tab. Turning it off hides the feature and deletes nothing.",true)
   + item("Tape measurements","",seg([{v:"in",t:"Inches"},{v:"cm",t:"Centimetres"}],"cm"),
-      "Independent of pounds or kilos."));
+      "Independent of pounds or kilos.")));
 
 const gym_C = ()=>
   heroW("IN THE GYM","Pounds, bar and plates","Tap any one to change it.")
@@ -397,6 +397,14 @@ const where_A = ()=>
 
 const where_B = ()=>
   hero("GYMS ELEMENT 26 KNOWS","3",null,"One usual, two you have visited once each.")
++ list(
+   `<button type="button" class="sd-r-h"><span class="sd-r-n">Palma Vista Gym</span>
+      <span class="sd-r-v">48 sessions</span><span class="sd-r-c">›</span></button>`
+ + `<button type="button" class="sd-r-h"><span class="sd-r-n">Lotus Gym</span>
+      <span class="sd-r-v">1 session</span><span class="sd-r-c">›</span></button>`
+ + `<button type="button" class="sd-r-h"><span class="sd-r-n">Uptown Gym</span>
+      <span class="sd-r-v">1 session</span><span class="sd-r-c">›</span></button>`)
++ says("Your usual is where the kit below comes from. The other two carry only what is <b>different</b> about them.")
 + sec("Your usual — Palma Vista")
 + group(
     item("Smallest plate each side","Not set, so it suggests exact numbers your rack may not make.",
@@ -576,6 +584,7 @@ const remind_B = ()=>
   hero("REMINDERS ON","0","of 3","None are on. Turn them on and each one is switched separately.")
 + `<div class="btn-row" style="margin:12px 0 0"><button type="button" class="btn"
     style="flex:1">Turn on reminders</button></div>`
++ says("Asks your phone for permission first. Nothing is scheduled until you pick the hours below, and each of the three is switched on its own.")
 + sec("Training")
 + group(tog("Which session is up","At an hour you choose. Skipped on a day you have already trained.",false)
   + `<div class="sd-item">${remPreview("Legs A today.","Squat, RDL, split squat.","Pick a time")}</div>`)

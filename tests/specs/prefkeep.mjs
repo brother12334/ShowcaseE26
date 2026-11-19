@@ -107,11 +107,14 @@ console.log("\n6 - SO THE PLATE QUESTION DOES NOT COME BACK");
 {
   const r = await p.evaluate(()=>{
     TAB="sync"; SET_PAGE="where"; render();
-    return {asks: /smallest plate you can put on each side/i.test(document.body.innerText),
+    /* Renamed by the plate derivation; the question is the same one. */
+    return {asks: /plates you have, each side/i.test(document.body.innerText),
+            picker: document.querySelectorAll('#app [data-prefpl]').length,
             step: trainPrefs().plateStep};
   });
   ck("the setting reads as answered", r.step===2.5, String(r.step));
   ck("the page offers it to change, not to answer from scratch", r.asks, String(r.asks));
+  ck("CONTROL: and offers the plates themselves", r.picker > 0, String(r.picker));
 }
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
