@@ -446,7 +446,7 @@ const plan_A = ()=>
 + more("The block and deloads", group(
     item("Six weeks into this block","Your last deload ended when the block began.",blockBar(),
       "A deload is offered every 6 weeks, or earlier if your RPE and check-ins say so.")
-  + item("","",`<div class="sd-chips"><button type="button" class="sd-chip is-word">Start a deload week</button></div>`)));
+  + item("","",`<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Start a deload week</button></div>`)));
 
 const plan_B = ()=>
   hero("INTO THIS BLOCK","6",`<span style="font-size:19px"> weeks</span>`,
@@ -460,7 +460,7 @@ const plan_B = ()=>
 + group(item("","",seg(PHASE3,"gain"),
     "Above maintenance. Protein and hard training are what decide how much of the gain is muscle."))
 + more("Deload now", group(item("","Ends when you say, or after a week.",
-    `<div class="sd-chips"><button type="button" class="sd-chip is-word">Start a deload week</button></div>`)));
+    `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Start a deload week</button></div>`)));
 
 const plan_C = ()=>
   heroW("YOUR PLAN","Build muscle, gaining","Six weeks into the block.")
@@ -499,5 +499,148 @@ const targets_MIX = ()=>
   + sec("Core") + group(AREAS.Core.map(mRange).join("")));
 
 Object.assign(window.SD, {targets_MIX});
+
+/* =====================  BATCH 3  =====================
+   Every setting on these three is UNSET in the fixture: push off, no reminders, no wake
+   time, no live links. That is not a gap in the mockups, it is the state they are most
+   often seen in, and a design that only looks right once it is full is a design that
+   looks wrong the first time anybody opens it. */
+
+/* ---------- Sleep and mornings ---------- */
+const clockFace = (h,label)=>`<div style="text-align:center;margin:2px 0 0">
+  <span class="sd-hero-v" style="font-size:44px">${E(h)}<i>h</i></span>
+  <div class="sd-hero-s" style="margin-top:2px">${label}</div></div>`;
+
+const day_A = ()=>
+  hero("HOURS OF SLEEP YOU WANT","8","h",
+    "Late sessions cost sleep, and sleep is what recovery is made of.")
++ `<div class="sd-step" style="max-width:260px;margin-left:auto;margin-right:auto">
+    <button type="button" aria-label="Less">−</button>
+    <div class="sd-step-v" role="spinbutton" tabindex="0" aria-valuenow="8">8<i>h</i></div>
+    <button type="button" aria-label="More">+</button></div>`
++ says("Train now and you'd be up around <b>7:30</b>. Leave this blank and nothing about sleep is asked.")
++ sec("Tracking it")
++ group(
+    tog("Track my sleep","Offers to start the clock at night; the first time you open the app next morning is taken as the time you got up. Measured rather than remembered.",true)
+  + item("My night starts at","",`<div class="sd-chips">
+      <button type="button" class="sd-chip" aria-pressed="true">22:30</button></div>`))
++ more("A fixed wake time, if you have one", group(
+    item("Wake time","Most people don't have one, and that's fine. Add one only if you want the app to start cutting exercises to protect it.",
+      `<div class="sd-chips"><button type="button" class="sd-chip is-word" aria-pressed="false">Not set</button></div>`,
+      "With just the hours above, Today shows what time you'd be getting up if you train now and leaves the decision to you.")));
+
+const day_B = ()=>
+  heroW("SLEEP AND MORNINGS","8 hours wanted, night starts 22:30","No fixed wake time, so nothing is ever cut from a session to protect one.")
++ sec("How much")
++ group(item("Hours of sleep you want","Optional. Blank turns all of this off.",
+    step(8,"h"),"Train now and you'd be up around <b>7:30</b>."))
++ sec("When")
++ group(
+    item("My night starts at","",`<div class="sd-chips">
+      <button type="button" class="sd-chip" aria-pressed="true">22:30</button></div>`)
+  + item("Wake time","Only if you have a fixed one.",`<div class="sd-chips">
+      <button type="button" class="sd-chip is-word" aria-pressed="false">Not set</button></div>`,
+      "Set one and the app works backwards: wake minus 8 h is bedtime, and bedtime minus 2 h is the latest you should still be training."))
++ sec("Measuring it")
++ group(tog("Track my sleep","The clock starts at night and stops when you first open the app. Measured rather than remembered.",true));
+
+const day_C = ()=>
+  heroW("SLEEP AND MORNINGS","8 hours, no fixed wake","Tap any one to change it.")
++ list(
+   row("Hours you want","8 h",true,
+     step(8,"h") + says("Train now and you'd be up around <b>7:30</b>. Blank turns all of this off."))
+ + row("Track my sleep","On")
+ + row("Night starts","22:30")
+ + row("Wake time","Not set"));
+
+/* ---------- Reminders ---------- */
+const remPreview=(t,b,when)=>`<div class="sd-prev">
+  <div class="sd-prev-w">${E(when)}</div>
+  <div class="sd-prev-b"><b>${E(t)}</b> ${E(b)}</div></div>`;
+
+const remind_A = ()=>
+  heroW("REMINDERS","Off","Three reminders, each switchable on its own. Nothing is sent that isn't listed below — and you can read every one before you agree to any of it.")
++ `<div class="btn-row" style="margin:12px 0 0"><button type="button" class="btn"
+    style="flex:1">Turn on reminders</button></div>`
++ sec("What you would get")
++ group(
+    item("Training","Which session is up, at an hour you choose. Skipped on a day you have already trained.",
+      remPreview("Legs A today.","Squat, RDL, split squat.","Weekdays at 17:00"))
+  + item("Bedtime","A nudge to start the sleep clock at 22:30.",
+      remPreview("Night starts now.","Tap to start the sleep clock.","Every night at 22:30"))
+  + item("Morning","The check-in, once you are up.",
+      remPreview("How did you sleep?","One tap, then the day's session.","Each morning")))
++ says("Turning it on asks your phone for permission. Nothing is scheduled until you pick the hours.");
+
+const remind_B = ()=>
+  hero("REMINDERS ON","0","of 3","None are on. Turn them on and each one is switched separately.")
++ `<div class="btn-row" style="margin:12px 0 0"><button type="button" class="btn"
+    style="flex:1">Turn on reminders</button></div>`
++ sec("Training")
++ group(tog("Which session is up","At an hour you choose. Skipped on a day you have already trained.",false)
+  + `<div class="sd-item">${remPreview("Legs A today.","Squat, RDL, split squat.","Pick a time")}</div>`)
++ sec("Bedtime")
++ group(tog("Start the sleep clock","At 22:30, your night-start time.",false)
+  + `<div class="sd-item">${remPreview("Night starts now.","Tap to start the sleep clock.","Every night at 22:30")}</div>`)
++ sec("Morning")
++ group(tog("The morning check-in","Once you are up, before the day's session.",false))
++ more("Why a reminder might not arrive", group(item("","",
+    `<div class="sd-sub">Checks notification permission, the service worker, and whether a
+     subscription reached the server — so you can confirm a fix without waiting until six in the morning.</div>`)));
+
+const remind_C = ()=>
+  heroW("REMINDERS","Off","Nothing is sent until you turn these on.")
++ list(
+   row("Reminders","Off",true,
+     `<div class="btn-row" style="margin:0"><button type="button" class="btn" style="flex:1">Turn on reminders</button></div>`
+     + says("Asks your phone for permission. Nothing is scheduled until you pick the hours."))
+ + row("Training","—") + row("Bedtime","—") + row("Morning","—"))
++ more("Why a reminder might not arrive", group(item("","",
+    `<div class="sd-sub">Permission, service worker, subscription. Checked here rather than
+     at six in the morning.</div>`)));
+
+/* ---------- Share with a coach ---------- */
+const SHX=[["Bodyweight and measurements","Your weigh-ins and any tape measurements, as a trend."],
+  ["Sleep and check-ins","The hours and the energy ratings behind the readiness numbers."],
+  ["Niggles and injuries","What hurts, where, and what the app is doing about it."],
+  ["Session notes","Anything you have typed about a session or an exercise."]];
+
+const share_A = ()=>
+  heroW("SHARE WITH A COACH","No live links","A link opens a read-only page: your plan, what each muscle has been getting, where the lifts are going. They cannot change your log and do not need the app.")
++ `<div class="btn-row" style="margin:12px 0 0"><button type="button" class="btn"
+    style="flex:1">Make a link</button></div>`
++ sec("It expires on its own")
++ seg([{v:7,t:"7 days"},{v:30,t:"30 days"},{v:90,t:"90 days"}],30)
++ says("Thirty days unless you change it, ninety at the very most. <b>A link that never expires is one you will have forgotten about by the time it matters.</b>")
++ sec("What goes in it")
++ group(SHX.map(([t,s2])=> tog(t,s2,false)).join(""))
++ says("The plan and what you have done against it always go. Never shared, whatever you turn on: your account id, your recovery key, your reminder subscriptions. The snapshot is checked before it leaves this device and <b>refuses to send rather than trimming itself</b>.");
+
+const share_B = ()=>
+  hero("THIS LINK LASTS","30",`<span style="font-size:19px"> days</span>`,
+    "Then it stops working, for everyone who has it. You can revoke it sooner.")
++ seg([{v:7,t:"7 days"},{v:30,t:"30 days"},{v:90,t:"90 days"}],30)
++ says("Ninety at the very most. A link that never expires is one you will have forgotten about by the time it matters.")
++ sec("Four things that stay out unless you say")
++ group(SHX.map(([t,s2])=> tog(t,s2,false)).join(""))
++ sec("Make it")
++ group(item("","Your plan and what you have done against it always go in.",
+    `<div class="btn-row" style="margin:0"><button type="button" class="btn" style="flex:1">Make a link</button></div>`,
+    "Never shared: your account id, your recovery key, your reminder subscriptions. Checked before it leaves the device."))
++ more("Live links", group(item("","Nothing is readable right now.","")));
+
+const share_C = ()=>
+  heroW("SHARE WITH A COACH","No live links","Tap to set one up.")
++ list(
+   row("Make a link","None live",true,
+     `<div class="btn-row" style="margin:0"><button type="button" class="btn" style="flex:1">Make a link</button></div>`
+     + says("A read-only page. They cannot change your log and do not need the app or an account."))
+ + row("Expires after","30 days")
+ + row("Bodyweight","Left out") + row("Sleep and check-ins","Left out")
+ + row("Niggles and injuries","Left out") + row("Session notes","Left out"));
+
+Object.assign(window.SD, {day_A,day_B,day_C,
+  remind_A,remind_B,remind_C, share_A,share_B,share_C});
+
 
 })();

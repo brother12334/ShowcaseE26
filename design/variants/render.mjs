@@ -14,7 +14,10 @@ const TITLES = {
   gym:    ["In the gym",          "Pounds or kilos, and what the number you write for a barbell means."],
   targets:["Volume targets",      "What counts as enough work for each muscle, and how those numbers are reached."],
   where:  ["Where you train",     "The plates and dumbbells you have, the gyms Element 26 knows about, and whether it checks."],
-  plan:   ["Your plan",           "Deloads, and how your volume targets are worked out."]
+  plan:   ["Your plan",           "Deloads, and how your volume targets are worked out."],
+  day:    ["Sleep and mornings",  "The morning check, sleep tracking, and how much sleep you want."],
+  remind: ["Reminders",           "Notifications for training, bedtime and the morning."],
+  share:  ["Share with a coach",  "A read-only link to your plan and your numbers, which expires by itself."]
 };
 const b = await chromium.launch();
 let fails = 0;
