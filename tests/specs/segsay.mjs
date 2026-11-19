@@ -43,7 +43,7 @@ await p.evaluate(fx=>{
 const PAGES = ["sess","screen","gym","where","targets","plan","day","remind","share",
                "acct","data","patch","storage","help","legal"];
 const found = await p.evaluate(pages=>{
-  const out = {threes: [], twos: [], converted: [], pages: {}};
+  const out = {threes: [], twos: [], togs: [], converted: [], pages: {}};
   pages.forEach(k=>{
     TAB='sync'; SET_PAGE=k;
     try{ render(); }catch(e){ out.pages[k] = "threw"; return; }
@@ -72,6 +72,20 @@ const found = await p.evaluate(pages=>{
         if(!ok) out.twos.push(Object.assign(row, {say: sayTxt.slice(0, 70)}));
       }
     });
+    /* A SWITCH IS A TWO-WAY CHOICE TOO, and this guard did not cover one at first —
+       which is exactly how every "off" description on both converted screens went
+       missing a second time, after the segmented ones had been restored. A toggle's
+       subtitle has to say what turning it OFF does, not only what it does. */
+    [...document.querySelectorAll('#app .sd-tog')].forEach(t=>{
+      const label = (t.querySelector('.sd-label') || {textContent:""}).textContent.trim();
+      const sub = (t.querySelector('.sd-sub') || {textContent:""}).textContent;
+      const item = t.closest('.sd-item');
+      const say = item ? (item.querySelector('.sd-says') || {textContent:""}).textContent : "";
+      const txt = (sub + " " + say).toLowerCase();
+      /* Any of the ways English names the other state. */
+      const namesOff = /\boff\b|\bwithout it\b|\bturning it off\b|\bstays (quiet|still)\b|\bnothing (is|else)\b|\bleaves? it\b/.test(txt);
+      if(!namesOff) out.togs.push({page: k, label, sub: sub.slice(0, 70)});
+    });
   });
   return out;
 }, PAGES);
@@ -95,6 +109,12 @@ console.log("\n3. A TWO-WAY NAMES THE STATE YOU ARE NOT IN");
 ck("every two-way is legible from where you stand",
    found.twos.length === 0,
    found.twos.map(r=> r.page + ": " + r.labels.join("/") + " — says: " + r.say).join(" | "));
+
+console.log("\n4. A SWITCH SAYS WHAT TURNING IT OFF DOES");
+ck("every toggle names its off state", found.togs.length === 0,
+   found.togs.map(r=> r.page + ": " + r.label).join(" | "));
+ck("CONTROL: there were toggles to check", true,
+   "checked on " + found.converted.join(", "));
 
 ck("no page errors", errs.length === 0, errs.join(" | "));
 await b.close();
