@@ -7374,7 +7374,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.40";
+const APP_VERSION = "2026.11.17.41";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -36213,7 +36213,6 @@ function dataIssueCardHTML(){
       <button class="btn" id="badRecCopy" style="flex:1">Copy the set-aside records</button></div>
     <div class="btn-row">
       <button class="btn ghost small" id="badRecFile" style="flex:1">Save them as a file</button>
-      <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
     </div>
     <div class="sub" style="margin:6px 2px 0;color:var(--faint);font-size:var(--fs-3)">
       The set-aside records and the sessions they came from, and nothing else — no
@@ -36222,7 +36221,6 @@ function dataIssueCardHTML(){
     <div class="btn-row" style="margin-top:10px">
       <button class="btn ghost small" id="dataIssueSeen" style="flex:1">Got it</button>
     </div>` : `<div class="btn-row">
-      <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
       <button class="btn ghost small" id="dataIssueSeen" style="flex:1">Got it</button>
     </div>`}
     ${list.slice(-1).map(x=> (x.notes || []).length ? `<details style="margin-top:10px">
@@ -44975,6 +44973,52 @@ function researchConfigured(){ return !!researchBase(); }
    worth incomparably more than an empty one. */
 const RESEARCH_FRESH_MS = 24 * 60 * 60 * 1000;
 const RESEARCH_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/* THE BRAKE MUST OUTLIVE THE CACHE IT PROTECTS, which is why this is a separate key.
+
+   The only thing that stopped the app asking again was a successfully written feed cache,
+   and that cache is disposable BY DESIGN — it is in the storage budget and the pruner is
+   allowed to drop it. So on a device under storage pressure every single render of this
+   tab refetched the whole library: bindResearch() runs after every render, the cache it
+   checks was gone again, and 752 KB went down the wire on every keystroke in the search
+   box. That is how a reader ends up being told "429" by their own service.
+
+   A key under "e26." that is not the feed cache is PROTECTED by storageCategoryOf, so the
+   pruner cannot take the brake off while leaving the thing it brakes. It holds about sixty
+   bytes: when we last asked, how many times running it has failed, and the time before
+   which we must not ask again. It is written to disk rather than kept in a variable
+   because the failure mode is somebody reloading the page, and a variable is gone by then. */
+const RESEARCH_TRY_KEY = "e26.research.try.v1";
+/* Doubling-ish, and the last step is the cap. A service that has told us to go away five
+   times running is not going to be fixed by a sixth ask ninety seconds later. */
+const RESEARCH_RETRY_MS = [2 * 60 * 1000, 8 * 60 * 1000, 32 * 60 * 1000,
+                           2 * 60 * 60 * 1000, 6 * 60 * 60 * 1000];
+function researchTryRead(){
+  try{
+    const o = JSON.parse(localStorage.getItem(RESEARCH_TRY_KEY) || "null");
+    if(o && typeof o === "object") return {at: Number(o.at) || 0, fails: Number(o.fails) || 0,
+                                           status: Number(o.status) || 0, until: Number(o.until) || 0};
+  }catch(e){}
+  return {at: 0, fails: 0, status: 0, until: 0};
+}
+function researchTryWrite(o){
+  /* Not storagePutDisposable: losing this is worse than keeping it. */
+  try{ localStorage.setItem(RESEARCH_TRY_KEY, JSON.stringify(o)); }catch(e){}
+}
+/* The moment we are allowed to ask again, or 0 for "now". */
+function researchHeldUntil(){
+  const t = researchTryRead();
+  return (t.until > Date.now()) ? t.until : 0;
+}
+/* HOW LONG, IN WORDS SOMEBODY CAN ACT ON. "In a few minutes" is a promise; "429" is not. */
+function researchWaitWords(until){
+  const ms = Math.max(0, until - Date.now());
+  if(ms < 90 * 1000) return "in a moment";
+  const mins = Math.round(ms / 60000);
+  if(mins < 60) return "in about " + mins + " minute" + (mins === 1 ? "" : "s");
+  const hrs = Math.round(ms / 3600000);
+  return "in about " + hrs + " hour" + (hrs === 1 ? "" : "s");
+}
 /* The feed lives in localStorage rather than in S. It is public data the app did not
    author, it is reproducible from the Worker, and putting it in S would push it into every
    backup file and every sync payload for no benefit. What DOES go in S is the handful of
@@ -45115,6 +45159,12 @@ function researchById(id){
 /* ---------- fetching ---------- */
 let RESEARCH_LOADING = false;
 let RESEARCH_ERROR = "";
+/* WHICH FAILURE, because the four of them want four different sentences and the screen
+   used to put "Couldn't reach the research service" above every one of them — including a
+   429, which is the service answering, clearly and on time, to say we are asking too
+   often. Telling somebody their service is unreachable when it is merely busy sends them
+   to look for an outage that is not there. */
+let RESEARCH_ERROR_KIND = "";
 let RESEARCH_Q = "";             // the live search box contents
 let RESEARCH_VIEW = "feed";      // feed | saved
 let RESEARCH_PAPER = null;       // the open detail page's id, or null
@@ -45132,14 +45182,40 @@ async function researchFetchFeed(opts){
      file:// failure in the tests, and either would show as an error state when the truth
      is simply that no service has been pointed at yet. */
   if(!researchConfigured()){ RESEARCH_ERROR = ""; return; }
-  RESEARCH_LOADING = true; RESEARCH_ERROR = "";
   const o = opts || {};
+  /* HELD BACK IS NOT AN ERROR, AND IT IS NOT A STATE TO HIDE EITHER. A tap on Try again
+     is a person deciding, so it goes through; an automatic fetch inside the window does
+     not, and says nothing, because bindResearch() would otherwise say it on every render. */
+  if(!o.force && researchHeldUntil()) return;
+  RESEARCH_LOADING = true; RESEARCH_ERROR = ""; RESEARCH_ERROR_KIND = "";
+  const started = Date.now();
+  const was = researchTryRead();
   try{
     const qs = new URLSearchParams();
+    /* ASK FOR WHAT CHANGED, NOT FOR EVERYTHING, which the Worker has supported all along
+       and nothing ever passed. The whole library is 752 KB; a day's additions are a few,
+       and a day with none is 32 bytes. The merge below already keeps every paper we hold,
+       so an incremental answer loses nothing — that is what made this safe to turn on.
+
+       The overlap is deliberate: the filter is addedAt >= since, and the device's clock is
+       not the server's. Asking from a day before our last answer costs a few KB and cannot
+       skip a paper that landed in the gap. Past RESEARCH_STALE_MS we take the lot, because
+       at that point the cache is old enough that trusting it to be complete is a guess. */
+    const held = researchCacheRead();
+    const fresh = held && held.papers.length && (started - (held.at || 0)) < RESEARCH_STALE_MS;
     if(o.since) qs.set("since", o.since);
+    else if(fresh && !o.full) qs.set("since", String(Math.max(0, (held.at || 0) - RESEARCH_FRESH_MS)));
     const res = await fetch(researchBase() + "/research/feed?" + qs.toString(),
                             {headers: {"accept": "application/json"}});
-    if(!res.ok) throw new Error("the research service answered " + res.status);
+    if(!res.ok){
+      const err = new Error("the research service answered " + res.status);
+      err.status = res.status;
+      /* The service's own number if it gave one, in seconds. We are not obliged to improve
+         on it, and a service that names a wait knows something we do not. */
+      const ra = Number(res.headers.get("retry-after") || 0);
+      if(ra > 0) err.retryAfterMs = Math.min(ra, 24 * 60 * 60) * 1000;
+      throw err;
+    }
     const data = await res.json();
     if(!data || !Array.isArray(data.papers)) throw new Error("the research service sent something unreadable");
     /* MERGE, NEVER REPLACE. A paper the reader has saved must not vanish because it fell
@@ -45149,10 +45225,25 @@ async function researchFetchFeed(opts){
     old.forEach(x=> { if(x && x.id) by[x.id] = x; });
     data.papers.forEach(x=> { if(x && x.id) by[x.id] = x; });
     researchCacheWrite(Object.keys(by).map(k=> by[k]), Date.now());
+    researchTryWrite({at: Date.now(), fails: 0, status: 200, until: 0});
   }catch(e){
-    RESEARCH_ERROR = (!navigator.onLine)
+    const st = Number(e && e.status) || 0;
+    RESEARCH_ERROR_KIND = (!navigator.onLine) ? "offline"
+      : (st === 429) ? "busy"
+      : (st >= 500) ? "server"
+      : st ? "refused" : "net";
+    RESEARCH_ERROR = (RESEARCH_ERROR_KIND === "offline")
       ? "offline"
       : String((e && e.message) || "the research service could not be reached");
+    /* THE BACKOFF IS WRITTEN DOWN, so a reload does not start the flood again. Offline is
+       the exception: the brake there is the radio, and a person who has just walked back
+       into signal should not be told to wait two minutes. */
+    if(RESEARCH_ERROR_KIND !== "offline"){
+      const fails = Math.max(1, (was.fails || 0) + 1);
+      const step = RESEARCH_RETRY_MS[Math.min(fails - 1, RESEARCH_RETRY_MS.length - 1)];
+      const wait = Math.max(step, Number(e && e.retryAfterMs) || 0);
+      researchTryWrite({at: started, fails: fails, status: st, until: Date.now() + wait});
+    }
   }finally{
     RESEARCH_LOADING = false;
     if(TAB === "research") render();
@@ -45333,9 +45424,6 @@ function viewResearch(){
 
   let h = `<div class="hdr"><h1>Research Lab</h1>${hdrRight()}</div>
     <div class="rs-sub">New science for better training.</div>
-    <div class="btn-row" style="margin:0 0 12px">
-      <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
-    </div>
     <div class="rs-search">
       <label class="rs-sr" for="rsQ">Search research</label>
       <input id="rsQ" type="search" inputmode="search" autocomplete="off"
@@ -45351,9 +45439,28 @@ function viewResearch(){
     if(RESEARCH_ERROR === "offline") return h + researchNoteHTML("You're offline",
       "Research needs a connection the first time. Everything you've already opened or "
       + "saved stays readable without one.", true);
+    /* A SERVICE THAT ANSWERS 429 HAS NOT FAILED TO ANSWER. It is a small service on a free
+       plan telling us, correctly, that it is being asked too often, and the honest screen
+       says so and says when we will try again rather than implying an outage. */
+    if(RESEARCH_ERROR_KIND === "busy") return h + researchNoteHTML("The research service is busy",
+      "It asked Element 26 to slow down, so the next check is " + esc(researchWaitWords(
+        researchTryRead().until || Date.now())) + ". Nothing is wrong with your data, and "
+      + "anything you've already opened or saved is still readable.", true);
+    if(RESEARCH_ERROR_KIND === "server") return h + researchNoteHTML("The research service had a problem",
+      esc(RESEARCH_ERROR) + ". That's at its end, not yours — your training data isn't "
+      + "involved. It'll be tried again " + esc(researchWaitWords(researchTryRead().until
+        || Date.now())) + ".", true);
     if(RESEARCH_ERROR) return h + researchNoteHTML("Couldn't reach the research service",
       esc(RESEARCH_ERROR) + ". Nothing is wrong with your data — this screen is the only "
       + "thing affected.", true);
+    /* HELD BACK FROM AN EARLIER FAILURE, after a reload cleared the message that explained
+       it. Without this the screen read "No papers yet — tap below to look now" while the
+       tap was the one thing being declined, which is the kind of lie that makes somebody
+       tap twenty times. */
+    const held = researchHeldUntil();
+    if(held) return h + researchNoteHTML("Waiting before asking again",
+      "The research service asked Element 26 to slow down. The next check is "
+      + esc(researchWaitWords(held)) + ", or tap below to ask now.", true);
     return h + researchNoteHTML("No papers yet",
       "Element 26 checks for new research about once a day. Tap below to look now.", true);
   }
@@ -45905,7 +46012,7 @@ function bindResearch(){
   const ap = $("#rsApply");
   if(ap) ap.onclick = ()=> openResearchApply(RESEARCH_PAPER);
   const rt = $("#rsRetry");
-  if(rt) rt.onclick = ()=>{ researchFetchFeed(); render(); };
+  if(rt) rt.onclick = ()=>{ researchFetchFeed({force: true}); render(); };
   /* THE ONLY WAY TO REFRESH USED TO BE A BUTTON THAT ONLY EXISTED WHEN SOMETHING WAS WRONG.
 
      #rsRetry renders inside the error and empty notes, so a reader whose feed was merely OLD
@@ -45917,7 +46024,7 @@ function bindResearch(){
 
      So the control is now always on screen, under the count, saying what it does. */
   const rc = $("#rsCheck");
-  if(rc) rc.onclick = ()=>{ researchFetchFeed(); render(); };
+  if(rc) rc.onclick = ()=>{ researchFetchFeed({force: true}); render(); };
   /* READ AT 70% OF THE WAY DOWN, which is the brief's rule and a better proxy for having
      read something than opening it was. */
   if(RESEARCH_PAPER && !researchRead(RESEARCH_PAPER)) researchArmReadWatch(RESEARCH_PAPER);
@@ -45961,7 +46068,6 @@ function viewProgram(){
     <button class="btn ghost small" id="buildPlanBtn" style="flex:1">Build a new plan</button>
   </div>
   <div class="btn-row" style="margin-bottom:10px">
-    <button class="btn ghost small" id="rescueRaw" style="flex:1">Export raw data</button>
     <button class="btn ghost small" id="rescueFull" style="flex:1">Normal export</button>
   </div>
   ${/* ALWAYS REACHABLE, NOT ONLY WHILE THE NOTICE IS UP. The Today card goes the moment
@@ -45975,11 +46081,6 @@ function viewProgram(){
     read. They were moved out of the readers' way rather than deleted, and these two
     buttons hand over just those records and the sessions they came from — no account id
     or key, no tokens, nothing else.</div>` : ""}
-  <div class="sub" style="margin:-4px 2px 14px;font-size:var(--fs-3);color:var(--faint)">
-    <b>Export raw data</b> reads this device's storage directly as text rather than through
-    the app, so it works even when a screen will not draw. It is here, not in Settings,
-    because Settings is one of the screens that can go down. GitHub sync tokens are left
-    out; your account key is in it, so keep the file private.</div>
   <div class="btn-row" style="margin-bottom:16px">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
     <button class="btn ghost small" id="planHistBtn" style="flex:1">What changed${
@@ -62787,8 +62888,32 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.40";
+const NEWS_FOR = "2026.11.17.41";
 const NEWS = [
+  {k: "Research says what the service actually said",
+   s: ["Research reported \u201cCouldn\u2019t reach the research service\u201d when the service had "
+     + "answered perfectly clearly: 429, meaning it was being asked too often. It now says "
+     + "that, and says when the next check will be, because an outage you go looking for "
+     + "and a wait you only have to sit out are not the same problem.",
+     "It was being asked too often, and here is why. The only thing stopping the app "
+     + "asking again was a successfully saved copy of the feed \u2014 and that copy is "
+     + "deliberately disposable, so on a device short of room it kept being cleared. Every "
+     + "redraw of the tab then fetched the entire library again, including every keystroke "
+     + "in the search box. The brake is now kept separately from the thing it brakes, where "
+     + "clearing space cannot reach it, and it survives a reload, so reopening the app no "
+     + "longer starts it over.",
+     "And it now asks only for what is new rather than for all of it. The service has "
+     + "always been able to answer that question and nothing ever asked: a day with nothing "
+     + "new is 32 bytes where the whole library is 752 KB. Papers you have saved or opened "
+     + "are kept exactly as before \u2014 the answer is merged in, never substituted."]},
+  {k: "One place to export your raw data",
+   s: ["\u201cExport raw data\u201d was on Program, on Research and on the set-aside records "
+     + "notice. It is now in Settings \u203a Storage only, at the top of that screen, where it "
+     + "was already offered before anything there can be deleted.",
+     "The rescue copies stay where they are and are untouched: a tab that crashes, a screen "
+     + "that will not draw at all, and a save that failed each still offer the export on the "
+     + "spot \u2014 those are the moments when Settings may be exactly what is broken. Program "
+     + "keeps its normal export."]},
   {k: "Settings \u203a Storage: what is on your device, and what can go",
    s: ["A new screen shows what this app is keeping and what each part costs: your "
      + "training data, the rescue backups, the patch snapshots, the caches and the saved "
@@ -72846,7 +72971,9 @@ function storageCardHTML(){
     <div class="set-name">Before anything else</div>
     <div class="set-help">Everything on this screen removes something. The export is one
       file with your whole log, programme and settings in it, and importing it anywhere
-      brings all of it back.</div>
+      brings all of it back. It reads this device's storage directly as text rather than
+      through the app, so it works even when a screen will not draw. GitHub sync tokens are
+      left out; your account key is in it, so keep the file private.</div>
     <button class="btn small" id="stoExport">Export raw data</button>
   </div>
   <div class="set-block">

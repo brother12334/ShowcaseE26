@@ -755,6 +755,106 @@ exist to record the patch and its undo.
 
 ---
 
+## 24. "The research said 429" — FIXED (2026.11.17.41)
+
+**Reported as `The reaserch said "429"`.** Item 21 fixed the cause of the asking; this is the
+asking itself, and the message about it.
+
+### What 429 was
+
+It is the Worker's own rate limiter (`proxy/research-worker.js`, `rateOk`), not Cloudflare's.
+`RATE_PER_MIN = 60`, counted on a one-in-ten sample against a threshold of
+`ceil(60 / 10) = 6`, keyed `rl:<ip>:<minute>`.
+
+**Measured, not assumed:** 80 requests to the live Worker in about thirty seconds returned
+`404` eighty times and never once `429`. The limiter is looser in practice than on paper,
+because `env.RESEARCH.get(k)` immediately after `put(k)` is a KV read-after-write and KV is
+eventually consistent, so the counter it reads back is usually still the old one. Tripping it
+therefore takes a genuinely large burst — which is what makes the app-side finding below the
+answer rather than a guess.
+
+### Why the app was bursting
+
+The only thing that stopped `researchFetchFeed()` running again was a **successfully written
+feed cache** — and that cache is disposable by design. It is in the storage budget and
+`storageDisposable` is allowed to drop it. `bindResearch()` runs after *every* render, and
+the research screen re-renders on every keystroke in the search box and every filter tap.
+
+So on a device short of room the loop was: render, cache missing, `stale` true, fetch 752 KB,
+write the cache, pruner takes it again, render, fetch again. Item 21 removed one reason the
+pruner chose that cache first. It did not remove the structural fault, which is that **the
+brake lived inside the thing it was braking.**
+
+### The fix
+
+1. **The brake is a separate key, `e26.research.try.v1`.** `storageCategoryOf` files any
+   `e26.` key that is not the feed cache as protected, so the pruner cannot take the brake
+   off while leaving the thing it brakes. It holds `{at, fails, status, until}` — about sixty
+   bytes — and it is on disk rather than in a variable because the failure mode is somebody
+   reloading the page, and a variable is gone by then.
+2. **Backoff: 2 min, 8 min, 32 min, 2 h, 6 h,** capped, and `max(floor, Retry-After)` so the
+   wait is never shorter than the service asked for. Offline is exempt: the brake there is
+   the radio, and somebody walking back into signal should not be told to wait.
+3. **An explicit tap bypasses it** (`researchFetchFeed({force: true})`). A person deciding is
+   not a flood, and a screen that refuses the one button on it is a screen that gets tapped
+   twenty times.
+4. **`since` is passed at last.** The Worker has supported it all along (`addedAt >= since`)
+   and nothing ever sent it, so every fetch was the whole library. Measured against the live
+   service: **752 KB for everything, 140 KB for thirty days, 32 bytes for a day with nothing
+   new.** The overlap is deliberately a full `RESEARCH_FRESH_MS` back, because the filter is
+   `>=` and the device's clock is not the server's; past `RESEARCH_STALE_MS` it takes the lot,
+   which is the first use that constant has ever had. The existing merge already keeps every
+   held paper, which is what made this safe to turn on.
+
+### And the message was wrong
+
+`RESEARCH_ERROR` was one free-text string under one headline, `"Couldn't reach the research
+service"` — printed over a 429, which is the service answering clearly and on time. That
+sends somebody looking for an outage that is not there. There is now a `RESEARCH_ERROR_KIND`
+of `offline` / `busy` / `server` / `refused` / `net`, and four screens instead of one. A
+reload that clears the in-session message but not the on-disk brake now draws "Waiting before
+asking again" rather than "No papers yet — tap below to look now", which was a lie about the
+one thing being declined.
+
+### Worker-side, and it needs a deploy
+
+`proxy/research-worker.js` now sends `retry-after` on the 429 (seconds left in the counter's
+minute) **and names it in `access-control-expose-headers`** — without which
+`res.headers.get("retry-after")` reads `null` cross-origin however carefully the header is
+set, because Retry-After is not one of the seven CORS-safelisted response headers. That was
+nearly a silent no-op.
+
+**Not yet deployed.** `npx wrangler deploy --config wrangler.research.toml`. The app works
+either way: absent the header it uses its own floor.
+
+### Still open
+
+The limiter's sampled counter is a lottery on top of an eventually-consistent read, so it
+both under-counts ordinary use and could in principle over-count a burst. It is not worth
+changing while the client no longer bursts, but it is written down here.
+
+**Spec:** `tests/specs/res429.mjs`, 36 assertions in 8 sections. Section 3's control is the
+load-bearing one: "no more fetches happened" is worthless alone, so the brake is cleared and
+the same forty renders are run again, and a fetch must appear.
+
+## 23. Export raw data, in one place — DONE (2026.11.17.41)
+
+**Asked for as "remove all the previously made export raw data buttons in all the pages make
+it only in settings".**
+
+Removed from the Program tab, the Research tab, and both branches of the set-aside records
+card. Program keeps its *normal* export, which is not what was asked to be removed.
+
+**Kept, deliberately, and said so at the time:** the crashed-tab panel (`RESCUE_BTNS`), the
+screen that could not be drawn at all (`rescueBareHTML`), and the failed-save modal
+(`#sfExport`). The Program help text argued the raw export was on a page *because* "Settings
+is one of the screens that can go down" — which is true, and is exactly what those three
+cover. What moved is the everyday copy; the rescue did not.
+
+That paragraph also carried the only statement that GitHub sync tokens are left out of the
+file and the account key is in it. It has been moved to the Storage screen's own help text
+rather than deleted with the button it described.
+
 ## 22. Settings > Storage — SHIPPED (2026.11.17.40)
 
 Asked for as item 1 of the storage work and deliberately deferred behind the data-loss fix.

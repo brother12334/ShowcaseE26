@@ -1669,6 +1669,12 @@ function cors(origin) {
     "access-control-allow-origin": ok ? origin : ORIGINS[0],
     "access-control-allow-methods": "GET,OPTIONS",
     "access-control-allow-headers": "content-type,accept",
+    /* WITHOUT THIS THE 429's RETRY-AFTER IS INVISIBLE TO THE APP. Retry-After is not one of
+       the seven CORS-safelisted response headers, so res.headers.get("retry-after") from a
+       browser on another origin reads null however carefully the header was set. Naming it
+       here is the whole difference between the app honouring the service's own number and
+       the app inventing one. */
+    "access-control-expose-headers": "retry-after",
     "access-control-max-age": "86400"
   };
 }
@@ -1794,7 +1800,14 @@ async function handle(request, env) {
     const ip = request.headers.get("cf-connecting-ip") || "";
     const isAdminReq = !!url.searchParams.get("token");
     if (!(await rateOk(env, ip, isAdminReq)))
-      return new Response(JSON.stringify({error: "rate limit"}), {status: 429, headers: cors(origin)});
+      /* WITH A RETRY-AFTER, because a 429 with no number is a riddle. The counter's key is
+         the current minute and it expires on its own, so the honest answer is "when this
+         minute is over" — and the app reads this header rather than guessing, which is the
+         difference between it waiting a minute and it waiting two. */
+      return new Response(JSON.stringify({error: "rate limit", retryAfter: 60}), {
+        status: 429,
+        headers: Object.assign({"retry-after": String(60 - (Math.floor(Date.now() / 1000) % 60))},
+                               cors(origin))});
 
     /* ADMIN ROUTES, BEHIND A SECRET, and deliberately the only non-GET-shaped thing here:
        approving a summary is a judgement the owner makes, and it is made by hand. */
