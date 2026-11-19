@@ -670,17 +670,73 @@ console.log("\n20 - DELETING A ROW FROM THE HISTORY, WHICH IS NOT UNDOING IT");
   ck("CONTROL: and the plan history keeps every row the patch wrote",
      r.after.planRows === r.before.planRows && r.before.planRows > 0,
      r.before.planRows + " -> " + r.after.planRows);
-  ck("the sheet says the plan does not change", /Your plan does not change/.test(r.sheet),
-     r.sheet.slice(0, 80));
-  ck("and names what is lost", /What you lose/.test(r.sheet)
-     && /can no longer be reversed/.test(r.sheet),
-     (r.sheet.match(/What you lose[^.]*\./) || ["missing"])[0]);
+  ck("the sheet says neither choice changes the plan",
+     /Neither of these changes your plan/.test(r.sheet), r.sheet.slice(0, 80));
+  /* THE DEFAULT IS THE SMALL DECISION. Freeing the snapshot keeps the row, keeps the
+     journal and keeps undo working; removing the row is the other option and says what it
+     costs. The first version of this screen did both behind one button called Delete. */
+  ck("it offers freeing the snapshot, with the size and what survives",
+     /Free the snapshot/i.test(r.sheet)
+     /* the apostrophe arrives HTML-escaped here: this reads the markup with its tags
+        stripped, not innerText, which would have decoded it */
+     && /Frees [\d.]+ KB\. You can still undo this patch(?:'|&#39;)s own changes, but not roll back whole/.test(r.sheet),
+     (r.sheet.match(/Frees [^.]*\.[^.]*\./) || ["missing"])[0]);
+  ck("and removing the row as a separate, labelled choice",
+     /Or remove the row entirely/i.test(r.sheet) && /Undo goes with it/.test(r.sheet),
+     (r.sheet.match(/Or remove the row[^.]*\.[^.]*\./) || ["missing"])[0]);
+  ck("CONTROL: and says the plan history survives either way",
+     /plan history keeps every row it wrote either way/.test(r.sheet),
+     (r.sheet.match(/plan history[^.]*\./) || ["missing"])[0]);
   ck("delete all clears the list", r.all === 1 && r.left === 0, r.all + " deleted, " + r.left + " left");
   ck("CONTROL: and still does not touch the plan",
      r.floorsAfterAll.q === r.before.floorQ && r.floorsAfterAll.h === r.before.floorH,
      JSON.stringify(r.floorsAfterAll));
   ck("the empty list says so rather than showing nothing", /Nothing applied yet/.test(r.card),
      "empty state");
+
+  /* FREEING THE SNAPSHOT, AND THE UNDO STILL WORKING AFTERWARDS. That is the whole claim
+     the sheet makes, so it is the thing asserted: the bytes go, the row stays, and the
+     patch's own changes still reverse. */
+  const freed = await p.evaluate(async fx=>{
+    Object.keys(fx).forEach(k=>{ S[k] = JSON.parse(JSON.stringify(fx[k])); });
+    S.patchLog = []; migrate(); try{ applySplit(); }catch(e){}
+    const a = await patchApply(JSON.stringify({e26patch: 1, note: "free me",
+      ops: [{op: "volume.floor", muscle: "quads", to: 7}]}));
+    const before = {bytes: patchSnapBytes(a.id), snap: patchEntry(a.id).snap,
+                    used: storageUsed(), floor: (S.lmFloor || {}).quads};
+    const n = patchFreeSnap(a.id);
+    const row = patchEntry(a.id);
+    const after = {bytes: patchSnapBytes(a.id), snap: row && row.snap,
+                   used: storageUsed(), row: !!row,
+                   journal: row ? row.journal.length : 0,
+                   card: patchCardHTML()};
+    /* the claim: undo still reverses this patch's own changes */
+    const chk = patchUndoCheck(a.id);
+    const out = patchUndoRun(a.id);
+    const undone = {reversed: out.reversed, floor: (S.lmFloor || {}).quads};
+    /* and rolling back whole is honestly refused */
+    const roll = await patchRestore(a.id);
+    return {n, before, after, clean: chk.clean.length, undone, roll: roll.err || "no error"};
+  }, FX);
+  console.log("    freed " + freed.n + " chars, storage " + freed.before.used
+            + " -> " + freed.after.used);
+  /* storageSizeOf() counts the key's own name as well as its value, so a key that is gone
+     reads as the length of its name rather than zero. */
+  ck("freeing a snapshot frees the bytes", freed.n > 100000
+     && freed.after.bytes < 64
+     && freed.before.used - freed.after.used > 100000,
+     freed.n + " chars, " + (freed.before.used - freed.after.used) + " off storage");
+  ck("the row stays, with its journal", freed.after.row && freed.after.journal > 0,
+     freed.after.journal + " paths");
+  ck("the row stops claiming a whole roll-back", freed.before.snap === true
+     && freed.after.snap === false && /reverse only/.test(freed.after.card),
+     freed.before.snap + " -> " + freed.after.snap);
+  ck("CONTROL: and undo still reverses the patch's own changes",
+     freed.clean > 0 && freed.undone.reversed > 0 && freed.undone.floor === freed.before.floor - 1
+       || (freed.undone.reversed > 0 && freed.undone.floor !== 7),
+     freed.undone.reversed + " reversed, quads floor now " + freed.undone.floor);
+  ck("CONTROL: while rolling back whole is refused, not half done",
+     /no longer has a full snapshot/.test(freed.roll), freed.roll.slice(0, 70));
 }
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");

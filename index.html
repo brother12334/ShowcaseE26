@@ -2004,6 +2004,10 @@ button.side-chip.sc-set::after{
 .pt-hist-n{font-size:var(--fs-3);color:var(--dim);font-style:italic;margin-top:3px}
 .pt-hist-g{font:var(--fs-1) var(--mono);letter-spacing:.08em;color:var(--faint);margin-top:4px}
 .pt-done{opacity:.6}
+.pt-keep{margin-top:10px;padding:9px 11px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--card)}
+.pt-keep-k{font:var(--fs-1) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--acc)}
+.pt-keep-s{font-size:var(--fs-3);color:var(--dim);line-height:1.45;margin-top:5px}
 .pt-lose{margin-top:10px;padding:9px 11px;border:1px solid rgba(201,79,79,.3);
   border-radius:var(--r-sm)}
 .pt-lose-k{font:var(--fs-1) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--bad)}
@@ -7349,7 +7353,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.37";
+const APP_VERSION = "2026.11.17.38";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -62723,17 +62727,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.37";
+const NEWS_FOR = "2026.11.17.38";
 const NEWS = [
-  {k: "Patch history can be cleared out",
-   s: ["Each row in Settings \u203a Plan patches now has a Delete, and the list has a "
-     + "Delete all. It does not undo anything: every change those patches made stays "
-     + "exactly where it is, and your plan history keeps every row they wrote, with the "
-     + "reason and the day.",
-     "What you lose is the way back \u2014 that patch can no longer be undone, and if it "
-     + "still had a full snapshot behind it, there is no rolling back to before it "
-     + "either. The confirmation says which of those apply to the row you are deleting, "
-     + "rather than asking whether you are sure."]},
+  {k: "Patch history can be tidied up, in two sizes",
+   s: ["Each row in Settings \u203a Plan patches has a Delete, and so does the list. Neither "
+     + "undoes anything: every change those patches made stays exactly where it is, and "
+     + "your plan history keeps every row they wrote, with the reason and the day.",
+     "The sheet offers two different sizes of decision rather than one button. FREE THE "
+     + "SNAPSHOT is the small one and it tells you what it is worth \u2014 \u201cFrees 150 KB. "
+     + "You can still undo this patch\u2019s own changes, but not roll back whole.\u201d The row "
+     + "stays, and so does its undo.",
+     "REMOVE THE ROW is the other one, and it says what goes with it: the undo. A patch "
+     + "whose row is gone cannot be reversed any more. Your plan, and your plan history, "
+     + "are untouched by both."]},
   {k: "A one-limb pair opens on the side that needs it",
    s: ["A pair opened on the left, always, whichever side was behind. The protocol that "
      + "holds your stronger side to your weaker one caps it at the reps the weaker side "
@@ -72270,7 +72276,41 @@ function patchUndoRun(id, opts){
   return {ok: true, reversed: list.length, left: o.force ? 0 : chk.clash.length,
           clash: o.force ? [] : chk.clash, dir: chk.dir};
 }
-/* FORGETTING ONE, WHICH IS NOT UNDOING IT.
+/* FREEING THE SNAPSHOT, WHICH IS THE SMALL DECISION AND THEREFORE THE DEFAULT.
+
+   A history row holds two separate things, and they are worth very different amounts:
+
+     the JOURNAL   kilobytes, and the only way to undo that patch
+     the SNAPSHOT  about 150 KB, and the only way back to the moment before it
+
+   The first version of this screen deleted both behind one button called Delete, which
+   made the cheap, reversible tidy-up and the irreversible one the same press. They are
+   separated now: freeing the snapshot keeps the row, keeps the journal, and keeps "undo
+   this patch's own changes" working - it only gives up rolling back whole. Removing the
+   row is the other option, and it says so in those words.
+
+   Neither touches the plan, and neither touches the plan history. */
+function patchSnapBytes(id){
+  try{ return storageSizeOf(PATCH_SNAP_PREFIX + id); }catch(e){ return 0; }
+}
+function patchFreeSnap(id){
+  const row = patchEntry(id);
+  if(!row || !row.snap) return 0;
+  const n = patchSnapBytes(id);
+  storageDropItem(PATCH_SNAP_PREFIX + id);      // this is what marks the row reverse-only
+  save(); queueSync();
+  return n;
+}
+function patchFreeAllSnaps(){
+  let n = 0;
+  (S.patchLog || []).slice().forEach(r=>{ if(r && r.snap) n += patchFreeSnap(r.id); });
+  return n;
+}
+function fmtKB(chars){
+  const kb = chars / 1024;
+  return (kb >= 100 ? Math.round(kb) : Math.round(kb * 10) / 10) + " KB";
+}
+/* REMOVING THE ROW, WHICH IS NOT UNDOING IT EITHER.
 
    A history row holds two things: the journal, which is the only way back from that patch,
    and the snapshot, which is the only way back to the moment before it. Deleting the row
@@ -72414,7 +72454,7 @@ function patchCardHTML(){
       what it changed, and can be taken back.</div>`;
   } else {
     h += `<div class="set-row" style="justify-content:flex-end;margin:-4px 0 6px">
-      <button class="btn ghost small" id="ptForgetAll">Delete all</button>
+      <button class="btn ghost small" id="ptForgetAll">Delete…</button>
     </div>`;
     h += `<div class="set-help">The last ${PATCH_LOG_KEEP} patches. <b>Undo</b> reverses the
       patch's own changes and leaves anything you have done since. A patch that still has a
@@ -72438,7 +72478,7 @@ function patchCardHTML(){
           ${r.snap && !r.undone
             ? `<button class="btn ghost small" data-ptrestore="${esc(r.id)}">Roll back whole</button>`
             : ""}
-          <button class="btn ghost small" data-ptforget="${esc(r.id)}">Delete</button>
+          <button class="btn ghost small" data-ptforget="${esc(r.id)}">Delete…</button>
         </div>
       </div>`;
     });
@@ -72464,32 +72504,39 @@ function patchAskHTML(){
   }
   if(a.kind === "forget"){
     const one = a.rows.length === 1 ? a.rows[0] : null;
-    const snaps = a.rows.filter(r=> r.snap).length;
+    const withSnap = a.rows.filter(r=> r.snap);
+    const bytes = withSnap.reduce((n, r)=> n + patchSnapBytes(r.id), 0);
     const undone = a.rows.filter(r=> r.undone).length;
-    return `<div class="sheet-h">${one ? "Delete this patch from the history"
-                                       : "Delete all " + a.rows.length + " patches from the history"}</div>
-      <div class="sub">Your plan does not change. ${one
+    const what = one ? "this patch" : "these " + a.rows.length + " patches";
+    return `<div class="sheet-h">${one ? "Delete from the patch history"
+                                       : "Delete " + a.rows.length + " patches from the history"}</div>
+      <div class="sub">Neither of these changes your plan. ${one
         ? (one.changes === 1
             ? "The one change this patch made on " + esc(one.date) + " stays exactly as it is."
             : "The " + one.changes + " changes this patch made on " + esc(one.date)
               + " stay exactly as they are.")
         : "Every change these patches made stays exactly as it is."}
-        What goes is the way back.</div>
+        Your plan history keeps every row ${one ? "it" : "they"} wrote either way, with the
+        reason and the day.</div>
+      ${withSnap.length ? `<div class="pt-keep">
+        <div class="pt-keep-k">Free the snapshot${withSnap.length === 1 ? "" : "s"}</div>
+        <div class="pt-keep-s">Frees ${esc(fmtKB(bytes))}. You can still undo ${
+          esc(what + (one ? "'s" : "'"))} own changes, but not roll back whole.</div>
+        <button class="btn small" id="ptFreeGo" style="margin-top:9px">Free ${esc(fmtKB(bytes))}</button>
+      </div>` : `<div class="sub">${one ? "This row has" : "These rows have"} no snapshot left
+        to free.</div>`}
       <div class="pt-lose">
-        <div class="pt-lose-k">What you lose</div>
-        <div class="pt-row"><span class="pt-what">${one && !one.undone
-          ? "Undo: these changes can no longer be reversed."
-          : undone ? "Redo: " + (one ? "this patch" : undone + " undone patch"
-              + (undone === 1 ? "" : "es")) + " can no longer be put back."
-          : "Undo: these changes can no longer be reversed."}</span></div>
-        ${snaps ? `<div class="pt-row"><span class="pt-what">The full snapshot${
-          snaps === 1 ? "" : "s"} behind ${snaps === 1 ? "it" : snaps + " of them"}, so there is no
-          rolling back to before ${snaps === 1 ? "it" : "them"} either.</span></div>` : ""}
-        <div class="pt-row"><span class="pt-what">Nothing else. Your plan history keeps every
-          row these patches wrote, with the reason and the day.</span></div>
+        <div class="pt-lose-k">Or remove the row${one ? "" : "s"} entirely</div>
+        <div class="pt-row"><span class="pt-what">${undone && !(one && !one.undone)
+          ? "Redo goes with it: " + (one ? "this patch" : undone + " undone row"
+              + (undone === 1 ? "" : "s")) + " can no longer be put back."
+          : "Undo goes with it: " + what + (one ? "'s" : "'") + " own changes can no longer be reversed."}</span></div>
+        <div class="pt-row"><span class="pt-what">The row leaves this list. Nothing else
+          changes.</span></div>
+        <button class="btn ghost small" id="ptForgetGo" style="margin-top:9px">${
+          one ? "Remove the row" : "Remove all " + a.rows.length + " rows"}</button>
       </div>
       <div class="set-row" style="gap:8px;margin-top:12px">
-        <button class="btn small" id="ptForgetGo">${one ? "Delete it" : "Delete all " + a.rows.length}</button>
         <button class="btn ghost small" id="ptForgetNo">Cancel</button>
       </div>`;
   }
@@ -72604,6 +72651,14 @@ function patchAskWire(){
   };
   const no = $("#ptClashNo");
   if(no) no.onclick = ()=>{ hideModal(); PATCH_ASK = null; };
+  const fs = $("#ptFreeGo");
+  if(fs) fs.onclick = ()=>{
+    const ids = (PATCH_ASK && PATCH_ASK.ids) || [];
+    let n = 0;
+    ids.forEach(id=>{ n += patchFreeSnap(id); });
+    hideModal(); PATCH_ASK = null; render();
+    toast(n ? "Freed " + fmtKB(n) + " \u2014 these can still be undone" : "Nothing to free", "good");
+  };
   const fg = $("#ptForgetGo");
   if(fg) fg.onclick = ()=>{
     const ids = (PATCH_ASK && PATCH_ASK.ids) || [];

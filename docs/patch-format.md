@@ -287,11 +287,15 @@ inverse ops only, and your new sessions are never read. Something changed since 
 patch also changed → neither, silently: the slot is named, with the patch's value, the
 value now, and what undo would write, and you choose.
 
-**A row can be deleted**, from the row itself or with Delete all. That is not an undo:
-every change the patch made stays exactly where it is, and the plan history keeps every row
-it wrote. What goes is the journal and the snapshot — so the patch can no longer be
-reversed, and no longer rolled back whole. The confirmation names which of those apply
-rather than asking whether you are sure.
+**A row can be tidied up in two sizes**, and the sheet offers both rather than one button
+called Delete. Neither changes your plan, and neither touches the plan history.
+
+- **Free the snapshot** — the small one, and the default. It says what it is worth: *"Frees
+  150 KB. You can still undo this patch's own changes, but not roll back whole."* The row
+  stays, its journal stays, undo keeps working; what goes is the ability to roll back to
+  the moment before it.
+- **Remove the row** — the other one, clearly labelled, which takes the undo with it. A
+  patch whose row is gone cannot be reversed any more.
 
 Snapshots are gzipped and kept under a byte budget rather than a fixed count, because a
 full state is several hundred kilobytes and browser storage is about five megabytes. Patch
