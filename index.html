@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.49";
+const APP_VERSION = "2026.11.17.50";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -47514,6 +47514,21 @@ function tgValueAt(el, clientX, clientY){
 function tgCommit(pct, was){
   if(pct === was) return;
   S.lmScale = pct / 100;
+  /* AND THE BLOCK HOLD LETS GO, because this is the person's own hand on the dial.
+
+     A block in progress finishes on the numbers it started on, so a change to the model
+     does not move a target somebody is three weeks into chasing. That rule already
+     exempts a landmark you set by hand -- "a number the person set by hand is never
+     held", as adjustedLandmarks puts it -- and the scale is exactly such a number. It was
+     not exempt, so moving this dial set lmScale, wrote a plan-history entry, re-rendered,
+     and visibly did nothing: every row kept its held figures until the next block began.
+     Asked as "if I move the dial, do the floors update?"; the answer was no.
+
+     The hold is DROPPED rather than rescaled, on purpose. What it stores was snapshotted
+     with whatever scale was in force at the time, so multiplying it again would stack one
+     scale on another. Dropping it puts every muscle back on the live chain, which is what
+     somebody moving this dial is asking for. */
+  if(S.volHold) S.volHold = null;
   logPlanChange("rule", null, "Volume targets",
     [was + "% → " + pct + "% of the published figures"],
     {note: "You scaled every muscle's targets from Settings."});
@@ -63525,8 +63540,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.49";
+const NEWS_FOR = "2026.11.17.50";
 const NEWS = [
+  {k: "The volume dial actually moves the numbers now",
+   s: ["Moving the dial on Volume targets changed the setting, wrote it to your plan "
+     + "history, and then visibly did nothing: every muscle kept the figures it was "
+     + "showing before. It has been that way for as long as the dial has existed.",
+     "The cause was a rule that is otherwise right. A block already under way finishes "
+     + "on the numbers it started on, so a change to the model cannot move a target you "
+     + "are three weeks into chasing \u2014 and that rule already makes an exception for any "
+     + "figure you set by hand. The dial is such a figure and was not exempt.",
+     "It is now. Move the dial and every muscle's floor, target and ceiling move with "
+     + "it, on screen and on the bars, immediately. A floor you typed in yourself is "
+     + "still left alone, as it always was."]},
   {k: "Every muscle's week, drawn",
    s: ["Each muscle on Volume targets now carries a small bar: the band runs from the "
      + "floor to the ceiling, a tick marks the target, and a marker sits where this "
