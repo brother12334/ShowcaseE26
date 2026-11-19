@@ -7349,7 +7349,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.35";
+const APP_VERSION = "2026.11.17.36";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -13662,7 +13662,12 @@ function applySwapSides(en){
   const style = altStyle({name: en.name});
   if(style){
     en.altStyle = style;
-    en.startSide = startSideFor(S.active ? S.active.workoutId : null);
+    /* THROUGH THE SAME RULE AS A PLANNED ONE, so a session never mixes orders. This used
+       startSideFor() for every style, which alternates: a movement swapped in mid-session
+       could open on the right while every planned pair beside it opened on the left. */
+    en.startSide = entryPerSideWanted(en)
+      ? openingSideFor(en)
+      : startSideFor(S.active ? S.active.workoutId : null);
   } else {
     delete en.altStyle;
     delete en.startSide;
@@ -17609,6 +17614,34 @@ function altIndex(wid){
 // (UNILATERAL + isSingleArm live near the top of the file, migrate() needs them.)
 // Which arm to START with this session. Flips every session of that day:
 // session 0,2,4 → Right first; 1,3,5 → Left first.
+/* WHICH SIDE A PAIR OPENS ON, as one rule with one answer.
+
+   Three steps, in order, and each exists for a reason:
+
+     1. THE SLOT'S OWN, when it names one. Somebody who knows their left shoulder wants
+        the extra minute of warmth has said so, and nothing here outranks that.
+     2. THE ESTABLISHED WEAKER SIDE, while a balance check has one. The hold-to-weaker
+        protocol caps the stronger side at the reps the weaker one did IN THIS SESSION -
+        so the weaker side has to go first, or the first pair has nothing to cap against
+        and the protocol starts working from the second. That was the live behaviour: a
+        pair opened on the left whether or not the left was the weaker side.
+     3. OTHERWISE THE LEFT. A pair happens inside one set, seconds apart, so there is no
+        fresh-set advantage to share out and no reason to alternate; a fixed opener is one
+        less thing to remember at the rack.
+
+   startSideFor() still answers for a LEGACY ALTERNATING entry, where each side really is
+   its own set and the opener should rotate so neither side always gets the fresh one. */
+function openingSideFor(e){
+  const own = e && e.startSide;
+  if(own === "L" || own === "R") return own;
+  try{
+    if(e && entryPerSideWanted(e) && asymActiveFor(e)){
+      const st = sideStats(e.name);
+      if(st && st.ok && !st.closed && (st.weaker === "L" || st.weaker === "R")) return st.weaker;
+    }
+  }catch(err){}
+  return "L";
+}
 function startSideFor(wid){
   // Flipping is a preference, not a law: somebody who always wants to open on their
   // right (a coach's plan often says so) can turn it off, and then it never moves.
@@ -51372,7 +51405,7 @@ function planEntry(e, isFinisher, wi, chosenList, side){
          advantage to cancel, and a fixed order is what makes "hold the right to the
          left's count" a protocol somebody can actually follow. */
       startSide: altStyle(e)
-        ? (entryPerSideWanted(e) ? ((e.startSide === "R") ? "R" : "L") : side)
+        ? (entryPerSideWanted(e) ? openingSideFor(e) : side)
         : undefined,
       /* P1-7 — and whether a set of this movement is a PAIR. Frozen into the session
          with the rest of the prescription, so changing the plan mid-workout cannot turn
@@ -62690,8 +62723,17 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.35";
+const NEWS_FOR = "2026.11.17.36";
 const NEWS = [
+  {k: "A one-limb pair opens on the side that needs it",
+   s: ["A pair opened on the left, always, whichever side was behind. The protocol that "
+     + "holds your stronger side to your weaker one caps it at the reps the weaker side "
+     + "did IN THAT SESSION \u2014 so if the weaker side went second, the first pair had "
+     + "nothing to cap against and the protocol only started working from the second set.",
+     "The rule now, in order: the side a slot names if it names one, then the weaker side "
+     + "while a balance check has one, then the left. A movement swapped in mid-session "
+     + "follows the same rule, so a session never mixes orders \u2014 it used to alternate, "
+     + "and could open on the right beside planned pairs opening on the left."]},
   {k: "A full device no longer costs you a session",
    s: ["If storage filled up, Element 26 said so once and gave up: it did not free "
      + "anything, did not try again, and the next write hit the same full device. A "
@@ -71840,8 +71882,12 @@ function patchPlanSummary(){
      reader can see why a one-limb line behaves as it does. */
   L.push("side tracking: " + ({separate: "each side tracked separately",
                                matchWeaker: "both sides held to the weaker one",
-                               both: "both sides counted as one set"}[p.sides] || p.sides || "unset")
-       + "   opening side: " + (p.startSideFlip === false ? "always the right" : "swapped each session"));
+                               both: "both sides counted as one set"}[p.sides] || p.sides || "unset"));
+  /* The RULE, not the setting. The setting governs a legacy alternating entry, where each
+     side is its own set; it does not govern a pair, and saying "swapped each session" of a
+     plan made of pairs was simply untrue. */
+  L.push("opening side on a pair: the slot's own if it names one, else the weaker side "
+       + "while a balance check has one, else the left");
   const bw = bodyWeightNow();
   L.push("bodyweight: " + (bw ? fmtLoad(bw) : "not logged"));
   const hg = gymById(S.homeGym);
@@ -71868,6 +71914,22 @@ function patchPlanSummary(){
          with what the app will do with the line. */
       const per = (function(){ try{ return entryPerSideWanted(e); }catch(err){ return false; } })();
       if(per) bits.push("per side (the set count is per side)");
+      /* WHAT THE SESSION WILL ACTUALLY ASK FOR, where it differs from the line. A live
+         balance check adds one set for the side that is behind, so a line reading 3 is a
+         session of 4 - and a summary that says 3 and stops is right about the plan and
+         silent about the workout. Derived, like everything else here, through the same
+         function the session builder uses, so the two cannot disagree. */
+      const extra = (function(){
+        try{
+          if(!per || !asymActiveFor(e)) return null;
+          const st = sideStats(e.name);
+          if(!st || !st.ok || st.closed || !st.weaker) return null;
+          return st.weaker;
+        }catch(err){ return null; }
+      })();
+      if(extra) bits.push("+1 set for the weaker side (" + extra + "), so "
+                        + ((parseInt(e.sets, 10) || 0) + 1) + " in the session");
+      if(per) bits.push("opens on " + (function(){ try{ return openingSideFor(e); }catch(err){ return "L"; } })());
       if(e.setType && e.setType !== "straight") bits.push(e.setType + " sets");
       if(e.pct != null) bits.push(e.pct + "% of training max");
       L.push("    " + patchSlotId(wid, i) + "  " + e.name + "   " + bits.join(", "));

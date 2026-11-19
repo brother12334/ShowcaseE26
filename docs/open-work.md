@@ -755,6 +755,53 @@ exist to record the patch and its undo.
 
 ---
 
+## 20. The opening side, and a summary that was silent about the workout — FIXED (2026.11.17.36)
+
+**The opening side.** `planEntry()` had P1-7's rule written into it: a pair opens on the
+left, or on whichever side the slot names. That was deliberate and documented, and it took
+no account of which side is WEAKER. The hold-to-weaker protocol caps the stronger side at
+the reps the weaker one did IN THIS SESSION, so the weaker side has to go first or the
+first pair has nothing to cap against and the protocol starts working from the second set.
+
+`openingSideFor(e)` is the rule in one place: the slot's own if it names one, then the
+established weaker side while a balance check has one, then the left. A movement swapped in
+mid-session goes through the same function — `applySwapSides()` used `startSideFor()`, which
+ALTERNATES, so a swapped-in movement could open on the right beside planned pairs opening
+on the left. `startSideFor()` still answers for a legacy alternating entry, where each side
+really is its own set and rotating the opener is right.
+
+**The fixture could not have proved this.** On it, the weaker side is the left on all three
+live checks, so the rule and the old default agree and every assertion would pass without
+the rule existing. The spec forces `sideStats()` to report a weaker right and asserts the
+pair opens R, that a slot's own choice still beats it, and that with neither it is the left.
+
+**A consequence worth stating:** `startSideFlip` — the "Which side should go first?"
+question — now governs only legacy alternating entries. It is still asked at onboarding.
+Reworded or removed is a decision for the user, recorded rather than taken.
+
+**And the summary was silent about the workout.** Three slots prescribe one more set than
+their line says: the extra half-set a live balance check gives the side that is behind. The
+summary said 3 and stopped — right about the plan, silent about what the session would ask
+for, and a patch written against it would have been written against a plan that does not
+exist. Those lines now read `+1 set for the weaker side (L), so 4 in the session`, and every
+per-side line states which side it opens on.
+
+**`tests/specs/summary.mjs`** parses the summary back out of the text that reaches the
+clipboard — not out of the structure that built it, because a summary that is right in
+memory and wrong on the clipboard is wrong — and compares every slot on every day against
+what `startWorkout()` builds: 38 slots, sets, reps and loads. Its own first run failed on
+all 38 at once, which is what a parse bug looks like next to a real one: the rep-range regex
+was swallowing the trailing comma.
+
+**A standing correction to how this document and this session talk.** Everything described
+as "your plan" in the plan-patch work was read from `tests/fixtures/state-2026-11-17.json`.
+The user's device has moved on — their export today reads 3 x 8-12 for the Bulgarian split
+squat where the fixture says 4 x 4-8. The fixture is a fixture; when the live plan is what
+matters, ask for an export. The mechanisms described elsewhere in item 15 hold; the specific
+slots and numbers are the fixture's.
+
+---
+
 ## 19. Storage filled up, and a save that failed was the end of it — FIXED (2026.11.17.35)
 
 **Reported from a device: "storage is full".** That message was this app's own, and it was
