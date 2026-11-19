@@ -186,7 +186,11 @@ console.log("3 - P4: THREE BUZZES AND NO OTHERS");
     const opts = Array.from(d.querySelectorAll("[data-prefhaptics]")).map(x=> x.dataset.prefhaptics);
     return {opts, text: d.textContent.replace(/\s+/g," ")};
   });
-  ck("there is a setting for it", r.opts.join(",") === "on,off", JSON.stringify(r.opts));
+  /* TWO BUTTONS BECAME ONE SWITCH when the workout screen was rebuilt, so a single
+     render carries the value it would set rather than both. What matters is that the
+     setting is there and can reach either state, not that both appear at once. */
+  ck("there is a setting for it", r.opts.length === 1 && /^(on|off)$/.test(r.opts[0]),
+     JSON.stringify(r.opts));
   ck("and it says which three moments buzz", /rest clock is up/.test(r.text),
      r.text.slice(0, 80));
 }

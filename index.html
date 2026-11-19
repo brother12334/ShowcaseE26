@@ -785,6 +785,11 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
 /* Stacked when three choices carry words rather than one. */
 .sd-seg.is-tall{flex-direction:column}
 .sd-seg.is-tall button{text-align:left;padding:11px 11px;min-height:44px}
+.sd-seg.is-tall button b{display:block;font-weight:600}
+.sd-seg.is-tall button span{display:block;margin-top:2px;font-family:var(--sans);
+  font-weight:400;font-size:var(--fs-3);line-height:1.4;color:var(--dim);
+  letter-spacing:0;white-space:normal}
+.sd-seg.is-tall button[aria-pressed="true"] span{color:var(--dim)}
 
 /* toggle with a subtitle that says what changes */
 .sd-tog{display:flex;align-items:flex-start;gap:12px;width:100%;text-align:left;
@@ -17009,7 +17014,11 @@ const SND_SEL = [
 ].join(", ");
 /* A press that LANDS something gets the softer pop instead of the click: a set ticked, an
    option chosen out of a set, a switch moved. Everything else is a plain press. */
-const SND_POP_SEL = '.ch, .chip, .seg button, .feel-btn, .chk, [data-done], input[type="checkbox"], input[type="radio"]';
+/* A CONTROL THAT SETTLES ON A CHOICE POPS; a button that does something clicks. The
+   shared Settings library's segmented pills, switches and chips are all the former, and
+   were clicking until they were named here — a two-year-old distinction in how the app
+   feels, quietly dropped by a visual redesign. Caught by tests/specs/sound.mjs. */
+const SND_POP_SEL = '.ch, .chip, .seg button, .feel-btn, .chk, [data-done], input[type="checkbox"], input[type="radio"], .sd-seg button, .sd-tog, .sd-chip, .sd-plate-b, .sd-step button';
 let SND_AT = 0;
 document.addEventListener("pointerdown", e=>{
   if(!soundOn()) return;
@@ -34048,9 +34057,22 @@ function sdItem(label, sub, ctrl, says){
 /* 2 or 3 mutually exclusive choices. `attr` is the SAME data attribute the old screens
    used, so the existing handler wires it with no change — which is what keeps a redesign
    from becoming a behaviour change. */
+/* AN OPTION YOU ARE NOT ON STILL HAS TO EXPLAIN ITSELF.
+
+   The first two conversions replaced option lists that described every choice with pills
+   that described only the one you were standing on — so "Notify my phone" stopped saying
+   it reaches a locked phone, and "Automatic" stopped saying it writes the increase into
+   your plan. That is a loss of meaning even though not a byte of stored state changed,
+   and restping caught it only because one of those sentences happened to be asserted.
+
+   THE RULE, applied in both directions: a choice of THREE carries a description on each
+   option, in the stacked form, because you cannot see what you are not on. A choice of
+   TWO may use the compact row, but its says line must then describe BOTH states. */
 function sdSeg(opts, attr, cur, tall){
-  return `<div class="sd-seg${tall ? " is-tall" : ""}" role="group">${opts.map(o=>
-    `<button type="button" ${attr}="${attrSafe(o.v)}" aria-pressed="${o.v === cur}">${esc(o.t)}</button>`
+  const described = opts.some(o=> o.d);
+  return `<div class="sd-seg${(tall || described) ? " is-tall" : ""}" role="group">${opts.map(o=>
+    `<button type="button" ${attr}="${attrSafe(o.v)}" aria-pressed="${o.v === cur}">${
+      o.d ? `<b>${esc(o.t)}</b><span>${o.d}</span>` : esc(o.t)}</button>`
   ).join("")}</div>`;
 }
 /* A toggle carries the value it WILL set, so the same handler that reads a segmented
@@ -34220,8 +34242,11 @@ function prefsScreenHTML(){
     </div>`
     + sdSeg([{v:"regular", t:"The session"}, {v:"focus", t:"Gym mode"}], "data-vmode",
             focus ? "focus" : "regular")
-    + sdSays("There is a switch for this on the session itself, so you can change your mind "
-        + "mid-workout without coming back here.");
+    + sdSays((focus
+        ? "<b>The session</b> puts all of it on one page instead: what you have done, what you are on, and what is left."
+        : "<b>Gym mode</b> shows one exercise at a time with bigger controls instead.")
+      + " There is a switch for this on the session itself, so you can change your mind "
+      + "mid-workout without coming back here.");
 
   h += sdSec("While a set rests");
   h += sdGroup(
@@ -34229,18 +34254,24 @@ function prefsScreenHTML(){
         sdSeg([{v:"up", t:"Count up"}, {v:"down", t:"Count down"}],
               "data-prefrestclock", p.restClock === "down" ? "down" : "up"),
         p.restClock === "down"
-          ? "From the rest that set earned, then into negative overtime."
-          : "A stopwatch from zero.")
+          ? "Counting down from the rest that set earned, then into negative overtime. <b>Count up</b> is a stopwatch from zero instead."
+          : "A stopwatch from zero. <b>Count down</b> starts from the rest that set earned and runs into negative overtime instead.")
     + sdItem("When the rest is up", "",
-        sdSeg([{v:"off", t:"Nothing"}, {v:"buzz", t:"Buzz"}, {v:"notify", t:"Notify my phone"}],
-              "data-prefrestalert", na, true),
+        sdSeg([
+          {v:"off",    t:"Nothing", d:"The clock runs and never interrupts you."},
+          {v:"buzz",   t:"Buzz",    d:"A vibration and a line on screen the moment the rest reaches its target."},
+          {v:"notify", t:"Notify my phone",
+           d:"The same, plus a notification you get with the phone locked or on another app."}
+        ], "data-prefrestalert", na),
         alertSay));
 
   h += sdSec("What you hear and feel");
   h += sdGroup(
       sdTog("Sound",
         "A click as you press, a softer one when something lands, and a note when Element 26 "
-        + "says something back. It follows your ringer switch.",
+        + "says something back. It follows your ringer switch, so silencing the phone "
+        + "silences it. Nothing is downloaded until you turn it on, and once it is, it "
+        + "works with no signal.",
         soundOn(), "data-prefsound", soundOn() ? "off" : "on")
     + sdTog("Buzz",
         "Three buzzes and no others: a tick when a set is banked, two when the rest clock is "
@@ -34279,8 +34310,13 @@ function prefsSessionHTML(){
 
   let h = sdHeroW("WHEN A WEIGHT IS READY TO GO UP", esc(progWord), esc(progSay))
     + sdSeg([
-        {v:"auto", t:"Automatic"}, {v:"ask", t:"Ask me"}, {v:"hold", t:"I'll manage"}
-      ], "data-prefprog", p.progression, true)
+        {v:"auto", t:"Automatic",
+         d:"Writes the increase into your plan the moment a session earns it."},
+        {v:"ask",  t:"Ask me",
+         d:"Offers it on the grade card with a one-tap Apply."},
+        {v:"hold", t:"I'll manage",
+         d:"Says nothing. You change the loads yourself."}
+      ], "data-prefprog", p.progression)
     + sdSays(p.progression === "hold"
         ? "Nothing is suggested, so nothing here can surprise you mid-session."
         : "Either way, extra <b>sets</b> go on another day rather than into one session.");
@@ -34288,8 +34324,11 @@ function prefsSessionHTML(){
   h += sdSec("While you train");
   h += sdGroup(
       sdItem("Warm-up sets", "A ramp worked out before the first big lift of the day.",
-        sdSeg([{v:"auto", t:"Add them"}, {v:"planOnly", t:"Plan only"}, {v:"manual", t:"Off"}],
-              "data-prefwarm", p.warmups),
+        sdSeg([
+          {v:"auto",     t:"Add them",  d:"A ramp worked out before the first big lift of the day."},
+          {v:"planOnly", t:"Plan only", d:"Only the warm-ups your programme wrote."},
+          {v:"manual",   t:"Off",       d:"No warm-up rows at all."}
+        ], "data-prefwarm", p.warmups),
         "Never counted as working sets either way.")
     + sdTog("Rate your sets",
         "How close to failure each set was — the biggest single input the grade has.",
@@ -34307,21 +34346,23 @@ function prefsSessionHTML(){
         sdSeg([{v:"peak", t:"Speed up while it works"}, {v:"off", t:"One set at a time"}],
               "data-prefclimb", p.volClimb === "off" ? "off" : "peak", true),
         p.volClimb === "off"
-          ? "One set per block, whatever happens. Slower to find your number."
-          : "Up to <b>3 sets</b> a block while a muscle keeps improving, easing off when it stops.")
+          ? "One set per block, whatever happens. Slower to find your number. <b>Speed up while it works</b> adds up to 3 a block instead, easing off when a muscle stops improving."
+          : "Up to <b>3 sets</b> a block while a muscle keeps improving, easing off when it stops. <b>One set at a time</b> is the steadier climb instead, whatever happens.")
     + sdItem("Deload weeks", "",
         sdSeg([{v:"auto", t:"Suggest one"}, {v:"planOnly", t:"Leave it to me"}],
               "data-prefdeload", p.deloads),
         p.deloads === "auto"
-          ? "Offered every " + DELOAD_EVERY_WEEKS + " weeks, or earlier if your RPE and check-ins say so."
-          : "Stays quiet. For a programme that schedules its own."));
+          ? "Offered every " + DELOAD_EVERY_WEEKS + " weeks, or earlier if your RPE and check-ins say so. <b>Leave it to me</b> stays quiet instead."
+          : "Stays quiet, for a programme that schedules its own. <b>Suggest one</b> offers a deload every " + DELOAD_EVERY_WEEKS + " weeks instead, or earlier if your RPE and check-ins say so."));
 
   /* The rare half, collapsed rather than removed: one-limb work only means something once
      the plan contains it, and which side goes first only once you have logged some. */
   let rare = sdGroup(
       sdItem("Which day you train", "",
-        sdSeg([{v:"fixed", t:"Follow the rotation"}, {v:"any", t:"Let me choose"}],
-              "data-setdayorder", p.dayOrder === "any" ? "any" : "fixed"),
+        sdSeg([
+          {v:"fixed", t:"Follow the rotation", d:"The plan's order. The next day is the next day."},
+          {v:"any",   t:"Let me choose",       d:"Tap a day on Today to do that one. The day you skip stays next."}
+        ], "data-setdayorder", p.dayOrder === "any" ? "any" : "fixed"),
         daysFree()
           ? "Today is <b>" + esc(dayName(todaysWorkoutId())) + "</b>" + (dayPickedToday()
               ? ", which you picked. " + esc(dayName(ROTATION[S.pointer])) + " is still next."
@@ -34339,8 +34380,11 @@ function prefsSessionHTML(){
   if(anyUnilateralInPlan()){
     rare += sdSec("One-arm and one-leg work") + sdGroup(
         sdItem("How a one-limb set is counted", "",
-          sdSeg([{v:"separate", t:"Separately"}, {v:"matchWeaker", t:"Match weaker"},
-                 {v:"both", t:"Together"}], "data-prefsides", p.sides, true),
+          sdSeg([
+            {v:"separate",    t:"Separately",   d:"Each set is marked L or R and tracked on its own."},
+            {v:"matchWeaker", t:"Match weaker", d:"Holds both sides to the weaker one, so the gap closes."},
+            {v:"both",        t:"Together",     d:"One set counts as covering both limbs."}
+          ], "data-prefsides", p.sides),
           p.sides === "matchWeaker"
             ? "Both sides held to the weaker one, so the gap closes."
             : p.sides === "both"
@@ -34351,8 +34395,8 @@ function prefsSessionHTML(){
               sdSeg([{v:"fixed", t:"Always right"}, {v:"flip", t:"Swap each cycle"}],
                     "data-prefstart", p.startSideFlip ? "flip" : "fixed"),
               p.startSideFlip
-                ? "Alternates, so the fresh set does not always go to the same limb."
-                : "Every session opens on the right.")
+                ? "Alternates, so the fresh set does not always go to the same limb. <b>Always right</b> opens every session on the same side instead."
+                : "Every session opens on the right. <b>Swap each cycle</b> alternates instead, so the fresh set does not always go to the same limb.")
           : ""));
   }
   h += sdMore("More \u2014 the day order, the soreness check" +

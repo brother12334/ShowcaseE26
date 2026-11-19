@@ -90,7 +90,9 @@ console.log("3 - A PRESS THAT LANDS SOMETHING GETS THE SOFTER POP");
   const r = await p.evaluate(async ()=>{
     TAB="sync"; SET_PAGE="screen"; render();
     await new Promise(r2=> setTimeout(r2, 60));
-    const seg = document.querySelector(".ch");
+    /* .ch was the old option row. The rebuilt screen uses the shared library, so the
+       nearest equivalent press target is a segmented button. */
+    const seg = document.querySelector(".sd-seg button") || document.querySelector(".ch");
     window.__played.length = 0;
     seg.dispatchEvent(new PointerEvent("pointerdown", {bubbles:true}));
     return {played: window.__played.slice(), had: !!seg};
@@ -216,7 +218,10 @@ console.log("10 - THE SETTING IS WHERE THE OTHER WORKOUT-SCREEN ONES ARE");
             head: /^|\bSound\b/.test(t) && /follows your ringer switch/i.test(t),
             offline: /works with no signal/i.test(t)};
   });
-  ck("two answers", r.opts.join(",") === "on,off", r.opts.join(","));
+  /* One switch now rather than two buttons, so a render carries the value it would set.
+     The ringer and offline sentences below are the part that had to survive, and did
+     not at first -- they were dropped by the rebuild and restored when this caught it. */
+  ck("the setting is there", r.opts.length === 1 && /^(on|off)$/.test(r.opts[0]), r.opts.join(","));
   ck("it warns about the ringer", r.head, String(r.head));
   ck("and says it works offline", r.offline, String(r.offline));
 }
