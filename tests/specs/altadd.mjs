@@ -117,6 +117,24 @@ const reloadAndProbe = async ()=>{
      That made this spec fail intermittently, which is worse than failing: it is a test
      nobody can trust. The editor has already written what it was going to write, so from
      this point nothing may write at all. The reload gets fresh prototypes. */
+  /* ITEM 17, THE REPRODUCTION THAT WAS OWED.
+
+     This failed in the 311-spec run and passed three times out of three on its own, which
+     is the CPU-contention case the entry predicted and could not demonstrate. The retries
+     below are not the answer: under load every attempt can miss the same way, and raising
+     the count only buys a slower failure.
+
+     So the write is CONFIRMED PRESENT before the page is left, instead of being assumed
+     and checked afterwards. The tag is read back out of localStorage itself — not out of
+     S, which is the in-memory copy and would say yes whether or not anything was stored.
+     Only then are writes frozen and the page navigated away. */
+  await p.waitForFunction(tag=>{
+    try{
+      const k = Object.keys(localStorage).find(x=> x.indexOf("ironlog.v1") === 0);
+      if(!k) return false;
+      return (JSON.parse(localStorage.getItem(k) || "{}").seedTag || null) === tag;
+    }catch(e){ return false; }
+  }, SEED_TAG, {timeout: 15000}).catch(()=> console.log("    the tag never reached localStorage"));
   await p.evaluate(()=>{
     Storage.prototype.setItem = function(){};
     Storage.prototype.removeItem = function(){};
