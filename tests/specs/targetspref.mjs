@@ -44,11 +44,16 @@ console.log("\n1. EVERY CONTROL THE SCREEN HAD IS STILL WIRED");
 let r = await p.evaluate(()=>{
   const n = sel=> document.querySelectorAll('#app ' + sel).length;
   return {dial: n('#tgDial'), cal: n('[data-lmcal]'), rows: n('[data-tgopen]'),
+          gkeys: GKEYS.length,
           areas: n('.tg-area'), clearAll: n('#tgClearAll'),
           reset: n('#tgScaleReset'), hero: n('.sd-hero'), more: n('.sd-more')};
 });
 ck("CONTROL: the dial is on the screen", r.dial === 1, r.dial);
-ck("all twenty-one muscles have a row", r.rows === 21, r.rows);
+/* NINETEEN, NOT TWENTY-ONE. The figure came from a comment in setGroups that still says
+   "twenty-one controls and a scale"; GROUPS has nineteen entries and GKEYS and AREA_OF
+   agree. Shins were removed from GROUPS at some point and the comment was not. Counted
+   from GKEYS rather than written down, so the next removal moves this with it. */
+ck("every muscle in GKEYS has a row", r.rows === r.gkeys, r.rows + " rows, " + r.gkeys + " muscles");
 ck("grouped by body area", r.areas === 6, r.areas);
 ck("the calibration choice is here", r.cal === 2, r.cal);
 ck("and the clear-all for floors you set", r.clearAll === 1, r.clearAll);

@@ -7088,6 +7088,17 @@ body.news-open{overscroll-behavior:contain}
 @media (prefers-reduced-motion: reduce){
   .tg-knob,.tg-fill{transition:none}
 }
+/* The read-only week bar in a muscle row. See tgBarHTML. */
+.tg-bar{position:relative;height:16px;margin:0 12px 10px;padding:0}
+.tg-bar-rail{position:absolute;top:7px;left:0;right:0;height:2px;background:var(--line);
+  border-radius:var(--r-xs)}
+.tg-bar-band{position:absolute;top:5px;height:6px;border-radius:var(--r-xs);
+  background:var(--acc-soft);box-shadow:inset 0 0 0 1px var(--acc-line)}
+.tg-bar-mav{position:absolute;top:3px;width:1px;height:10px;background:var(--acc-line)}
+.tg-bar-now{position:absolute;top:1px;width:3px;height:14px;margin-left:-1.5px;
+  border-radius:2px;background:var(--text)}
+.tg-bar.tg-under .tg-bar-now{background:var(--warn)}
+.tg-bar.tg-over .tg-bar-now{background:var(--bad)}
 .tg-area{
   font:var(--fs-2) var(--mono);text-transform:uppercase;letter-spacing:.11em;color:var(--faint);
   margin:14px 2px 5px;
@@ -7694,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.48";
+const APP_VERSION = "2026.11.17.49";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -22072,6 +22083,34 @@ const LM_SCALE_MIN = 0.5, LM_SCALE_MAX = 1.5;
    together and rounding early compounds. The SCREEN shows whole numbers, because 15.3
    asserts a precision the model does not have \u2014 these are population figures scaled by
    estimates, and the third significant figure is noise dressed as measurement. */
+/* A MUSCLE'S WEEK, DRAWN. Floor to ceiling, with a mark where this week's hard sets
+   actually fall.
+
+   READ-ONLY ON PURPOSE. It takes no drag and no input: it reads the same three landmarks
+   the steppers inside the row write, and the same weekly volume the Body tab reads, so
+   there is exactly one way to change any of it and this is not it. A control that both
+   displays and edits the same number is a control that can disagree with itself.
+
+   The scale runs 0 to the ceiling plus a margin, so a muscle sitting past its ceiling has
+   somewhere to be drawn rather than being pinned to the end and looking merely full. */
+function tgBarHTML(g, L, now){
+  const mev = Number(L && L.mev), mav = Number(L && L.mav), mrv = Number(L && L.mrv);
+  if(!isFinite(mev) || !isFinite(mrv) || mrv <= 0) return "";
+  const vol = isFinite(Number(now)) ? Number(now) : 0;
+  const top = Math.max(mrv * 1.15, vol * 1.05, 1);
+  const pc = v=> Math.max(0, Math.min(100, (v / top) * 100));
+  const under = vol < mev, over = vol > mrv;
+  const state = under ? " tg-under" : over ? " tg-over" : "";
+  const say = under ? "below the floor" : over ? "past the ceiling" : "in range";
+  return `<div class="tg-bar${state}" role="img"
+      aria-label="${esc(gName(g))}: ${r1(vol)} sets a week, against a floor of ${
+        fmtLandmark(mev)} and a ceiling of ${fmtLandmark(mrv)} — ${say}">
+    <span class="tg-bar-rail"></span>
+    <span class="tg-bar-band" style="left:${pc(mev).toFixed(2)}%;right:${(100 - pc(mrv)).toFixed(2)}%"></span>
+    <span class="tg-bar-mav" style="left:${pc(mav).toFixed(2)}%"></span>
+    <span class="tg-bar-now" style="left:${pc(vol).toFixed(2)}%"></span>
+  </div>`;
+}
 function fmtLandmark(v){
   return (v == null || !isFinite(v)) ? "\u2014" : String(Math.round(v));
 }
@@ -46967,7 +47006,7 @@ function setGroups(){
     {k:"day", icon:"moon2", title:"Sleep and mornings", sub:"The morning check, sleep tracking, and how much sleep you want.",
      val: p.sleepPrompt === false ? "off" : (target > 0 ? r1(target) + " h target" : "tracking"),
      body: settingsDayHTML},
-    /* Its own row rather than a block inside "Your plan": it is twenty-one controls and a
+    /* Its own row rather than a block inside "Your plan": it is a control per muscle and a
        scale, and a screen that long sitting under a deload button is a screen nobody
        finds. The row says how much of it is yours, because that is the one thing worth
        knowing from outside. */
@@ -47865,7 +47904,8 @@ function targetsScreenHTML(){
         <button type="button" class="tg-head" data-tgopen="${g}" aria-expanded="${open}">
           <span class="tg-n">${esc(gName(g))}${mine ? `<i class="tg-mark">yours</i>` : ""}</span>
           <span class="tg-v num">${now} \u00b7 ${fmtLandmark(L.mev)}/${fmtLandmark(L.mav)}/${fmtLandmark(L.mrv)}</span>
-        </button>`;
+        </button>
+        ${tgBarHTML(g, L, now)}`;
       if(open){
         const LAND = [
           {k:"mev", t:"Floor",   sub:"least that still grows it"},
@@ -63485,8 +63525,18 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.48";
+const NEWS_FOR = "2026.11.17.49";
 const NEWS = [
+  {k: "Every muscle's week, drawn",
+   s: ["Each muscle on Volume targets now carries a small bar: the band runs from the "
+     + "floor to the ceiling, a tick marks the target, and a marker sits where this "
+     + "week's hard sets actually fall. Below the floor it turns amber; past the "
+     + "ceiling, red.",
+     "It is a picture, not a control \u2014 nothing on it drags or takes a number. It reads "
+     + "the same three figures the steppers inside the row write, so there is one way to "
+     + "change them and this is not it.",
+     "A screen reader gets the whole sentence: the muscle, the sets you are doing, the "
+     + "floor and ceiling they are measured against, and whether you are inside them."]},
   {k: "Volume targets, with the dial at the top",
    s: ["The dial that moves every muscle at once is the first thing on the screen now, "
      + "with what it currently says underneath it, and the twenty-one muscles grouped by "
