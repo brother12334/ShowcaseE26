@@ -83,14 +83,19 @@ console.log("\n5 - THE SWITCH SWITCHES IT OFF");
     TAB="sync"; SET_PAGE="sess"; render();
     const btns=[...document.querySelectorAll('[data-prefpo]')];
     const on=btns.find(x=> x.dataset.prefpo==='on');
-    const labelled = btns.length>0 && /Progressive overload tips/.test(document.body.innerText);
+    /* TWO BUTTONS BECAME ONE SWITCH. The old screen offered "on" and "off" side by side;
+       the rebuilt one offers a toggle carrying the value it will set, so a single render
+       holds one control rather than two. The setting is also named in the words it does
+       something in — "Tell me the number to beat" rather than "Progressive overload
+       tips" — which is the whole point of a switch with a sentence under it. */
+    const labelled = btns.length>0 && /Tell me the number to beat/.test(document.body.innerText);
     if(on) on.click();
     TAB="workout"; render();
     return {labelled, n:btns.length, tip: !!document.querySelector('.ex-po'),
             pref: trainPrefs().overloadTips};
   });
   console.log("   ", JSON.stringify(back));
-  ck("the setting exists under its own name", back.labelled && back.n===2, JSON.stringify(back));
+  ck("the setting exists under its own name", back.labelled && back.n===1, JSON.stringify(back));
   ck("and turning it back on brings the tip back", back.tip && back.pref===true, JSON.stringify(back));
 }
 

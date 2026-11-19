@@ -308,6 +308,10 @@ console.log("16 - AND THE SETTING SAYS WHY THE HOUR MATTERS");
 {
   const r = await p.evaluate(()=>{
     TAB="sync"; SET_PAGE="sess"; render();
+    /* The rare settings sit under "More" since the screen was rebuilt, and innerText does
+       not read inside a closed <details> — so this was failing on the collapse, not on
+       the setting. Opened first, which is the one tap a person makes to reach it. */
+    document.querySelectorAll('#app details.sd-more').forEach(d=> d.open = true);
     const t = document.body.innerText;
     return {row: /Rest-day soreness/i.test(t),
             why: /keeps your readings comparable|keeps the readings comparable/i.test(t),

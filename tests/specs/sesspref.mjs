@@ -150,26 +150,32 @@ const u = await newP.evaluate(async ()=>{
   document.querySelectorAll('#toasts .tst').forEach(el=> el.remove());
   const before = trainPrefs().warmups;
   document.querySelector('#app [data-prefwarm="manual"]').click();
-  await new Promise(r=> setTimeout(r, 50));
-  const after = trainPrefs().warmups;
+  await new Promise(r=> setTimeout(r, 60));
   /* The LAST toast. Earlier sections left a pile, and the first one in the host is the
-     oldest — which is not the one this tap just produced. */
+     oldest \u2014 which is not the one this tap just produced. */
   const all = document.querySelectorAll('#toasts .tst');
   const t = all[all.length - 1];
-  const hasUndo = !!(t && t.querySelector('.tst-u'));
-  if(t) t.click();
-  await new Promise(r=> setTimeout(r, 50));
-  /* Read back from whichever key this build actually writes, rather than guessing one. */
-  const key = Object.keys(localStorage).find(k=> k.indexOf("ironlog.v1") === 0);
-  return {before, after, hasUndo, back: trainPrefs().warmups, key: !!key,
-          onDisk: key ? (JSON.parse(localStorage.getItem(key) || "{}").prefs || {}).warmups : null};
+  return {before, after: trainPrefs().warmups, toasted: !!t,
+          hasUndo: !!(t && t.querySelector('.tst-u'))};
 });
 ck("CONTROL: the tap really changed the setting", u.before === "auto" && u.after === "manual",
    u.before + " -> " + u.after);
-ck("the toast offers Undo in words, not just a tap target", u.hasUndo);
-ck("and taking it restores what was actually there", u.back === "auto", u.back);
-ck("CONTROL: there is a stored copy to check", u.key);
-ck("including on disk", u.onDisk === "auto", u.onDisk);
+ck("CONTROL: it produced a toast to act on", u.toasted);
+ck("which carries Undo as a button, not a word on the toast itself", u.hasUndo);
+
+/* PRESSED THROUGH THE BROWSER, not from inside evaluate(). A scripted click is untrusted
+   and is refused on purpose, so the undo has to travel the path a thumb takes \u2014 which
+   is also why this assertion had to move out of the page context when the guard landed. */
+await newP.locator('#toasts .tst-u').last().click();
+await newP.waitForTimeout(220);
+const u2 = await newP.evaluate(()=>{
+  const key = Object.keys(localStorage).find(k=> k.indexOf("ironlog.v1") === 0);
+  return {back: trainPrefs().warmups, key: !!key,
+          onDisk: key ? (JSON.parse(localStorage.getItem(key) || "{}").prefs || {}).warmups : null};
+});
+ck("and taking it restores what was actually there", u2.back === "auto", u2.back);
+ck("CONTROL: there is a stored copy to check", u2.key);
+ck("including on disk", u2.onDisk === "auto", u2.onDisk);
 
 console.log("\n4. UNCROWDED, AS THE RULE ASKS");
 const shape = await newP.evaluate(()=>{

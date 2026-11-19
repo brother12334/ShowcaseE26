@@ -972,7 +972,8 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
    model is what put it there. */
 .tst-u{flex:0 0 auto;align-self:center;font-family:var(--disp);font-size:var(--fs-2);
   font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--acc);
-  padding:4px 2px 4px 10px}
+  background:none;border:0;cursor:pointer;min-height:44px;padding:4px 4px 4px 12px}
+.tst-u:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:5px}
 
 /* One room's line in the plate reconciliation. */
 .pd-row{border-top:1px solid var(--line);padding:9px 0}
@@ -7655,7 +7656,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.44";
+const APP_VERSION = "2026.11.17.45";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -15651,7 +15652,8 @@ function toast(msg, kind, opts){
   el.dataset.msg = String(msg);
   el.innerHTML = `<span class="tst-ico">${svgIcon(TOAST_ICONS[k] || TOAST_ICONS.info)}</span>
     <span class="tst-body">${opts.title ? `<span class="tst-h">${esc(opts.title)}</span>` : ""}${esc(String(msg))}</span>
-    ${opts.undo ? `<span class="tst-u">Undo</span>` : ""}
+    ${opts.undo ? `<button type="button" class="tst-u"
+      aria-label="Undo \u2014 ${attrSafe(String(msg))}">Undo</button>` : ""}
     ${opts.sticky ? `<span class="tst-x" aria-hidden="true">\u00d7</span>` : ""}`;
   const close = ()=>{
     if(el._gone) return;
@@ -15669,13 +15671,26 @@ function toast(msg, kind, opts){
   /* A WARNING ABOUT A SCREEN SHOULD BE ABLE TO OPEN IT. Tapping still dismisses, as every
      toast in this app always has; `go` adds the one thing the storage warning needed, which
      is a way to act on it that is not "find Settings yourself". */
-  /* UNDO IS NOT NAVIGATION, so it is a separate option with a word on it. `go` takes you
-     somewhere and has always been silent; a toast that quietly reverses a change when you
-     tap it to dismiss would be the worst of both. */
+  /* UNDO IS A BUTTON, NOT A MEANING LAYERED ONTO THE WHOLE TOAST.
+
+     Tapping the toast has dismissed it for as long as there have been toasts, and making
+     that same gesture also reverse a change was the mistake: it collided with the queue's
+     own housekeeping and it gave a destructive action no target of its own. So the toast
+     still dismisses, and Undo is a real <button> inside it — which is also the only way
+     a keyboard or VoiceOver can reach it. Enter and Space on a button produce a trusted
+     click; a div with an onclick is not focusable and is not announced as actionable.
+
+     AND IT STILL CHECKS THE EVENT. A structural fix beats a fixed caller: nothing in this
+     file may reverse somebody's setting by calling .click() on a toast. */
   el.onclick = ()=>{
     close();
-    if(typeof opts.undo === "function"){ try{ opts.undo(); }catch(e){} return; }
     if(typeof opts.go === "function"){ try{ opts.go(); }catch(e){} }
+  };
+  const uBtn = el.querySelector(".tst-u");
+  if(uBtn) uBtn.onclick = (ev)=>{
+    if(ev){ ev.stopPropagation(); if(ev.isTrusted === false) return; }
+    close();
+    if(typeof opts.undo === "function"){ try{ opts.undo(); }catch(e){} }
   };
   host.appendChild(el);
   /* Three at once is the most that can be read before the first has gone. Beyond that
@@ -15687,7 +15702,21 @@ function toast(msg, kind, opts){
     if(typeof first._close === "function") first._close();
     else first.remove();
   }
-  if(!opts.sticky) el._h = setTimeout(close, opts.ms || (k === "warn" ? 4200 : 2800));
+  /* 2.8 SECONDS IS NOT LONG ENOUGH TO TAB TO SOMETHING. An ordinary toast is read and
+     forgotten, but one carrying an action has to still be there when somebody arrives at
+     it — and a VoiceOver user hears the message first and only then goes looking. So an
+     undo toast dwells far longer, and stops counting down entirely while focus is inside
+     it. The timer restarts when focus leaves. */
+  const dwell = opts.ms || (opts.undo ? 9000 : (k === "warn" ? 4200 : 2800));
+  if(!opts.sticky){
+    el._h = setTimeout(close, dwell);
+    if(opts.undo){
+      el.addEventListener("focusin", ()=> clearTimeout(el._h));
+      el.addEventListener("focusout", ()=>{
+        if(!el._gone) el._h = setTimeout(close, dwell);
+      });
+    }
+  }
   return el;
 }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
@@ -63274,8 +63303,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.44";
+const NEWS_FOR = "2026.11.17.45";
 const NEWS = [
+  {k: "Undo is a button you can reach",
+   s: ["The notice that appears when you change a setting now carries an <b>Undo</b> "
+     + "button. Tapping the notice itself dismisses it, the way it always has \u2014 the two "
+     + "are separate things, which is the point.",
+     "It is a real button, so it can be reached with a keyboard and is announced by a "
+     + "screen reader, and it stays on screen far longer than an ordinary notice \u2014 and "
+     + "stops counting down altogether while you are on it. An undo you cannot get to in "
+     + "time is not an undo.",
+     "This replaces a first attempt where tapping anywhere on the notice undid the change. "
+     + "That collided with the way notices tidy themselves up: only three are kept, and the "
+     + "oldest was dismissed by a simulated tap \u2014 so a fourth notice could silently "
+     + "reverse a setting you had changed moments earlier. Nothing in the app can do that "
+     + "now; an undo only happens when a person actually presses it."]},
   {k: "How training is run, rebuilt",
    s: ["That screen was nine lists of options stacked one on another, every one the same "
      + "size and weight, and reading it meant reading all of it. It is one headline now "
