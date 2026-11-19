@@ -975,6 +975,29 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   background:none;border:0;cursor:pointer;min-height:44px;padding:4px 4px 4px 12px}
 .tst-u:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:5px}
 
+/* The workout screen's picture of itself. Structure only — see prefsScreenMockHTML. */
+.wsm{width:132px;margin:2px auto 0;border:1px solid var(--line);border-radius:12px;
+  background:var(--bg);padding:8px 7px;overflow:hidden}
+.wsm-grip{display:block;height:5px;width:34px;background:var(--line);border-radius:3px;
+  margin:0 auto 8px}
+.wsm-row{display:flex;gap:5px;align-items:center;margin-bottom:5px}
+.wsm-row i{flex:1;height:17px;border-radius:4px;background:var(--card2);
+  border:1px solid var(--line)}
+.wsm-row u{width:20px;height:17px;border-radius:4px;background:var(--card2);
+  text-decoration:none}
+.wsm-row.is-now i{background:var(--acc-soft);border-color:var(--acc-line)}
+.wsm-rule{display:block;height:1px;background:var(--line);margin:8px 0}
+.wsm-bar{height:13px;border-radius:4px;background:var(--card2);margin-bottom:5px}
+.wsm-card{border:1px solid var(--acc-line);border-radius:7px;background:var(--acc-soft);
+  padding:9px 8px;margin-bottom:7px}
+.wsm-k{display:block;height:7px;width:46px;border-radius:3px;background:var(--acc);
+  opacity:.65}
+.wsm-n{display:block;height:20px;width:58px;border-radius:4px;background:var(--card2);
+  margin-top:5px}
+.wsm-pair{display:flex;gap:5px}
+.wsm-pair i{flex:1;height:30px;border:1px solid var(--line);border-radius:6px;
+  background:var(--card2)}
+
 /* One room's line in the plate reconciliation. */
 .pd-row{border-top:1px solid var(--line);padding:9px 0}
 .pd-row:first-of-type{border-top:0}
@@ -7656,7 +7679,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.45";
+const APP_VERSION = "2026.11.17.46";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -34141,56 +34164,95 @@ function prefsGymHTML(){
    one is how the app looks while you use it, the other is how your programme is run. You
    went to the same 2,600px page for both and read past five unrelated decisions to reach
    either. Split, so each page answers one question. */
+/* THE ONE ILLUSTRATION IN SETTINGS, and the rule that keeps it honest: it shows the
+   SHAPE of the session screen, never its content. Bars and blocks, not a copy — so it
+   cannot quietly become a lie the next time the real session layout changes. It is here
+   because this is the one setting whose whole subject is what you are looking at. */
+function prefsScreenMockHTML(focus){
+  if(focus) return `<div class="wsm" aria-hidden="true">
+    <span class="wsm-grip"></span>
+    <div class="wsm-card"><i class="wsm-k"></i><b class="wsm-n"></b></div>
+    <div class="wsm-pair"><i></i><i></i></div></div>`;
+  return `<div class="wsm" aria-hidden="true">
+    <span class="wsm-grip"></span>
+    ${[0,1,2,3].map(i=> `<div class="wsm-row${i === 1 ? " is-now" : ""}"><i></i><u></u></div>`).join("")}
+    <span class="wsm-rule"></span>
+    ${[0,1].map(()=> `<div class="wsm-bar"></div>`).join("")}</div>`;
+}
 function prefsScreenHTML(){
   const p = trainPrefs();
-  let h = setChoice("The workout screen", [
-      {v:"regular", t:"The session", d:"All of it on one page: what you have done, what you are on, what is left."},
-      {v:"focus",   t:"Gym mode",    d:"One exercise at a time with bigger controls. There is a switch for this on the session itself."}
-    ], "data-vmode", S.viewMode === "focus" ? "focus" : "regular");
-  h += setChoice("The rest clock", [
-      {v:"up",   t:"Count up",   d:"A stopwatch from zero."},
-      {v:"down", t:"Count down", d:"From the rest that set earned, then into negative overtime."}
-    ], "data-prefrestclock", p.restClock === "down" ? "down" : "up");
+  /* CONVERTED TO THE SHARED LIBRARY (design/settings-reconcile.md, variation A).
+
+     Six option lists in a row, every one the same weight, on a screen whose subject is
+     what the screen looks like — so it is a picture now, and the picture changes with
+     the setting under it.
+
+     EVERY DATA ATTRIBUTE IS THE ONE THAT WAS HERE BEFORE: data-vmode,
+     data-prefrestclock, data-prefrestalert, data-prefsound, data-prefhaptics,
+     data-askwhy, and the data-restalertpush link inside the notify footnote. bindPrefs()
+     is untouched. */
+  const focus = S.viewMode === "focus";
   const na = restAlertMode();
-  h += setChoice("When the rest is up", [
-      {v:"off",    t:"Nothing",  d:"The clock runs and never interrupts you."},
-      {v:"buzz",   t:"Buzz",     d:"A vibration and a line on screen the moment the rest reaches its target."},
-      {v:"notify", t:"Notify my phone", d:"The same, plus a notification you get with the phone locked or on another app."}
-    ], "data-prefrestalert", na,
-    na === "notify"
-      ? (()=>{
-          const ok = typeof Notification !== "undefined" && Notification.permission === "granted";
-          if(!ok) return "Notifications are not allowed yet. Tap <b>Notify my phone</b> again to ask "
-            + "for permission — without it you will still get the buzz and the line on screen.";
-          /* THE HONEST VERSION OF THIS SENTENCE DEPENDS ON WHERE THE ALERT IS KEPT. Held by
-             the page it dies with the page; posted with your reminders it is your phone's job
-             and the app can be shut. Saying "with the screen off" while it was only ever the
-             former is how somebody sits through a rest that never rang. */
-          if(S.pushOn) return "This reaches you with the screen off and with the app shut — the "
-            + "rest deadline goes out with your reminders, so your phone is holding it rather "
-            + "than this page.";
-          return "Allowed, and it fires on the dot while the app is open. To get it with the "
-            + "phone locked or the app swiped away it has to be scheduled off the device, which "
-            + "is what reminders do: <button class=\"linklike\" data-restalertpush=\"1\">turn "
-            + "Reminders on</button>.";
-        })()
-      : "Rest targets come from the set you just did, so a heavy triple gets longer than a set of fifteen.");
-  h += setChoice("Sound", [
-      {v:"on",  t:"On",  d:"A click as you press, a softer one when something lands, and a note when Element 26 says something back."},
-      {v:"off", t:"Off", d:"Silent."}
-    ], "data-prefsound", soundOn() ? "on" : "off",
-    "It follows your ringer switch, so silencing the phone silences it. Nothing here is "
-    + "downloaded until you turn it on, and once it is, it works with no signal.");
-  h += setChoice("Buzz", [
-      {v:"on",  t:"On",  d:"Three buzzes and no others: a tick when a set is banked, two when the rest clock is up, and a short rise when the session closes."},
-      {v:"off", t:"Off", d:"The phone stays still."}
-    ], "data-prefhaptics", hapticsOn() ? "on" : "off",
-    "For the moments you are not looking at the screen. Phones that cannot vibrate from "
-    + "a web page — every iPhone, today — ignore this either way.");
-  h += setChoice("When a set falls well short", [
-      {v:"on",  t:"Ask me",    d:"One tap to say why. The answer changes the advice, not just the mark."},
-      {v:"off", t:"Don't ask", d:"Logs the set and says nothing."}
-    ], "data-askwhy", S.askWhy === false ? "off" : "on");
+
+  /* The notify footnote is the one piece of copy on this screen that depends on something
+     outside the app — whether the browser has granted permission, and whether reminders
+     are on to carry the alert to a locked phone. Carried over whole. */
+  const alertSay = na === "notify"
+    ? (()=>{
+        const ok = typeof Notification !== "undefined" && Notification.permission === "granted";
+        if(!ok) return "Notifications are not allowed yet. Tap <b>Notify my phone</b> again to ask "
+          + "for permission — without it you will still get the buzz and the line on screen.";
+        if(S.pushOn) return "This reaches you with the screen off and with the app shut — the "
+          + "rest deadline goes out with your reminders, so your phone is holding it rather "
+          + "than this page.";
+        return "Allowed, and it fires on the dot while the app is open. To get it with the "
+          + "phone locked or the app swiped away it has to be scheduled off the device, which "
+          + "is what reminders do: <button class=\"linklike\" data-restalertpush=\"1\">turn "
+          + "Reminders on</button>.";
+      })()
+    : "Rest targets come from the set you just did, so a heavy triple gets longer than a set of fifteen.";
+
+  let h = `<div class="sd-hero"><div class="sd-hero-k">THE WORKOUT SCREEN</div>
+      ${prefsScreenMockHTML(focus)}
+      <p class="sd-hero-s">${focus
+        ? "Gym mode: one exercise at a time, with bigger controls."
+        : "The session: all of it on one page — what you have done, what you are on, and what is left."}</p>
+    </div>`
+    + sdSeg([{v:"regular", t:"The session"}, {v:"focus", t:"Gym mode"}], "data-vmode",
+            focus ? "focus" : "regular")
+    + sdSays("There is a switch for this on the session itself, so you can change your mind "
+        + "mid-workout without coming back here.");
+
+  h += sdSec("While a set rests");
+  h += sdGroup(
+      sdItem("The rest clock", "",
+        sdSeg([{v:"up", t:"Count up"}, {v:"down", t:"Count down"}],
+              "data-prefrestclock", p.restClock === "down" ? "down" : "up"),
+        p.restClock === "down"
+          ? "From the rest that set earned, then into negative overtime."
+          : "A stopwatch from zero.")
+    + sdItem("When the rest is up", "",
+        sdSeg([{v:"off", t:"Nothing"}, {v:"buzz", t:"Buzz"}, {v:"notify", t:"Notify my phone"}],
+              "data-prefrestalert", na, true),
+        alertSay));
+
+  h += sdSec("What you hear and feel");
+  h += sdGroup(
+      sdTog("Sound",
+        "A click as you press, a softer one when something lands, and a note when Element 26 "
+        + "says something back. It follows your ringer switch.",
+        soundOn(), "data-prefsound", soundOn() ? "off" : "on")
+    + sdTog("Buzz",
+        "Three buzzes and no others: a tick when a set is banked, two when the rest clock is "
+        + "up, a short rise when the session closes. Phones that cannot vibrate from a web "
+        + "page — every iPhone, today — ignore this either way.",
+        hapticsOn(), "data-prefhaptics", hapticsOn() ? "off" : "on"));
+
+  h += sdMore("More \u2014 what happens when a set falls short", sdGroup(
+      sdTog("Ask me why",
+        "One tap to say what went wrong when a set lands well under its target. The answer "
+        + "changes the advice, not just the mark.",
+        S.askWhy !== false, "data-askwhy", S.askWhy === false ? "on" : "off")));
   return h;
 }
 // HOW THE TRAINING ITSELF IS RUN: the rules that change your programme or how it is judged.
@@ -63303,8 +63365,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.45";
+const NEWS_FOR = "2026.11.17.46";
 const NEWS = [
+  {k: "The workout screen shows you the workout screen",
+   s: ["Six lists of options, on the one screen whose whole subject is what you are "
+     + "looking at. It opens with a picture of the session now, and the picture changes "
+     + "when you switch between the full session and gym mode \u2014 so you can see the "
+     + "answer rather than read about it.",
+     "Under it: the rest clock and what happens when rest is up, then sound and buzz as "
+     + "switches with a line each saying exactly what they do. Asking why a set fell "
+     + "short is folded under <b>More</b>.",
+     "The picture is deliberately only shapes, never words, so it cannot quietly go out "
+     + "of date the next time the session screen changes. Nothing this screen stores has "
+     + "changed, and a test holds it against the old one tap for tap."]},
   {k: "Undo is a button you can reach",
    s: ["The notice that appears when you change a setting now carries an <b>Undo</b> "
      + "button. Tapping the notice itself dismisses it, the way it always has \u2014 the two "

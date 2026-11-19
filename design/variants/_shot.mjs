@@ -14,11 +14,11 @@ await p.evaluate(fx=>{
   Object.keys(S).forEach(k=>{delete S[k]});
   Object.keys(fx).forEach(k=>{S[k]=JSON.parse(JSON.stringify(fx[k]))});
   S.tourDone=true; migrate(); try{applySplit()}catch(e){}
-  TAB='sync'; SET_PAGE='sess'; render();
+  TAB='sync'; SET_PAGE='screen'; render();
   try{ OB=null }catch(e){} try{ PF=null }catch(e){}
   ['preflight','aiFull','splash'].forEach(id=>{const el=document.getElementById(id); if(el) el.remove();});
   document.body.classList.remove('ai-open','onboarding','pfl-open');
   const nav=document.querySelector('nav'); if(nav) nav.style.display='none';
 }, FX);
-await p.screenshot({path: appFile('design/variants/shots/live_sess.png'), fullPage:true});
+await p.screenshot({path: appFile('design/variants/shots/live_screen.png'), fullPage:true});
 await b.close(); console.log('shot');
