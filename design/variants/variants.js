@@ -475,4 +475,29 @@ const plan_C = ()=>
 Object.assign(window.SD, {targets_A,targets_B,targets_C,
   where_A,where_B,where_C, plan_A,plan_B,plan_C});
 
+
+/* targets: the dial from A as the hero, the per-muscle ranges from B as the body.
+   The says line has to carry the relationship between them, because it is the one thing
+   neither control shows: the dial moves the twelve you have NOT set, and dragging a
+   muscle's own range takes it out of the dial's reach for good. */
+const targets_MIX = ()=>
+  `<div class="sd-hero" style="padding-bottom:10px"><div class="sd-hero-k">ALL TARGETS, AGAINST THE PUBLISHED FIGURES</div>
+    ${dial(100,"%","of published",[50,75,100,125,150],50,150)}</div>`
++ says("At <b>100%</b> you are on the published figures. This moves the <b>twelve</b> you have not set yourself — the <b>six</b> marked below are already yours and stay where you put them.")
++ sec("Where the figures come from")
++ group(item("","",seg([{v:"pub",t:"As published"},{v:"learn",t:"Learn from my training"}],"pub"),
+    "Published numbers until your own log says otherwise."))
++ sec("Legs")
++ group(AREAS.Legs.slice(0,4).map(mRange).join(""))
++ sec("Shoulders")
++ group(AREAS.Shoulders.map(mRange).join(""))
++ says("Drag either end, or tap a number to type it. <b>Enough</b> is the middle mark — where most people grow without digging a hole. Move one and it becomes yours.")
++ more("Chest, Back, Arms and Core",
+    sec("Back") + group(AREAS.Back.map(mRange).join(""))
+  + sec("Arms") + group(AREAS.Arms.map(mRange).join(""))
+  + sec("Chest") + group(AREAS.Chest.map(mRange).join(""))
+  + sec("Core") + group(AREAS.Core.map(mRange).join("")));
+
+Object.assign(window.SD, {targets_MIX});
+
 })();

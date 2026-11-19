@@ -41,6 +41,7 @@ for(const width of [390, 320]){
   for(const key of Object.keys(await p.evaluate(()=> window.SD))){
     const [scr, letter] = key.split('_');
     const [title, sub] = TITLES[scr];
+    void letter;
     const over = await p.evaluate(({key,title,sub})=>{
       /* The onboarding import screen is a separate overlay and outlived the boot, so it
          sat on top of every shot. Cleared here, after the last render, not before it. */
