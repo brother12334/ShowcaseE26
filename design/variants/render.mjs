@@ -11,7 +11,10 @@ mkdirSync(OUT, {recursive:true});
 const TITLES = {
   sess:   ["How training is run", "Warm-ups, RPE, deloads, one-limb work, and when weights go up."],
   screen: ["The workout screen",  "How a session looks while you are in it, and what it asks you."],
-  gym:    ["In the gym",          "Pounds or kilos, and what the number you write for a barbell means."]
+  gym:    ["In the gym",          "Pounds or kilos, and what the number you write for a barbell means."],
+  targets:["Volume targets",      "What counts as enough work for each muscle, and how those numbers are reached."],
+  where:  ["Where you train",     "The plates and dumbbells you have, the gyms Element 26 knows about, and whether it checks."],
+  plan:   ["Your plan",           "Deloads, and how your volume targets are worked out."]
 };
 const b = await chromium.launch();
 let fails = 0;
@@ -60,7 +63,7 @@ for(const width of [390, 320]){
     if(over > 0){ console.log(`  OVERFLOW ${key} at ${width}: ${over}px`); fails++; }
     /* Smallest tap target among the library's interactive elements. */
     const small = await p.evaluate(()=> {
-      const sel = '.sd-seg button,.sd-tog,.sd-chip,.sd-step button,.sd-r-h,.sd-more > summary,.sd-range-th';
+      const sel = '.sd-seg button,.sd-tog,.sd-chip,.sd-plate-b,.sd-step button,.sd-r-h,.sd-more > summary,.sd-range-th';
       return [...document.querySelectorAll(sel)]
         .map(el=>{ let r = el.getBoundingClientRect();
           const be = getComputedStyle(el, '::before');

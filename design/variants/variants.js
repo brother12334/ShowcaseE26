@@ -25,9 +25,11 @@ const tog = (label,sub,on)=> `<button type="button" class="sd-tog" aria-pressed=
 const chips = (opts,cur,plate)=> `<div class="sd-chips">${opts.map(o=>
   `<button type="button" class="sd-chip${plate?" sd-plate":""}${o.word?" is-word":""}"
      aria-pressed="${o.v===cur}">${E(o.t)}</button>`).join("")}</div>`;
-const step = (v,unit)=> `<div class="sd-step">
+const step = (v,unit,unset)=> `<div class="sd-step">
   <button type="button" aria-label="Less">−</button>
-  <div class="sd-step-v" role="spinbutton" tabindex="0" aria-valuenow="${E(v)}">${E(v)}${unit?`<i>${E(unit)}</i>`:""}</div>
+  <div class="sd-step-v${unset?" is-unset":""}" role="spinbutton" tabindex="0"
+    ${unset?'aria-valuetext="not set"':`aria-valuenow="${E(v)}"`}>${
+    unset?`—<i>${E(unit)}</i><u>${E(v)}</u>`:`${E(v)}${unit?`<i>${E(unit)}</i>`:""}`}</div>
   <button type="button" aria-label="More">+</button></div>`;
 const more = (label,inner)=> `<details class="sd-more"><summary>${E(label)}</summary>
   <div class="sd-more-b">${inner}</div></details>`;
@@ -254,7 +256,7 @@ const gym_B = ()=>
 + sec("The bar")
 + group(
     item("Your bar weighs","Not set, so percentages fall back to a standard bar. Tap the number to type one.",
-      step(45,"lb"),"Warm-ups come off this. <b>Plates are asked for separately</b>, under Where you train.")
+      step(45,"lb",true),"Warm-ups come off this. <b>Plates are asked for separately</b>, under Where you train.")
   + item("The number you write down","",
       seg([{v:"total",t:"Bar + plates"},{v:"plates",t:"Plates only"}],"total"),
       "A 45 lb bar with a 45 on each end is <b>135</b>, not 90 and never 45."))
@@ -280,4 +282,197 @@ window.SD = {
   screen_A, screen_B, screen_C,
   gym_A, gym_B, gym_C
 };
+/* =====================  BATCH 2  ===================== */
+/* Real figures: GROUPS defaults, with the six the fixture's lmFloor overrides marked. */
+const M = {
+  quads:["Quads",5.5,16,20,true],  hams:["Hamstrings",4.5,14,20,true],
+  glutes:["Glutes",4,12,16,false], calves:["Calves",2,14,20,true],
+  adductors:["Adductors",0,6,12,false],
+  upper_back:["Mid Back",5.3,20,25,true], lats:["Lats",10,18,22,false],
+  traps:["Traps",4,16,24,false],   lower_back:["Lower Back",4,8,12,false],
+  delts_side:["Side Delts",5,20,26,true], delts_rear:["Rear Delts",8.5,18,24,true],
+  delts_front:["Front Delts",0,12,16,false],
+  chest:["Chest",10,20,22,false],
+  biceps:["Biceps",8,18,24,false], triceps:["Triceps",6,14,18,false],
+  forearms:["Forearms",2,8,12,false],
+  abs:["Abs",6,18,24,false], obliques:["Obliques",4,10,16,false]
+};
+const AREAS = {Chest:["chest"], Back:["upper_back","lats","traps","lower_back"],
+  Shoulders:["delts_side","delts_rear","delts_front"],
+  Arms:["biceps","triceps","forearms"], Core:["abs","obliques"],
+  Legs:["quads","hams","glutes","calves","adductors"]};
+const mName=k=>M[k][0], mMine=k=>M[k][4];
+const band = k=>{const [n,a,b,c]=M[k];return `${a}/${b}/${c}`;};
+
+/* A muscle as a three-stop range: MEV, MAV marked on the rail, MRV. */
+function mRange(k){
+  const [n,mev,mav,mrv,mine]=M[k], MAXS=28;
+  const p=v=>(v/MAXS)*100;
+  return `<div class="sd-item">
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <div class="sd-label" style="flex:1 1 auto;margin:0">${E(n)}${mine?` <i class="sd-mine">yours</i>`:""}</div>
+      <div class="sd-r-v">${E(mev)}–${E(mrv)}</div></div>
+    <div class="sd-range" style="margin-top:9px"><div class="sd-range-t">
+      <div class="sd-range-rail"></div>
+      <div class="sd-range-on" style="left:${p(mev)}%;right:${(100-p(mrv)).toFixed(1)}%"></div>
+      <div class="sd-range-mid" style="left:${p(mav)}%"></div>
+      <div class="sd-range-th" role="slider" tabindex="0" aria-label="${E(n)} minimum"
+        aria-valuenow="${mev}" style="left:${p(mev)}%"></div>
+      <div class="sd-range-th" role="slider" tabindex="0" aria-label="${E(n)} maximum"
+        aria-valuenow="${mrv}" style="left:${p(mrv)}%"></div></div>
+      <div class="sd-range-sc"><span>0</span><span>enough: ${E(mav)}</span><span>${MAXS}</span></div></div>
+  </div>`;
+}
+/* Plates you own, drawn as plates: the heavy ones read heavier. */
+const PLATES=[45,35,25,10,5,2.5];
+function plateRow(owned){
+  const big=Math.max(...PLATES);
+  /* The face varies with the plate; the BUTTON does not. A 2.5 drawn small is the point
+     of the metaphor, but a 29px tap target is a miss, so the face sits inside a full-size
+     hit area rather than being one. */
+  return `<div class="sd-chips sd-plates">${PLATES.map(v=>{
+    const h=26+Math.round((v/big)*28);
+    return `<button type="button" class="sd-plate-b" aria-pressed="${owned.indexOf(v)>-1}"
+      aria-label="${v} pound plates"><span class="sd-plate-f" style="height:${h}px">${v}</span></button>`;
+  }).join("")}</div>`;
+}
+
+/* ---------- Volume targets ---------- */
+const tgMuscleList = ()=> Object.keys(AREAS).map(a=>
+  `<div class="sd-sec" style="margin:18px 2px 7px">${E(a)}</div>` + group(
+    AREAS[a].map(k=> `<button type="button" class="sd-r-h">
+      <span class="sd-r-n">${E(mName(k))}${mMine(k)?` <i class="sd-mine">yours</i>`:""}</span>
+      <span class="sd-r-v">${E(band(k))}</span><span class="sd-r-c">›</span></button>`).join(""))).join("");
+
+const targets_A = ()=>
+  `<div class="sd-hero" style="padding-bottom:12px"><div class="sd-hero-k">ALL TARGETS, AGAINST THE PUBLISHED FIGURES</div>
+    ${dial(100,"%","of published",[50,75,100,125,150],50,150)}</div>`
++ says("At <b>100%</b> you are on the published figures. Six muscles you have set yourself are left alone by this — the scale moves the other twelve.")
++ sec("Where the figures come from")
++ group(item("","",seg([{v:"pub",t:"As published"},{v:"learn",t:"Learn from my training"}],"pub"),
+    "Published numbers until your log says otherwise. <b>Quads: 16 sets a week</b>, about 5 per leg day."))
++ more("Each muscle on its own — 6 of 18 set by you", tgMuscleList());
+
+const targets_B = ()=>
+  heroW("VOLUME TARGETS","18 muscles, 6 set by you",
+    "Each one is a range: the least that does anything, and the most you can recover from.")
++ sec("Legs")
++ group(AREAS.Legs.slice(0,4).map(mRange).join(""))
++ sec("Shoulders")
++ group(AREAS.Shoulders.map(mRange).join(""))
++ says("Drag either end, or tap a number to type it. <b>Enough</b> is the middle mark — where most people grow without digging a hole.")
++ more("Chest, Back, Arms and Core", sec("Back") + group(AREAS.Back.map(mRange).join(""))
+  + sec("Arms") + group(AREAS.Arms.map(mRange).join("")));
+
+const targets_C = ()=>
+  heroW("VOLUME TARGETS","100% of published","Six muscles you have set yourself. Tap an area to open it.")
++ list(
+   row("Legs","5 muscles",true,
+     group(AREAS.Legs.map(k=>`<div class="sd-item" style="display:flex;align-items:center;gap:10px">
+       <span class="sd-label" style="flex:1 1 auto;margin:0">${E(mName(k))}${mMine(k)?` <i class="sd-mine">yours</i>`:""}</span>
+       <span class="sd-r-v">${E(band(k))}</span></div>`).join(""))
+     + says("Shown as <b>least / enough / most</b> sets a week."))
+ + row("Back","4 muscles") + row("Shoulders","3 muscles") + row("Arms","3 muscles")
+ + row("Chest","1 muscle") + row("Core","2 muscles"))
++ more("All of them at once", `<div class="sd-item">${dial(100,"%","of published",[50,75,100,125,150],50,150)}</div>`);
+
+/* ---------- Where you train ---------- */
+const gymRow=(n,sess,note)=>`<button type="button" class="sd-r-h">
+  <span class="sd-r-n">${E(n)}<span class="sd-sub" style="display:block">${E(note)}</span></span>
+  <span class="sd-r-v">${E(sess)}</span><span class="sd-r-c">›</span></button>`;
+
+const where_A = ()=>
+  heroW("WHERE YOU TRAIN","Palma Vista Gym","48 of your 74 sessions. Its kit is what the app assumes unless another gym says otherwise.")
++ sec("Plates you have, each side")
++ plateRow(PLATES)
++ says("The smallest pair decides every load the app suggests. Yours is <b>not set</b>, so it still suggests numbers your rack may not make.")
++ sec("The rest of the kit")
++ group(
+    item("Dumbbells go up by","",step(5,"lb"),"So 30, 35, 40 — and nothing in between. Heaviest pair: <b>50 lb</b>.")
+  + item("The Smith carriage weighs","",step(25,"lb")))
++ more("Your other two gyms, and finding them", list(
+    gymRow("Lotus Gym","1","2.5 lb plates · 35 lb Smith")
+  + gymRow("Uptown Gym","1","35 lb Smith")) 
+  + group(tog("Recognise the gym you are in","Uses your location to pick the right kit. Nothing leaves the device.",true)));
+
+const where_B = ()=>
+  hero("GYMS ELEMENT 26 KNOWS","3",null,"One usual, two you have visited once each.")
++ sec("Your usual — Palma Vista")
++ group(
+    item("Smallest plate each side","Not set, so it suggests exact numbers your rack may not make.",
+      plateRow(PLATES),"Tap the pair you own. The bar then moves <b>twice</b> that at a time.")
+  + item("Dumbbells go up by","",step(5,"lb"),"Heaviest pair on the rack: <b>50 lb</b>.")
+  + item("The Smith carriage","",step(25,"lb")))
++ sec("Exceptions")
++ group(
+    item("Lotus Gym","Visited once.",`<div class="sd-chips">
+      <button type="button" class="sd-chip" aria-pressed="true">2.5 lb plates</button>
+      <button type="button" class="sd-chip" aria-pressed="true">35 lb Smith</button></div>`)
+  + item("Uptown Gym","Visited once.",`<div class="sd-chips">
+      <button type="button" class="sd-chip" aria-pressed="true">35 lb Smith</button></div>`))
++ more("Finding the gym you are in", group(
+    tog("Recognise the gym you are in","Picks the right kit when you arrive. Your location never leaves the device.",true)));
+
+const where_C = ()=>
+  heroW("WHERE YOU TRAIN","Three gyms","Tap one to see what it has.")
++ list(
+   row("Palma Vista Gym","48 sessions",true,
+     `<p class="sd-sub" style="margin-bottom:10px">Your usual. Its kit is what the app assumes everywhere else.</p>`
+     + plateRow(PLATES)
+     + says("Smallest plate <b>not set</b> · dumbbells every <b>5 lb</b> to <b>50</b> · Smith <b>25 lb</b>."))
+ + row("Lotus Gym","1 session") + row("Uptown Gym","1 session"))
++ more("Finding the gym you are in", group(
+    tog("Recognise the gym you are in","Uses your location, which never leaves the device.",true)));
+
+/* ---------- Your plan ---------- */
+const GOAL4=[{v:"muscle",t:"Build muscle"},{v:"strength",t:"Get stronger"},
+             {v:"lean",t:"Lose fat, keep muscle"},{v:"health",t:"General health"}];
+const PHASE3=[{v:"gain",t:"Gaining"},{v:"maintain",t:"Maintaining"},{v:"lose",t:"Losing"}];
+const blockBar = ()=>`<div style="margin:14px 2px 0">
+  <div style="display:flex;gap:3px;height:28px;align-items:flex-end">
+    ${Array.from({length:10},(_,i)=>`<div style="flex:1;height:${i<6?"100%":"55%"};
+      border-radius:3px 3px 0 0;background:${i<6?"var(--acc)":"var(--line)"};
+      opacity:${i<6?(0.45+i*0.09).toFixed(2):1}"></div>`).join("")}
+  </div>
+  <div class="sd-range-sc" style="margin-top:6px"><span>block start</span><span>deload due</span></div></div>`;
+
+const plan_A = ()=>
+  heroW("WHAT YOU'RE TRAINING FOR","Build muscle","Moderate reps, plenty of volume. This is what sets every rep range in your plan.")
++ seg(GOAL4,"muscle",true)
++ says("Heavy lifts <b>6–10</b> · second movement <b>8–12</b> · isolation <b>12–15</b> · abs <b>10–15</b>.")
++ sec("What you're eating for")
++ group(item("","",seg(PHASE3,"gain"),
+    "Eating above maintenance to build. Some fat comes with it; the rate decides how much."))
++ more("The block and deloads", group(
+    item("Six weeks into this block","Your last deload ended when the block began.",blockBar(),
+      "A deload is offered every 6 weeks, or earlier if your RPE and check-ins say so.")
+  + item("","",`<div class="sd-chips"><button type="button" class="sd-chip is-word">Start a deload week</button></div>`)));
+
+const plan_B = ()=>
+  hero("INTO THIS BLOCK","6",`<span style="font-size:19px"> weeks</span>`,
+    "Your last deload ended when this block began. The next is offered at week six.")
++ blockBar()
++ says("Offered every <b>6 weeks</b>, or earlier if your RPE and check-ins say so. Nothing starts without you.")
++ sec("Training for")
++ group(item("","",seg(GOAL4,"muscle",true),
+    "<b>Build muscle</b> — heavy <b>6–10</b>, second <b>8–12</b>, isolation <b>12–15</b>."))
++ sec("Eating for")
++ group(item("","",seg(PHASE3,"gain"),
+    "Above maintenance. Protein and hard training are what decide how much of the gain is muscle."))
++ more("Deload now", group(item("","Ends when you say, or after a week.",
+    `<div class="sd-chips"><button type="button" class="sd-chip is-word">Start a deload week</button></div>`)));
+
+const plan_C = ()=>
+  heroW("YOUR PLAN","Build muscle, gaining","Six weeks into the block.")
++ list(
+   row("Training for","Build muscle",true,
+     seg(GOAL4,"muscle",true)
+     + says("Sets every rep range: heavy <b>6–10</b>, second <b>8–12</b>, isolation <b>12–15</b>, abs <b>10–15</b>."))
+ + row("Eating for","Gaining")
+ + row("Block","6 weeks in")
+ + row("Deload","Due at week 6"));
+
+Object.assign(window.SD, {targets_A,targets_B,targets_C,
+  where_A,where_B,where_C, plan_A,plan_B,plan_C});
+
 })();
