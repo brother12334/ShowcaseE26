@@ -158,8 +158,19 @@ console.log("\n3 - AND THE DECLARED EXCEPTIONS ARE WHAT THEY CLAIM TO BE");
   ck("display exceptions exist and are few",
      (kinds.display || []).length > 0 && (kinds.display || []).length <= 8,
      String((kinds.display || []).length));
-  ck("the side-flip handler is the only hand-written side",
-     (kinds.write || []).length === 3, String((kinds.write || []).length));
+  /* RAISED FROM 3 TO 7, AND HERE IS THE ARGUMENT, because this line exists to make the
+     raise cost something. There is now a SECOND place that constructs a side object: the
+     plan patch's session.set op, which rewrites a logged session and must therefore be
+     able to write a set logged one limb at a time. It is four lines, it is the whole of
+     the op's writing, and it is checked the only way that means anything - patch.mjs
+     section 18 applies one and then asserts that the APP reads it back as a pair, in the
+     order startSide gives, each side counting half a set. A pair the app cannot read would
+     apply cleanly and change nothing any rule can see, which is precisely the failure this
+     ratchet is here to prevent, so it is tested rather than trusted.
+
+     The side-flip handler remains the only hand-written side in the LOGGER. */
+  ck("the hand-written sides are the flip handler and the patch op, and nothing else",
+     (kinds.write || []).length === 7, String((kinds.write || []).length));
   /* This was pinned at exactly one while the report and CSV still numbered rows by set.
      That table now reads through the adapter, so the allowance is gone: any new tracked
      gap has to be argued for by changing this line. */

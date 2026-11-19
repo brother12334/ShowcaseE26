@@ -755,6 +755,62 @@ exist to record the patch and its undo.
 
 ---
 
+## 19. Storage filled up, and a save that failed was the end of it — FIXED (2026.11.17.35)
+
+**Reported from a device: "storage is full".** That message was this app's own, and it was
+the end of the story rather than the start of one. `persist()` caught the quota error, said
+so once in a toast, and returned false. **Nothing was freed, nothing was retried**, and the
+next write tried the same thing against the same full box. A session finished in that state
+is a session somebody performed and the app lost.
+
+**Where the space went, counted rather than guessed:**
+
+```
+the live data            ~850 KB   the thing that must never be dropped
+3 rescue backups       ~2,550 KB   RAW copies of that same data, uncompressed
+up to 10 patch snaps   ~1,500 KB   gzipped, but budgeted as if they were alone
+                                   ------
+                                   ~4.9 MB against a ~5 MB box
+```
+
+Two mechanisms each sized sensibly on its own, adding to more than the device has. The
+rescue backups have been raw since they were written; the patch snapshots arrived at
+2026.11.17.31 with a budget sized without reference to them, which is mine.
+
+**A write that does not fit now makes room for itself.** Oldest disposable copy first, one
+at a time, rebuilding the payload each attempt — because freeing a patch snapshot changes
+`S` (its history row stops claiming a whole roll-back) and writing the stale string would
+put the lie straight back on disk. Protected, and never dropped under any pressure:
+sessions, plan, settings, gyms, volume landmarks, plan history, account. When only those
+are left, nothing is written silently: the data stays in memory and `saveFailedModal()` —
+the app's existing sticky dialogue, reused rather than duplicated — will not let the person
+past without exporting.
+
+**One budget for everything disposable**, a fraction of the real quota rather than a number
+typed in, with `navigator.storage.estimate()` consulted and used only when it is SMALLER
+than the 5 MB assumption. Rescue backups are compressed: 848,772 chars becomes 153,919.
+
+**And the ordering bug that nearly shipped with it.** Compressing is async, so the first
+version scheduled the backup and returned. A backup that is merely scheduled is not a
+backup — the whole promise is that the copy is on the device BEFORE the repair writes over
+the original, and a tab closed in between would have taken it. `badshape` caught it, eight
+assertions at once. The raw bytes now land synchronously and the compressed version
+replaces them a moment later.
+
+**`tests/specs/storage.mjs`** caps `Storage.prototype.setItem` at the current usage — a
+box with nothing spare, which is what a real one does — and then finishes a session. The
+assertion that matters is named for it: **A SESSION FINISHED ON A FULL BOX IS STILL SAVED**.
+Section 4 proves the other half: with every disposable thing already gone, the save reports
+failure, the data is still in memory, it is honestly not on disk, and the dialogue cannot be
+dismissed into silence.
+
+**Still open: the Storage screen** (Settings, a breakdown by category, deleting only
+disposable things with what each costs stated, an export offered first) and the longer-term
+question of moving to IndexedDB, which has far more room than localStorage's ~5 MB. Both
+were asked for; both were deliberately deferred behind the data-loss fix.
+
+---
+
 ## 17. Flaky: `altadd.mjs`, "the movement survived the reload" — CAUSE FOUND IN THE SPEC (2026-11-18), reproduction still owed
 
 **Worked through in the order the original entry sets out. Step 2 killed step 1, and my own
