@@ -135,12 +135,16 @@ const d5 = await p.evaluate(()=>{
   S.sessions.forEach(s=>{ delete s.badEntries; (s.entries||[]).forEach(e=>{ delete e.badSets; }); });
   if(S.active){ delete S.active.badEntries; }
   TAB = "program"; render();
+  /* The control is Program's NORMAL export rather than the raw one: the raw button has
+     moved to Settings > Storage, so its absence here no longer tells us whether the page
+     drew. What the control is for is unchanged — proving the two gone buttons above went
+     because there was nothing to hand over, and not because the screen rendered empty. */
   return {have: haveBadRecords(), btn: !!document.getElementById("badRecCopy"),
-          raw: !!document.getElementById("rescueRaw")};
+          raw: !!document.getElementById("rescueFull")};
 });
 ck("haveBadRecords() says no", !d5.have);
 ck("the buttons are gone", !d5.btn);
-ck("and the raw export is still there (control)", d5.raw);
+ck("and Program's normal export is still there (control)", d5.raw);
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;

@@ -142,27 +142,43 @@ ck("the drawn content is kept, not replaced", d4.kept);
 ck("the error text is on screen", d4.shows);
 ck("with an export button", d4.btn);
 
-/* ---------------- 5. reachable from Program and Research while they work ---------- */
-console.log("\n5. the button is on Program and Research too");
+/* ---------------- 5. NOT on the ordinary screens any more --------------------------
+   THIS SECTION USED TO ASSERT THE OPPOSITE, and the old expectation was simply the old
+   policy: the raw export was put on Program and Research deliberately, on the argument
+   that Settings is itself a screen that can go down. It is now in Settings > Storage
+   only, by request. The argument was not wrong, and it is not ignored either — it is
+   answered by sections 3 and 4 above, which are the cases it was really about: a tab that
+   crashed and a tab that drew and then failed to wire each still offer the export on the
+   spot. So what this section tests is unchanged, which is where a person can get their
+   data out from; only the right answer has moved. */
+console.log("\n5. the button is NOT on the ordinary screens");
 for(const tab of ["program","research"]){
   const r = await p.evaluate(t=>{
     TAB = t; render();
     const b = document.getElementById("rescueRaw");
-    return {there: !!b, wired: !!(b && b.onclick), drew: document.getElementById("app").innerHTML.length > 800};
+    return {there: !!b, drew: document.getElementById("app").innerHTML.length > 800};
   }, tab);
   ck(tab + " drew normally", r.drew);
-  ck(tab + " carries the raw export button", r.there);
-  ck("and it is wired", r.wired);
+  ck(tab + " does not carry the raw export", r.there === false);
 }
+/* CONTROL: it has to be somewhere, or the two negatives above are satisfied by an app
+   that simply cannot export at all. */
+const d5s = await p.evaluate(()=>{
+  TAB = "sync"; SET_PAGE = "storage"; render();
+  const b = document.getElementById("stoExport");
+  return {there: !!b, wired: !!(b && b.onclick)};
+});
+ck("CONTROL: Settings > Storage carries it instead", d5s.there);
+ck("and it is wired", d5s.wired);
 
 /* ---------------- 6. the export writes a file ---------------- */
 console.log("\n6. pressing it produces a download");
-await p.evaluate(()=>{ TAB = "program"; render(); });
+await p.evaluate(()=>{ TAB = "sync"; SET_PAGE = "storage"; render(); });
 /* Clicked through the DOM rather than with a real pointer: a static overlay sits above
    the page in the harness, and what is under test is the handler, not the hit area. */
 const dl = await Promise.all([
   p.waitForEvent("download", {timeout:8000}).catch(()=> null),
-  p.evaluate(()=>{ document.getElementById("rescueRaw").click(); })
+  p.evaluate(()=>{ document.getElementById("stoExport").click(); })
 ]).then(x=> x[0]);
 ck("a file was offered", !!dl, dl ? dl.suggestedFilename() : "none");
 if(dl) ck("named as a raw export", /^element26-raw-/.test(dl.suggestedFilename()), dl.suggestedFilename());
