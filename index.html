@@ -7694,7 +7694,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.47";
+const APP_VERSION = "2026.11.17.48";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -47789,48 +47789,67 @@ function targetsScreenHTML(){
   const sc = lmScale();
   const pct = Math.round(sc * 100);
   const nOwn = Object.keys(S.lmFloor || {}).filter(k=> GROUPS[k]).length;
-  /* PLAIN ENGLISH FIRST. Everything under this point is the app arguing with itself about
-     published figures, scaling factors and landmarks, and none of it means anything until
-     somebody knows what the numbers ARE. Four short sentences, no jargon, before the
-     controls — and specifically including what these numbers do NOT do, because a screen
-     where you can move every target in the app is a screen where "will this change my
-     workouts?" is the first question anybody has. */
-  let h = setBlock("What these numbers are",
-    "Every muscle has a number of hard sets it needs before it grows. Element 26 works one "
-    + "out for each one from published research, then adjusts it for how experienced you are, "
-    + "how often you train that muscle, and how long your cycle actually ran.",
-    `<div class="tg-plain">
-      <p><b>They are only used to tell you things.</b> The Body tab reads them to say when a
-        muscle is behind. They never change your plan, your sets or your loads on their own —
-        nothing on this screen touches a workout.</p>
-      <p><b>Each row below reads “what you are doing / what it asks for”.</b>
-        So <span class="num">8 / 10</span> means eight sets against a floor of ten, and you are
-        two short. A muscle at or above its number is not mentioned on the Body tab at all.</p>
-      <p><b>Change them if they are wrong for you.</b> If the whole scale feels off, move the
-        dial below and every muscle moves together. If it is one muscle, open that row. Anything
-        you set is marked as yours and can be put back.</p>
-    </div>`);
-  h += setBlock("All of them at once",
-    "One dial for every muscle. Use it if you think the figures run high or low for you generally, rather than arguing with them one at a time.",
-    `<div class="tg-scale">${tgDialHTML(pct)}
-      <div class="set-says num" id="tgSay">${tgScaleSay(pct)}</div>
+  /* CONVERTED TO THE SHARED LIBRARY (design/settings-reconcile.md: the dial as hero, the
+     muscle rows as the body). LAYOUT ONLY.
+
+     Every control on this screen keeps its own machinery untouched, because all three
+     have behaviour that took work and that the library does not have: the dial drags,
+     takes the keyboard, and repaints through tgDialPaint() WITHOUT a render, since
+     re-drawing twenty-one rows per frame stutters; the steppers hold to accelerate -- a
+     tenth while you are aiming, a half once you are travelling -- capture the pointer and
+     commit on release; and every landmark change goes through logPlanChange(), so this
+     screen writes plan history as well as lmFloor and lmScale. Swapping in the library's
+     dial or stepper would have replaced all of that with markup.
+
+     This is the one screen where the hero IS the control rather than sitting above it.
+     Nothing else here competes for the top, and splitting the readout from the dial it
+     belongs to would be worse. */
+  let h = `<div class="sd-hero" style="padding-bottom:10px">
+      <div class="sd-hero-k">ALL TARGETS, AGAINST THE PUBLISHED FIGURES</div>
+      <div class="tg-scale">${tgDialHTML(pct)}</div>
     </div>`
-    + (pct !== 100 ? `<div class="btn-row" style="margin-top:9px"><button class="btn ghost small" id="tgScaleReset" style="flex:1">Back to the published figures</button></div>` : ""));
+    + sdSays(`<span class="num" id="tgSay">${tgScaleSay(pct)}</span>`
+        + " One dial for every muscle \u2014 use it if the figures run high or low for you "
+        + "generally, rather than arguing with them one at a time. "
+        + (nOwn ? "The <b>" + nOwn + "</b> you have set yourself stay where you put them."
+                : "Nothing here changes your plan, your sets or your loads."))
+    + (pct !== 100 ? `<div class="btn-row" style="margin-top:9px"><button class="btn ghost small" id="tgScaleReset" style="flex:1">Back to the published figures</button></div>` : "");
 
-  h += setChoice("Where the figures come from", [
-      {v:"learn", t:"Learn from my training",
-       d:"The published figures, moved by how your own lifts and recovery have behaved at the volumes you have trained at."},
-      {v:"pub",   t:"Published figures only",
-       d:"The chain as it was before Element 26 started learning from your response. Nothing is lost — it keeps watching, and switching back restores what it has worked out."}
-    ], "data-lmcal", calibrationOff() ? "pub" : "learn",
-    "This changes the numbers on this screen and what the Body tab says about them. It never touches your programme.");
+  /* THE PLAIN-ENGLISH EXPLAINER STAYS FIRST AND STAYS NAMED, which is what its author
+     argued for: none of this means anything until somebody knows what the numbers ARE,
+     and "will this change my workouts?" is the first question anybody has. It is one tap
+     rather than four paragraphs across the top, and the answer to that first question is
+     in the says line above, where it is read without opening anything. */
+  h += sdMore("What these numbers are, and what they do not do", sdGroup(sdItem("", "",
+    `<div class="tg-plain">
+      <p>Every muscle has a number of hard sets it needs before it grows. Element 26 works
+        one out for each one from published research, then adjusts it for how experienced
+        you are, how often you train that muscle, and how long your cycle actually ran.</p>
+      <p><b>They are only used to tell you things.</b> The Body tab reads them to say when a
+        muscle is behind. They never change your plan, your sets or your loads on their own
+        \u2014 nothing on this screen touches a workout.</p>
+      <p><b>Each row below reads \u201cwhat you are doing / what it asks for\u201d.</b>
+        So <span class="num">8 / 10</span> means eight sets against a floor of ten, and you
+        are two short. A muscle at or above its number is not mentioned on the Body tab at all.</p>
+      <p><b>Change them if they are wrong for you.</b> If the whole scale feels off, move the
+        dial above and every muscle moves together. If it is one muscle, open that row.
+        Anything you set is marked as yours and can be put back.</p>
+    </div>`)));
 
-  /* One row per group, grouped by body area, because twenty-one loose rows is a list
-     nobody finds anything in. Each row carries the number the app arrived at, what you
-     are actually doing against it, and a control that only appears once you open it —
-     a screen of twenty-one steppers is a screen daring you to fiddle. */
-  h += `<div class="set-block"><div class="set-name">Each one on its own</div>
-    <div class="set-says">Tap a muscle to change just that one.</div>`;
+  h += sdSec("Where the figures come from");
+  h += sdGroup(sdItem("", "",
+      sdSeg([
+        {v:"learn", t:"Learn from my training",
+         d:"The published figures, moved by how your own lifts and recovery have behaved at the volumes you have trained at."},
+        {v:"pub",   t:"Published figures only",
+         d:"The chain as it was before Element 26 started learning from your response. Nothing is lost \u2014 it keeps watching, and switching back restores what it has worked out."}
+      ], "data-lmcal", calibrationOff() ? "pub" : "learn"),
+      "This changes the numbers on this screen and what the Body tab says about them. "
+      + "<b>It never touches your programme.</b>"));
+
+  h += sdSec("Each one on its own");
+  h += sdSays("Tap a muscle to change just that one.");
+  h += `<div class="set-block" style="margin-top:0">`;
   AREA_ORDER.forEach(area=>{
     const rows = GKEYS.filter(g=> AREA_OF[g] === area);
     if(!rows.length) return;
@@ -47904,12 +47923,12 @@ function targetsScreenHTML(){
       <button class="btn ghost small" id="tgClearAll" style="flex:1">Clear all ${nOwn} floor${nOwn===1?"":"s"} I set</button>
     </div>`;
   }
-  h += `<div class="set-block"><div class="set-says">Floors move a tenth of a set at a
-    time \u2014 hold either button to run, or type the number straight in. The figure each row
-    shows is the ${term("mev","MEV")}. There are two more above it — the productive range, and the point
-    past which you stop recovering — and those are not editable: they move with how often
-    you train, how long your cycle ran and what your log says you recover from. A number
-    you cannot justify against your own training is not one worth typing in.</div></div>`;
+  h += sdSays("Floors move a tenth of a set at a time \u2014 hold either button to run, or type "
+    + "the number straight in. The figure each row shows is the " + term("mev","MEV")
+    + ". There are two more above it \u2014 the productive range, and the point past which you "
+    + "stop recovering \u2014 and those are not editable: they move with how often you train, "
+    + "how long your cycle ran and what your log says you recover from. A number you cannot "
+    + "justify against your own training is not one worth typing in.");
   return h;
 }
 /* C4 — THE WHOLE CHAIN, FOR ONE MUSCLE, ON DEMAND.
@@ -63466,8 +63485,20 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.47";
+const NEWS_FOR = "2026.11.17.48";
 const NEWS = [
+  {k: "Volume targets, with the dial at the top",
+   s: ["The dial that moves every muscle at once is the first thing on the screen now, "
+     + "with what it currently says underneath it, and the twenty-one muscles grouped by "
+     + "body area below that.",
+     "The four paragraphs explaining what these numbers are \u2014 and the important part, "
+     + "that they never change your plan, your sets or your loads \u2014 are one tap away "
+     + "rather than sitting across the top of the screen. The short version stays where "
+     + "you read it without opening anything.",
+     "<b>Every control on this screen is untouched.</b> The dial still drags and takes the "
+     + "arrow keys, the floors still move a tenth at a time and run when you hold them, "
+     + "and every change still goes into your plan history. Only the furniture around "
+     + "them moved."]},
   {k: "In the gym leads with the unit",
    s: ["Pounds or kilos is the one answer that changes every number in the app, so it is "
      + "what the screen opens with \u2014 and underneath it, what switching would actually do "

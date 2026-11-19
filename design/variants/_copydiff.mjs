@@ -27,12 +27,20 @@ async function textOf(url){
     /* THE EXPLANATORY STRINGS, not innerText. innerText runs an option's label, its tick
        and its description together into one line, so a naive sentence split reports the
        whole screen as missing. These are the elements whose job is to explain. */
-    const SEL = ['.ch-tx span', '.ob-opt-s', '.set-help', '.set-says',
+    /* A SELECTOR LIST IS A PLACE TO MISS SOMETHING. This read eight strings off the
+       targets screen and reported a sentence as lost that was sitting in front of it, in
+       a .tg-plain paragraph nothing here named. Screen-specific prose containers are
+       included now, and anything the sweep does not recognise is caught by the fallback:
+       any <p> inside the card that is not already covered. */
+    const SEL = ['.ch-tx span', '.ob-opt-s', '.set-help', '.set-says', '.set-unit',
                  '.sd-seg button span', '.sd-tog .sd-sub', '.sd-sub', '.sd-says',
-                 '.sd-hero-s', '.set-unit'].join(',');
+                 '.sd-hero-s', '.tg-plain p', '.tg-land-s', '.tg-conf span',
+                 '.card p', '.sub'].join(',');
+    const seen = new Set();
     return [...document.querySelectorAll('#app ' + SEL)]
       .map(el=> el.textContent.replace(/\s+/g, ' ').trim())
-      .filter(x=> x.length >= 20);
+      .filter(x=> x.length >= 20)
+      .filter(x=>{ if(seen.has(x)) return false; seen.add(x); return true; });
   }, [FX, PAGE]);
   await p.close(); return t;
 }
