@@ -7353,7 +7353,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.38";
+const APP_VERSION = "2026.11.17.39";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -14992,25 +14992,45 @@ function storageBudget(){ return Math.floor(STORAGE_QUOTA * STORAGE_DISPOSABLE_F
 /* WHICH CATEGORY A KEY IS IN, and whether this screen may delete it. The protected list is
    written as "what it IS" rather than "what it is not", so a key added later is other and
    disposable only if it is named here. */
+/* AND IN WHAT ORDER THEY GO. `rank` is the order of sacrifice, lowest first.
+
+   The first version of this had none, so everything disposable was ordered by age alone -
+   and a cache carries no timestamp, so it read as age 0 and was ALWAYS the oldest thing in
+   the box. The research feed is 695 KB of it. The result: writing a single rescue backup
+   evicted the entire research cache, every time, and the Research tab lost the only copy
+   of the papers the reader had saved or opened. Measured, not deduced: a probe wrote a
+   real 400-paper feed, took two backups, and found the cache already gone.
+
+   A rescue backup is insurance against a repair that already went fine. A patch snapshot
+   is the whole-roll-back half of an undo whose other half survives without it. The
+   research cache is the only offline copy of what somebody has saved to read. So they go
+   in that order, and the cache goes last. */
 function storageCategoryOf(k){
   const s = String(k);
   if(s.indexOf(RESCUE_BACKUP_PREFIX) === 0)
-    return {id: "rescue", label: "Rescue backups", drop: true};
+    return {id: "rescue", label: "Rescue backups", drop: true, rank: 0};
   if(s.indexOf(PATCH_SNAP_PREFIX) === 0)
-    return {id: "patchsnap", label: "Patch snapshots", drop: true};
-  if(s === RESEARCH_CACHE_KEY || s === ERR_KEY || s === REPORT_QUEUE_KEY)
-    return {id: "cache", label: "Caches and logs", drop: true};
+    return {id: "patchsnap", label: "Patch snapshots", drop: true, rank: 1};
+  if(s === ERR_KEY || s === REPORT_QUEUE_KEY)
+    return {id: "cache", label: "Caches and logs", drop: true, rank: 2};
+  if(s === RESEARCH_CACHE_KEY)
+    return {id: "research", label: "Saved research", drop: true, rank: 3};
   if(s.indexOf(LS_KEY) === 0)
-    return {id: "live", label: "Your training data", drop: false};
+    return {id: "live", label: "Your training data", drop: false, rank: 99};
   if(s.indexOf("e26.") === 0)
-    return {id: "account", label: "Account and device", drop: false};
-  return {id: "other", label: "Other", drop: false};
+    return {id: "account", label: "Account and device", drop: false, rank: 99};
+  return {id: "other", label: "Other", drop: false, rank: 99};
 }
 /* When each disposable item was written, so the oldest goes first. Both prefixes carry a
    timestamp; a cache has none and is treated as oldest, because a cache is the cheapest
    thing in here to lose. */
 function storageItemAge(k){
   const s = String(k);
+  /* The feed stamps itself, so it can be ordered among its own kind rather than reading as
+     the oldest thing on the device. */
+  if(s === RESEARCH_CACHE_KEY){
+    try{ return Number(JSON.parse(localStorage.getItem(s) || "{}").at) || 0; }catch(e){ return 0; }
+  }
   if(s.indexOf(RESCUE_BACKUP_PREFIX) === 0){
     const m = s.match(/\.(\d{10,})$/);
     return m ? Number(m[1]) : 0;
@@ -15035,7 +15055,8 @@ function storageItemLoses(k){
   }
   if(s.indexOf(RESCUE_BACKUP_PREFIX) === 0)
     return "a copy of your data from before an automatic repair";
-  if(s === RESEARCH_CACHE_KEY) return "the research library, which downloads again";
+  if(s === RESEARCH_CACHE_KEY)
+    return "every paper you have saved or opened, offline - it downloads again with a signal";
   if(s === ERR_KEY) return "the error log this app keeps for diagnosis";
   if(s === REPORT_QUEUE_KEY) return "reports waiting to be sent";
   return "a disposable copy";
@@ -15045,7 +15066,8 @@ function storageDisposable(){
     .filter(k=> storageCategoryOf(k).drop && !/\.why$/.test(k))
     .map(k=> ({key: k, bytes: storageSizeOf(k), at: storageItemAge(k),
                cat: storageCategoryOf(k), loses: storageItemLoses(k)}))
-    .sort((a, b)=> a.at - b.at);
+    /* By what it costs to lose, then by age within that. */
+    .sort((a, b)=> (a.cat.rank - b.cat.rank) || (a.at - b.at));
 }
 /* Dropping one, and keeping the app's own record of it honest: a patch whose snapshot is
    gone must stop claiming it can be rolled back whole, or the history lies. */
@@ -62727,8 +62749,17 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.38";
+const NEWS_FOR = "2026.11.17.39";
 const NEWS = [
+  {k: "Research stopped losing its library to a backup",
+   s: ["Freeing space for a backup threw away the research cache first, every time. That "
+     + "cache is the only offline copy of the papers you have saved or opened, and it is "
+     + "the biggest disposable thing on the device, so it was always the first one "
+     + "chosen \u2014 a side effect of the storage work in the last release, and the reason "
+     + "Research stopped behaving.",
+     "Disposable copies now go in order of what they cost to lose: rescue backups, then "
+     + "patch snapshots, then logs, and the research library last. It is still freed if "
+     + "the device truly runs out, but only after everything else has gone."]},
   {k: "Patch history can be tidied up, in two sizes",
    s: ["Each row in Settings \u203a Plan patches has a Delete, and so does the list. Neither "
      + "undoes anything: every change those patches made stays exactly where it is, and "

@@ -208,6 +208,48 @@ console.log("\n5 - THE BUDGET KEEPS THE PILE DOWN WITHOUT ANYTHING FAILING FIRST
      r.kept > 0, r.kept + " kept");
 }
 
+console.log("\n6 - WHAT GOES FIRST, AND WHAT GOES LAST");
+{
+  /* THE REGRESSION THIS SECTION EXISTS FOR. Disposable items were ordered by age alone,
+     and a cache carries no timestamp, so it read as age 0 - always the oldest thing on the
+     device. The research feed is the better part of a megabyte of it, so writing a single
+     rescue backup evicted the whole thing, every time, and the Research tab lost the only
+     offline copy of what the reader had saved. Reported as "research is no longer
+     working", found by probing rather than by reading. */
+  const r = await p.evaluate(async ()=>{
+    boot();
+    /* A feed in the cache, big enough to be the obvious thing to sacrifice. */
+    const papers = [];
+    for(let i = 0; i < 300; i++) papers.push({id: "p" + i, title: "x".repeat(600),
+      journal: "j", published: "2025-11", publishedAt: Date.now(), type: "rct"});
+    researchCacheWrite(papers, Date.now());
+    const had = (researchCacheRead() || {papers: []}).papers.length;
+    for(let i = 0; i < 2; i++){ rescueBackupOnce("f" + i); await new Promise(s2=> setTimeout(s2, 110)); }
+    await patchApply(JSON.stringify({e26patch: 1, note: "snap",
+      ops: [{op: "volume.floor", muscle: "quads", to: 7}]}));
+    const order = storageDisposable().map(x=> x.cat.id);
+    const kept = (researchCacheRead() || {papers: []}).papers.length;
+    /* And when room really is needed, it is still the LAST to go, not the first. */
+    const dropped = [];
+    for(let i = 0; i < 9; i++){ const d = storageFreeOne(); if(!d) break; dropped.push(d.cat.id); }
+    return {had, kept, order, dropped,
+            cacheGone: !localStorage.getItem(RESEARCH_CACHE_KEY)};
+  });
+  console.log("    order of sacrifice: " + r.order.join(" -> "));
+  console.log("    freed in turn:      " + r.dropped.join(" -> "));
+  ck("a feed went into the cache", r.had === 300, String(r.had));
+  ck("writing backups and a snapshot does not touch it", r.kept === 300,
+     r.had + " -> " + r.kept);
+  ck("the research cache sorts last among disposable things",
+     r.order[r.order.length - 1] === "research", r.order.join(","));
+  ck("CONTROL: and when space is genuinely needed it is the last one freed",
+     r.dropped.length > 1 && r.dropped[r.dropped.length - 1] === "research"
+       && r.dropped.indexOf("research") === r.dropped.length - 1,
+     r.dropped.join(" -> "));
+  ck("CONTROL: which does eventually free it, rather than protecting it for ever",
+     r.cacheGone, String(r.cacheGone));
+}
+
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");

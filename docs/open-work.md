@@ -755,6 +755,43 @@ exist to record the patch and its undo.
 
 ---
 
+## 21. Research stopped working, and it was the storage fix — FIXED (2026.11.17.39)
+
+**Reported as "research is no longer working, it says couldn't reach the research service".**
+
+**The service was fine.** The Worker answers `http=200` with 752 KB of papers, and its CORS
+header is correct for the Pages origin — checked from four different origins, and it returns
+`access-control-allow-origin: https://brother12334.github.io` for all of them, which is right
+for the real one.
+
+**The cause was 2026.11.17.35, and it was mine.** `storageDisposable()` ordered everything by
+AGE alone. A cache carries no timestamp, so it read as age 0 — always the oldest thing on the
+device. The research feed is the better part of a megabyte of it, so it was always the first
+thing chosen, and **writing a single rescue backup evicted the whole research library**.
+Measured rather than deduced: a probe wrote a real 400-paper feed, took two backups, and
+found the cache already gone.
+
+That cache is the only offline copy of the papers somebody has saved or opened. Losing it is
+not the same as losing a backup of a repair that already went fine.
+
+**Disposable copies now carry a rank** — the order of sacrifice, lowest first: rescue backups
+(0), patch snapshots (1), logs and queues (2), the research library (3). Age orders within a
+rank, and the feed stamps itself so it can be ordered among its own kind. It is still freed
+when the device genuinely runs out, but only after everything else has gone.
+
+`tests/specs/storage.mjs` section 6 pins it: 300 papers in, two backups and a patch applied,
+300 papers still there; the order of sacrifice printed; and two controls — the cache is the
+LAST thing freed when space is genuinely needed, and it IS eventually freed rather than
+protected for ever.
+
+**What is still unexplained: the error message itself.** A cache that has been evicted leaves
+the Research tab empty, not erroring. The screen prints the specific reason under the
+heading, so the second line on the device names the actual cause — a status code, "Failed to
+fetch", or "sent something unreadable" — and that is the next thing to read. Recorded as
+open rather than closed by a fix that explains something else.
+
+---
+
 ## 20. The opening side, and a summary that was silent about the workout — FIXED (2026.11.17.36)
 
 **The opening side.** `planEntry()` had P1-7's rule written into it: a pair opens on the
