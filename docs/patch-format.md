@@ -287,6 +287,12 @@ inverse ops only, and your new sessions are never read. Something changed since 
 patch also changed → neither, silently: the slot is named, with the patch's value, the
 value now, and what undo would write, and you choose.
 
+**A row can be deleted**, from the row itself or with Delete all. That is not an undo:
+every change the patch made stays exactly where it is, and the plan history keeps every row
+it wrote. What goes is the journal and the snapshot — so the patch can no longer be
+reversed, and no longer rolled back whole. The confirmation names which of those apply
+rather than asking whether you are sure.
+
 Snapshots are gzipped and kept under a byte budget rather than a fixed count, because a
 full state is several hundred kilobytes and browser storage is about five megabytes. Patch
 history says per row which guarantee is still behind it. A row that has aged out of its

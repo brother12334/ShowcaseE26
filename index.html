@@ -7349,7 +7349,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.36";
+const APP_VERSION = "2026.11.17.37";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -62723,8 +62723,17 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.36";
+const NEWS_FOR = "2026.11.17.37";
 const NEWS = [
+  {k: "Patch history can be cleared out",
+   s: ["Each row in Settings \u203a Plan patches now has a Delete, and the list has a "
+     + "Delete all. It does not undo anything: every change those patches made stays "
+     + "exactly where it is, and your plan history keeps every row they wrote, with the "
+     + "reason and the day.",
+     "What you lose is the way back \u2014 that patch can no longer be undone, and if it "
+     + "still had a full snapshot behind it, there is no rolling back to before it "
+     + "either. The confirmation says which of those apply to the row you are deleting, "
+     + "rather than asking whether you are sure."]},
   {k: "A one-limb pair opens on the side that needs it",
    s: ["A pair opened on the left, always, whichever side was behind. The protocol that "
      + "holds your stronger side to your weaker one caps it at the reps the weaker side "
@@ -72261,6 +72270,31 @@ function patchUndoRun(id, opts){
   return {ok: true, reversed: list.length, left: o.force ? 0 : chk.clash.length,
           clash: o.force ? [] : chk.clash, dir: chk.dir};
 }
+/* FORGETTING ONE, WHICH IS NOT UNDOING IT.
+
+   A history row holds two things: the journal, which is the only way back from that patch,
+   and the snapshot, which is the only way back to the moment before it. Deleting the row
+   throws both away and changes NOTHING about your plan - every change that patch made
+   stays exactly where it is. What you lose is the ability to take them back.
+
+   That is an odd shape for a delete button, so the sheet says it in those words rather
+   than asking "are you sure". The plan history is untouched either way: the rows
+   logPlanChange() wrote under rule "patch" are the record of what changed and why, and
+   they are not this app's to tidy away because somebody cleaned up a list. */
+function patchForget(id){
+  const list = S.patchLog || [];
+  const i = list.findIndex(r=> r && r.id === id);
+  if(i < 0) return false;
+  patchSnapDrop(id);
+  list.splice(i, 1);
+  save(); queueSync();
+  return true;
+}
+function patchForgetAll(){
+  let n = 0;
+  (S.patchLog || []).slice().forEach(r=>{ if(r && patchForget(r.id)) n++; });
+  return n;
+}
 /* THE OTHER DOOR: the photograph. Everything goes back to the moment before the patch,
    including anything logged since, which is why it is never the automatic answer and why
    the screen lists what would be lost before offering it. */
@@ -72379,6 +72413,9 @@ function patchCardHTML(){
     h += `<div class="set-help">Nothing applied yet. Every patch you apply is kept here with
       what it changed, and can be taken back.</div>`;
   } else {
+    h += `<div class="set-row" style="justify-content:flex-end;margin:-4px 0 6px">
+      <button class="btn ghost small" id="ptForgetAll">Delete all</button>
+    </div>`;
     h += `<div class="set-help">The last ${PATCH_LOG_KEEP} patches. <b>Undo</b> reverses the
       patch's own changes and leaves anything you have done since. A patch that still has a
       full snapshot behind it can also be rolled back whole — which does lose what came
@@ -72401,6 +72438,7 @@ function patchCardHTML(){
           ${r.snap && !r.undone
             ? `<button class="btn ghost small" data-ptrestore="${esc(r.id)}">Roll back whole</button>`
             : ""}
+          <button class="btn ghost small" data-ptforget="${esc(r.id)}">Delete</button>
         </div>
       </div>`;
     });
@@ -72422,6 +72460,37 @@ function patchAskHTML(){
       <div class="set-row" style="gap:8px;margin-top:12px">
         <button class="btn small" id="ptClashGo">Reverse the ${a.total - a.clash.length} that match</button>
         <button class="btn ghost small" id="ptClashNo">Leave it alone</button>
+      </div>`;
+  }
+  if(a.kind === "forget"){
+    const one = a.rows.length === 1 ? a.rows[0] : null;
+    const snaps = a.rows.filter(r=> r.snap).length;
+    const undone = a.rows.filter(r=> r.undone).length;
+    return `<div class="sheet-h">${one ? "Delete this patch from the history"
+                                       : "Delete all " + a.rows.length + " patches from the history"}</div>
+      <div class="sub">Your plan does not change. ${one
+        ? (one.changes === 1
+            ? "The one change this patch made on " + esc(one.date) + " stays exactly as it is."
+            : "The " + one.changes + " changes this patch made on " + esc(one.date)
+              + " stay exactly as they are.")
+        : "Every change these patches made stays exactly as it is."}
+        What goes is the way back.</div>
+      <div class="pt-lose">
+        <div class="pt-lose-k">What you lose</div>
+        <div class="pt-row"><span class="pt-what">${one && !one.undone
+          ? "Undo: these changes can no longer be reversed."
+          : undone ? "Redo: " + (one ? "this patch" : undone + " undone patch"
+              + (undone === 1 ? "" : "es")) + " can no longer be put back."
+          : "Undo: these changes can no longer be reversed."}</span></div>
+        ${snaps ? `<div class="pt-row"><span class="pt-what">The full snapshot${
+          snaps === 1 ? "" : "s"} behind ${snaps === 1 ? "it" : snaps + " of them"}, so there is no
+          rolling back to before ${snaps === 1 ? "it" : "them"} either.</span></div>` : ""}
+        <div class="pt-row"><span class="pt-what">Nothing else. Your plan history keeps every
+          row these patches wrote, with the reason and the day.</span></div>
+      </div>
+      <div class="set-row" style="gap:8px;margin-top:12px">
+        <button class="btn small" id="ptForgetGo">${one ? "Delete it" : "Delete all " + a.rows.length}</button>
+        <button class="btn ghost small" id="ptForgetNo">Cancel</button>
       </div>`;
   }
   if(a.kind === "restore"){
@@ -72492,6 +72561,19 @@ function patchWire(){
     render();
     toast(out.dir === "undo" ? "Patch undone" : "Patch reapplied", "good");
   });
+  document.querySelectorAll("[data-ptforget]").forEach(btn=> btn.onclick = ()=>{
+    const e = patchEntry(btn.dataset.ptforget);
+    if(!e) return;
+    PATCH_ASK = {kind: "forget", ids: [e.id], rows: [e]};
+    showModal(patchAskHTML()); patchAskWire();
+  });
+  const fa = $("#ptForgetAll");
+  if(fa) fa.onclick = ()=>{
+    const rows = (S.patchLog || []).slice();
+    if(!rows.length) return;
+    PATCH_ASK = {kind: "forget", ids: rows.map(r=> r.id), rows: rows};
+    showModal(patchAskHTML()); patchAskWire();
+  };
   document.querySelectorAll("[data-ptrestore]").forEach(btn=> btn.onclick = async ()=>{
     const id = btn.dataset.ptrestore, e = patchEntry(id);
     if(!e) return;
@@ -72522,6 +72604,16 @@ function patchAskWire(){
   };
   const no = $("#ptClashNo");
   if(no) no.onclick = ()=>{ hideModal(); PATCH_ASK = null; };
+  const fg = $("#ptForgetGo");
+  if(fg) fg.onclick = ()=>{
+    const ids = (PATCH_ASK && PATCH_ASK.ids) || [];
+    let n = 0;
+    ids.forEach(id=>{ if(patchForget(id)) n++; });
+    hideModal(); PATCH_ASK = null; render();
+    toast(n === 1 ? "Patch deleted from the history" : n + " patches deleted from the history");
+  };
+  const fn = $("#ptForgetNo");
+  if(fn) fn.onclick = ()=>{ hideModal(); PATCH_ASK = null; };
   const rg = $("#ptRestoreGo");
   if(rg) rg.onclick = async ()=>{
     rg.disabled = true; rg.textContent = "Rolling back…";

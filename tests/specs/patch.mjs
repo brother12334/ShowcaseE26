@@ -630,6 +630,59 @@ console.log("\n17 - AND THE WHOLE THING THROUGH THE REAL SCREEN");
      && /\bredo\b/i.test(undone.text), (undone.text.match(/\d+ changes . undone/i) || ["missing"])[0]);
 }
 
+console.log("\n20 - DELETING A ROW FROM THE HISTORY, WHICH IS NOT UNDOING IT");
+{
+  const r = await p.evaluate(async fx=>{
+    Object.keys(fx).forEach(k=>{ S[k] = JSON.parse(JSON.stringify(fx[k])); });
+    S.patchLog = []; migrate(); try{ applySplit(); }catch(e){}
+    const a = await patchApply(JSON.stringify({e26patch: 1, note: "one",
+      ops: [{op: "volume.floor", muscle: "quads", to: 7}]}));
+    const b2 = await patchApply(JSON.stringify({e26patch: 1, note: "two",
+      ops: [{op: "volume.floor", muscle: "hams", to: 6}]}));
+    const before = {rows: (S.patchLog || []).length,
+                    snap: !!localStorage.getItem(PATCH_SNAP_PREFIX + a.id),
+                    floorQ: (S.lmFloor || {}).quads, floorH: (S.lmFloor || {}).hams,
+                    planRows: (S.planLog || []).filter(x=> x && x.rule === "patch").length};
+    const gone = patchForget(a.id);
+    const after = {rows: (S.patchLog || []).length,
+                   snap: !!localStorage.getItem(PATCH_SNAP_PREFIX + a.id),
+                   floorQ: (S.lmFloor || {}).quads, floorH: (S.lmFloor || {}).hams,
+                   planRows: (S.planLog || []).filter(x=> x && x.rule === "patch").length,
+                   stillThere: !!patchEntry(a.id), other: !!patchEntry(b2.id)};
+    /* and the sheet that has to say what is lost before any of that happens */
+    PATCH_ASK = {kind: "forget", ids: [b2.id], rows: [patchEntry(b2.id)]};
+    const sheet = patchAskHTML().replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    PATCH_ASK = null;
+    const all = patchForgetAll();
+    return {gone, before, after, sheet, all, left: (S.patchLog || []).length,
+            floorsAfterAll: {q: (S.lmFloor || {}).quads, h: (S.lmFloor || {}).hams},
+            card: patchCardHTML()};
+  }, FX);
+  ck("the row goes", r.gone && r.after.rows === r.before.rows - 1 && !r.after.stillThere,
+     r.before.rows + " -> " + r.after.rows);
+  ck("and its snapshot with it", r.before.snap && !r.after.snap,
+     r.before.snap + " -> " + r.after.snap);
+  ck("the other row is untouched", r.after.other, String(r.after.other));
+  /* THE WHOLE POINT: a delete here is not an undo. */
+  ck("the plan does not change", r.after.floorQ === r.before.floorQ
+     && r.after.floorH === r.before.floorH,
+     "quads " + r.after.floorQ + ", hams " + r.after.floorH);
+  ck("CONTROL: and the plan history keeps every row the patch wrote",
+     r.after.planRows === r.before.planRows && r.before.planRows > 0,
+     r.before.planRows + " -> " + r.after.planRows);
+  ck("the sheet says the plan does not change", /Your plan does not change/.test(r.sheet),
+     r.sheet.slice(0, 80));
+  ck("and names what is lost", /What you lose/.test(r.sheet)
+     && /can no longer be reversed/.test(r.sheet),
+     (r.sheet.match(/What you lose[^.]*\./) || ["missing"])[0]);
+  ck("delete all clears the list", r.all === 1 && r.left === 0, r.all + " deleted, " + r.left + " left");
+  ck("CONTROL: and still does not touch the plan",
+     r.floorsAfterAll.q === r.before.floorQ && r.floorsAfterAll.h === r.before.floorH,
+     JSON.stringify(r.floorsAfterAll));
+  ck("the empty list says so rather than showing nothing", /Nothing applied yet/.test(r.card),
+     "empty state");
+}
+
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;
 console.log(bad ? ("BROKEN: "+bad) : "all good");
