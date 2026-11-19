@@ -17,7 +17,13 @@ const TITLES = {
   plan:   ["Your plan",           "Deloads, and how your volume targets are worked out."],
   day:    ["Sleep and mornings",  "The morning check, sleep tracking, and how much sleep you want."],
   remind: ["Reminders",           "Notifications for training, bedtime and the morning."],
-  share:  ["Share with a coach",  "A read-only link to your plan and your numbers, which expires by itself."]
+  share:  ["Share with a coach",  "A read-only link to your plan and your numbers, which expires by itself."],
+  acct:   ["Your account",        "Your ID and recovery key, cloud backup, signing out."],
+  data:   ["Your data",           "Export a backup, bring one in, or erase what's on this device."],
+  patch:  ["Plan patches",        "Paste a change, read what it would do, apply it, take it back."],
+  storage:["Storage",             "What is on this device, what it costs, and what can go."],
+  help:   ["Help",                "The tour, and telling somebody when the app misbehaves."],
+  legal:  ["Licensing",           "The work Element 26 uses, who made it, and under what terms."]
 };
 const b = await chromium.launch();
 let fails = 0;

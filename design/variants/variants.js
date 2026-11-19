@@ -449,7 +449,7 @@ const plan_A = ()=>
   + item("","",`<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Start a deload week</button></div>`)));
 
 const plan_B = ()=>
-  hero("INTO THIS BLOCK","6",`<span style="font-size:19px"> weeks</span>`,
+  hero("INTO THIS BLOCK","6","weeks",
     "Your last deload ended when this block began. The next is offered at week six.")
 + blockBar()
 + says("Offered every <b>6 weeks</b>, or earlier if your RPE and check-ins say so. Nothing starts without you.")
@@ -617,7 +617,7 @@ const share_A = ()=>
 + says("The plan and what you have done against it always go. Never shared, whatever you turn on: your account id, your recovery key, your reminder subscriptions. The snapshot is checked before it leaves this device and <b>refuses to send rather than trimming itself</b>.");
 
 const share_B = ()=>
-  hero("THIS LINK LASTS","30",`<span style="font-size:19px"> days</span>`,
+  hero("THIS LINK LASTS","30","days",
     "Then it stops working, for everyone who has it. You can revoke it sooner.")
 + seg([{v:7,t:"7 days"},{v:30,t:"30 days"},{v:90,t:"90 days"}],30)
 + says("Ninety at the very most. A link that never expires is one you will have forgotten about by the time it matters.")
@@ -641,6 +641,123 @@ const share_C = ()=>
 
 Object.assign(window.SD, {day_A,day_B,day_C,
   remind_A,remind_B,remind_C, share_A,share_B,share_C});
+/* =====================  BATCH 4 — the action screens  =====================
+   One pass each, in the language the nine picks settled: hero, the control, a says line,
+   labelled groups, More, and the app's own .btn for anything that is a verb. */
+
+/* ---------- Your account ---------- */
+const acct_1 = ()=>
+  heroW("SIGNED IN AS","Fer","Your plan, workouts and settings are stored on this device under this account.")
++ sec("The two halves of your account")
++ group(
+    `<div class="sd-item"><div class="sd-label">Your Element 26 User ID</div>
+      <div class="sd-key"><code>E26-7K4Q-2M18</code>
+        <button type="button" class="btn ghost small" style="width:auto;padding:9px 14px">Copy</button></div>
+      <p class="sd-sub" style="margin-top:7px">Identifies the account. It opens nothing on its own.</p></div>`
+  + `<div class="sd-item"><div class="sd-label">Recovery key</div>
+      <div class="sd-key is-hidden"><code>•••• •••• •••• ••••</code>
+        <button type="button" class="btn ghost small" style="width:auto;padding:9px 14px">Show</button></div>
+      <p class="sd-sub" style="margin-top:7px">The half that proves the account is yours. Not for sharing.</p></div>`)
++ says("You need the ID <b>and</b> the key to sign in somewhere else. Keep both private.")
++ sec("Cloud backup")
++ group(tog("Back up to the cloud","Off. Everything lives on this device and nowhere else.",false))
++ more("Signing out", group(item("","Reversible. Your data stays on this device.",
+    `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Sign out</button></div>`,
+    "Deleting the account for good lives with the other irreversible action, under <b>Your data</b>.")));
+
+/* ---------- Your data ---------- */
+const data_1 = ()=>
+  hero("LOGGED ON THIS DEVICE","74","sessions",
+    "One file holds all of it: every workout, your plan, your split and your settings.")
++ `<div class="btn-row" style="margin:12px 0 0">
+    <button type="button" class="btn" style="flex:1">Export my data</button>
+    <button type="button" class="btn ghost small" style="flex:0 0 auto">Import a file</button></div>`
++ says("No passwords or keys are ever written into the file. This browser has <b>not</b> granted persistent storage, so it may clear this app's data if the device runs short — an exported file is the copy nobody can clear.")
++ more("Repairs — three things worth checking", group(
+    item("Been logging wrong?","Whether a barbell number meant the bar plus plates or just the plates.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Check my logged weights</button></div>`)
+  + item("Dips and pull-ups logged without you","Bodyweight sets that may be missing your weight.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Check my bodyweight sets</button></div>`)))
++ `<div class="sd-sec sd-sec-danger">There is no way back from these</div>`
++ `<div class="sd-group sd-danger">`
+  + item("Erase my training data","Your plan and every workout logged on this device. The account itself stays — sign in again and you start empty.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small danger" style="flex:1">Erase my training data</button></div>`)
+  + item("Delete my account","The account itself, and everything stored against it. No copy anywhere.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small danger" style="flex:1">Delete account</button></div>`,
+      "Export a backup above first if there is any chance you want the log later.")
++ `</div>`;
+
+/* ---------- Plan patches ---------- */
+const patch_1 = ()=>
+  heroW("PLAN PATCHES","None applied yet","A patch is a written change to your plan: paste it, read exactly what it would do, then apply it. Everything it does can be taken back.")
++ sec("Paste a patch")
++ group(`<div class="sd-item">
+    <textarea class="sd-ta" rows="5" spellcheck="false"
+      placeholder='{"e26patch": 1, "note": "why", "ops": [ ... ]}'></textarea>
+    <div class="btn-row" style="margin:10px 0 0">
+      <button type="button" class="btn" style="flex:1">Preview</button>
+      <button type="button" class="btn ghost small" style="flex:0 0 auto">Copy the format</button></div>
+  </div>`)
++ says("Nothing is written until you have seen the preview and pressed Apply. The format is for developers — <b>Copy the format</b> hands over the spec and your current plan together.")
++ more("What a patch can change", group(item("","",
+    `<div class="sd-sub">Sets, reps, load, rest and RPE on a slot; renaming or replacing a
+     movement; adding and removing slots; reordering a day; and notes. Nineteen operations
+     in all.</div>`)));
+
+/* ---------- Storage ---------- */
+const storage_1 = ()=>
+  hero("ON THIS DEVICE","1.8","MB of 5",
+    "36% used. Everything on this screen removes something, so the export comes first.")
++ `<div class="sto-bar" style="margin:4px 0 0"><span class="sto-fill" style="width:36%"></span></div>`
++ `<div class="btn-row" style="margin:14px 0 0"><button type="button" class="btn" style="flex:1">Export raw data</button></div>`
++ says("Reads this device's storage directly as text, so it works even when a screen will not draw. GitHub sync tokens are left out; your account key is in it, so keep the file private.")
++ sec("Can be freed — 412 KB")
++ group(
+    item("Rescue backups","Three copies of your data from before a risky change. 243 KB.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Free all three</button></div>`,
+      "You lose the ability to roll back to before those changes. Your log is untouched.")
+  + item("Patch snapshots","Two, 119 KB.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Free both</button></div>`,
+      "Undo keeps working on each patch's own changes; only the whole roll-back goes.")
+  + item("Saved research","50 KB.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Free it</button></div>`,
+      "Papers you have opened or saved stop being readable offline until the next fetch."))
++ more("What cannot be freed here — 1.4 MB", group(item("","",
+    `<div class="sd-sub">Your sessions, plan, settings, gyms, volume landmarks, plan history
+     and account. Listed because an honest answer to what is taking the room has to include
+     them, and that is all — there is no delete button, not a disabled one.</div>`)));
+
+/* ---------- Help ---------- */
+const help_1 = ()=>
+  hero("ELEMENT 26","2026.11.17.41",null,"What changed, how the app works, and how to tell somebody when it misbehaves.")
++ sec("Reading")
++ group(
+    item("What changed in this version","Research that says what the service actually said, one place to export your raw data, and Settings › Storage.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Read what changed</button></div>`)
+  + item("The tour","Twelve steps on cycles, rep ranges, RPE, logging a set and grades. About a minute, and it changes nothing.",
+      `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Show the tour again</button></div>`))
++ sec("Something's wrong")
++ group(item("Report a problem","Goes to whoever maintains Element 26 with the version you are on and any errors the app caught.",
+    `<div class="btn-row" style="margin:0"><button type="button" class="btn ghost small" style="flex:1">Report a problem</button></div>`,
+    "<b>Never your workouts.</b>"));
+
+/* ---------- Licensing ---------- */
+const legal_1 = ()=>
+  heroW("LICENSING","Open source","The work Element 26 uses, who made it, and under what terms.")
++ sec("The anatomy drawings")
++ group(item("MuscleMap","Copyright (c) 2026 Melih Colpan, used under the MIT licence.","",
+    "The licence has one obligation and this screen is it: its copyright and permission notice travel with the work, carried rather than linked — a link is a promise that a server somewhere keeps answering, and these drawings ship offline."))
++ more("The MIT licence in full", group(`<div class="sd-item">
+    <pre class="sd-pre">MIT License
+
+Copyright (c) 2026 Melih Colpan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction…</pre></div>`));
+
+Object.assign(window.SD, {acct_1,data_1,patch_1,storage_1,help_1,legal_1});
+
 
 
 })();
