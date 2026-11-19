@@ -783,9 +783,19 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   box-shadow:inset 0 0 0 1px var(--acc-line)}
 .sd-seg button:active{transform:scale(.97)}
 /* Stacked when three choices carry words rather than one. */
+/* AND flex:1 1 0 IS A ROW'S RULE. Turned on its side it makes the options share the
+   height equally instead of sizing to their own text, so the longest description spills
+   out past its own button and over the line below it. The stacked form sizes to content. */
 .sd-seg.is-tall{flex-direction:column}
+.sd-seg.is-tall button{flex:0 0 auto}
 .sd-seg.is-tall button{text-align:left;padding:11px 11px;min-height:44px}
-.sd-seg.is-tall button b{display:block;font-weight:600}
+/* DIRECT CHILD, and this is the second time this project has learned it. The option's
+   description is allowed to contain bold -- "A 45 lb bar with a 45 on each end is
+   <b>135</b>." -- and a descendant selector turns that number into a block, so 135 takes
+   a line of its own and the sentence collapses over the one below it. .ch-tx carries the
+   same note a few hundred lines up; the new library reintroduced the bug and a screenshot
+   found it. */
+.sd-seg.is-tall button > b{display:block;font-weight:600}
 .sd-seg.is-tall button span{display:block;margin-top:2px;font-family:var(--sans);
   font-weight:400;font-size:var(--fs-3);line-height:1.4;color:var(--dim);
   letter-spacing:0;white-space:normal}
@@ -7684,7 +7694,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.46";
+const APP_VERSION = "2026.11.17.47";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -34139,46 +34149,85 @@ function barWeightPickHTML(p){
 let BARW_OPEN = false;
 function prefsGymHTML(){
   const p = trainPrefs();
-  let h = setChoice("Pounds or kilos", [
-      {v:"lb", t:"Pounds", d:"Loads shown and entered in lb."},
-      {v:"kg", t:"Kilos",  d:"Loads shown and entered in kg."}
-    ], "data-prefunits", p.units === "kg" ? "kg" : "lb",
-    "Nothing already logged is converted.");
-  h += setChoice("Track your bodyweight", [
-      {v:"on",  t:"Yes",           d:"A weigh-in log on the Body tab, and the cycle review reads it."},
-      {v:"off", t:"Leave it out",  d:"Nothing in the app asks for it or shows it. Anything already logged is kept."}
-    ], "data-trackw", tracksWeight() ? "on" : "off",
-    "Turning it off hides the feature; it does not delete a single weigh-in.");
-  /* ASKED, BECAUSE IT WAS BEING GUESSED. The tape unit was derived from the weight unit
-     on the reasoning that nobody wants pounds and centimetres together. People do, and
-     there was no way to say so. Only offered where the tape exists at all. */
-  if(tracksWeight())
-    h += setChoice("Tape measurements", [
-        {v:"in", t:"Inches", d:"Arms, chest, waist and the rest in <b>in</b>."},
-        {v:"cm", t:"Centimetres", d:"The same measurements in <b>cm</b>."}
-      ], "data-tapeunit", lenWord(),
-      "Independent of pounds or kilos. Anything already measured can be converted when you switch.");
-  /* THE EXAMPLE IS ABOUT YOUR BAR, or it is not an example of anything. This was written
-     with 45 hard-coded in both lines, so somebody who had told the app their bar weighs 25
-     was reading "a 45 lb bar with a 45 on each end is 135" directly above the field where
-     they had said otherwise \u2014 the one screen whose whole job is explaining which number
-     to write, demonstrating it with a bar they do not own. */
+  /* CONVERTED TO THE SHARED LIBRARY (design/settings-reconcile.md, variation B).
+
+     The hero is the unit, because it is the one answer that changes every number in the
+     app, and the live conversion under it says what switching would actually do to a
+     weight already in the log. Bar weight is a stepper; measuring yourself folds away.
+
+     EVERY DATA ATTRIBUTE IS THE ONE THAT WAS HERE BEFORE: data-prefunits, data-trackw,
+     data-tapeunit, data-prefbar, plus the bar chips' data-prefbarw and the plate link's
+     data-platefix, both of which live in barWeightPickHTML and are untouched. */
+  const kg = inKg();
   const barW = p.barWeight == null ? barDefault() : p.barWeight;
-  const plate = inKg() ? 20 : 45;               // one plate a side, the one everybody pictures
-  h += setChoice("The number you write down for a barbell", [
-      {v:"total",  t:"Bar + plates",
-       d:"A " + esc(String(barW)) + " " + esc(unitWord()) + " bar with a " + plate +
-         " on each end is <b>" + esc(String(r1(barW + plate * 2))) + "</b>."},
-      {v:"plates", t:"Plates only",
-       d:"The same bar is <b>" + (plate * 2) + "</b> \u2014 the plates, with the bar left out."}
-    ], "data-prefbar", p.barMode,
-    "<b>Either way it is the whole load, never one side.</b> Same for a Smith machine.")
-    + (p.barMode === "total" ? barWeightPickHTML(p) : "");
-  /* The plates and the dumbbells used to be asked for again here. They are facts about a
-     ROOM, not about you, and "Where you train" already asks them per gym — so the same
-     two questions were on two screens, and the answer on this one was the one the other
-     screen called "your usual". They are asked once now, on that page, with the usual at
-     the top and each gym's exceptions under it. */
+  const plate = kg ? 20 : 45;
+  /* THE EXAMPLE IS ABOUT YOUR BAR, or it is not an example of anything — the lesson
+     already learned on this screen and kept. */
+  const total = r1(barW + plate * 2);
+
+  /* A load actually in the log, so the conversion is about this person's training rather
+     than a round number. Falls back to a plain example when there is nothing logged. */
+  const heaviest = (()=>{
+    let best = 0;
+    try{
+      (S.sessions || []).forEach(x=> (x.entries || []).forEach(e=> (e.sets || []).forEach(st=>{
+        const w = parseFloat(st && (st.weight != null ? st.weight : st.w));
+        if(isFinite(w) && w > best) best = w;
+      })));
+    }catch(e){}
+    return best;
+  })();
+  const other = heaviest > 0
+    ? (kg ? Math.round(heaviest * 2.20462) : Math.round(heaviest / 2.20462 * 10) / 10)
+    : 0;
+
+  let h = sdHero("EVERY LOAD IN THE APP", kg ? "KG" : "LB", null,
+      "Shown and entered in " + (kg ? "kilos" : "pounds") + ". "
+      + "<b>Nothing already logged is converted.</b>")
+    + sdSeg([
+        {v:"lb", t:"Pounds", d:"Loads shown and entered in lb."},
+        {v:"kg", t:"Kilos",  d:"Loads shown and entered in kg."}
+      ], "data-prefunits", kg ? "kg" : "lb")
+    + sdSays(heaviest > 0
+        ? "Your heaviest logged set reads <b>" + esc(fmtLoad(heaviest)) + "</b> today. In "
+          + (kg ? "pounds" : "kilos") + " the same set would read <b>" + esc(String(other))
+          + " " + (kg ? "lb" : "kg") + "</b> — the weight on the bar does not change, only "
+          + "the name for it."
+        : "Switching changes how every weight is written, here and on every screen. "
+          + "Nothing already logged is converted.");
+
+  h += sdSec("The bar");
+  h += sdGroup(
+      sdItem("The number you write down for a barbell", "",
+        sdSeg([
+          {v:"total",  t:"Bar + plates",
+           d:"A " + esc(String(barW)) + " " + esc(unitWord()) + " bar with a " + plate
+             + " on each end is <b>" + esc(String(total)) + "</b>."},
+          {v:"plates", t:"Plates only",
+           d:"The same bar is <b>" + (plate * 2) + "</b> — the plates, with the bar left out."}
+        ], "data-prefbar", p.barMode),
+        "<b>Either way it is the whole load, never one side.</b> Same for a Smith machine."));
+
+  /* The bar-weight chips keep their own block: they are a list of real bars rather than a
+     two-way choice, and the block carries the plates-are-separate sentence that sends
+     people to the right screen. Only offered where the number includes the bar. */
+  if(p.barMode === "total") h += barWeightPickHTML(p);
+
+  h += sdMore("Measuring yourself — bodyweight and the tape", sdGroup(
+      sdTog("Track your bodyweight",
+        "A weigh-in log on the Body tab, and the cycle review reads it. Off, nothing in the "
+        + "app asks for it or shows it. Turning it off hides the feature; it does not "
+        + "delete a single weigh-in.",
+        tracksWeight(), "data-trackw", tracksWeight() ? "off" : "on")
+    + (tracksWeight()
+        ? sdItem("Tape measurements", "",
+            sdSeg([
+              {v:"in", t:"Inches",      d:"Arms, chest, waist and the rest in <b>in</b>."},
+              {v:"cm", t:"Centimetres", d:"The same measurements in <b>cm</b>."}
+            ], "data-tapeunit", lenWord()),
+            "Independent of pounds or kilos, and anything already measured can be "
+            + "converted when you switch.")
+        : "")));
   return h;
 }
 /* TEN SETTINGS IN ONE BIN, AND THEY WERE NOT THE SAME KIND OF THING. "How sessions work"
@@ -63417,8 +63466,18 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.46";
+const NEWS_FOR = "2026.11.17.47";
 const NEWS = [
+  {k: "In the gym leads with the unit",
+   s: ["Pounds or kilos is the one answer that changes every number in the app, so it is "
+     + "what the screen opens with \u2014 and underneath it, what switching would actually do "
+     + "to a weight already in your log, using the heaviest set you have logged rather "
+     + "than a made-up example.",
+     "What the number for a barbell means keeps its worked example, still written with "
+     + "your bar rather than a standard one. Bodyweight and the tape fold under "
+     + "<b>More</b>, since they are not really about the gym.",
+     "Every sentence the old screen carried is still here, and nothing it stores has "
+     + "changed."]},
   {k: "The workout screen shows you the workout screen",
    s: ["Six lists of options, on the one screen whose whole subject is what you are "
      + "looking at. It opens with a picture of the session now, and the picture changes "

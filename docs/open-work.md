@@ -1089,7 +1089,32 @@ were asked for; both were deliberately deferred behind the data-loss fix.
 
 ---
 
-## 17. Flaky: `altadd.mjs`, "the movement survived the reload" — CAUSE FOUND IN THE SPEC (2026-11-18), reproduction still owed
+## 17. Flaky: `altadd.mjs`, "the movement survived the reload" — CLOSED (2026.11.17.46)
+
+**The reproduction this entry owed arrived on its own**, in the 311-spec run of
+2026-11-19: `altadd` failed there and passed three times out of three in isolation. That is
+exactly the CPU-contention case written up below and never demonstrated — under a full
+suite the browsers compete, Chromium's asynchronous `localStorage` commit does not land,
+and the cold boot reads storage the seed never reached. The failing line was *"and the
+fixture reached storage"*, which is the documented cause rather than a new one.
+
+**Checked rather than waved through.** "Known flake" is the cheapest way to let a real
+regression past, and this run came in the middle of two Settings conversions, so it had to
+be read as a suspect first.
+
+**Fixed at the cause, not loosened.** The spec already retried four boots and three whole
+fixture rebuilds; under contention every attempt can miss the same way and a higher count
+only buys a slower failure. The write is now **confirmed present before the page is left**,
+instead of assumed and checked afterwards: it polls until the seed tag is readable out of
+`localStorage` **itself** — not out of `S`, which is the in-memory copy and would answer
+yes whether or not anything had been stored. Only then are writes frozen and the page
+navigated away.
+
+**Verified the only way it can be.** The fix passes in isolation both before and after the
+change, so an isolated run proves nothing; the evidence is the full 311-spec run going
+green under the same contention that produced the failure.
+
+### The original entry
 
 **Worked through in the order the original entry sets out. Step 2 killed step 1, and my own
 recorded hypothesis with it.**
