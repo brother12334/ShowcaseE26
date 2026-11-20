@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.52";
+const APP_VERSION = "2026.11.17.53";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -14665,6 +14665,13 @@ function migrate(){
   if(!S.exMuscles || typeof S.exMuscles !== "object") S.exMuscles = {};
   // which movements have had the RPE-ramp suggestion turned down, so it stays down
   if(!S.rpeSugSkip || typeof S.rpeSugSkip !== "object") S.rpeSugSkip = {};
+  /* A BLOCK HOLD FROM AN OLDER BUILD IS NOT READ, SO IT IS NOT KEPT. It stored the
+     finished figure with the goal and the scale already in it; volHoldFor only reads a
+     v2 hold, which stores the app\u2019s estimate on its own. Clearing it here means the
+     only holds in storage are ones that can be reasoned about. A block running across
+     the upgrade goes back onto the live estimate now, which is what the two narrower
+     fixes before this one already did to it. */
+  if(S.volHold && S.volHold.v !== 2) S.volHold = null;
   /* THE MORNING WEIGH-IN MOVES HOUSE, IT DOES NOT EVAPORATE.
 
      The morning screen used to carry an optional bodyweight box, written into that day's
@@ -21906,6 +21913,8 @@ function notePriorWeeks(weeks){
      against the corrected chain rather than the one that assumed a beginner. */
   delete S.lmCalSeeded;
   try{ seedCalibrationFromHistory(); }catch(e){}
+  /* A block in progress was held to an estimate built on the wrong training age. */
+  try{ resnapVolHold(); }catch(e){}
   return true;
 }
 const EXP_DROP_SESSIONS_WK = 1.5;                      // under this, drop one level
@@ -23226,6 +23235,8 @@ function openPriorTrainingAsk(){
        against the corrected chain rather than the one that assumed a beginner. */
     delete S.lmCalSeeded;
     try{ seedCalibrationFromHistory(); }catch(e){}
+    /* So the toast below is true even mid-block: see resnapVolHold. */
+    try{ resnapVolHold(); }catch(e){}
     save(); queueSync(); hideModal(); render();
     toast("Targets updated for " + experienceWhy().level + " training age", "good");
   });
@@ -25739,7 +25750,10 @@ function volMigrate(){
     const A = (()=>{ try{ return bodyAnalysis(); }catch(e){ return null; } })();
     GKEYS.forEach(g=>{
       if(!A) return;
-      try{ const L = adjustedLandmarks(A, g); before[g] = {mev: L.mev, mav: L.mav, mrv: L.mrv}; }
+      try{
+        const L = adjustedLandmarks(A, g);
+        before[g] = {mev: L.mev, mav: L.mav, mrv: L.mrv, model: L.model, pub: L.modelPub};
+      }
       catch(e){}
     });
   } finally { VOL_MIGRATION_BYPASS = false; }
@@ -25808,10 +25822,22 @@ function volMigrate(){
   /* A BLOCK ALREADY UNDER WAY KEEPS THE FIGURES IT WAS PLANNED AGAINST. Snapshotted
      only when there is a block to protect \u2014 somebody who has not started one has
      nothing to hold, and an empty hold would just be a stale object to reason about. */
+  /* WHAT IS SNAPSHOTTED IS THE APP\u2019S OWN ESTIMATE, not the finished figure.
+
+     Storing the finished figure is what made the hold swallow the scale dial, the goal
+     and the calibration source: those settings are applied to the estimate, so a hold
+     over the top of them pinned them too. Stored this way the hold freezes the one thing
+     it is for, and every setting below the model line in adjustedLandmarks goes on
+     working mid-block. Both estimates are kept so the calibration switch stays live. */
   if(S.blockStart > 0 && (S.sessions || []).some(x=> x && x.startedAt >= S.blockStart)){
-    const lm = {};
-    GKEYS.forEach(g=>{ if(before[g]) lm[g] = before[g]; });
-    if(Object.keys(lm).length) S.volHold = {blockStart: S.blockStart, lm, at: Date.now()};
+    const lm = {}, pub = {};
+    GKEYS.forEach(g=>{
+      if(!before[g] || !before[g].model) return;
+      lm[g] = before[g].model;
+      pub[g] = before[g].pub || before[g].model;
+    });
+    if(Object.keys(lm).length)
+      S.volHold = {blockStart: S.blockStart, lm, pub, v: 2, at: Date.now()};
   }
 
   /* WHERE THE APP NOW DISAGREES WITH A NUMBER THE PERSON SET THEMSELVES, by more than a
@@ -26130,30 +26156,70 @@ function volStartTarget(opts){
 
    A block already under way finishes on the numbers it started on, so a change to the
    volume model cannot move a target somebody is three weeks into chasing.
-   adjustedLandmarks states the exception in its own comment -- "a number the person set
-   by hand is never held" -- and honours it for a hand-set MEV, MAV or MRV.
 
-   THREE OTHER DELIBERATE CHOICES MOVE LANDMARKS AND WERE NOT EXEMPT: the scale dial,
-   the training goal, and where the figures come from. Each of them wrote its setting,
-   logged it, re-rendered, and changed nothing a reader could see until the block ended.
+   THAT RULE WAS WRITTEN AS A LIST OF EXCEPTIONS and the list is what went wrong. The
+   hold froze the finished figure and named the settings allowed through; anything not
+   named was swallowed. Three were missing in turn -- the scale dial, the training goal,
+   and where the figures come from -- and each one wrote its setting, logged it,
+   re-rendered the screen and changed nothing a reader could see until the block ended.
    The goal's own description says it "moves the volume targets the Body tab measures you
-   against", and settingsPlanHTML records that this control was once deleted BECAUSE its
-   description was a lie and restored because the claim had become true. It was not true
-   again while a hold was in force.
+   against", and settingsPlanHTML records that the control was once deleted BECAUSE its
+   description was a lie and restored once the claim became true. It was not true again
+   while a hold was in force.
 
-   So the hold lets go when any of the three is used. Dropped rather than rescaled: what
-   it stores was snapshotted under whatever settings were in force then, so re-deriving
-   from it would stack one adjustment on another. */
-function releaseVolHold(){
-  if(!S.volHold) return false;
-  S.volHold = null;
+   So the rule is stated the other way round. The hold now freezes ONE thing, the app's
+   own estimate, and adjustedLandmarks applies it at the line where that estimate ends.
+   Your settings all live below that line and move your targets because of where they
+   are. There is no list to forget, and nothing to release: the hold and your settings
+   no longer compete for the same number. lmholds.mjs walks every user-facing setting
+   that touches a landmark and requires each one to move it during a hold. */
+/* AND WHEN YOU CORRECT SOMETHING THE ESTIMATE WAS BUILT ON, THE HELD ESTIMATE IS RETAKEN.
+
+   Your training age is not a preference applied on top of the app\u2019s estimate; it is an
+   input the estimate is computed FROM, which is why it sits above the model line rather
+   than below it with the goal and the scale. So it cannot pass through a hold the way
+   those do \u2014 there is nothing of it left on the far side to pass.
+
+   Releasing the hold instead would be wrong: the block would lose the protection it was
+   given. What is true here is narrower than either. The app was working from the wrong
+   training age, so the estimate it froze was the wrong estimate, and the honest repair is
+   to freeze the right one. The block keeps its hold; the hold gets corrected figures.
+
+   Without this, answering "I have trained for six years" raised a toast reading "Targets
+   updated for advanced training age" and moved nothing a reader could see \u2014 the fifth
+   control to be swallowed by this one rule, and the reason the rule is now stated as one
+   line in adjustedLandmarks rather than a list of exemptions. */
+function resnapVolHold(){
+  const h = S.volHold;
+  if(!h || !h.lm) return false;
+  let A; try{ A = bodyAnalysis(); }catch(e){ return false; }
+  const lm = {}, pub = {};
+  GKEYS.forEach(g=>{
+    let L; try{ L = adjustedLandmarks(A, g); }catch(e){ return; }
+    if(!L || !L.model) return;
+    lm[g] = L.model;
+    pub[g] = L.modelPub || L.model;
+  });
+  if(!Object.keys(lm).length) return false;
+  /* The hold\u2019s OWN block, not whatever is running now: a hold whose block has already
+     ended is expired, and re-stamping it with the current block would bring it back. */
+  S.volHold = {blockStart: h.blockStart, lm, pub, v: 2, at: Date.now()};
   return true;
 }
 function volHoldFor(g){
   const h = S.volHold;
   if(!h || !h.lm) return null;
+  /* A v1 hold stored the FINISHED figure, your goal and scale already baked in. Reading
+     one as a model figure would apply both a second time, so it is not read at all: a
+     block still running when this version lands picks the current estimate up now, which
+     is exactly what the two narrower fixes before this one already did. */
+  if(h.v !== 2) return null;
   if(h.blockStart !== (S.blockStart || 0)) return null;
-  const v = h.lm[g];
+  /* Whichever estimate you are asking for right now, frozen as it stood when the block
+     began -- so the switch still works mid-block without the app's own learning moving
+     the target underneath it. */
+  const src = (calibrationOff() && h.pub) ? h.pub : h.lm;
+  const v = src[g] || h.lm[g];
   return (v && (v.mev > 0 || v.mav > 0 || v.mrv > 0)) ? v : null;
 }
 function adjustedLandmarks(A, g){
@@ -26164,15 +26230,6 @@ function adjustedLandmarks(A, g){
   const ib = INDIRECT_BASIS_CORRECTION[g] || 1;
   let mev = G.mev * ib * sc.mev, mav = G.mav * ib * sc.mav, mrv = G.mrv * ib * sc.mrv;
   const why = [{k:"Experience", v:exp, note:"base numbers scaled for an "+exp+" lifter"}];
-  /* Second, and before anything read off the log, because it is a statement about what
-     the numbers are FOR rather than an adjustment to them. */
-  const goal = trainingGoal();
-  const gs = GOAL_SCALE[goal];
-  if(goal !== "muscle"){
-    mev *= gs.mev; mav *= gs.mav; mrv *= gs.mrv;
-    why.push({k:"Training for", v:(GOALS[goal] || {}).name || goal, note:gs.note});
-  }
-
   /* The recovery-side factors accumulate here and are applied once, clamped, rather than
      multiplying into mrv as they are discovered. Experience and goal are NOT in this
      product: they say which band this person is on, not how much recovery they have. */
@@ -26297,11 +26354,56 @@ function adjustedLandmarks(A, g){
 
      Part B fills it in. Until then landmarkCalibration() returns 1 for everything, which
      leaves the chain exactly as it was. */
+  /* Snapshotted on BOTH sides of the calibration, because the switch that turns it off
+     is a user-facing choice while the figure it swaps in is model-derived. One snapshot
+     could only serve one answer, and a block held under the other one would find the
+     switch dead -- the same shape of bug as the dial and the goal. Two snapshots, and
+     volHoldFor hands back whichever estimate you are currently asking for. */
+  const modelPub = {mev, mav, mrv};
   const cal = landmarkCalibration(g);
   if(cal.mev !== 1 || cal.mav !== 1 || cal.mrv !== 1){
     mev *= cal.mev; mav *= cal.mav; mrv = capCalibratedMRV(mrv * cal.mrv);
     why.push({k:"Your own response", v:cal.label || "learned from your training",
       note: cal.note || "adjusted by how your lifts and recovery actually behaved at these volumes"});
+  }
+  /* ============ END OF THE MODEL, AND THE ONLY THING A HOLD FREEZES ============
+
+     Everything above this line is the app's own estimate: published figures for the
+     muscle, scaled by experience and by what it can read off your log. Everything below
+     it is yours \u2014 what you are training for, your scale, and any figure you typed in
+     yourself.
+
+     The hold used to sit at the very bottom and freeze the finished number, with a list
+     of exceptions for the settings that had to be let through. That list was the bug,
+     because it had to be remembered. The scale dial was missing from it, then the goal,
+     then the calibration source; each one in turn wrote itself, logged itself,
+     re-rendered the screen and changed nothing anybody could see. A fourth would have
+     looked exactly the same.
+
+     So the hold is inverted. It freezes the model figure, here, where the model ends, and
+     nothing else. A setting below this line moves your targets because of WHERE IT IS,
+     not because somebody remembered to add it to a list. */
+  const model = {mev, mav, mrv};
+  const hold = volHoldFor(g);
+  if(hold){
+    if(hold.mev > 0) mev = hold.mev;
+    if(hold.mav > 0) mav = hold.mav;
+    if(hold.mrv > 0) mrv = hold.mrv;
+    why.push({k:"Held for this block", v:"the estimate you started on",
+      note:"the app\u2019s figures were updated while this block was running, so it "
+        + "finishes on the estimate it was planned against. The new estimate takes over "
+        + "at the next block. Your own settings below still move these targets \u2014 it "
+        + "is only the app\u2019s guess that is held"});
+  }
+
+  /* WHAT THE NUMBERS ARE FOR. A statement about the point of the training rather than an
+     adjustment to the model, which is why it belongs on this side of the line: the goal
+     is yours, so changing it moves your targets today, mid-block or not. */
+  const goal = trainingGoal();
+  const gs = GOAL_SCALE[goal];
+  if(goal !== "muscle"){
+    mev *= gs.mev; mav *= gs.mav; mrv *= gs.mrv;
+    why.push({k:"Training for", v:(GOALS[goal] || {}).name || goal, note:gs.note});
   }
   const sc2 = lmScale();
   if(sc2 !== 1){
@@ -26335,29 +26437,15 @@ function adjustedLandmarks(A, g){
     why.push({k:"Your MRV", v:man.mrv + " sets a week",
       note:"you set this yourself, so the computed ceiling is not used for it"});
   }
-  /* A BLOCK IN PROGRESS FINISHES ON THE NUMBERS IT STARTED ON.
-
-     Changing the model mid-block would move the target somebody is three weeks into
-     chasing, and then judge the block against a line that was not there when they
-     planned it. The migration snapshots the old figures for whatever block was running
-     when it ran, and they stand until that block ends. A number the person set by hand
-     is never held \u2014 they can still change their own mind mid-block. */
-  const hold = volHoldFor(g);
-  if(hold){
-    let held = false;
-    if(man.mev == null && hold.mev > 0){ mev = hold.mev; held = true; }
-    if(man.mav == null && hold.mav > 0){ mav = hold.mav; held = true; }
-    if(man.mrv == null && hold.mrv > 0){ mrv = hold.mrv; held = true; }
-    if(held) why.push({k:"Held for this block", v:"the figures you started on",
-      note:"the targets were updated while this block was running, so it finishes on the "
-        + "numbers it was planned against. The new figures take over at the next block"});
-  }
   const R = v => Math.max(0, Math.round(v*10)/10);
   mev = R(mev); mav = R(Math.max(mav, mev+1)); mrv = R(Math.max(mrv, mav+1));
   /* The same three numbers expressed over this cycle rather than a week. Secondary
      everywhere: shown only in the advanced view, and always labelled. */
   const cycle = {mev: R(mev*scale), mav: R(mav*scale), mrv: R(mrv*scale)};
-  return {mev, mav, mrv, cycle, weekly:{mev, mav, mrv}, scale, why, exp,
+  /* `model` is the estimate before any of your own settings touched it. The migration
+     snapshots THAT for a block in progress, which is what makes the hold freeze the
+     model and let everything else through. */
+  return {mev, mav, mrv, cycle, weekly:{mev, mav, mrv}, scale, why, exp, model, modelPub,
           base:{mev:G.mev, mav:G.mav, mrv:G.mrv}};
 }
 function landmarkExplainerHTML(A){
@@ -47567,11 +47655,9 @@ function tgCommit(pct, was){
      and visibly did nothing: every row kept its held figures until the next block began.
      Asked as "if I move the dial, do the floors update?"; the answer was no.
 
-     The hold is DROPPED rather than rescaled, on purpose. What it stores was snapshotted
-     with whatever scale was in force at the time, so multiplying it again would stack one
-     scale on another. Dropping it puts every muscle back on the live chain, which is what
-     somebody moving this dial is asking for. */
-  releaseVolHold();
+     The hold no longer has to be let go here. It freezes the app's own estimate at the
+     line where that estimate ends, and the scale is applied below that line, so moving
+     this dial moves every muscle whether a block is running or not. */
   logPlanChange("rule", null, "Volume targets",
     [was + "% → " + pct + "% of the published figures"],
     {note: "You scaled every muscle's targets from Settings."});
@@ -50423,8 +50509,6 @@ function bind(){
     const off = b.dataset.lmcal === "pub";
     if(off === calibrationOff()) return;
     S.prefs = Object.assign({}, S.prefs, {lmNoCal: off});
-    /* Same reason as the goal and the dial: this is your hand, not the app's. */
-    releaseVolHold();
     save(); queueSync(); render();
     toast(off ? "Back to the published figures" : "Using what your own training says", "good");
   });
@@ -51516,9 +51600,6 @@ function bind(){
   document.querySelectorAll("[data-setgoal]").forEach(b=> b.onclick = ()=>{
     S.setup = Object.assign({name:"Me", level:"intermediate", gear:"full", at:Date.now()},
                             S.setup || {}, {goal: b.dataset.setgoal});
-    /* The goal scales every landmark through GOAL_SCALE, so a block hold would swallow
-       it whole -- see releaseVolHold. */
-    releaseVolHold();
     save(); queueSync(); render();
     toast("Training for " + ((GOALS[b.dataset.setgoal]||{}).name || "").toLowerCase());
   });
@@ -63595,8 +63676,25 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.52";
+const NEWS_FOR = "2026.11.17.53";
 const NEWS = [
+  {k: "Your settings reach your targets, all of them",
+   s: ["Three releases in a row fixed the same bug in three different controls: a setting "
+     + "that wrote itself, logged itself and then left every volume target where it was. "
+     + "The scale dial, then the training goal and where the figures come from. A fourth "
+     + "was waiting \u2014 your training age \u2014 and a fifth would have looked the same.",
+     "The rule behind all of them is a good one: a block already under way finishes on "
+     + "the numbers it started on, so the app cannot move a target you are three weeks "
+     + "into chasing. It was written as a list of settings allowed through, and the list "
+     + "was the problem, because it had to be remembered.",
+     "So it is stated the other way round. A block now holds exactly one thing \u2014 the "
+     + "app\u2019s own estimate \u2014 and everything you set is applied after it. Your settings "
+     + "move your targets because of where they sit, not because somebody listed them, "
+     + "and the block keeps the protection it was given either way.",
+     "One figure changes with this: if your own logged response had pushed a ceiling up "
+     + "and you train for strength, fat loss or general health, that ceiling now reflects "
+     + "your goal too. It was being compressed by the goal and then partly un-compressed "
+     + "again a step later. Floors and targets are unchanged."]},
   {k: "Your goal moves your targets again",
    s: ["Changing what you are training for \u2014 or where the figures come from \u2014 set the "
      + "choice, wrote it to your plan history, and then left every volume target exactly "

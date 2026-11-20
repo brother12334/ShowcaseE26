@@ -16,7 +16,16 @@ import { readFileSync } from 'node:fs';
    This spec is the one that would have caught it: it drives the real dial with the
    keyboard and requires the landmarks, the rows and the bars to move together, on screen
    AND in storage. Its control is the half that makes it mean something -- the hold must
-   genuinely be in force first, or the test passes on an app that simply never holds. */
+   genuinely be in force first, or the test passes on an app that simply never holds.
+
+   THE FIX IT WAS WRITTEN FOR HAS SINCE BEEN REPLACED BY A STRUCTURAL ONE, and this spec
+   changed with it. The first fix had the dial RELEASE the hold, which worked and left the
+   next control to be found the same way. The hold now freezes only the app's own estimate
+   and the dial is applied below it, so the hold STAYS IN FORCE and the numbers move
+   anyway -- a better answer, because the block keeps the protection it was given. The
+   assertions that demanded S.volHold be gone were asserting the shape of the old fix, not
+   the thing anybody wanted; they now require the hold to survive and the figures to move.
+   lmholds.mjs owns the general rule across every setting. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const b = await chromium.launch();
 const p = await b.newPage({viewport:{width:390,height:1600}});
@@ -68,8 +77,11 @@ await p.evaluate(fx=>{
 console.log("\n1. THE HOLD IS REALLY IN FORCE, OR THE REST PROVES NOTHING");
 /* Planted the way the migration plants it: a snapshot of the figures the running block
    began on. Without this, every assertion below passes on an app that never holds. */
+/* v2: what a hold stores is the app's ESTIMATE, before the goal, the scale or anything
+   hand-set is applied to it. On this fixture the goal is "muscle" and the scale is 1, so
+   these come through to the screen as themselves. */
 await p.evaluate(()=> boot(S2=>{
-  S2.volHold = {blockStart: S2.blockStart || 0, at: Date.now(),
+  S2.volHold = {blockStart: S2.blockStart || 0, at: Date.now(), v: 2,
     lm: {chest: {mev: 10, mav: 19, mrv: 20}, quads: {mev: 9, mav: 14, mrv: 19}}};
 }));
 let r = await p.evaluate(()=> window.snap());
@@ -86,7 +98,9 @@ r = await p.evaluate(()=> window.snap());
 ck("the scale itself moved", r.scale < before.scale,
    Math.round(before.scale*100) + "% -> " + Math.round(r.scale*100) + "%");
 ck("and it reached disk", r.onDisk === r.scale, String(r.onDisk));
-ck("the hold let go, because this was your own hand", r.held === false, String(r.held));
+/* NOT "the hold let go" any more. The scale is applied below the line where the app's
+   estimate ends, so the dial moves every figure WITHOUT the block losing its hold. */
+ck("the hold is still in force, as the block was promised", r.held === true, String(r.held));
 
 const names = Object.keys(before.rows);
 /* TWO KINDS OF MUSCLE MUST NOT MOVE, and asserting "every one" caught both as failures
@@ -145,47 +159,54 @@ ck("CONTROL: the dial moved", after4.scale < 100, after4.scale + "%");
 ck("a floor you set by hand is not scaled with the rest",
    Math.abs(after4.mine2 - r.mine1) < 0.001, r.mine1 + " -> " + after4.mine2);
 
-console.log("\n5. THE OTHER TWO DELIBERATE CHOICES RELEASE IT TOO");
+console.log("\n5. THE OTHER TWO DELIBERATE CHOICES GET THROUGH TOO");
 /* The dial was the first found. The goal and the calibration source also move every
    landmark and were held by the same rule, so each changed its setting, logged it,
-   re-rendered and did nothing anybody could see. All three are one rule now, and a
-   regression in any of them would otherwise look exactly like the screen working. */
-for(const [what, page, sel, kind, movesNow] of [
-  ["the training goal", "plan", '[data-setgoal="strength"]', "goal", true],
-  ["where the figures come from", "targets", '[data-lmcal="pub"]', "cal", false]
+   re-rendered and did nothing anybody could see. All three are one rule now: they are
+   applied where a hold cannot reach them, so each one moves the figures while the block
+   keeps its hold. A regression in any of them would otherwise look exactly like the
+   screen working. */
+for(const [what, page, sel, kind] of [
+  ["the training goal", "plan", '[data-setgoal="strength"]', "goal"],
+  ["where the figures come from", "targets", '[data-lmcal="pub"]', "cal"]
 ]){
   const res = await p.evaluate(async ([page, sel, kind])=>{
-    boot(S2=>{
-      S2.volHold = {blockStart: S2.blockStart || 0, at: Date.now(),
-        lm: {chest: {mev: 10, mav: 19, mrv: 20}}};
+    boot(S2=>{ S2.volHold = null; });
+    /* PLANTED FROM THE LIVE CHAIN rather than invented, because the calibration switch
+       is served by the hold carrying BOTH estimates -- the one with your own logged
+       response in it and the published one. A hold with only the first would leave that
+       switch dead, which is the bug this is here to catch. */
+    const A0 = bodyAnalysis();
+    const lm = {}, pub = {};
+    GKEYS.forEach(g=>{
+      const L = adjustedLandmarks(A0, g);
+      lm[g] = L.model; pub[g] = L.modelPub;
     });
+    S.volHold = {blockStart: S.blockStart || 0, at: Date.now(), v: 2, lm, pub};
     /* Each control lives on its own screen; boot() lands on targets. */
     TAB='sync'; SET_PAGE=page; render();
-    const heldFirst = !!S.volHold;
-    const was = Math.round(bodyAnalysis().lm.chest.mev * 100) / 100;
+    const heldFirst = GKEYS.every(g=> !!volHoldFor(g));
+    /* THE WHOLE BAND, not just the floor. This fixture has a hand-set chest MEV, which
+       is exempt from everything by design -- reading only that one number asked whether
+       a hand-set floor had moved, and the answer is correctly no. */
+    const band = ()=>{ const L = bodyAnalysis().lm.chest;
+      const R = v=> Math.round(v * 100) / 100;
+      return R(L.mev) + "/" + R(L.mav) + "/" + R(L.mrv); };
+    const was = band();
     const el = document.querySelector('#app ' + sel);
     if(!el) return {none:true, heldFirst};
     el.click();
     await new Promise(x=> setTimeout(x, 80));
-    return {heldFirst, was, now: Math.round(bodyAnalysis().lm.chest.mev * 100) / 100,
+    return {heldFirst, was, now: band(),
             held: !!S.volHold,
             changed: kind === "goal" ? trainingGoal() : String(calibrationOff())};
   }, [page, sel, kind]);
-  ck("CONTROL: a hold was in force before " + what + " changed", res.heldFirst === true);
+  ck("CONTROL: a hold was in force before " + what + " changed", res.heldFirst === true,
+     String(res.heldFirst));
   ck("CONTROL: " + what + " was on its screen and changed", !res.none && !!res.changed,
      res.none ? "control not found" : res.changed);
-  ck(what + " lets the hold go", res.held === false, String(res.held));
-  if(movesNow){
-    ck("and the landmarks move", res.was !== res.now, res.was + " -> " + res.now);
-  } else {
-    /* THE CALIBRATION CANNOT MOVE ANYTHING YET, and that is not this fix failing.
-       landmarkCalibration() returns 1 for every muscle until its Part B is filled in --
-       adjustedLandmarks says so in its own comment -- so switching the source off
-       subtracts a factor of one. What matters here is that the hold no longer swallows
-       the switch; the day calibration has a value, it will be free to move. */
-    ck("CONTROL: and it has nothing to move yet, which is why the figure holds",
-       res.was === res.now, res.was + " -> " + res.now);
-  }
+  ck(what + " moves the landmarks", res.was !== res.now, res.was + " -> " + res.now);
+  ck("and the block keeps its hold", res.held === true, String(res.held));
 }
 
 ck("no page errors", errs.length === 0, errs.join(" | "));

@@ -160,17 +160,26 @@ console.log("5 - THE PHASE IS A SETTING, AND IT TRAVELS");
     TAB = "sync"; SET_PAGE = "plan"; render();
     await new Promise(r=> setTimeout(r, 60));
     const btns = document.querySelectorAll("[data-eat]");
-    const onNow = Array.from(btns).find(b=> b.classList.contains("on"));
+    /* THE MARK MOVED FROM A CLASS TO aria-pressed, which is what the shared Settings
+       control library sets and what the copper fill is styled off. The old .ch and
+       .ob-opt lists marked the current option with class "on", which no screen reader
+       ever saw; this screen was rebuilt on the library, so reading the class here was
+       reading a convention this screen no longer has. Both options are still offered,
+       the current one is still filled, and now it is announced as well. */
+    const pressed = Array.from(btns).filter(b=> b.getAttribute("aria-pressed") === "true");
     return {ok, bad, stored: S.eatPhase, read: eatPhase(),
             inSettings: btns.length === 3,
-            on: onNow ? onNow.dataset.eat : null,
+            marked: pressed.length,
+            on: pressed.length === 1 ? pressed[0].dataset.eat : null,
             backed: BACKUP_FIELDS.indexOf("eatPhase") > -1,
             inBackup: backupObject().eatPhase};
   });
   ck("a real phase is accepted", r.ok === true && r.stored === "lose", JSON.stringify(r));
   ck("nonsense is refused", r.bad === false && r.read === "lose", JSON.stringify(r));
   ck("Settings offers all three", r.inSettings === true, String(r.inSettings));
-  ck("with the current one marked", r.on === "lose", String(r.on));
+  ck("with exactly one marked", r.marked === 1, String(r.marked));
+  ck("and it is the current one, announced not just coloured",
+     r.on === "lose", String(r.on));
   ck("it is a backup field", r.backed === true, String(r.backed));
   ck("and travels in a backup", r.inBackup === "lose", String(r.inBackup));
 }

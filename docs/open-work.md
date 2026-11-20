@@ -755,6 +755,75 @@ exist to record the patch and its undo.
 
 ---
 
+## 27. The block hold swallowed settings, five times — FIXED STRUCTURALLY (2026.11.17.53)
+
+A block already under way finishes on the numbers it started on, so a change to the volume
+model cannot move a target somebody is three weeks into chasing. Good rule. It was written
+as a list: the hold froze the **finished** figure and named the settings allowed through.
+
+Anything not named was swallowed, and the failure mode is the worst kind — the setting
+wrote itself, logged itself, re-rendered the screen, and moved nothing. It looked exactly
+like a control that worked.
+
+Five were found, one at a time, each fixed on its own:
+
+| Control | Shipped as |
+|---|---|
+| The scale dial, Settings › Volume targets | `.50` |
+| The training goal, Settings › Your plan | `.52` |
+| Where the figures come from | `.52` |
+| Your training age, the question asked once | `.53` |
+| — and the next one would have looked the same | |
+
+### The inversion
+
+`adjustedLandmarks` now has one line in it that says where the app's own estimate ends.
+Above it: the published figures, experience, and everything read off the log — frequency,
+intensity, exercise mix, recovery, the window, the learned calibration. Below it:
+**everything that is yours** — the goal, the scale, any landmark you set by hand.
+
+The hold freezes the figure at that line and nothing else. A setting below the line moves
+your targets because of where it is, not because somebody remembered to list it. There is
+nothing to release, so `releaseVolHold()` is gone along with its three call sites, and the
+block keeps the protection it was given instead of losing it to the first setting tapped.
+
+Two cases do not fit the simple split, and both are handled rather than ignored:
+
+- **Where the figures come from** is a user-facing switch over a model-derived figure. One
+  snapshot could only serve one answer, so a hold stores **both** estimates — with your
+  logged response and without — and `volHoldFor` hands back whichever is being asked for.
+- **Your training age** is an input the estimate is computed *from*, not a factor applied
+  on top, so there is nothing of it left below the line to pass through. Releasing the hold
+  would lose the block's protection; the honest repair is narrower, and `resnapVolHold()`
+  re-freezes the corrected estimate. The block keeps its hold and gets the right numbers.
+
+`lmholds.mjs` is the half that keeps this true: it enumerates every user-facing setting that
+can move a landmark and requires each one to move it **during** a hold, with the control
+that the hold must genuinely be in force and genuinely be what the rows are showing first.
+A sixth of these cannot be added without being listed there.
+
+### One figure changed, deliberately
+
+A v1 hold is not read (it stored the finished figure, so re-reading it as a model figure
+would apply the goal and the scale twice) and `migrate()` clears it. A block running across
+the upgrade goes back onto the live estimate — the same thing `.50` and `.52` already did.
+
+Moving the goal below the model line also moved **MRV, on non-default goals only**: 25 of
+228 muscle/goal/scale combinations on the fixture, by up to 3.1 sets. Measured against the
+`.52` build rather than reasoned about, after an arithmetic reconstruction gave an answer
+that turned out to be wrong.
+
+The cause is the band floor `if(mrv < mav + 1) mrv = mav + 1`. On `lean` the goal compresses
+the ceiling harder than the target (×0.72 against ×0.85) — deliberately, you recover less in
+a deficit. Under the old order that compression made the band degenerate, the floor then
+**re-widened** it, and the learned calibration multiplied the artificial widening by 1.30.
+Applied to the model's own band instead, the floor does what its comment says it is for, and
+the goal compresses afterwards. The final `Math.max(mrv, mav + 1)` still guarantees a real
+band. MEV and MAV are unchanged everywhere; `muscle`, the default goal, is unchanged
+everywhere because `GOAL_SCALE` is all 1.00 for it.
+
+---
+
 ## 26. `smallestPlate()` ignores the gym you are standing in — OPEN
 
 `kitFor(sess)` merges a gym's own `plateStep` over the global one, and the gym kit editor
