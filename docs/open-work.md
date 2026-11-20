@@ -967,12 +967,23 @@ returns every figure exactly.
 claim mean something: there IS a Smith set logged away from home, at a gym whose carriage
 differs, and its stored figure is untouched by either.
 
-### Not built, pending a decision
+### Not built, by decision — a guard instead
 
-The Accept/Skip migration itself. It would find nothing on this profile. It would only
-have something to find on a profile written in **"plates only"**, where `barAdd` is
-stamped per entry and could record a carriage that was wrong at the time. This one has
-never been in that mode.
+The Accept/Skip migration was dropped: it would find nothing on this profile, and would
+only have something to find on a log written in **"plates only"**, where `barAdd` is
+stamped per entry. This one has never been in that mode.
+
+`barstamp.mjs` stands in its place. It watches for the one state Part 1 could have created
+and Part 2 closed: an entry stamped with the **global** carriage while the gym that
+session was performed at has its own, different one.
+
+The signature is deliberately narrow. "The stamp disagrees with the gym" is the wrong
+test — a stamp is meant to be authoritative, so a stamp that differs from what the gym
+says today is usually right and the gym's figure is what changed (you remeasured the
+carriage). §3 plants exactly that case and requires it **not** to be flagged. §1 plants
+the real bug and requires it to be caught. §4 drives a real mode switch on the shipping
+build and requires the detector to object to nothing — which is the end of it: the code
+path can no longer produce the state.
 
 ## 26c. Comments carry literal `\u2014` escape text — OPEN, cosmetic
 
