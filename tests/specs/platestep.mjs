@@ -52,12 +52,31 @@ ck("and the Smith takes the same plates, so the same jump", r.smith === 5, r.smi
 ck("CONTROL: the old value is still stored, it is simply not in charge", r.stored === 10, r.stored);
 
 console.log("\n2. IT IS STILL A FALLBACK FOR SOMEBODY WHO NEVER TICKED ANY");
+/* "NEVER TICKED ANY" NOW MEANS ANYWHERE, AND IT DID NOT USED TO.
+
+   This cleared the global plate list and nothing else, which was the whole of the answer
+   while smallestPlate() read only the global profile. Item 26 routed the engine through
+   kitFor, so a gym\u2019s own plate list is consulted first -- and every gym in this fixture
+   has one. Clearing the global list alone left the home gym still holding 2.5s, so the
+   fallback under test was never reached and the section was asserting the old engine.
+
+   The scenario it means is somebody who has named no plates at all, so the setup names
+   none at all. The gym-by-gym case is section 5's, and gymkit.mjs owns the rule. */
 r = await p.evaluate(()=>{
-  boot(S2=>{ S2.prefs.plates = null; S2.prefs.plateStep = 10; });
-  const a = {smallest: smallestPlate(), bar: loadStepFor("Barbell Back Squat")};
-  boot(S2=>{ S2.prefs.plates = null; S2.prefs.plateStep = null; });
+  const noPlatesAnywhere = S2=>{
+    S2.prefs.plates = null;
+    (S2.gyms || []).forEach(g=>{ g.plates = null; g.plateStep = null; });
+  };
+  boot(S2=>{ noPlatesAnywhere(S2); S2.prefs.plateStep = 10; });
+  const a = {smallest: smallestPlate(), bar: loadStepFor("Barbell Back Squat"),
+             /* The control that would have caught the stale setup: with the list really
+                gone, no gym can still be answering from one. */
+             anyGymHasPlates: (S.gyms || []).some(g=> (g.plates || []).length)};
+  boot(S2=>{ noPlatesAnywhere(S2); S2.prefs.plateStep = null; });
   return Object.assign(a, {none: smallestPlate(), noneBar: loadStepFor("Barbell Back Squat")});
 });
+ck("CONTROL: no plate list is left anywhere, global or per gym",
+   r.anyGymHasPlates === false, String(r.anyGymHasPlates));
 ck("with no plates named the remembered step is used", r.smallest === 10, r.smallest);
 ck("so the bar moves in 20", r.bar === 20, r.bar);
 ck("CONTROL: with neither, there is no rounding to do", r.none === 0 && r.noneBar === 0,
@@ -81,8 +100,19 @@ ck("and the old editable step is gone while plates are ticked", r.editable === 0
 ck("CONTROL: the sentence that was untrue is gone", r.lie === false);
 
 console.log("\n4. TICKING A PLATE CHANGES THE JUMP, AND IS WHAT YOU EDIT");
+/* THIS CHIP EDITS THE GLOBAL LIST, AND ITEM 26 CHANGED WHO LISTENS TO IT.
+
+   The picker used to be the only plate list the engine read, so un-ticking a 2.5 moved
+   every jump in the app. The engine now reads the gym you are standing in, and a gym
+   with its own list is answered from that list -- so this chip moves the jump at every
+   gym that has NOT named its own plates, and no longer moves one that has.
+
+   That is the rule working, and it is also a thing somebody can be surprised by, so both
+   halves are written down: here, the gym that inherits; in section 4b, the gym that does
+   not. The setup names the home gym as one that inherits, which the old setup got for
+   free because there was nothing else to read. */
 r = await p.evaluate(async ()=>{
-  boot();
+  boot(S2=>{ (S2.gyms || []).forEach(g=>{ g.plates = null; g.plateStep = null; }); });
   TAB='sync'; SET_PAGE='where'; render();
   const before = smallestPlate();
   const chip = document.querySelector('#app [data-prefpl="2.5"]');
@@ -91,13 +121,40 @@ r = await p.evaluate(async ()=>{
   const after = smallestPlate();
   const stored = (trainPrefs().plates || []).slice();
   return {before, after, stored, had: !!chip,
+          ownList: (homeGym() || {}).plates || null,
           bar: loadStepFor("Barbell Back Squat")};
 });
 ck("CONTROL: the 2.5 chip is on the screen", r.had);
+ck("CONTROL: and this gym inherits, rather than naming its own plates",
+   r.ownList === null, JSON.stringify(r.ownList));
 ck("it started at 2.5", r.before === 2.5, r.before);
 ck("un-ticking it moves the smallest plate up to 5", r.after === 5, r.after);
 ck("so the bar now moves in 10", r.bar === 10, r.bar);
 ck("and the stored list is what changed", r.stored.indexOf(2.5) === -1, JSON.stringify(r.stored));
+
+console.log("\n4b. AND A GYM THAT NAMED ITS OWN PLATES IS NOT MOVED BY IT");
+/* The other half, and the consequence worth knowing about: on this fixture every gym has
+   its own list, so the global picker reaches none of them. */
+r = await p.evaluate(async ()=>{
+  boot();
+  const own = ((homeGym() || {}).plates || []).slice();
+  TAB='sync'; SET_PAGE='where'; render();
+  const before = smallestPlate();
+  const chip = document.querySelector('#app [data-prefpl="2.5"]');
+  if(chip) chip.click();
+  await new Promise(x=> setTimeout(x, 60));
+  return {own, before, after: smallestPlate(),
+          global: (trainPrefs().plates || []).slice(),
+          stillOwn: ((homeGym() || {}).plates || []).slice()};
+});
+ck("CONTROL: the home gym has named its own plates", r.own.indexOf(2.5) > -1,
+   JSON.stringify(r.own));
+ck("CONTROL: and the tap really did change the global list",
+   r.global.indexOf(2.5) === -1, JSON.stringify(r.global));
+ck("the gym's own list is untouched", r.stillOwn.indexOf(2.5) > -1,
+   JSON.stringify(r.stillOwn));
+ck("and the jump there is still its own", r.after === 2.5 && r.after === r.before,
+   r.before + " -> " + r.after);
 
 console.log("\n5. THE RECONCILIATION SPEAKS ONLY WHEN SOMETHING ACTUALLY CHANGED");
 r = await p.evaluate(()=>{

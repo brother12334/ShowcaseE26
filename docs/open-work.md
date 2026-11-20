@@ -824,7 +824,85 @@ everywhere because `GOAL_SCALE` is all 1.00 for it.
 
 ---
 
-## 26. `smallestPlate()` ignores the gym you are standing in — OPEN
+## 26. `smallestPlate()` ignored the gym you are standing in — PART 1 DONE (2026.11.17.56)
+
+`kitFor(sess)` has merged a gym's own gear over the global settings since gyms existed,
+and **nothing in the engine ever called it.** `smallestPlate()`, `loadStepFor()` and
+`smithWeight()` each read `trainPrefs()` directly, so a gym's plates, its plate step and
+its Smith carriage were stored, displayed on "Where you train", and ignored the moment a
+weight was suggested.
+
+### What it cost, measured on the real export
+
+| gym | sessions | differs from the global profile |
+|---|---|---|
+| Palma Vista (home) | 37 | nothing |
+| Lotus | 1 | Smith carriage **35 lb**, not 25 |
+| Uptown | 1 | Smith carriage **35 lb**, not 25 |
+| untagged | 35 | — assumed home, which matches global |
+
+Not the plates: all three gyms list the same ones. **The carriage.** Every Smith
+prescription away from home was out by 10 lb, in the direction of under-prescribing.
+
+### Fixed at the accessors, not the call sites
+
+Some forty places compute a load and they all go through five functions, so those five
+moved and the callers did not. `kitNow(sess)` resolves the kit in force, defaulting to
+the session you are in:
+
+    the session's own gym  →  the home gym  →  the global profile
+
+`KIT_NO_SESSION` is what "no session at all" resolves to — an untagged session, which
+`sessionGym()` already assumes is home (item 10). Passing `null` explicitly still means
+"nothing is known" and stays exactly global, which is `kitFor`'s own long-standing
+contract.
+
+Four more global reads were found by the scan rather than by reading: `exNameHTML` (where
+`smithWeight()` was already gym-aware and the barbell chip beside it was not, so the two
+halves of one sentence could disagree), `handLoadSay`, `roundLoadableOn` and
+`plateBreakdown` — the last being the line that tells you which plates to put on, which
+has to be the tree in front of you or it is worse than nothing.
+
+### The boundary
+
+Part 1 changed **what the app prescribes**. It did not change what any existing rewrite
+does to sets already logged: `logFixConvert` and `barModeConvertPlan` are pinned to
+`implementWeight(name, null)` so they stay byte-for-byte what they were. Whether a past
+set assumed one carriage or another depends on how it was typed, which the app cannot
+know — that is Part 2, one session at a time, confirmed.
+
+`rackMaxSrc` was left alone: it is already gym-aware, with its own chain (active gym →
+last gym trained at → global) argued where it is written.
+
+### The consequence worth knowing about
+
+The plate picker on "Where you train" is the **global** list. A gym that has named its own
+plates now follows its own list, so the global picker no longer moves it. On this export
+every gym has named its own, so that picker reaches none of them. `platestep.mjs` §4 and
+§4b hold both halves. The screen does not yet say which list you are editing — that is a
+UI job, not done here.
+
+### Guards
+
+- `kitscan.mjs` — a source scan that fails if anything outside `kitFor` reads
+  `smithWeight`, `barWeight`, `plateStep`, `plates`, `dbStep`, `dbMax` or `stackStep` off
+  `trainPrefs()`, directly or through a local alias. It caught all four of the above. Its
+  own control proves the pattern matches a real read and that its function attribution
+  works, because it first blamed every line in `kitFor` on `pick`, an inner helper.
+- `gymkit.mjs` — the behaviour: the same Smith movement at two gyms in one run gets two
+  carriages; a gym with no kit falls back to home and not to zero; and a 50-prescription
+  sweep against the previous build changes **only** Lotus and Uptown, and only on Smith
+  work.
+
+## 26b. Past Smith sets at Lotus and Uptown — OPEN (Part 2)
+
+Scope on the real export: 2 sessions, one at each. Not automatic — confirmed per session,
+showing date, gym, exercise, logged weight and what it would become, with Accept or Skip;
+undoable through the plan-patch mechanism; accepted changes logged to plan history with a
+reason; and stall rebuild, progression state, PRs and regrade rerun after any accepted
+change. A skipped session never comes up again unless that gym's carriage changes.
+
+
 
 `kitFor(sess)` merges a gym's own `plateStep` over the global one, and the gym kit editor
 lets you record each gym's `plates` list. **Neither reaches the load engine.**

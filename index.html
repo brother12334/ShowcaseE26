@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.55";
+const APP_VERSION = "2026.11.17.56";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -38410,8 +38410,12 @@ function exNameHTML(en, ei){
   }
   const kind = barKindFor(en && en.name);
   if(!kind) return `${esc(en.name)}`;
+  /* The kit in the room you are standing in, both halves. smithWeight() reads it and
+     the barbell beside it read the global profile, so on a Smith day away from home the
+     chip said one gym\u2019s carriage and the bar chip next to it said another\u2019s. */
+  const kitBar = kitNow().barWeight;
   const w = kind === "smith" ? smithWeight() + " " + unitWord()
-          : (trainPrefs().barWeight == null ? "not set" : trainPrefs().barWeight + " " + unitWord());
+          : (kitBar == null ? "not set" : kitBar + " " + unitWord());
   return `<button class="ex-bar-name" data-barkind="${kind}"
     aria-label="${esc(en.name)} \u2014 ${kind === "smith" ? "Smith carriage" : "barbell"} ${esc(String(w))}, tap to change"
     >${esc(en.name)}<span class="ex-bar-w" aria-hidden="true">${esc(String(w))}</span></button>`;
@@ -48513,11 +48517,19 @@ function logFixScopeMatch(name, scope){
    the stamped carriage weight is still right and is added on top exactly as before. Under
    "bar + plates" the bar has to join it, because that convention expects it inside the
    number. */
+/* THE GLOBAL PROFILE, DELIBERATELY, AND THE BOUNDARY OF ITEM 26 PART 1.
+
+   Part 1 changed what the app PRESCRIBES. It did not change what any existing rewrite
+   does to sets already logged, because which gym a past set belongs to is a question the
+   app cannot answer on its own \u2014 whether the number you typed assumed one carriage or
+   another depends on how you typed it. Passing null keeps kitFor\u2019s "nothing is known"
+   contract and leaves this byte-for-byte what it was. Part 2 is where past sets are
+   revisited, one at a time, with the person confirming each. */
 function logFixConvert(w, name){
   const v = parseFloat(w);
   if(!(v > 0)) return null;
   const both = v * 2;
-  return trainPrefs().barMode === "total" ? both + implementWeight(name) : both;
+  return trainPrefs().barMode === "total" ? both + implementWeight(name, null) : both;
 }
 /* Every set the fix would touch, and what it would become. Nothing is written here. */
 function logFixCandidates(scope){
@@ -52107,6 +52119,30 @@ function kitFor(sess){
   };
 }
 
+/* THE KIT IN FORCE, WHICH IS THE ONE THING THE LOAD ENGINE NEVER ASKED FOR.
+
+   kitFor() has merged a gym's own gear over the global settings since gyms existed, and
+   nothing in the engine called it. smallestPlate(), loadStepFor() and smithWeight() each
+   read trainPrefs() directly, so a gym's plates, its plate step and its Smith carriage
+   were stored, shown back on "Where you train", and ignored the moment a weight was
+   suggested. Training anywhere but home got home\u2019s grid \u2014 and on a Smith, home\u2019s
+   carriage, which is a straight error in the prescribed load wherever the two differ.
+
+   Fixed at the accessors rather than at the call sites. There are some forty places that
+   compute a load and they all go through five functions; changing those five moves the
+   whole engine at once, and a caller that means a SPECIFIC session passes it rather than
+   being rewritten.
+
+   THE FALLBACK ORDER IS THE ONE sessionGym() ALREADY STATES: the session\u2019s own gym,
+   then the home gym, then the global settings. The default here is the session you are
+   in. With no session at all \u2014 planning on the Program tab, a plan check \u2014 the answer
+   is the home gym, which is what KIT_NO_SESSION is: an untagged session, resolved the
+   way every untagged session in the log is. Passing null explicitly still means "nothing
+   is known", which is kitFor\u2019s own long-standing contract and stays exactly global. */
+const KIT_NO_SESSION = {};
+function kitNow(sess){
+  return kitFor(sess === undefined ? (S.active || KIT_NO_SESSION) : sess);
+}
 function gymById(id){ return gymList().find(g=> g && g.id === id) || null; }
 /* One reading, with a hard ceiling on how long it may take. getCurrentPosition can hang
    indefinitely on a device that has been refused location at the OS level without ever
@@ -63940,8 +63976,25 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.55";
+const NEWS_FOR = "2026.11.17.56";
 const NEWS = [
+  {k: "Weights are worked out from the kit in the room you are in",
+   s: ["Each gym can record its own plates, its own plate step and its own Smith "
+     + "carriage, and <b>Where you train</b> has been showing those back to you. The code "
+     + "that suggests a weight never read any of it. Training anywhere but your usual "
+     + "place got your usual place\u2019s gear.",
+     "On a Smith that is not a rounding difference, it is a wrong number: a carriage is "
+     + "25 lb in one room and 35 in another, and every prescription away from home was "
+     + "out by the difference.",
+     "Fixed. A load is now worked out from the session\u2019s own gym, falling back to your "
+     + "home gym and then to your usual kit \u2014 so a gym you have recorded nothing for "
+     + "behaves exactly as it did.",
+     "<b>One thing to know:</b> the plate list on <b>Where you train</b> is your usual "
+     + "kit, and a gym that has named its own plates now follows its own list instead. "
+     + "Edit that gym\u2019s kit to change what it is prescribed.",
+     "Nothing already logged is touched. Where a past set was logged against the wrong "
+     + "carriage, that is a separate job and the app will ask you about each one rather "
+     + "than quietly rewriting it."]},
   {k: "Reminders and sharing, rebuilt \u2014 and that is all nine",
    s: ["<b>Reminders</b> leads with how many of the three are actually on, which is the "
      + "one thing worth knowing when you open it. The three On/Off pairs are switches "
@@ -66313,8 +66366,8 @@ function equipmentOf(name){
   return "other";
 }
 function isBarbellLift(name){ return equipmentOf(name) === "barbell"; }
-function smithWeight(){
-  const w = trainPrefs().smithWeight;
+function smithWeight(sess){
+  const w = kitNow(sess).smithWeight;
   return w == null ? smithBarDefault() : w;
 }
 /* =====================================================================
@@ -66342,18 +66395,21 @@ function smithWeight(){
    Only a barbell and a Smith have an implement in the first place. A dumbbell load is
    per hand, a machine's is the stack, a cable's is the stack; none of them have an empty
    weight to add. */
-function implementWeight(name){
-  const p = trainPrefs();
+function implementWeight(name, sess){
+  const k = kitNow(sess);
   const eq = equipmentOf(name);
   /* The Smith's own figure, never the barbell's. Reading barWeight here meant somebody
      who told the app their bar was 55 lb was also telling it their Smith carriage was,
      which is a different machine in a different rack. */
-  if(eq === "smith") return smithWeight();
-  if(eq === "barbell") return p.barWeight == null ? 0 : p.barWeight;
+  if(eq === "smith") return smithWeight(sess);
+  if(eq === "barbell") return k.barWeight == null ? 0 : k.barWeight;
   return 0;
 }
-function barWeightFor(name){
-  return trainPrefs().barMode === "total" ? implementWeight(name) : 0;
+/* barMode is NOT gear and is deliberately global: it is the convention YOU write loads
+   in, which does not change when you walk into a different room. kitFor returns the
+   global one for exactly that reason. */
+function barWeightFor(name, sess){
+  return kitNow(sess).barMode === "total" ? implementWeight(name, sess) : 0;
 }
 /* =====================================================================
    CHANGING WHICH NUMBER YOU WRITE DOWN
@@ -66375,11 +66431,16 @@ function barWeightFor(name){
    wrong wants something different from somebody switching how they will log it from now
    on. And it is its own undo: switch back, convert again, and every figure returns,
    because adding and subtracting the same implement weight is reversible. */
+/* ALSO PINNED TO THE GLOBAL PROFILE \u2014 see logFixConvert for the reason. Switching the
+   convention you write loads in rewrites sets that are already in the log, which is Part
+   2\u2019s territory and not Part 1\u2019s. Reading each session\u2019s own gym here would be more
+   correct and would also change, silently and in bulk, numbers the person has not been
+   shown. */
 function barModeConvertPlan(to){
   const out = {sets: [], entries: [], plan: [], skipped: 0};
   (S.sessions || []).forEach(sess=> (sess.entries || []).forEach(en=>{
     if(!en || !en.name) return;
-    const imp = implementWeight(en.name);
+    const imp = implementWeight(en.name, null);
     const stamped = Number(en.barAdd) || 0;
     const wasPlates = stamped > 0;
     // already written in the convention we are moving to
@@ -66408,7 +66469,7 @@ function barModeConvertPlan(to){
   DAYS.concat(["finisher"]).forEach(wid=> (S.program[wid] || []).forEach(e=>{
     [e, e && e.alt].forEach(t=>{
       if(!t || !t.name) return;
-      const imp = implementWeight(t.name);
+      const imp = implementWeight(t.name, null);
       const w = parseFloat(t.weight);
       if(!(imp > 0) || !isFinite(w) || w <= 0) return;
       const nw = w + (to === "total" ? imp : -imp);
@@ -66609,8 +66670,8 @@ function heldInBothHands(name){
   const n = structNorm(nrmRaw(name || ""));
   return !/\b(single|one)[ -]?(arm|hand|side)\b|\bgoblet\b|\bsuitcase\b|\bunilateral\b/.test(n);
 }
-function loadStepFor(name){
-  const p = trainPrefs();
+function loadStepFor(name, sess){
+  const p = kitNow(sess);
   const eq = equipmentOf(name);
   /* NOT doubled here. On an ordinary dumbbell movement the number the app stores is the
      one in ONE hand — startingLoadFor() says so where it writes it — so dbStep, which is
@@ -66623,7 +66684,7 @@ function loadStepFor(name){
      does, and better. Without it, somebody who had ticked their plate sizes got no
      rounding on a bar at all and an overload tip that asked them to go to Settings and
      name the plates they had already named. */
-  if(eq === "barbell" || eq === "smith"){ const st = smallestPlate(); return st > 0 ? st * 2 : 0; }
+  if(eq === "barbell" || eq === "smith"){ const st = smallestPlate(sess); return st > 0 ? st * 2 : 0; }
   /* A stack is a stack: it moves in whole pins, and the only question is how big one is.
      Zero here meant no rounding at all, which is worse than a step that is occasionally
      the wrong size — a wrong-sized step still lands on a number somebody could try. */
@@ -66669,10 +66730,12 @@ function loadStepFor(name){
    put "15 lb a hand is the nearest pair you have (30 lb)" inside a chip built for "30 lb"
    — which is how a warm-up ended up wider than the phone. `short` is the figure and
    nothing else; the long form stays where there is a line to say it on. */
-function handLoadSay(name, added, short){
+function handLoadSay(name, added, short, sess){
   const a = Math.round((parseFloat(added) || 0) * 10) / 10;
   if(!(a > 0.05) || !heldInBothHands(name)) return "";
-  const stepHand = trainPrefs().dbStep > 0 ? trainPrefs().dbStep : 0;
+  /* "the nearest pair you have" means the pair in THIS room. */
+  const k = kitNow(sess);
+  const stepHand = k.dbStep > 0 ? k.dbStep : 0;
   const each = a / 2;
   const near = stepHand > 0 ? Math.max(stepHand, Math.round(each / stepHand) * stepHand)
                             : Math.round(each * 10) / 10;
@@ -66711,7 +66774,7 @@ function addedLoadOf(entry, total){
 }
 /* Round a total so the part you can load lands on the grid and the part that is you is
    left exactly as it is. */
-function roundLoadableOn(entry, w, name){
+function roundLoadableOn(entry, w, name, sess){
   const bw = bwPartOf(entry);
   const t = parseFloat(w);
   if(!isFinite(t)) return t;
@@ -66725,7 +66788,8 @@ function roundLoadableOn(entry, w, name){
      that was "not even possible with my weight and the dumbbells I have". Only where the
      load is held in both hands: a goblet squat is one dumbbell and steps by one. */
   const nm = name || (entry && entry.name);
-  const pairStep = heldInBothHands(nm) && trainPrefs().dbStep > 0 ? trainPrefs().dbStep * 2 : 0;
+  const kDb = kitNow(sess).dbStep;
+  const pairStep = heldInBothHands(nm) && kDb > 0 ? kDb * 2 : 0;
   const loadable = pairStep > 0
     ? capToRack(Math.max(pairStep, Math.round(added / pairStep) * pairStep), nm)
     : roundLoadable(added, nm);
@@ -66923,7 +66987,11 @@ const LOAD_TRUST_SESSIONS = 2;
 function loadImpossible(name, w, sess){
   const v = parseFloat(w);
   if(!(v > 0)) return null;                      // an empty box is not a claim
-  const p = kitFor(sess);
+  /* kitNow, not kitFor: with no session passed this is a live check, and the kit in
+     force is the one in the room you are standing in rather than the global profile.
+     The sess/no-sess branches below are about whether to INVENT a figure the kit does
+     not state, which is a different question from which gym\u2019s kit to read. */
+  const p = kitNow(sess);
   const eq = equipmentOf(name);
   const seen = loadSeenSessions(name, v);
   const trusted = seen >= LOAD_TRUST_SESSIONS;
@@ -66931,7 +66999,7 @@ function loadImpossible(name, w, sess){
     why: "You have logged this in " + seen + " sessions, so it is a weight you can reach"
        + " \u2014 but " + what + " Element 26 has the kit down as something else."});
   if(eq === "dumbbell" || eq === "kettlebell"){
-    const max = parseFloat(sess ? p.dbMax : rackMaxNow());
+    const max = parseFloat(sess ? p.dbMax : rackMaxNow());   // rackMaxSrc has its own chain
     if(isFinite(max) && max > 0 && v > max + 0.001){
       if(trusted) return profileSay("the heaviest dumbbell on file is " + fmtLoad(max) + ", so");
       return {kind: "rack", limit: r1(max), seen,
@@ -66957,7 +67025,7 @@ function loadImpossible(name, w, sess){
        bench press is an ordinary entry and saying otherwise would be nonsense. */
     if(p.barMode !== "total") return null;
     const imp = parseFloat(sess ? (eq === "smith" ? p.smithWeight : p.barWeight)
-                                : implementWeight(name));
+                                : implementWeight(name, sess));
     if(isFinite(imp) && imp > 0 && v < imp - 0.001){
       if(trusted) return profileSay("the " + (eq === "smith" ? "carriage" : "bar")
         + " is on file as " + fmtLoad(imp) + " on its own, so");
@@ -67121,11 +67189,19 @@ const PLATE_SETS_KG = [25, 20, 15, 10, 5, 2.5, 1.25];
    plates, whose answer would otherwise be thrown away. See item 25 in docs/open-work.md
    for the one-time reconciliation, which is the approved exception to "no behaviour
    changes" in the Settings redesign. */
-function smallestPlate(){
+/* THE GYM\u2019S OWN PLATES FIRST. smallestPlateAt() was written for item 25 and reads one
+   gym\u2019s list; this is the same question asked of the kit in force, which is that gym\u2019s
+   list where it has one and the global list where it does not. */
+function smallestPlate(sess){
+  const k = kitNow(sess);
+  if(k.gym){
+    const mine = smallestPlateAt(k.gym);
+    if(mine > 0) return mine;
+  }
   const p = trainPrefs();
   const named = platesOwned(p);
   if(named.length) return Math.min.apply(null, named);
-  return p.plateStep > 0 ? p.plateStep : 0;
+  return k.plateStep > 0 ? k.plateStep : 0;
 }
 function platesOwned(src){
   const list = src && Array.isArray(src.plates) ? src.plates : null;
@@ -67195,8 +67271,11 @@ function plateJumpSay(){
   if(!(st > 0)) return "";
   return "Smallest jump: <b>" + fmtLoad(st * 2) + "</b>, a pair of " + stepNum(st) + "s.";
 }
-function plateBreakdown(total, name){
-  const p = trainPrefs();
+function plateBreakdown(total, name, sess){
+  /* THE TREE IN FRONT OF YOU. The whole point of this line is that you can walk to the
+     rack and follow it, so it has to be the rack in this room: the gym\u2019s own plate
+     list where it has one, the global list where it does not. */
+  const p = kitNow(sess);
   const eq = equipmentOf(name);
   if(eq !== "barbell" && eq !== "smith") return null;
   const w = parseFloat(total);
@@ -67208,12 +67287,12 @@ function plateBreakdown(total, name){
      has to come off the top first, and without a bar weight there is nothing to subtract
      and no honest answer to give. */
   const platesOnly = p.barMode !== "total";
-  const barW = platesOnly ? 0 : implementWeight(name);
+  const barW = platesOnly ? 0 : implementWeight(name, sess);
   if(!platesOnly && !(barW > 0)) return null;   // nobody has said what the bar weighs
   let perSide = (w - barW) / 2;
   if(perSide < 0) return null;                  // lighter than the empty bar
   if(perSide === 0) return {bar: barW, plates: [], perSide: 0, exact: true};
-  const step = smallestPlate();
+  const step = smallestPlate(sess);
   if(!step) return null;                        // no plate collection named
   /* WHAT IS ACTUALLY ON THE TREE. The standard set filtered by the smallest plate you own
      is right for most gyms and wrong for the ones missing a 35, or with nothing between a
