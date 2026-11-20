@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.54";
+const APP_VERSION = "2026.11.17.55";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -28851,84 +28851,128 @@ function pushDiagHTML(){
 }
 function pushCardHTML(){
   if(!VAPID_PUBLIC) return "";
+  /* CONVERTED TO THE SHARED LIBRARY (design/settings-reconcile.md, variation B).
+
+     HERO > button > says > (SEC > group)x3 > MORE. The hero counts how many of the three
+     are actually on, because that is the one thing somebody opening this screen wants to
+     know, and the button under it is the hero\u2019s own control: with reminders off the
+     count can only be zero, whatever the three switches say.
+
+     EVERY DATA ATTRIBUTE AND ID IS THE ONE THAT WAS HERE BEFORE: data-remtrain,
+     data-rembed, data-remwake, #pushOnBtn, #pushOffBtn, #remindAtIn. The three two-button
+     On/Off segmenteds became library switches, which is the same control with one tap
+     instead of a choice between two words.
+
+     THE STATES ARE THE STATES THIS SCREEN ALREADY HAD. Busy, blocked, off, and on. The
+     three sections appear when reminders are on, because until then there is nothing to
+     switch and a row of dead switches would be a worse answer than not drawing them. */
   const why = pushBlocker();
-  let h = `<div class="sub" style="margin:0 0 12px">Three here, each one switchable on its own${
-      restAlertMode() === "notify"
-        ? `, plus the <b>rest alert</b> \u2014 that one rides along on this so it can reach a locked
-           phone, and it is switched on the workout-screen page rather than here`
-        : ""}. Nothing is sent that isn't listed.</div>`;
+  const p = trainPrefs();
+  const sleepOff = p.sleepPrompt === false;
+  const on = S.pushOn
+    ? [S.remindAt, S.remindBed && !sleepOff, S.remindWake && !sleepOff].filter(Boolean).length
+    : 0;
+  const alsoRest = restAlertMode() === "notify"
+    ? " Plus the <b>rest alert</b> \u2014 that one rides along on this so it can reach a locked "
+      + "phone, and it is switched on the workout-screen page rather than here."
+    : "";
+
+  const hero = (sub)=> sdHero("REMINDERS ON", String(on), "of 3", sub);
+
   if(PUSH_BUSY){
-    return h + `<div class="ai-busy"><span class="ai-spin"></span><span>Setting that up…</span></div>`;
+    return hero("Setting that up\u2026")
+      + `<div class="ai-busy"><span class="ai-spin"></span><span>Setting that up\u2026</span></div>`;
   }
   if(why && !(why === "denied" && !S.pushOn)){
     /* The diagnostic goes UNDER the blocker, not instead of it. The sentence says what is
        wrong; the panel is how you check you have fixed it without turning the whole
        feature on and waiting until six o'clock to find out. */
-    return h + `<div class="sync-warn">${PUSH_WHY[why] || PUSH_WHY.failed}</div>` + pushDiagHTML();
+    return hero("Nothing can be sent until this is sorted out.")
+      + `<div class="sync-warn">${PUSH_WHY[why] || PUSH_WHY.failed}</div>`
+      + sdMore("Why a reminder might not arrive", pushDiagHTML());
   }
   if(!S.pushOn){
-    if(PUSH_ERR) h += `<div class="sync-warn">${PUSH_WHY[PUSH_ERR] || PUSH_WHY.failed}</div>`;
-    return h + `<div class="btn-row" style="margin-top:0">
-      <button class="btn small" id="pushOnBtn" style="flex:1">Turn on reminders</button>
-    </div>` + pushDiagHTML();
+    return hero("None are on. Three reminders, each switched separately once this is on."
+        + " Nothing is sent that isn\u2019t listed.")
+      + (PUSH_ERR ? `<div class="sync-warn">${PUSH_WHY[PUSH_ERR] || PUSH_WHY.failed}</div>` : "")
+      + `<div class="btn-row" style="margin-top:0">
+          <button class="btn small" id="pushOnBtn" style="flex:1">Turn on reminders</button>
+        </div>`
+      + sdSays("Turning them on asks your phone for permission first. Nothing is scheduled "
+          + "until you pick the hours, and each of the three is switched on its own."
+          + alsoRest)
+      + sdMore("Why a reminder might not arrive", pushDiagHTML());
   }
-  const seg = (attr, on)=> `<div class="seg">
-    <button class="${on?"on":""}" ${attr}="on">On</button>
-    <button class="${on?"":"on"}" ${attr}="off">Off</button></div>`;
+
   const plan = plannedReminders();
   const at = k => plan.find(x=> x.kind === k);
-  const p = trainPrefs();
-  const sleepOff = p.sleepPrompt === false;
   /* WHAT IT WILL SAY, AND WHEN, BEFORE YOU AGREE TO IT. A reminder somebody cannot read
      in advance is one they find out about at six in the morning. */
   const preview = (k, none, note)=>{
     const r = at(k);
     return `<div class="rem-when">${r
-      ? `${esc(fmtWhen(r.at))}${note ? ", " + note : ""} — “<b>${esc(r.title)}</b> ${esc(r.body)}”`
+      ? `${esc(fmtWhen(r.at))}${note ? ", " + note : ""} \u2014 \u201c<b>${esc(r.title)}</b> ${esc(r.body)}\u201d`
       : none}</div>`;
   };
 
-  h += `<div class="rem-row">
-    <div class="rem-head"><b>Training</b>${seg("data-remtrain", !!S.remindAt)}</div>
-    <div class="sub">Which session is up, at an hour you choose. Skipped on a day you've already trained.</div>`;
-  if(S.remindAt){
-    h += `<div class="field" style="margin:8px 0 0"><label>Time</label>
-      <input class="timein" type="time" id="remindAtIn" value="${esc(S.remindAt)}"></div>`;
-  }
-  h += preview("train", "Pick a time.") + `</div>`;
+  let h = hero(on === 0
+      ? "Reminders are on, but none of the three are. Each is switched on its own below."
+      : "Each of the three is switched on its own.")
+    + `<div class="btn-row" style="margin-top:0">
+        <button class="btn ghost small" id="pushOffBtn" style="flex:1">Turn off all reminders</button>
+      </div>`
+    + sdSays("Nothing is sent that isn\u2019t listed below." + alsoRest);
 
-  h += `<div class="rem-row">
-    <div class="rem-head"><b>Bedtime</b>${seg("data-rembed", !!S.remindBed && !sleepOff)}</div>
-    <div class="sub">A nudge to start the sleep clock at ${
-      sleepOff ? "your night-start time" : `<b>${esc(p.sleepTime || "22:30")}</b>`
-    }, the hour the app already treats as your night — change it under <b>Sleep and mornings</b>.
-      Not sent on a night you've already answered.</div>`;
-  h += sleepOff
-    ? `<div class="rem-when">Sleep tracking is off, so there's nothing to remind you about.</div>`
-    : preview("bed", "Off.");
-  h += `</div>`;
+  h += sdSec("Training");
+  h += sdGroup(
+      sdTog("Which session is up",
+        S.remindAt
+          ? "At an hour you choose. Skipped on a day you\u2019ve already trained. "
+            + "<b>Turn it off and no training reminder is sent.</b>"
+          : "At an hour you choose. Skipped on a day you\u2019ve already trained.",
+        !!S.remindAt, "data-remtrain", S.remindAt ? "off" : "on")
+    + (S.remindAt
+        ? sdItem("Time", "",
+            `<div class="field" style="margin:0"><input class="timein" type="time"
+              id="remindAtIn" value="${esc(S.remindAt)}"></div>`)
+        : "")
+    + `<div class="sd-item">${preview("train", "Pick a time.")}</div>`);
+
+  h += sdSec("Bedtime");
+  h += sdGroup(
+      sdTog("Start the sleep clock",
+        "A nudge at " + (sleepOff ? "your night-start time" : "<b>" + esc(p.sleepTime || "22:30") + "</b>")
+          + ", the hour the app already treats as your night \u2014 change it under "
+          + "<b>Sleep and mornings</b>. Not sent on a night you\u2019ve already answered."
+          + (S.remindBed && !sleepOff ? " <b>Turn it off and no bedtime nudge is sent.</b>" : ""),
+        !!S.remindBed && !sleepOff, "data-rembed", (S.remindBed && !sleepOff) ? "off" : "on")
+    + `<div class="sd-item">${sleepOff
+        ? `<div class="rem-when">Sleep tracking is off, so there\u2019s nothing to remind you about.</div>`
+        : preview("bed", "Off.")}</div>`);
 
   const w = predictedWake();
-  h += `<div class="rem-row">
-    <div class="rem-head"><b>Morning</b>${seg("data-remwake", !!S.remindWake && !sleepOff && !!w)}</div>
-    <div class="sub">To log the night while you can still remember it. Element 26 works out roughly
-      when you get up from the mornings you've already logged — nobody has to set an alarm.</div>`;
-  if(sleepOff){
-    h += `<div class="rem-when">Sleep tracking is off, so there's nothing to remind you about.</div>`;
-  } else if(!w){
-    /* Deliberately no fallback hour. Inventing 07:00 would be wrong at somebody every
-       morning until the data arrived, and a reminder that is reliably wrong gets
-       swiped away without being read — including on the days it was right. */
-    h += `<div class="rem-when">Not yet — it needs ${WAKE_MIN_SAMPLES} logged mornings before it'll
-      guess, and it won't guess before then. Set a fixed wake time under <b>Sleep and mornings</b> to skip the wait.</div>`;
-  } else {
-    h += preview("wake", "Off.", "worked out from " + esc(w.why));
-  }
-  h += `</div>`;
+  h += sdSec("Morning");
+  h += sdGroup(
+      sdTog("The morning check-in",
+        "To log the night while you can still remember it. Element 26 works out roughly "
+          + "when you get up from the mornings you\u2019ve already logged \u2014 nobody has to set "
+          + "an alarm."
+          + (S.remindWake && !sleepOff && w ? " <b>Turn it off and no morning check-in is sent.</b>" : ""),
+        !!S.remindWake && !sleepOff && !!w, "data-remwake",
+        (S.remindWake && !sleepOff && w) ? "off" : "on")
+    + `<div class="sd-item">${
+        sleepOff
+          ? `<div class="rem-when">Sleep tracking is off, so there\u2019s nothing to remind you about.</div>`
+          : !w
+            /* Deliberately no fallback hour. Inventing 07:00 would be wrong at somebody
+               every morning until the data arrived, and a reminder that is reliably wrong
+               gets swiped away without being read - including on the days it was right. */
+            ? `<div class="rem-when">Not yet \u2014 it needs ${WAKE_MIN_SAMPLES} logged mornings
+                before it\u2019ll guess, and it won\u2019t guess before then. Set a fixed wake time
+                under <b>Sleep and mornings</b> to skip the wait.</div>`
+            : preview("wake", "Off.", "worked out from " + esc(w.why))}</div>`);
 
-  return h + pushDiagHTML() + `<div class="btn-row" style="margin-top:12px">
-      <button class="btn ghost small" id="pushOffBtn" style="flex:1">Turn off all reminders</button>
-    </div>`;
+  return h + sdMore("Why a reminder might not arrive", pushDiagHTML());
 }
 /* "Today at 18:00" / "Tomorrow at 18:00" / a date, for the one line that previews it. */
 function fmtWhen(ms){
@@ -34243,8 +34287,12 @@ function sdTog(label, sub, on, attr, setTo){
       <span class="sd-sub" style="display:block">${sub}</span></span>
     <span class="sd-tog-sw" aria-hidden="true"></span></button>`;
 }
-function sdMore(label, inner){
-  return `<details class="sd-more"><summary>${esc(label)}</summary>
+/* `open` is for a fold that usually has nothing in it and occasionally has something
+   worth acting on \u2014 live share links being the case it was added for. Folded away when
+   empty, already open when there is something there, without either state needing its own
+   place in the spine. */
+function sdMore(label, inner, open){
+  return `<details class="sd-more"${open ? " open" : ""}><summary>${esc(label)}</summary>
     <div class="sd-more-b">${inner}</div></details>`;
 }
 /* THE LIBRARY\u2019S STEPPER, and the one place its behaviour lives.
@@ -48881,56 +48929,91 @@ function openLogFix(){
 /* D6 · THE SHARE SCREEN. Four things: what will be in it, how long it lasts, the
    button, and the list of what is already out there with a way to take each one back. */
 function settingsShareHTML(){
+  /* CONVERTED TO THE SHARED LIBRARY (design/settings-reconcile.md, variation B).
+
+     HERO > seg > says > SEC > group > SEC > group > MORE. The hero is how long the link
+     lasts, because that is the decision somebody is actually making here: making a link
+     is one button, and everything that matters about it is what it contains and when it
+     stops working.
+
+     EVERY DATA ATTRIBUTE AND ID IS THE ONE THAT WAS HERE BEFORE: data-shdays,
+     data-shopt-<key>, data-shcopy, data-shkill, #shMake, #shRefresh. The four extras were
+     two-option lists and are switches now, each one still saying what leaving it out
+     means as well as what putting it in does.
+
+     LIVE LINKS FOLD AWAY, AND OPEN THEMSELVES WHEN THERE ARE ANY. Most of the time there
+     are none and the section is a line about nothing; when there is one, revoking it is
+     the most urgent thing on the screen, so the fold starts open and its summary counts
+     them. */
   const o = shareOpts();
   const live = Array.isArray(S.shareSeen) ? S.shareSeen : [];
   const cloud = accountCloudOn() && !!accountAuth();
-  let h = setBlock("A link you can send",
-    "It opens a page — your plan, what each muscle has been getting, where the lifts are "
-    + "going, your records and your weeks on target. Whoever has the link can read it and "
-    + "nothing else: they cannot change your log, and they do not need the app or an account. "
-    + "The link expires on its own, and you can revoke it any time.",
-    cloud ? `<div class="btn-row" style="margin-top:0">
-        <button class="btn ghost small" id="shMake" style="flex:1">Make a link</button>
-        <button class="btn ghost small" id="shRefresh" style="flex:0 0 auto">Refresh</button>
-      </div>`
-      : `<div class="sub">Sharing needs an Element 26 account that is signed in, because the
-         link is created against it — that is what lets you revoke it later.</div>`);
-  h += `<div class="set-block"><div class="set-name">What goes in it</div>
-    <div class="set-help">The plan and what you have done against it always go. These four do
-      not, unless you say so here — each one is a different thing to tell somebody about
-      yourself.</div></div>`;
-  SHARE_EXTRAS.forEach(x=>{
-    h += setChoice(x.t, [
-      {v:"off", t:"Leave it out", d:x.s},
-      {v:"on",  t:"Include it",   d:"Readable by anybody who has the link."}
-    ], "data-shopt-" + x.k, o[x.k] ? "on" : "off");
-  });
-  h += `<div class="set-block"><div class="set-help">Never shared, whatever you turn on: your
-    account id, your recovery key, your reminder subscriptions, and anything that could be used
-    to sign in as you. The snapshot is checked for all of it before it leaves this device, and
-    refuses to send rather than trimming itself.</div></div>`;
-  h += setBlock("How long it lasts",
-    "Thirty days unless you change it, and ninety at the very most. A link that never expires "
-    + "is a link you will have forgotten about by the time it matters.",
-    `<div class="seg spec-seg">${[7, 30, 90].map(d=>
-      `<button type="button" data-shdays="${d}" class="${o.days === d ? "on" : ""}">${d} days</button>`).join("")}</div>`);
-  if(live.length){
-    h += setBlock("Live links",
-      "What is readable right now. Revoking one stops it immediately, for everyone who has it.",
+
+  let h = sdHero("THIS LINK LASTS", String(o.days), o.days === 1 ? "day" : "days",
+      "Then it stops working, for everyone who has it \u2014 and you can revoke it sooner.")
+    + `<div class="sd-seg" role="group">${[7, 30, 90].map(d=>
+        `<button type="button" data-shdays="${d}" aria-pressed="${o.days === d}">${d} days</button>`
+      ).join("")}</div>`
+    + sdSays("Thirty days unless you change it, and ninety at the very most. <b>A link that "
+        + "never expires is a link you will have forgotten about by the time it matters.</b>");
+
+  h += sdSec("Four things that stay out unless you say");
+  /* THE DESCRIPTION IS KEPT WHOLE IN BOTH STATES. An earlier pass lowercased it and
+     spliced it into a sentence about turning the switch off, which produced "your
+     weigh-ins and any tape measurements, as a trend are not in the link at all". These
+     strings are descriptions, not clauses. What the switch does is said after it. */
+  h += sdGroup(SHARE_EXTRAS.map(x=> sdTog(x.t,
+      o[x.k]
+        ? x.s + " <b>In the link, and readable by anybody who has it. Off, it is not in "
+          + "the snapshot at all.</b>"
+        : x.s + " <b>Off, so it is not in the snapshot at all. Turn it on and anybody who "
+          + "has the link can read it.</b>",
+      !!o[x.k], "data-shopt-" + x.k, o[x.k] ? "off" : "on")).join("")
+    + sdSays("The plan and what you have done against it always go. These four do not "
+        + "unless you say so here, because <b>each one is a different thing to tell "
+        + "somebody about yourself</b>."));
+
+  h += sdSec("Make it");
+  h += sdGroup(sdItem("A link you can send",
+      "It opens a page \u2014 your plan, what each muscle has been getting, where the lifts "
+      + "are going, your records and your weeks on target. Whoever has the link can read it "
+      + "and nothing else: they cannot change your log, and they do not need the app or an "
+      + "account. The plan and what you have done against it always go in.",
+      cloud
+        ? `<div class="btn-row" style="margin-top:0">
+            <button class="btn ghost small" id="shMake" style="flex:1">Make a link</button>
+            <button class="btn ghost small" id="shRefresh" style="flex:0 0 auto">Refresh</button>
+          </div>`
+        : `<div class="sub" style="margin:0">Sharing needs an Element 26 account that is
+           signed in, because the link is created against it \u2014 that is what lets you
+           revoke it later.</div>`,
+      "Never shared, whatever you turn on: your account id, your recovery key, your reminder "
+      + "subscriptions, and anything that could be used to sign in as you. The snapshot is "
+      + "checked for all of it before it leaves this device, and <b>refuses to send rather "
+      + "than trimming itself</b>."));
+
+  h += sdMore(live.length
+      ? "Live links \u2014 " + live.length + " readable right now"
+      : "Live links",
+    sdGroup(sdItem("", live.length
+        ? "What is readable right now. Revoking one stops it immediately, for everyone who "
+          + "has it."
+        : (cloud
+            ? "No live links. Anything you make will be listed here with its expiry date and "
+              + "a way to take it back."
+            : "No live links, and none can be made until this device is signed in to an "
+              + "Element 26 account."),
       live.map(x=> `<div class="rl-row">
         <span class="rl-n"><b>${esc(x.label || "Shared link")}</b><br>
           <i style="font-style:normal;color:var(--faint);font-size:var(--fs-3)">made ${
             esc(fmtDateShort(dayStr(x.at)))}, stops working ${esc(fmtDateShort(dayStr(x.expiresAt)))}${
-            x.size ? " · " + Math.max(1, Math.round(x.size / 1024)) + " KB" : ""}</i></span>
+            x.size ? " \u00b7 " + Math.max(1, Math.round(x.size / 1024)) + " KB" : ""}</i></span>
         <span class="rl-btns">
           <button class="rl-b" data-shcopy="${esc(x.token)}">copy</button>
           <button class="rl-b rl-x" data-shkill="${esc(x.token)}">revoke</button>
         </span>
-      </div>`).join(""));
-  } else if(cloud){
-    h += `<div class="set-block"><div class="set-help">No live links. Anything you make will
-      be listed here with its expiry date and a way to take it back.</div></div>`;
-  }
+      </div>`).join(""))),
+    live.length > 0);
   return h;
 }
 function settingsDataHTML(){
@@ -63857,8 +63940,18 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.54";
+const NEWS_FOR = "2026.11.17.55";
 const NEWS = [
+  {k: "Reminders and sharing, rebuilt \u2014 and that is all nine",
+   s: ["<b>Reminders</b> leads with how many of the three are actually on, which is the "
+     + "one thing worth knowing when you open it. The three On/Off pairs are switches "
+     + "now, and each still says what turning it off does.",
+     "<b>Share with a coach</b> leads with how long the link lasts, because that is the "
+     + "decision you are really making: making one is a button, and what matters is what "
+     + "goes in it and when it stops working. Live links fold away when there are none "
+     + "and open themselves when there is one to revoke.",
+     "That finishes the nine settings screens. All nine are built from one set of "
+     + "controls now, instead of the four different ways a choice used to be offered."]},
   {k: "Sleep and mornings, rebuilt",
    s: ["The hours of sleep you want are the hero of the screen now, because every other "
      + "line on it is worked out from them \u2014 your bedtime, the latest you can still be "

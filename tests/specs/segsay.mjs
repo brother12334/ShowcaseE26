@@ -43,7 +43,8 @@ await p.evaluate(fx=>{
 const PAGES = ["sess","screen","gym","where","targets","plan","day","remind","share",
                "acct","data","patch","storage","help","legal"];
 const found = await p.evaluate(pages=>{
-  const out = {threes: [], twos: [], togs: [], converted: [], pages: {}};
+  const out = {threes: [], twos: [], togs: [], converted: [], pages: {},
+               togPages: {}, togSeen: 0};
   pages.forEach(k=>{
     TAB='sync'; SET_PAGE=k;
     try{ render(); }catch(e){ out.pages[k] = "threw"; return; }
@@ -67,8 +68,14 @@ const found = await p.evaluate(pages=>{
          list of VALUES: 2.5, 5, 10, 15 are the thing they describe, and the plate and
          dumbbell steps are exactly that. Narrowed to word-labelled options rather than
          relaxed for everything, and the says line beside these still has to carry the
-         consequence -- "So 30, 35, 40, and nothing in between" -- which section 3 checks. */
-      const words = labels.filter(l=> !/^[\d.,]+\s*\w{0,3}$/.test(l) && !/^other$/i.test(l));
+         consequence -- "So 30, 35, 40, and nothing in between" -- which section 3 checks.
+
+         A NUMBER WITH ITS UNIT ON IT IS STILL A NUMBER. The pattern allowed three letters
+         after the digits, which covers "lb" and "kg" and not "7 days" -- so the share
+         screen's expiry chooser was asked to explain what seven days means. The label has
+         to START with digits either way, so "Always" and "Automatic" are caught exactly as
+         before; the teeth below prove it. */
+      const words = labels.filter(l=> !/^[\d.,]+\s*\w{0,6}$/.test(l) && !/^other$/i.test(l));
       if(btns.length >= 3 && words.length >= 3){
         if(described !== btns.length) out.threes.push(row);
       }
@@ -87,7 +94,9 @@ const found = await p.evaluate(pages=>{
        which is exactly how every "off" description on both converted screens went
        missing a second time, after the segmented ones had been restored. A toggle's
        subtitle has to say what turning it OFF does, not only what it does. */
-    [...document.querySelectorAll('#app .sd-tog')].forEach(t=>{
+    const togs = [...document.querySelectorAll('#app .sd-tog')];
+    if(togs.length){ out.togPages[k] = togs.length; out.togSeen += togs.length; }
+    togs.forEach(t=>{
       const label = (t.querySelector('.sd-label') || {textContent:""}).textContent.trim();
       const sub = (t.querySelector('.sd-sub') || {textContent:""}).textContent;
       const item = t.closest('.sd-item');
@@ -126,7 +135,7 @@ const teeth = await p.evaluate(()=>{
   const btns = [...box.querySelectorAll('button')];
   const labels = btns.map(x=> (x.querySelector('b') || x).textContent.trim());
   const described = btns.filter(x=> x.querySelector('span')).length;
-  const words = labels.filter(l=> !/^[\d.,]+\s*\w{0,3}$/.test(l) && !/^other$/i.test(l));
+  const words = labels.filter(l=> !/^[\d.,]+\s*\w{0,6}$/.test(l) && !/^other$/i.test(l));
   return {flagged: btns.length >= 3 && words.length >= 3 && described !== btns.length,
           labels, words: words.length};
 });
@@ -141,8 +150,14 @@ ck("every two-way is legible from where you stand",
 console.log("\n4. A SWITCH SAYS WHAT TURNING IT OFF DOES");
 ck("every toggle names its off state", found.togs.length === 0,
    found.togs.map(r=> r.page + ": " + r.label).join(" | "));
-ck("CONTROL: there were toggles to check", true,
-   "checked on " + found.converted.join(", "));
+/* THIS CONTROL USED TO PASS `true` AND PRINT THE WRONG LIST. It reported the pages that
+   carry SEGMENTED controls, which is a different set from the pages that carry switches,
+   and it asserted nothing at all -- so a change that stopped every toggle from rendering
+   would have left section 4 green with nothing in it. It counts switches now, and says
+   which page each one was on. */
+ck("CONTROL: there were toggles to check, and this is where they were",
+   found.togSeen >= 6, found.togSeen + " switches on "
+     + Object.keys(found.togPages).map(k=> k + ":" + found.togPages[k]).join(", "));
 
 ck("no page errors", errs.length === 0, errs.join(" | "));
 await b.close();

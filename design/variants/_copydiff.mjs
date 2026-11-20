@@ -33,10 +33,15 @@ async function textOf(url){
        a .tg-plain paragraph nothing here named. Screen-specific prose containers are
        included now, and anything the sweep does not recognise is caught by the fallback:
        any <p> inside the card that is not already covered. */
-    const SEL = ['.ch-tx span', '.ob-opt-s', '.set-help', '.set-says', '.set-unit',
-                 '.sd-seg button span', '.sd-tog .sd-sub', '.sd-sub', '.sd-says',
-                 '.sd-hero-s', '.tg-plain p', '.tg-land-s', '.tg-conf span',
-                 '.card p', '.sub'].join(',');
+    /* AND LABELS, because a conversion moves a phrase out of a description and into the
+       control's own label about as often as it drops one. Reading only the descriptions
+       reports the move as a loss, which is the tool crying wolf at the one moment it
+       most needs to be believed. */
+    const SEL = ['.ch-tx span', '.ch-tx b', '.ob-opt-s', '.set-help', '.set-says',
+                 '.set-unit', '.set-name', '.sd-seg button span', '.sd-seg button b',
+                 '.sd-tog .sd-sub', '.sd-sub', '.sd-says', '.sd-label', '.sd-sec',
+                 '.sd-more > summary', '.sd-hero-s', '.tg-plain p', '.tg-land-s',
+                 '.tg-conf span', '.rem-when', '.rem-head b', '.card p', '.sub'].join(',');
     const seen = new Set();
     return [...document.querySelectorAll('#app ' + SEL)]
       .map(el=> el.textContent.replace(/\s+/g, ' ').trim())
