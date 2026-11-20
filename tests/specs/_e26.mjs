@@ -10,7 +10,8 @@
    the repository is checked out. */
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +35,41 @@ export const shot = name=>{
   try{ mkdirSync(SHOT_DIR, {recursive: true}); }catch(e){}
   return path.join(SHOT_DIR, name);
 };
+
+/* AN EARLIER BUILD OF THE APP, FOR THE CONVERSION SPECS TO COMPARE AGAINST.
+
+   Each Settings conversion is held against the screen it replaced, which means loading
+   two builds side by side. The first six did that by reading a file somebody had dropped
+   in a scratchpad by hand -- an absolute path, in a directory this repository does not
+   create, holding whatever build was copied there last. Three specs shared the one path.
+   Refreshing it for a seventh conversion silently changed what the other two were
+   comparing against, and one of them failed on a build it was never written for. From a
+   fresh clone all three simply could not run.
+
+   So the old build comes out of git, at a commit the spec names, into a file of its own.
+   `git show <ref>:index.html` is the whole mechanism. The copy is cached, because a spec
+   that shells out to git on every run is a spec nobody waits for.
+
+   The ref a spec passes is the commit BEFORE its screen was converted, which is the only
+   build the comparison means anything against. */
+export function oldBuild(ref){
+  const dir = path.join(REPO, "tests", ".old");
+  const file = path.join(dir, ref + ".html");
+  if(!existsSync(file)){
+    mkdirSync(dir, {recursive: true});
+    let src;
+    try{
+      src = execFileSync("git", ["show", ref + ":index.html"],
+        {cwd: REPO, maxBuffer: 256 * 1024 * 1024, encoding: "utf8"});
+    }catch(e){
+      throw new Error("Could not read index.html at " + ref + " out of git. This spec "
+        + "compares a converted screen against the build it replaced, so it needs that "
+        + "commit to be present (a shallow clone may not have it). " + e.message);
+    }
+    writeFileSync(file, src);
+  }
+  return "file://" + file;
+}
 
 /* PLAYWRIGHT, WHEREVER IT LIVES. An installed dependency first, because that is what a
    fresh clone running `npm i -D playwright` gets; then the path this suite was written

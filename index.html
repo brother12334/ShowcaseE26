@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.53";
+const APP_VERSION = "2026.11.17.54";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -34247,6 +34247,126 @@ function sdMore(label, inner){
   return `<details class="sd-more"><summary>${esc(label)}</summary>
     <div class="sd-more-b">${inner}</div></details>`;
 }
+/* THE LIBRARY\u2019S STEPPER, and the one place its behaviour lives.
+
+   The landmark steppers on the targets screen already proved the parts and paid for the
+   lessons: commit on RELEASE rather than per tick, because committing re-renders and takes
+   the button the press came from with it; and a click handler beside the pointer handlers,
+   because keyboards and assistive tech send click without ever sending pointerdown. This
+   is the same mechanism with the landmark specifics taken out, so the rest of Settings
+   does not grow a second one.
+
+   A STEP CAN REACH "NOT SET", which is the whole reason .sd-step-v.is-unset exists: a
+   setting that is optional has to have somewhere to go that is not a number. Stepping
+   down off the bottom turns it off; stepping up from off starts at whatever the app
+   assumes meanwhile, which the readout has been naming all along. */
+const SD_STEP = {};
+function sdStepRegister(key, cfg){ SD_STEP[key] = cfg; }
+function sdStep(key, cur){
+  const c = SD_STEP[key];
+  if(!c) return "";
+  const off = !(cur > 0);
+  const hi = !off && cur >= c.max;
+  return `<div class="sd-step">
+    <button type="button" data-sdstep="${attrSafe(key + ":down")}" aria-label="Less"${
+      off ? " disabled" : ""}>\u2212</button>
+    <div class="sd-step-v${off ? " is-unset" : ""}" data-sdstepv="${attrSafe(key)}"
+      role="spinbutton" tabindex="0" aria-label="${esc(c.label || key)}"
+      aria-valuemin="${c.min}" aria-valuemax="${c.max}"${
+      off ? ` aria-valuetext="not set"` : ` aria-valuenow="${esc(String(r1(cur)))}"`}>${
+      off
+        ? `\u2014<i>${esc(c.unit || "")}</i><u>${esc(String(r1(c.assume())))}</u>`
+        : `${esc(String(r1(cur)))}<i>${esc(c.unit || "")}</i>`}</div>
+    <button type="button" data-sdstep="${attrSafe(key + ":up")}" aria-label="More"${
+      hi ? " disabled" : ""}>+</button>
+  </div>`;
+}
+/* Bound once, for every stepper on whatever screen is showing. */
+function bindSdSteps(){
+  document.querySelectorAll("[data-sdstep]").forEach(b=>{
+    const [key, dir] = b.dataset.sdstep.split(":");
+    const c = SD_STEP[key];
+    if(!c) return;
+    const sign = dir === "up" ? 1 : -1;
+    const readout = b.parentNode && b.parentNode.querySelector("[data-sdstepv]");
+    let held = null, was = 0, cur = 0;
+    /* OFF IS BELOW THE BOTTOM, not a separate control. Down from the minimum turns the
+       setting off; up from off lands on the figure the app was assuming anyway, so the
+       first press never moves the behaviour it describes. */
+    const next = (v)=>{
+      if(!(v > 0)) return sign > 0 ? r1(c.assume()) : 0;
+      const t = r1(v + sign * c.step);
+      if(t < c.min) return c.canUnset ? 0 : c.min;
+      return Math.min(c.max, t);
+    };
+    const paint = ()=>{
+      if(!readout) return;
+      if(cur > 0){
+        readout.classList.remove("is-unset");
+        readout.textContent = "";
+        readout.appendChild(document.createTextNode(r1(cur)));
+        const i = document.createElement("i"); i.textContent = c.unit || "";
+        readout.appendChild(i);
+        readout.setAttribute("aria-valuenow", String(r1(cur)));
+        readout.removeAttribute("aria-valuetext");
+      } else {
+        readout.classList.add("is-unset");
+        readout.textContent = "\u2014";
+        const i = document.createElement("i"); i.textContent = c.unit || "";
+        const u = document.createElement("u"); u.textContent = String(r1(c.assume()));
+        readout.appendChild(i); readout.appendChild(u);
+        readout.setAttribute("aria-valuetext", "not set");
+        readout.removeAttribute("aria-valuenow");
+      }
+    };
+    const stop = ()=>{
+      if(held == null) return;
+      clearInterval(held); held = null;
+      if(cur !== was) c.set(cur, was);
+    };
+    const bump = ()=>{ const t = next(cur); if(t === cur){ stop(); return; } cur = t; paint(); };
+    b.onpointerdown = ev=>{
+      if(held != null) return;
+      if(ev && ev.button > 0) return;
+      was = c.get(); cur = was;
+      bump();                                   // the press itself is the first step
+      held = setInterval(bump, 140);
+      if(ev && ev.pointerId != null && b.setPointerCapture){
+        try{ b.setPointerCapture(ev.pointerId); }catch(e){}
+      }
+    };
+    b.onpointerup = stop;
+    b.onpointercancel = stop;
+    b.onpointerleave = stop;
+    b.onclick = ev=>{
+      if(ev && (ev.detail > 0 || held != null)) return;   // a real press already handled it
+      const from = c.get();
+      cur = was = from;
+      const t = next(from);
+      if(t !== from) c.set(t, from);
+    };
+  });
+  /* The readout is a spinbutton, so the arrows have to work on it too. */
+  document.querySelectorAll("[data-sdstepv]").forEach(el=>{
+    const c = SD_STEP[el.dataset.sdstepv];
+    if(!c) return;
+    el.onkeydown = ev=>{
+      const up = ev.key === "ArrowUp" || ev.key === "ArrowRight";
+      const dn = ev.key === "ArrowDown" || ev.key === "ArrowLeft";
+      if(!up && !dn) return;
+      ev.preventDefault();
+      const from = c.get();
+      let t;
+      if(!(from > 0)) t = up ? r1(c.assume()) : 0;
+      else {
+        t = r1(from + (up ? c.step : -c.step));
+        if(t < c.min) t = c.canUnset ? 0 : c.min;
+        t = Math.min(c.max, t);
+      }
+      if(t !== from) c.set(t, from);
+    };
+  });
+}
 // name, one line, control. The shape for settings that are not a choice between options.
 function setBlock(title, help, control){
   return `<div class="set-block">
@@ -47508,36 +47628,101 @@ if(p.sleepPrompt !== false){
 }
 /* The day-shaped settings: the two things the app asks you about outside a workout, and
    the sleep numbers those questions feed. */
+/* THE HOURS ARE A STEPPER NOW, and the stepper can reach "not set".
+
+   The old control was a decimal text field whose placeholder read "e.g. 8 \u2014 blank turns
+   this off", which is three instructions for one number. A target measured in half hours
+   between 3 and 14 is a number you nudge, so it gets the control for nudging, and the one
+   thing a text field could do that a stepper cannot \u2014 empty itself \u2014 is where the
+   stepper goes when you press down off the bottom. The readout names the figure the app
+   assumes meanwhile, so turning it off never leaves a reader wondering what happens next.
+
+   The clamp is new and the old field had one too: it refused anything at or above 24
+   hours and anything at or below zero. This one refuses less than 3 and more than 14. */
+sdStepRegister("sleepTarget", {
+  label: "Hours of sleep you want", unit: "h",
+  min: 3, max: 14, step: 0.5, canUnset: true,
+  assume: ()=> SLEEP_NEED_DEFAULT,
+  get: ()=> parseFloat(S.sleepTarget) > 0 ? parseFloat(S.sleepTarget) : 0,
+  set: (v, was)=>{
+    const put = x=>{ S.sleepTarget = x > 0 ? x : null; save(); queueSync(); render(); };
+    put(v);
+    /* "Sleep tracking off" is what this said when the field was emptied, and it was not
+       true: tracking is the switch below, and it stays exactly where it was. Clearing the
+       target only stops the app aiming at a number. */
+    toast(v > 0 ? "Aiming for " + r1(v) + " h" : "No sleep target", null,
+      {undo: ()=>{ put(was); toast("Put back", "info"); }});
+  }
+});
 function settingsDayHTML(){
   const p = trainPrefs();
-  let h = setChoice("Sleep and mornings", [
-      {v:"on",  t:"Track my sleep", d:"Offers to start the clock at night; the first time you open it next morning is taken as the time you got up. Measured rather than remembered."},
-      {v:"off", t:"Don't",          d:"Nothing is asked outside a workout."}
-    ], "data-slprompt", p.sleepPrompt === false ? "off" : "on")
-    + (p.sleepPrompt === false ? "" : `<div class="set-block"><div class="field" style="margin:0"><label>My night starts at</label>
-      <input type="time" id="prefSleepT" class="timein" value="${esc(p.sleepTime || "22:30")}" aria-label="Sleep time"></div></div>`);
-  h += setBlock("Hours of sleep you want",
-    "Optional, and off until you fill it in. Late sessions cost sleep, and sleep is what recovery is made of.",
-    `<div class="field" style="margin:0"><input class="timein" inputmode="decimal" id="sleepTargetIn"
-      value="${esc(S.sleepTarget||"")}" placeholder="e.g. 8 &mdash; blank turns this off"></div>`);
-  h += setBlock("Wake time, only if you have a fixed one",
-    hasWakeTime()
-      ? `Set to <b>${esc(S.wakeTime)}</b>. The app works backwards from it: wake &minus; ${r1(sleepNeedH())} h is
-         bedtime, and bedtime &minus; ${WIND_DOWN_H} h is the latest you should still be training. If a session
-         won't fit it says so before your first set, and names what to cut.`
-      : `Most people don't have one, and that's fine. With just the hours above, Today shows what time you'd
-         be getting up if you train now and leaves the decision to you. Add a wake time only if you want the
-         app to start cutting exercises to protect it.`,
-    `<div style="display:flex;gap:8px;align-items:stretch">
-      <input type="time" class="timein" id="wakeIn" aria-label="Wake time" value="${esc(S.wakeTime||"")}" style="flex:1">
-      ${S.wakeTime ? `<button class="btn ghost small" id="wakeClear" style="flex-shrink:0;width:auto;padding:0 14px">Clear</button>` : ""}
-    </div>` +
-    (S.sleepTarget ? `<div class="set-says num">${
-      hasWakeTime()
-        ? "Asleep by "+esc(fmtTimeOfDay(sleepWindow(todaysWorkoutId()).bedtime))+
-          " &middot; out of the gym by "+esc(fmtTimeOfDay(sleepWindow(todaysWorkoutId()).latestEnd))
-        : "Train now and you'd be up around "+esc(fmtTimeOfDay(sleepProjection(todaysWorkoutId()).wake))
-      }</div>` : ""));
+  /* CONVERTED TO THE SHARED LIBRARY (design/settings-reconcile.md, variation A).
+
+     HERO > stepper > says > SEC > group > MORE. The hours are the hero because they are
+     the one figure every other line on this screen is worked out from: the bedtime, the
+     latest you can still be training, and what Today tells you if you train now.
+
+     EVERY DATA ATTRIBUTE AND ID IS THE ONE THAT WAS HERE BEFORE: data-slprompt,
+     #prefSleepT, #wakeIn, #wakeClear. The hours moved from #sleepTargetIn to the
+     library's stepper, which is the one control on this screen that changed. */
+  const on = p.sleepPrompt !== false;
+  const target = parseFloat(S.sleepTarget) > 0 ? parseFloat(S.sleepTarget) : 0;
+  const need = r1(sleepNeedH());
+
+  let h = sdHero("HOURS OF SLEEP YOU WANT", String(need), "h",
+      target > 0
+        ? "Yours. Late sessions cost sleep, and sleep is what recovery is made of."
+        : "<b>The app\u2019s assumption, not yours.</b> Set it and every line below is "
+          + "worked out from your figure instead.")
+    + sdStep("sleepTarget", target);
+
+  /* THE SAYS LINE IS THE ARITHMETIC, which is the whole reason the hours are worth
+     setting. Carried over from the block that used to sit under the wake time, because
+     it is a consequence of the hours rather than of the wake time: with one it is a
+     window with a hard edge, without one it is a projection. */
+  h += sdSays(hasWakeTime()
+    ? "Asleep by <b>" + esc(fmtTimeOfDay(sleepWindow(todaysWorkoutId()).bedtime))
+      + "</b>, out of the gym by <b>"
+      + esc(fmtTimeOfDay(sleepWindow(todaysWorkoutId()).latestEnd)) + "</b>."
+    : "Train now and you\u2019d be up around <b>"
+      + esc(fmtTimeOfDay(sleepProjection(todaysWorkoutId()).wake))
+      + "</b>. Today shows you that and leaves the decision to you.");
+
+  h += sdSec("Tracking it");
+  h += sdGroup(
+      sdTog("Track my sleep",
+        on
+          ? "Offers to start the clock at night; the first time you open it next morning "
+            + "is taken as the time you got up. Measured rather than remembered. "
+            + "<b>Turn it off and nothing is asked outside a workout.</b>"
+          : "Nothing is asked outside a workout. Turn it on and the app offers to start "
+            + "the clock at night, then takes the first time you open it next morning as "
+            + "the time you got up \u2014 measured rather than remembered.",
+        on, "data-slprompt", on ? "off" : "on")
+    + (on
+        ? sdItem("My night starts at", "",
+            `<div class="field" style="margin:0"><input type="time" id="prefSleepT"
+              class="timein" value="${esc(p.sleepTime || "22:30")}" aria-label="Sleep time"></div>`,
+            "When the offer to start the clock appears. It is an offer, never an alarm.")
+        : ""));
+
+  h += sdMore("A fixed wake time, if you have one", sdGroup(
+      sdItem("Wake time",
+        hasWakeTime()
+          ? "Set to <b>" + esc(S.wakeTime) + "</b>. The app works backwards from it: "
+            + "wake &minus; " + need + " h is bedtime, and bedtime &minus; " + WIND_DOWN_H
+            + " h is the latest you should still be training. If a session won\u2019t fit it "
+            + "says so before your first set, and names what to cut."
+          : "Most people don\u2019t have one, and that\u2019s fine. With just the hours above, "
+            + "Today shows what time you\u2019d be getting up if you train now and leaves the "
+            + "decision to you. Add a wake time only if you want the app to start cutting "
+            + "exercises to protect it.",
+        `<div style="display:flex;gap:8px;align-items:stretch">
+          <input type="time" class="timein" id="wakeIn" aria-label="Wake time"
+            value="${esc(S.wakeTime||"")}" style="flex:1">
+          ${S.wakeTime ? `<button class="btn ghost small" id="wakeClear"
+            style="flex-shrink:0;width:auto;padding:0 14px">Clear</button>` : ""}
+        </div>`)));
   return h;
 }
 /* The plan-shaped settings: what the programme is being run FOR, and the numbers the
@@ -51559,13 +51744,9 @@ function bind(){
     pushSyncSchedule();
     toast("Rest-day soreness checks moved to " + fmtMinOfDay(domsCheckMin()), "good");
   };
-  const sti = $("#sleepTargetIn");
-  if(sti) sti.onchange = ()=>{
-    const v = parseFloat(sti.value);
-    S.sleepTarget = (v > 0 && v < 24) ? v : null;
-    save(); queueSync(); render();
-    toast(S.sleepTarget ? "Aiming for "+r1(S.sleepTarget)+" h" : "Sleep tracking off");
-  };
+  /* The hours of sleep moved from #sleepTargetIn to the library's stepper, whose
+     behaviour lives once in bindSdSteps() for every screen that uses one. */
+  bindSdSteps();
   const wi = $("#wakeIn");
   if(wi) wi.onchange = ()=>{
     S.wakeTime = wi.value || null;
@@ -63676,8 +63857,18 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.53";
+const NEWS_FOR = "2026.11.17.54";
 const NEWS = [
+  {k: "Sleep and mornings, rebuilt",
+   s: ["The hours of sleep you want are the hero of the screen now, because every other "
+     + "line on it is worked out from them \u2014 your bedtime, the latest you can still be "
+     + "training, and what Today tells you if you train now.",
+     "They were a text box whose placeholder read \u201ce.g. 8 \u2014 blank turns this off\u201d, "
+     + "which is three instructions for one number. They are a stepper now. Press down "
+     + "off the bottom and the target turns off, and the readout names the figure the app "
+     + "assumes meanwhile, so there is never a question about what happens next.",
+     "A fixed wake time folds away under <b>More</b>, where it belongs: most people do "
+     + "not have one."]},
   {k: "Your settings reach your targets, all of them",
    s: ["Three releases in a row fixed the same bug in three different controls: a setting "
      + "that wrote itself, logged itself and then left every volume target where it was. "

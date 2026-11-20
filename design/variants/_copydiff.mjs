@@ -1,11 +1,12 @@
-import { chromium, APP_URL, appFile } from '../../tests/specs/_e26.mjs';
+import { chromium, APP_URL, appFile, oldBuild } from '../../tests/specs/_e26.mjs';
 import { readFileSync } from 'node:fs';
 /* What the old screen said that the new one does not. Sentence by sentence, with every
    <details> opened, because copy hidden behind More is still copy. */
 const FX=JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'),'utf8'));
 const PAGE = process.argv[2] || "sess";
-const OLDREF = process.argv[3] || "a71826e";
-const OLD = "file:///tmp/claude-0/-home-user-ShowcaseE26/cb903a36-3103-5d6a-a18b-78ade397246e/scratchpad/cmp/index.html";
+/* The build to compare against, out of git, so this tool reads the same thing twice
+   running instead of whatever was last copied into a scratchpad. */
+const OLD = oldBuild(process.argv[3] || "a71826e");
 const b=await chromium.launch();
 async function textOf(url){
   const p=await b.newPage({viewport:{width:390,height:1400}}); p.on('dialog',d=>d.accept());

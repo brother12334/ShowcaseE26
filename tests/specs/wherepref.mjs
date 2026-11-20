@@ -1,4 +1,4 @@
-import { chromium, APP_URL, appFile } from './_e26.mjs';
+import { chromium, APP_URL, appFile, oldBuild } from './_e26.mjs';
 import { readFileSync } from 'node:fs';
 /* THE FIFTH CONVERSION, HELD AGAINST THE REAL SCREEN IT REPLACED.
 
@@ -12,7 +12,10 @@ import { readFileSync } from 'node:fs';
    picker, and three different ways in and out of geolocation. None of it was rewritten,
    so this spec exists to prove none of it was lost. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
-const OLD = "file:///tmp/claude-0/-home-user-ShowcaseE26/cb903a36-3103-5d6a-a18b-78ade397246e/scratchpad/cmp/index.html";
+/* The build this screen replaced: where B was converted in 04f25e9. Taken out of git rather than
+   read from a scratchpad, so the comparison cannot be changed by what somebody
+   copied there last -- see oldBuild() in _e26.mjs. */
+const OLD = oldBuild("909886b");
 const b = await chromium.launch();
 let bad = 0;
 const ck=(what,ok,got)=>{ console.log((ok?"  ok   ":"  BROKEN ")+what+(got===undefined?"":"  ["+got+"]")); if(!ok) bad++; };
