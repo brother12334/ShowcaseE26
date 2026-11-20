@@ -138,13 +138,21 @@ r = await newP.evaluate(()=>{
   TAB='sync'; SET_PAGE='where'; render();
   const t = document.getElementById('app').innerText;
   const len = document.getElementById('app').innerHTML.length;
+  /* THE KIT IS CHECKED AS CONTROLS, NOT AS A SENTENCE. This read the words "plates you
+     have", which was the heading while the section edited the global profile. The
+     section is about a named gym now and falls back to "Your kit" when there are no
+     gyms to name, so the old phrase is gone and nothing was lost by its going. What
+     matters is that the plates are still editable here, which is what is asserted. */
+  const pl = document.querySelectorAll('#app [data-prefpl]').length;
+  const db = document.querySelectorAll('#app [data-dbstep]').length;
   window.geoReady = real;
-  return {before, len, says: /nothing to switch on/.test(t),
-          kit: /plates you have/i.test(t)};
+  return {before, len, says: /nothing to switch on/.test(t), pl, db,
+          kit: pl > 0 && db > 0};
 });
 ck("CONTROL: the screen still draws something substantial", r.len > 800, r.len + " chars");
 ck("it explains why there is no switch", r.says);
-ck("and the kit is still editable without a gym", r.kit);
+ck("and the kit is still editable without a gym", r.kit,
+   r.pl + " plate chips, " + r.db + " dumbbell steps");
 
 console.log("\n6. UNCROWDED, AS THE RULE ASKS");
 r = await newP.evaluate(()=>{
@@ -157,7 +165,11 @@ r = await newP.evaluate(()=>{
             .filter(el=> el.getBoundingClientRect().height < 44).length};
 });
 ck("exactly one hero", r.heroes === 1, r.heroes);
-ck("the location switch is behind More", r.more === 1, r.more);
+/* TWO FOLDS NOW, AND BOTH EARN IT. The location switch is one; "your usual kit -- what
+   a gym falls back to" is the other, which exists because the kit section above it is
+   about one named gym and the global list is what a gym with no list of its own
+   inherits. Promoting either would put a rarely-touched thing above the plates. */
+ck("the location switch and the fallback kit are both behind More", r.more === 2, r.more);
 ck("CONTROL: the old step chooser's styling is gone", r.oldSeg === 0, r.oldSeg);
 ck("every library control clears 44px", r.small === 0, r.small + " under");
 

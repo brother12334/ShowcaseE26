@@ -131,3 +131,22 @@ on the screen; live share links are the case it was written for.
 
 The six action screens — `acct`, `data`, `patch`, `storage`, `help`, `legal` — in their
 single pass.
+
+
+## An amendment to the spine: `where` has two folds (2026.11.17.57)
+
+The table above gives `where` one `MORE`. It has two, and both earn it.
+
+Item 26 made the load engine read the kit of the gym you are standing in, which turned the
+kit section on this screen from a global editor into a per-gym one — headed with the gym's
+name, with every gym a tap away. The general list did not stop being used: it is what a
+gym with no list of its own inherits. So it stays editable, folded, and labelled as the
+fallback rather than as "your kit".
+
+Promoting either fold would put a rarely-touched thing above the plates. Nesting one
+inside the other would hide a control two taps deep. Two folds is the honest shape for a
+screen that has one thing you edit often and two you almost never do.
+
+The per-gym equipment **sheet** is gone with the same change: it edited the same seven
+numbers from a second place, which is exactly the drift this library exists to end. The
+equipment button on a gym row selects that gym in the section instead.

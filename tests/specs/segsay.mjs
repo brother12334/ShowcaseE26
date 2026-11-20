@@ -76,7 +76,22 @@ const found = await p.evaluate(pages=>{
          to START with digits either way, so "Always" and "Automatic" are caught exactly as
          before; the teeth below prove it. */
       const words = labels.filter(l=> !/^[\d.,]+\s*\w{0,6}$/.test(l) && !/^other$/i.test(l));
-      if(btns.length >= 3 && words.length >= 3){
+      /* AND A PICKER IS NOT A SETTING.
+
+         The rule exists because you cannot see what you are not standing on: "Automatic"
+         says nothing about what "Ask me" would do. A control that chooses WHICH THING
+         the rest of the screen is about is not that -- "Lotus Gym" says exactly what
+         picking it does, and the names are the user's own words, so no description could
+         be written for them in advance.
+
+         Exempted by the control's own attribute rather than by its labels, because a gym
+         can be called anything at all and a pattern over names would exempt whatever
+         happened to look like one. Each entry has to earn its place here by being a
+         selector; the moment one of these also sets something, it comes off the list. */
+      const PICKERS = ["data-gympick"];
+      const isPicker = PICKERS.some(a=> seg.querySelector("[" + a + "]"));
+      if(isPicker){ /* nothing to describe */ }
+      else if(btns.length >= 3 && words.length >= 3){
         if(described !== btns.length) out.threes.push(row);
       }
       else if(btns.length === 2){

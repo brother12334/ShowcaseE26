@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.56";
+const APP_VERSION = "2026.11.17.57";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -34804,9 +34804,16 @@ const DB_STEPS    = {lb: [2.5, 5, 10],       kg: [1, 2, 2.5, 5]};
 const STACK_STEPS = {lb: [2.5, 5, 10, 15],   kg: [1.25, 2.5, 5, 7.5]};
 let STEP_OTHER = {plateStep: false, dbStep: false, stackStep: false};
 const stepNum = v=> String(Math.round(v * 100) / 100);
-function stepChoiceHTML(key, attr, opts, cur){
+/* SCOPED, because "Where you train" now draws this chooser twice: once for the gym you
+   have selected and once for the usual kit it falls back to. Unscoped, the two shared
+   one STEP_OTHER flag and emitted the same element id, so opening "Other" on one opened
+   it on both and the typed field was ambiguous. `scope` is "" for the global kit and
+   "gym" for the selected gym\u2019s. */
+function stepChoiceHTML(key, attr, opts, cur, scope){
+  const sc = scope || "";
+  const skey = sc + key;
   const inList = opts.some(v=> v === cur);
-  const other = STEP_OTHER[key] || (cur != null && !inList);
+  const other = STEP_OTHER[skey] || (cur != null && !inList);
   /* THE LIBRARY'S PILL, not the old .seg. These three sit on "Where you train" directly
      under the plate picker, which uses the new copper selected-state, and a screen that
      shows two different ways of looking selected is the drift the library exists to stop.
@@ -34818,167 +34825,202 @@ function stepChoiceHTML(key, attr, opts, cur){
       key === "plateStep" ? "Smallest plate, one side"
       : key === "stackStep" ? "What one pin moves the stack"
       : "Gap between dumbbells"}</label>
-      <input id="pref${key === "plateStep" ? "PlateStep" : key === "stackStep" ? "StackStep" : "DbStep"}" inputmode="decimal"
+      <input id="${sc ? "gym" : "pref"}${key === "plateStep" ? "PlateStep" : key === "stackStep" ? "StackStep" : "DbStep"}" inputmode="decimal"
         value="${esc(cur == null ? "" : cur)}" placeholder="in ${unitWord()}"></div>` : "");
 }
-/* ONE GYM'S KIT, EDITED WHERE THE GYM LIVES.
-
-   The bar and the carriage already travelled with the building — set them on the workout
-   screen and rememberGymGear() files them under wherever you were. The rack and the plate
-   tree could not be set at all: they were one global figure for every room you train in,
-   which is wrong the moment you use two. A 2.5 lb jump exists in one gym and not the
-   other; a rack stops at 50 here and 120 there.
-
-   Saving writes straight onto the gym AND, if that is where you are right now, into the
-   live preferences — otherwise the numbers would be correct in Settings and stale in the
-   session you are in the middle of. Everything is optional: blank means "my usual", and
-   applyGymGear() puts the usual back on the way in. */
 const PLATE_PICK = {lb: [45, 35, 25, 10, 5, 2.5, 1.25], kg: [25, 20, 15, 10, 5, 2.5, 1.25]};
-let GYM_KIT = null;                      // {id, plates:[...]} while the sheet is open
-function openGymKit(id){
-  const g = gymById(id);
-  if(!g) return;
-  const kg = inKg(), p = trainPrefs();
-  if(!GYM_KIT || GYM_KIT.id !== id){
-    GYM_KIT = {id, plates: Array.isArray(g.plates) ? g.plates.slice() : null};
-  }
-  const num = (v, ph)=> `value="${esc(v == null ? "" : v)}" placeholder="${esc(ph)}"`;
-  const usual = v => v == null ? "your usual" : fmtLoad(v);
-  const chosen = GYM_KIT.plates;
-  const h = `<h3>Kit at ${esc(g.name)}</h3>
-    <div class="sub" style="margin:-4px 0 14px;text-transform:none;letter-spacing:0">Only what is
-      different about this room. Leave anything blank and Element 26 uses your usual setting, and puts
-      it back when you train somewhere else.</div>
+/* THE PER-GYM KIT SHEET IS GONE, AND THAT IS THE POINT.
 
-    <div class="rev-head">Dumbbells</div>
-    <div class="field"><label>Gap from one to the next</label>
-      <input id="gkDbStep" inputmode="decimal" ${num(g.dbStep, usual(p.dbStep))}></div>
-    <div class="field" style="margin-top:9px"><label>Heaviest on the rack</label>
-      <input id="gkDbMax" inputmode="decimal" ${num(g.dbMax, usual(p.dbMax))}></div>
-    <div class="set-says">A rack that ends at ${esc(fmtLoad(g.dbMax != null ? g.dbMax : (p.dbMax != null ? p.dbMax : (kg ? 40 : 100))))}
-      makes every suggestion past it a weight that is not in the building. Told, Element 26 stops there.</div>
+   It was a modal that edited one gym\u2019s seven numbers, sitting beside an inline section
+   that edited the global seven and looked like it edited the gym. Two editors for one
+   thing, which is the drift the shared control library exists to end, and the reason the
+   inline picker could appear to work while changing nothing the engine read.
 
-    <div class="rev-head" style="margin-top:16px">Cable stacks</div>
-    <div class="field"><label>Gap from one pin to the next</label>
-      <input id="gkStackStep" inputmode="decimal" ${num(g.stackStep, usual(p.stackStep))}></div>
-    <div class="set-says">A stack with 2.5 ${esc(unitWord())} add-ons and one without are different
-      rooms. Told, Element 26 stops calling the loads you actually used impossible here.</div>
-
-    <div class="rev-head" style="margin-top:16px">Plates</div>
-    <div class="field"><label>Smallest plate, one side</label>
-      <input id="gkPlStep" inputmode="decimal" ${num(g.plateStep, usual(p.plateStep))}></div>
-    <div class="k-lab" style="margin-top:12px">Which sizes this gym has</div>
-    <div class="gk-plates">${PLATE_PICK[kg ? "kg" : "lb"].map(v=>
-      `<button type="button" class="gk-pl${chosen && chosen.indexOf(v) > -1 ? " on" : ""}"
-        data-gkpl="${v}">${stepNum(v)}</button>`).join("")}</div>
-    <div class="set-says">${chosen && chosen.length
-      ? "The plate line will use exactly these."
-      : "None picked, so it assumes the usual set down to your smallest plate \u2014 which is right in most gyms."}</div>
-
-    <div class="btn-row" style="margin-top:18px">
-      <button class="btn small" id="gkSave" style="flex:1">Save</button>
-    </div>
-    <div class="btn-row" style="margin-top:8px">
-      <button class="btn ghost small" id="gkClear" style="flex:1">Use my usual for everything here</button>
-    </div>`;
-  showModal(h);
-  MODAL_REOPEN = ()=> openGymKit(id);
-  const m = $("#modal");
-  m.querySelectorAll("[data-gkpl]").forEach(b=> b.onclick = ()=>{
-    const v = parseFloat(b.dataset.gkpl);
-    const list = Array.isArray(GYM_KIT.plates) ? GYM_KIT.plates.slice() : [];
-    const at = list.indexOf(v);
-    if(at > -1) list.splice(at, 1); else list.push(v);
-    GYM_KIT.plates = list.length ? list.sort((a,b)=> b - a) : null;
-    openGymKit(id);
-  });
-  const readNum = sel =>{
-    const el = m.querySelector(sel);
-    const raw = el ? String(el.value).trim() : "";
-    if(!raw) return null;
-    const v = parseFloat(raw.replace(",", "."));
-    return isFinite(v) && v > 0 ? v : null;
-  };
-  const sv = m.querySelector("#gkSave");
-  if(sv) sv.onclick = ()=>{
-    g.dbStep = readNum("#gkDbStep");
-    g.dbMax = readNum("#gkDbMax");
-    g.plateStep = readNum("#gkPlStep");
-    g.stackStep = readNum("#gkStackStep");
-    g.plates = GYM_KIT.plates ? GYM_KIT.plates.slice() : null;
-    /* If this is the gym you are standing in, the session has to agree with it now. */
-    if(S.active && S.active.gymId === g.id) applyGymGear(g);
-    GYM_KIT = null;
-    save(); queueSync(); hideModal(); render();
-    toast("Kit saved for " + g.name, "good");
-  };
-  const cl = m.querySelector("#gkClear");
-  if(cl) cl.onclick = ()=>{
-    ["dbStep","dbMax","plateStep","stackStep","plates"].forEach(k=> delete g[k]);
-    GYM_KIT = null;
-    save(); queueSync(); hideModal(); render();
-    toast(g.name + " uses your usual kit");
-  };
+   The inline section is about a named gym now, so the sheet had nothing left to do. The
+   equipment button on a gym row selects that gym in the section instead. GYM_KIT, the
+   sheet\u2019s draft-plate state, went with it: the picker writes straight through, with an
+   Undo on the toast like every other control in Settings. */
+/* WHICH GYM THE KIT SECTION IS ABOUT. Defaults to the room you are standing in, then the
+   home gym, then the first one on file. */
+let GYM_SEL = null;
+function gymSelId(){
+  const gs = gymList();
+  if(GYM_SEL && gs.some(g=> g.id === GYM_SEL)) return GYM_SEL;
+  const live = S.active && S.active.gymId;
+  if(live && gs.some(g=> g.id === live)) return live;
+  const home = homeGym();
+  if(home) return home.id;
+  return gs.length ? gs[0].id : null;
 }
-/* YOUR USUAL KIT \u2014 the top of "Where you train", above the rooms that differ from it.
-
-   These are answers about a building: the smallest plate on the tree, the gap between
-   dumbbells, what the carriage weighs. They sat under "In the gym" as a single global
-   figure while each saved gym could override them, which meant the same question was
-   asked on two screens and only one of them said which gym it meant. They live here now,
-   where the exceptions live, and the sentence under the heading says plainly that this is
-   the fallback anything left blank on a gym comes back to. */
+/* "Inherited" is said in the words of where it actually comes from, which is NOT always
+   the home gym. For a tagged session the chain is this gym, then your usual kit; home
+   only stands in when there is no session at all. Saying "from home" on a gym that is
+   not home would be a plausible-sounding lie. */
+function gkInherit(val, usual, unit){
+  if(val != null) return {own: true, shown: val,
+    note: "Set for this gym."};
+  return {own: false, shown: usual,
+    note: usual == null || usual === "" || !(usual > 0)
+      ? "Not set here or in your usual kit."
+      : "Inherited from your usual kit (" + (unit ? fmtLoad(usual) : String(usual))
+        + "). Change it here and this gym keeps its own."};
+}
 function gymGearHTML(){
   const p = trainPrefs();
   const kg = inKg();
-  const pl = p.plateStep, db = p.dbStep;
-  const base = kg ? 10 : 30;
-  /* THE PLATES ARE THE QUESTION. THE JUMP IS THE ANSWER, AND IS NOT EDITABLE.
+  const gs = gymList();
+  const g = gymById(gymSelId());
 
-     This used to be a chip row for "smallest plate" whose value beat the plate list and
-     had its own editor, while the global plate list had none — so the screen could say
-     "Not set, so it suggests exact numbers your rack can't make" while the app was in
-     fact rounding perfectly well off plates ticked elsewhere. That sentence was simply
-     untrue for anybody who had named their plates.
+  /* THE PLATE PICKER USED TO EDIT THE GLOBAL LIST AND LOOK LIKE IT EDITED THIS GYM\u2019S.
 
-     The old chip row is kept, but only for somebody with no plates named at all, whose
-     stored step is the only thing standing between them and no rounding. */
+     Item 26 taught the engine to read the gym you are standing in, and a gym that has
+     named its own plates is answered from that list. The picker on this screen went on
+     writing the GLOBAL list, so on a profile where every gym has named its own \u2014 which
+     is the normal case once anybody has used the per-gym editor \u2014 un-ticking a plate
+     here moved nothing at all. A control that appears to work and does nothing is worse
+     than no control.
+
+     So the kit section is about ONE GYM, named in its heading, and the global list is
+     underneath as what a gym falls back to, which is the only thing it still is. */
+  if(!gs.length){
+    /* Nothing to be specific about yet: the usual kit IS the kit. */
+    return sdSec("Your kit")
+      + sdSays("No gyms saved yet, so this is what every suggestion is worked out from. "
+          + "Add a gym and anything different about it overrides these.")
+      + gymUsualKitHTML(p, kg, true);
+  }
+
+  const plates = Array.isArray(g && g.plates) && g.plates.length ? g.plates.slice() : null;
+  const usualPlates = platesOwned(p);
+  const shownPlates = plates || usualPlates;
+  const jump = g ? smallestPlate({gymId: g.id}) : smallestPlate(null);
+
+  let h = sdSec("Kit at " + (g ? g.name : "this gym"));
+  if(gs.length > 1){
+    /* Not the tall form: these are names, not options needing a sentence each, and three
+       full-width rows pushed the plates themselves below the fold. */
+    h += sdSeg(gs.map(x=> ({v: x.id, t: x.name})), "data-gympick", g ? g.id : "");
+  }
+  h += sdSays(plates
+    ? "What this room has. Element 26 only suggests a weight you could load here."
+    : "This gym has not been given its own kit, so it uses your usual. Change anything "
+      + "below and <b>" + esc(g ? g.name : "it") + "</b> keeps its own from then on.");
+
+  h += sdGroup(
+    sdItem("Plates at " + (g ? g.name : "this gym"),
+      plates ? "" : "<b>Inherited from your usual kit.</b> Tick or un-tick one and this "
+                  + "gym gets its own list.",
+      `<div class="gk-plates">${PLATE_PICK[kg ? "kg" : "lb"].map(v=>
+        `<button type="button" class="gk-pl${shownPlates.indexOf(v) > -1 ? " on" : ""}${
+          plates ? "" : " is-inherited"}"
+          data-gympl="${v}" aria-pressed="${shownPlates.indexOf(v) > -1}">${stepNum(v)}</button>`).join("")}</div>`,
+      jump > 0
+        ? plateJumpSay(g) + " One on each end, and it will never suggest half of that."
+        : "Nothing ticked here or in your usual kit, so a suggested weight can land on a "
+          + "number this rack cannot make.")
+    + (shownPlates.length ? "" : sdItem("Smallest plate, one side",
+        "Used while no sizes are ticked.",
+        stepChoiceHTML("plateStep", "data-gymplst", PLATE_STEPS[kg ? "kg" : "lb"],
+          g && g.plateStep != null ? g.plateStep : p.plateStep, "gym")))
+    + gkNumItem("Gap from one dumbbell to the next", g, "dbStep", p.dbStep,
+        "data-gymdb", DB_STEPS[kg ? "kg" : "lb"], kg)
+    + gkNumItem("What a cable or machine stack moves in", g, "stackStep", p.stackStep,
+        "data-gymstk", STACK_STEPS[kg ? "kg" : "lb"], kg));
+
+  h += sdGroup(
+    gkFieldItem("Heaviest dumbbell on the rack", g, "dbMax", p.dbMax,
+      "gymDbMax", "A rack that ends there makes every suggestion past it a weight that is "
+      + "not in the building. Told, Element 26 stops there.")
+    + gkFieldItem("What the empty Smith carriage weighs", g, "smith", p.smithWeight,
+      "gymSmithW", "They run from about " + (kg ? "3" : "6") + " to " + smithBarDefault()
+      + "+ " + unitWord() + " depending on the machine, and every warm-up and comparison "
+      + "comes off it.")
+    + gkFieldItem("What a straight barbell weighs here", g, "bar", p.barWeight,
+      "gymBarW", "Only used where you write the bar into the number."));
+
+  if(g) h += `<div class="btn-row" style="margin-top:10px">
+      <button class="btn ghost small" data-gymkitclear="${esc(g.id)}" style="flex:1"
+        ${gymHasOwnKit(g) ? "" : "disabled"}>Use my usual kit at ${esc(g.name)}</button>
+    </div>`;
+
+  /* THE GENERAL KIT, WHICH IS STILL READ \u2014 by any gym that has not named its own, and
+     by anything asked with no gym at all. So it stays editable, folded away, and
+     labelled as the fallback rather than as "your kit". */
+  h += sdMore("Your usual kit \u2014 what a gym falls back to",
+    gymUsualKitHTML(p, kg, false));
+  return h;
+}
+function gymHasOwnKit(g){
+  return ["dbStep","dbMax","plateStep","stackStep","plates","bar","smith"]
+    .some(k=> g && g[k] != null);
+}
+/* A step chooser for one gym, showing the inherited value until this gym has its own. */
+function gkNumItem(label, g, key, usual, attr, opts, kg){
+  const own = g && g[key] != null ? g[key] : null;
+  const inh = gkInherit(own, usual, true);
+  return sdItem(label,
+    own != null ? "" : "<b>" + esc(inh.note) + "</b>",
+    stepChoiceHTML(key, attr, opts, inh.shown, "gym"),
+    own != null
+      ? "This gym moves in " + fmtLoad(own) + " steps."
+      : (inh.shown > 0 ? "So " + fmtLoad(inh.shown) + " steps here, from your usual kit."
+                       : "Not set, so nothing rounds these here."));
+}
+/* A typed figure for one gym, with the inherited one as its placeholder. */
+function gkFieldItem(label, g, key, usual, id, help){
+  const own = g && g[key] != null ? g[key] : null;
+  const ph = usual == null ? "not set" : String(usual);
+  return sdItem(label, help,
+    `<div class="field" style="margin:0"><input id="${id}" inputmode="decimal"
+      value="${esc(own == null ? "" : own)}"
+      placeholder="${esc(own == null && usual != null ? ph + " \u2014 your usual" : ph)}"></div>`,
+    own != null
+      ? "Set for this gym."
+      : (usual != null
+          ? "Inherited from your usual kit. Type one here and this gym keeps its own."
+          : "Not set here or in your usual kit."));
+}
+/* The global kit, which is what every gym inherits from. */
+function gymUsualKitHTML(p, kg, bare){
   const owned = platesOwned(p);
-  const jump = smallestPlate();
-  return setBlock("The plates you have, each side",
-      "A bar takes one on each end, so these decide every weight Element 26 can suggest.",
+  return sdGroup(
+    sdItem("The plates you have, each side",
+      (bare ? "" : "What a gym with no plate list of its own uses. ")
+      + "A bar takes one on each end, so these decide every weight Element 26 can suggest.",
       `<div class="gk-plates">${PLATE_PICK[kg ? "kg" : "lb"].map(v=>
         `<button type="button" class="gk-pl${owned.indexOf(v) > -1 ? " on" : ""}"
           data-prefpl="${v}" aria-pressed="${owned.indexOf(v) > -1}">${stepNum(v)}</button>`).join("")}</div>`
       + (owned.length ? "" :
-        `<div class="set-help" style="margin:12px 0 0">Nothing ticked. Until you do, Element 26
+        `<div class="sd-sub" style="margin-top:10px">Nothing ticked. Until you do, Element 26
           falls back to the smallest plate you told it about once:</div>`
-        + stepChoiceHTML("plateStep", "data-plstep", PLATE_STEPS[kg ? "kg" : "lb"], pl))
-      + `<div class="set-says">${jump > 0
-        ? plateJumpSay() + " One on each end, and it will never suggest half of that."
-        : "Nothing ticked and no step remembered, so a suggested weight can land on a number your rack cannot make."}</div>`)
-    + setBlock("The gap from one dumbbell to the next on the rack", "",
-      stepChoiceHTML("dbStep", "data-dbstep", DB_STEPS[kg ? "kg" : "lb"], db) +
-      `<div class="set-says">${db > 0
-        ? "So " + stepNum(base) + ", " + stepNum(base + db) + ", " + fmtLoad(base + db*2) + " \u2014 and nothing in between."
-        : "Not set, so it can suggest a dumbbell that isn\u2019t on your rack."}</div>`)
-    /* THE QUESTION NOBODY HAD BEEN ASKED, and the one that produced "drop to 29.9 lb" on
-       a cable. Every other kind of gear had a step and these did not, so nothing rounded
-       them at all. */
-    + setBlock("What a cable or machine stack moves in",
-      "One pin on the stack. It is what keeps a suggested load to a weight the pin can actually sit at.",
-      stepChoiceHTML("stackStep", "data-stkstep", STACK_STEPS[kg ? "kg" : "lb"], p.stackStep) +
-      `<div class="set-says">${p.stackStep > 0
-        ? "So a cable or a machine is suggested in <b>" + fmtLoad(p.stackStep) + "</b> steps, and never between two pins."
-        : "Not set, so a cable can be suggested a weight no stack in the building can be set to."}</div>`)
-    + setBlock("What the empty Smith machine carriage weighs",
-      "They run from about " + (kg ? "3" : "6") + " to " + smithBarDefault() + "+ " + unitWord() +
-      " depending on the machine, and every warm-up and comparison comes off it.",
-      `<div class="field" style="margin:0"><input id="prefSmithW" inputmode="decimal"
-        value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
-        placeholder="${smithBarDefault()} if you leave it blank"></div>
-      <div class="set-says">The bar and the carriage are also editable mid-session \u2014 tap the name of the
-        lift you\u2019re on \u2014 for the day you train somewhere the kit is a different weight.</div>`);
+        + stepChoiceHTML("plateStep", "data-plstep", PLATE_STEPS[kg ? "kg" : "lb"], p.plateStep)),
+      owned.length
+        ? "A bar takes one on each end, so the smallest change is two of the smallest: "
+          + "<b>" + fmtLoad(Math.min.apply(null, owned) * 2) + "</b>."
+        : "Nothing ticked and no step remembered, so a suggested weight can land on a "
+          + "number your rack cannot make.")
+    + sdItem("The gap from one dumbbell to the next on the rack", "",
+        stepChoiceHTML("dbStep", "data-dbstep", DB_STEPS[kg ? "kg" : "lb"], p.dbStep),
+        p.dbStep > 0
+          ? "So " + stepNum(kg ? 10 : 30) + ", " + stepNum((kg ? 10 : 30) + p.dbStep)
+            + ", " + fmtLoad((kg ? 10 : 30) + p.dbStep * 2)
+            + " \u2014 and nothing in between."
+          : "Not set, so it can suggest a dumbbell that isn\u2019t on your rack.")
+    + sdItem("What a cable or machine stack moves in",
+        "One pin on the stack. It is what keeps a suggested load to a weight the pin can "
+        + "actually sit at.",
+        stepChoiceHTML("stackStep", "data-stkstep", STACK_STEPS[kg ? "kg" : "lb"], p.stackStep),
+        p.stackStep > 0
+          ? "So a cable or a machine is suggested in <b>" + fmtLoad(p.stackStep)
+            + "</b> steps, and never between two pins."
+          : "Not set, so a cable can be suggested a weight no stack in the building can "
+            + "be set to.")
+    + sdItem("What the empty Smith machine carriage weighs", "",
+        `<div class="field" style="margin:0"><input id="prefSmithW" inputmode="decimal"
+          value="${esc(p.smithWeight == null ? "" : p.smithWeight)}"
+          placeholder="${smithBarDefault()} if you leave it blank"></div>`,
+        "The bar and the carriage are also editable mid-session \u2014 tap the name of the "
+        + "lift you\u2019re on \u2014 for the day you train somewhere the kit is a different weight."));
 }
 function openSplitEditor(){
   const cur = S.customSplit ? "custom" : (S.splitId || DEFAULT_SPLIT);
@@ -47076,12 +47118,11 @@ function gymsCardHTML(){
      EVERY DATA ATTRIBUTE AND EVERY BUTTON ID IS THE ONE THAT WAS HERE BEFORE:
      data-gymhome, data-gymkit, data-gymren, data-gymdel, gymAddHere, gymGeoOn, gymGeoOff,
      and the whole of gymGearHTML with its plate picker. Nothing in bindPrefs changed. */
-  const kitSec = sdSec("Your usual kit")
-    + sdSays("What the room you normally lift in has. Element 26 only ever suggests a "
-        + "weight you could actually load with it"
-        + (gs.length ? ", and any gym below that is different overrides it \u2014 tap that "
-                     + "gym's equipment button." : "."))
-    + gymGearHTML();
+  /* gymGearHTML owns its own heading now, because the heading has to name the gym it is
+     about. It used to be headed "Your usual kit" here while the controls under it edited
+     the global profile -- which was true then and became a lie the moment the engine
+     started reading each gym's own kit. */
+  const kitSec = gymGearHTML();
 
   /* NO DEAD END. This used to return "" when the device had no geolocation and no gym had
      ever been saved, and the settings row opened onto a card with nothing in it. */
@@ -50855,8 +50896,114 @@ function bind(){
     render();
     toast(was ? g.name + " is no longer your home gym" : g.name + " is your home gym", "good");
   });
+  /* ONE EDITOR FOR A GYM\u2019S KIT, AND IT IS THE SECTION ON THIS SCREEN.
+
+     There used to be two: an inline section that edited the GLOBAL kit while looking
+     like it edited a gym, and a modal sheet per gym. The inline one is now about a named
+     gym, so the sheet is the duplicate \u2014 the same drift the shared control library
+     exists to end. The equipment button selects that gym here instead of opening a
+     second way to change the same seven numbers. */
   document.querySelectorAll("#app [data-gymkit]").forEach(b=> b.onclick = ()=>{
-    GYM_KIT = null; openGymKit(b.dataset.gymkit);
+    GYM_SEL = b.dataset.gymkit;
+    render();
+    const sec = document.querySelector('#app [data-gympick], #app [data-gympl]');
+    if(sec && sec.scrollIntoView) sec.scrollIntoView({block: "center"});
+  });
+  document.querySelectorAll("#app [data-gympick]").forEach(b=> b.onclick = ()=>{
+    GYM_SEL = b.dataset.gympick;
+    render();
+  });
+  /* A GYM GETS ITS OWN LIST THE MOMENT YOU TOUCH THE PICKER. Until then it is showing
+     the inherited one, so the first tap has to start from what is on screen rather than
+     from an empty list \u2014 otherwise un-ticking one plate would silently drop the other
+     six as well. */
+  document.querySelectorAll("#app [data-gympl]").forEach(b=> b.onclick = ()=>{
+    const g = gymById(gymSelId());
+    if(!g) return;
+    const v = parseFloat(b.dataset.gympl);
+    const had = Array.isArray(g.plates) && g.plates.length
+      ? g.plates.slice() : platesOwned(trainPrefs()).slice();
+    const was = Array.isArray(g.plates) && g.plates.length ? g.plates.slice() : null;
+    const at = had.indexOf(v);
+    if(at > -1) had.splice(at, 1); else had.push(v);
+    g.plates = had.length ? had.sort((a, c)=> c - a) : [];
+    if(S.active && S.active.gymId === g.id) applyGymGear(g);
+    save(); queueSync(); render();
+    toast((at > -1 ? "No " + stepNum(v) + "s at " : stepNum(v) + "s at ") + g.name, null,
+      {undo: ()=>{
+        g.plates = was;
+        if(S.active && S.active.gymId === g.id) applyGymGear(g);
+        save(); queueSync(); render(); toast("Put back", "info");
+      }});
+  });
+  /* The per-gym step choosers. Same shape as the global ones below them, writing to the
+     gym instead of to the profile. */
+  const gymStep = (attr, key, word)=>{
+    document.querySelectorAll("#app [" + attr + "]").forEach(b=> b.onclick = ()=>{
+      const g = gymById(gymSelId());
+      if(!g) return;
+      const raw = b.getAttribute(attr);
+      if(raw === "other"){ STEP_OTHER["gym" + key] = true; render(); return; }
+      const was = g[key] === undefined ? undefined : g[key];
+      g[key] = parseFloat(raw);
+      STEP_OTHER["gym" + key] = false;
+      if(S.active && S.active.gymId === g.id) applyGymGear(g);
+      save(); queueSync(); render();
+      toast(word + " at " + g.name + ": " + fmtLoad(g[key]), null,
+        {undo: ()=>{
+          if(was === undefined) delete g[key]; else g[key] = was;
+          if(S.active && S.active.gymId === g.id) applyGymGear(g);
+          save(); queueSync(); render(); toast("Put back", "info");
+        }});
+    });
+  };
+  gymStep("data-gymdb", "dbStep", "Dumbbell gap");
+  gymStep("data-gymstk", "stackStep", "Stack step");
+  gymStep("data-gymplst", "plateStep", "Smallest plate");
+  /* The typed figures. Blank clears this gym's own and puts it back on your usual. */
+  const gymField = (id, key, word)=>{
+    const el = $("#" + id);
+    if(!el) return;
+    el.onchange = ()=>{
+      const g = gymById(gymSelId());
+      if(!g) return;
+      const raw = String(el.value).trim();
+      const v = parseFloat(raw.replace(",", "."));
+      const was = g[key] === undefined ? undefined : g[key];
+      if(raw === "" || !isFinite(v) || v <= 0) delete g[key];
+      else g[key] = Math.min(400, Math.round(v * 100) / 100);
+      if(S.active && S.active.gymId === g.id) applyGymGear(g);
+      save(); queueSync(); render();
+      toast(g[key] == null ? word + " at " + g.name + " back to your usual"
+                           : word + " at " + g.name + ": " + fmtLoad(g[key]), null,
+        {undo: ()=>{
+          if(was === undefined) delete g[key]; else g[key] = was;
+          if(S.active && S.active.gymId === g.id) applyGymGear(g);
+          save(); queueSync(); render(); toast("Put back", "info");
+        }});
+    };
+  };
+  /* And the typed "Other" that each per-gym chooser opens. */
+  gymField("gymDbStep", "dbStep", "Dumbbell gap");
+  gymField("gymStackStep", "stackStep", "Stack step");
+  gymField("gymPlateStep", "plateStep", "Smallest plate");
+  gymField("gymDbMax", "dbMax", "Heaviest dumbbell");
+  gymField("gymSmithW", "smith", "Smith carriage");
+  gymField("gymBarW", "bar", "Bar");
+  document.querySelectorAll("#app [data-gymkitclear]").forEach(b=> b.onclick = ()=>{
+    const g = gymById(b.dataset.gymkitclear);
+    if(!g) return;
+    const KEYS = ["dbStep","dbMax","plateStep","stackStep","plates","bar","smith"];
+    const was = {};
+    KEYS.forEach(k=>{ if(g[k] !== undefined) was[k] = g[k]; });
+    KEYS.forEach(k=> delete g[k]);
+    if(S.active && S.active.gymId === g.id) applyGymGear(g);
+    save(); queueSync(); render();
+    toast(g.name + " uses your usual kit", null, {undo: ()=>{
+      Object.keys(was).forEach(k=>{ g[k] = was[k]; });
+      if(S.active && S.active.gymId === g.id) applyGymGear(g);
+      save(); queueSync(); render(); toast("Put back", "info");
+    }});
   });
   document.querySelectorAll("#app [data-gymren]").forEach(b=> b.onclick = ()=>{
     const g = gymById(b.dataset.gymren);
@@ -63976,8 +64123,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.56";
+const NEWS_FOR = "2026.11.17.57";
 const NEWS = [
+  {k: "The plate picker edits the gym it names",
+   s: ["Last release taught the app to work a weight out from the kit in the room you "
+     + "are in. The picker on <b>Where you train</b> went on editing your general list, "
+     + "so on a profile where every gym has named its own plates \u2014 which is yours \u2014 "
+     + "un-ticking one there changed nothing at all. A control that looks like it works "
+     + "and does not is worse than no control.",
+     "That section is about one gym now, named in its heading, with every gym a tap "
+     + "away. A gym that has not been given its own kit shows what it inherits, says so, "
+     + "and keeps its own from the moment you change anything.",
+     "Your general kit is still there, folded away underneath and labelled as what a gym "
+     + "falls back to \u2014 which is the only thing it still is.",
+     "The separate equipment sheet is gone. It edited the same seven numbers from a "
+     + "second place; the button on a gym row now just selects that gym."]},
   {k: "Weights are worked out from the kit in the room you are in",
    s: ["Each gym can record its own plates, its own plate step and its own Smith "
      + "carriage, and <b>Where you train</b> has been showing those back to you. The code "
@@ -67266,8 +67426,10 @@ function plateDeriveCardHTML(){
     </div>
   </div>`;
 }
-function plateJumpSay(){
-  const st = smallestPlate();
+/* Asked of a gym where there is one, because this sentence sits under that gym's own
+   plate picker and quoting the global jump beside it would contradict the row above. */
+function plateJumpSay(g){
+  const st = smallestPlate(g ? {gymId: g.id} : undefined);
   if(!(st > 0)) return "";
   return "Smallest jump: <b>" + fmtLoad(st * 2) + "</b>, a pair of " + stepNum(st) + "s.";
 }

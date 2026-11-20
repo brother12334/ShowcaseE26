@@ -894,6 +894,35 @@ UI job, not done here.
   sweep against the previous build changes **only** Lotus and Uptown, and only on Smith
   work.
 
+## 26a. The plate picker edited the global list and looked like it edited a gym — FIXED (2026.11.17.57)
+
+Item 26 taught the engine to read the gym you are standing in. The picker on "Where you
+train" went on writing the GLOBAL list, so on a profile where every gym has named its own
+plates — the normal case once anybody has used the per-gym editor, and the case on the
+real export — un-ticking a plate there moved nothing the engine read.
+
+The kit section is now about one named gym, with a chooser above it. A gym with no kit of
+its own shows what it inherits, marked as inherited, and keeps its own from the first
+change. The general list is folded underneath, labelled as what a gym falls back to, which
+is the only thing it still is.
+
+**The per-gym sheet is gone.** It edited the same seven numbers from a second place. The
+equipment button on a gym row selects that gym in the section instead.
+
+Two things the guards caught that reading would not have:
+
+- `stepChoiceHTML` emits a fixed element id and keys its "Other" flag off the setting's
+  name. Drawn twice on one screen — once for the gym, once for the fallback — the two
+  collided. It takes a scope now.
+- Removing the sheet took `const PLATE_PICK` with it, because the comment block the
+  removal was anchored on sat above the constant rather than below it. The screen threw on
+  render. The lesson is to assert what must SURVIVE a deletion, not only what must go.
+
+**Wording note.** The inherited line says "from your usual kit", not "from home". For a
+tagged session the chain is this gym, then the global profile; home only stands in when
+there is no session at all. "Inherited from home" would be a plausible-sounding lie on any
+gym that is not home, and `gympick.mjs` §4 asserts the screen never says it.
+
 ## 26b. Past Smith sets at Lotus and Uptown — OPEN (Part 2)
 
 Scope on the real export: 2 sessions, one at each. Not automatic — confirmed per session,
