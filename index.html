@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.50";
+const APP_VERSION = "2026.11.17.51";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -34528,9 +34528,13 @@ const stepNum = v=> String(Math.round(v * 100) / 100);
 function stepChoiceHTML(key, attr, opts, cur){
   const inList = opts.some(v=> v === cur);
   const other = STEP_OTHER[key] || (cur != null && !inList);
-  return `<div class="seg step-seg">${opts.map(v=>
-      `<button class="${cur === v ? "on" : ""}" ${attr}="${v}">${stepNum(v)}</button>`).join("")
-    }<button class="${other ? "on" : ""}" ${attr}="other">Other</button></div>` +
+  /* THE LIBRARY'S PILL, not the old .seg. These three sit on "Where you train" directly
+     under the plate picker, which uses the new copper selected-state, and a screen that
+     shows two different ways of looking selected is the drift the library exists to stop.
+     The attributes and the Other field are untouched; only the clothes changed. */
+  return `<div class="sd-seg" role="group">${opts.map(v=>
+      `<button type="button" ${attr}="${v}" aria-pressed="${cur === v}">${stepNum(v)}</button>`).join("")
+    }<button type="button" ${attr}="other" aria-pressed="${!!other}">Other</button></div>` +
     (other ? `<div class="field" style="margin:8px 0 0"><label>${
       key === "plateStep" ? "Smallest plate, one side"
       : key === "stackStep" ? "What one pin moves the stack"
@@ -46779,36 +46783,47 @@ let SHOW_KEY = false;      // the recovery key is hidden until asked for, every 
    you can check. */
 function gymsCardHTML(){
   const gs = gymList();
-  const kit = `<div class="set-block" style="padding-bottom:2px">
-      <div class="set-name">Your usual kit</div>
-      <div class="set-help">What the room you normally lift in has. Element 26 only ever suggests a
-        weight you could actually load with it${gs.length
-          ? ", and any gym below that is different overrides it \u2014 tap that gym's equipment button."
-          : "."}</div>
-    </div>` + gymGearHTML();
-  /* NO DEAD END. This used to return "" when the device had no geolocation and no gym
-     had ever been saved, and the settings row opened onto a 78px card with nothing in
-     it — a whole entry in the list leading nowhere. The page now always says what the
-     feature is and either offers the switch or explains why there isn't one. */
+  /* CONVERTED TO THE SHARED LIBRARY (design/settings-reconcile.md, variation B).
+
+     The hero is how many rooms Element 26 knows, and its control is the list of them --
+     the count's control is the thing it counts. The kit follows, then the location switch
+     folds away, because recognising where you are is a convenience and the plates are the
+     part that changes what you are prescribed.
+
+     EVERY DATA ATTRIBUTE AND EVERY BUTTON ID IS THE ONE THAT WAS HERE BEFORE:
+     data-gymhome, data-gymkit, data-gymren, data-gymdel, gymAddHere, gymGeoOn, gymGeoOff,
+     and the whole of gymGearHTML with its plate picker. Nothing in bindPrefs changed. */
+  const kitSec = sdSec("Your usual kit")
+    + sdSays("What the room you normally lift in has. Element 26 only ever suggests a "
+        + "weight you could actually load with it"
+        + (gs.length ? ", and any gym below that is different overrides it \u2014 tap that "
+                     + "gym's equipment button." : "."))
+    + gymGearHTML();
+
+  /* NO DEAD END. This used to return "" when the device had no geolocation and no gym had
+     ever been saved, and the settings row opened onto a card with nothing in it. */
   if(!geoReady() && !gs.length){
-    return kit + `<div class="set-block">
-      <div class="set-name">Filing sessions by gym</div>
-      <div class="set-help">Element 26 can take one location reading when you tap Start and compare it
-        only with gyms you have saved. Train somewhere new and it asks, so the session is filed under the
-        right room instead of being compared against a bar that weighs something different.</div>
-      <div class="set-says">This device can't read a location, so there is nothing to switch on. Everything
-        else works exactly the same; sessions are simply filed with no gym on them.</div>
-    </div>`;
+    return sdHeroW("WHERE YOU TRAIN", "No gyms yet",
+        "Element 26 can file each session under the room it happened in, so a bar that "
+        + "weighs something different is never compared with yours.")
+      + sdSays("This device can\u2019t read a location, so there is nothing to switch on. "
+        + "Everything else works exactly the same; sessions are simply filed with no gym "
+        + "on them.")
+      + kitSec;
   }
+
   const on = S.geo === "on";
-  let h = kit + `<div class="set-block">
-      <div class="set-name">Filing sessions by gym</div>
-      <div class="set-help" style="margin-bottom:0">Element 26 takes one location reading when you tap Start, and
-      compares it only with the gyms below. Same place as usual and nothing happens \u2014 it just puts back the
-      bar and carriage weights you set there. Somewhere else and it asks, so that session is filed under the
-      right gym instead of being compared to a bar that weighs something different.
-      ${on ? "Nothing is sent anywhere; it lives in your log like everything else." : ""}</div>
-    </div>`;
+  const home = homeGym();
+  const usual = home || gs.slice().sort((x, y)=> (y.n || 0) - (x.n || 0))[0] || null;
+  let h = gs.length
+    ? sdHero("GYMS ELEMENT 26 KNOWS", String(gs.length),
+        gs.length === 1 ? "gym" : "gyms",
+        usual ? "Your usual is <b>" + esc(usual.name) + "</b>"
+                + (usual.n ? ", where " + usual.n + " of your sessions happened." : ".")
+              : "None of them is marked as your usual yet.")
+    : sdHeroW("WHERE YOU TRAIN", "No gyms yet",
+        "Add the room you lift in and Element 26 files each session under it.");
+
   if(gs.length){
     h += `<div class="gym-list">` + gs.map(g=>{
       const bits = [];
@@ -46848,21 +46863,26 @@ function gymsCardHTML(){
       : `No home gym set. Tap \u2606 on the one you train at most, and sessions logged
          before you set gyms up will be read as that gym rather than as nowhere.`}</div>`;
   }
-  h += `<div class="btn-row" style="margin-top:12px">`;
-  if(on){
-    h += `<button class="btn ghost small" id="gymAddHere" style="flex:1">Add where I am now</button>`;
-  } else {
-    h += `<button class="btn ghost small" id="gymGeoOn" style="flex:1">${
-      S.geo === "off" ? "Turn it back on" : "Set this up"}</button>`;
-  }
-  h += `</div>`;
-  if(on){
-    h += `<div class="btn-row"><button class="btn ghost small" id="gymGeoOff" style="flex:1">Stop using my location</button></div>`;
-  } else {
-    h += `<div class="sub" style="margin:8px 0 0;color:var(--faint);font-size:var(--fs-3)">${
-      S.geo === "off" ? "Off. No location is read, and sessions are filed with no gym on them."
-                      : "Not set up yet \u2014 it will offer when you start your next workout."}</div>`;
-  }
+  h += kitSec;
+
+  h += sdMore("Filing sessions by gym" + (on ? "" : " \u2014 not set up"), sdGroup(sdItem("", "",
+    `<div class="set-help" style="margin-bottom:0">Element 26 takes one location reading when
+      you tap Start, and compares it only with the gyms above. Same place as usual and
+      nothing happens \u2014 it just puts back the bar and carriage weights you set there.
+      Somewhere else and it asks, so that session is filed under the right gym instead of
+      being compared to a bar that weighs something different.
+      ${on ? "Nothing is sent anywhere; it lives in your log like everything else." : ""}</div>`
+    + `<div class="btn-row" style="margin-top:12px">`
+    + (on
+        ? `<button class="btn ghost small" id="gymAddHere" style="flex:1">Add where I am now</button>`
+        : `<button class="btn ghost small" id="gymGeoOn" style="flex:1">${
+            S.geo === "off" ? "Turn it back on" : "Set this up"}</button>`)
+    + `</div>`
+    + (on
+        ? `<div class="btn-row"><button class="btn ghost small" id="gymGeoOff" style="flex:1">Stop using my location</button></div>`
+        : `<div class="sub" style="margin:8px 0 0;color:var(--faint);font-size:var(--fs-3)">${
+            S.geo === "off" ? "Off. No location is read, and sessions are filed with no gym on them."
+                            : "Not set up yet \u2014 it will offer when you start your next workout."}</div>`))));
   return h;
 }
 /* Setup used to be two screens: a front page, and an "Advanced settings" page behind a
@@ -63540,8 +63560,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.50";
+const NEWS_FOR = "2026.11.17.51";
 const NEWS = [
+  {k: "Where you train, counted",
+   s: ["The screen opens with how many gyms Element 26 knows and which one is your "
+     + "usual, then the gyms themselves, then the kit. Recognising where you are folds "
+     + "under <b>More</b>, because it is a convenience \u2014 the plates are the part that "
+     + "decides what you get asked to lift.",
+     "The dumbbell, stack and plate choices now look the same as each other. They were "
+     + "two different styles of \u201cselected\u201d sitting one above the other on the same "
+     + "screen.",
+     "Every gym keeps its four buttons, the kit still writes exactly what it wrote "
+     + "before, and the screen still explains itself on a device that cannot read a "
+     + "location."]},
   {k: "The volume dial actually moves the numbers now",
    s: ["Moving the dial on Volume targets changed the setting, wrote it to your plan "
      + "history, and then visibly did nothing: every muscle kept the figures it was "

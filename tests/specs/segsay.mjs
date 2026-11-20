@@ -60,7 +60,18 @@ const found = await p.evaluate(pages=>{
       const sayTxt = say ? say.textContent : "";
       const labels = btns.map(x=> (x.querySelector('b') || x).textContent.trim());
       const row = {page: k, n: btns.length, described, labels};
-      if(btns.length >= 3){ if(described !== btns.length) out.threes.push(row); }
+      /* A NUMBER EXPLAINS ITSELF; A WORD USUALLY DOES NOT.
+
+         The rule exists because you cannot see what you are not standing on -- "Automatic"
+         tells you nothing about what "Ask me" would do. That reasoning does not reach a
+         list of VALUES: 2.5, 5, 10, 15 are the thing they describe, and the plate and
+         dumbbell steps are exactly that. Narrowed to word-labelled options rather than
+         relaxed for everything, and the says line beside these still has to carry the
+         consequence -- "So 30, 35, 40, and nothing in between" -- which section 3 checks. */
+      const words = labels.filter(l=> !/^[\d.,]+\s*\w{0,3}$/.test(l) && !/^other$/i.test(l));
+      if(btns.length >= 3 && words.length >= 3){
+        if(described !== btns.length) out.threes.push(row);
+      }
       else if(btns.length === 2){
         /* The other state has to be named where you can read it: in the options
            themselves, or in the says line beside them. */
@@ -104,6 +115,23 @@ console.log("\n2. THREE CHOICES MEANS THREE DESCRIPTIONS");
 ck("every option of a three-way says what it does",
    found.threes.length === 0,
    found.threes.map(r=> r.page + ": " + r.labels.join("/") + " (" + r.described + " of " + r.n + ")").join(" | "));
+
+/* AND THE RULE STILL HAS TEETH AFTER BEING NARROWED. Carving numbers out of a guard is
+   one edit away from carving everything out, so a word-labelled three-way with no
+   descriptions is built here and the same detector is required to catch it. */
+const teeth = await p.evaluate(()=>{
+  const box = document.createElement('div');
+  box.innerHTML = sdSeg([{v:"a",t:"Automatic"},{v:"b",t:"Ask me"},{v:"c",t:"I'll manage"}],
+                        "data-fake", "a");
+  const btns = [...box.querySelectorAll('button')];
+  const labels = btns.map(x=> (x.querySelector('b') || x).textContent.trim());
+  const described = btns.filter(x=> x.querySelector('span')).length;
+  const words = labels.filter(l=> !/^[\d.,]+\s*\w{0,3}$/.test(l) && !/^other$/i.test(l));
+  return {flagged: btns.length >= 3 && words.length >= 3 && described !== btns.length,
+          labels, words: words.length};
+});
+ck("CONTROL: a word-labelled three-way with no descriptions is still caught",
+   teeth.flagged === true, teeth.labels.join("/") + ", " + teeth.words + " word labels");
 
 console.log("\n3. A TWO-WAY NAMES THE STATE YOU ARE NOT IN");
 ck("every two-way is legible from where you stand",
