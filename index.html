@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.58";
+const APP_VERSION = "2026.11.17.59";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -64202,8 +64202,23 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.58";
+const NEWS_FOR = "2026.11.17.59";
 const NEWS = [
+  {k: "Nothing in your log was wrong \u2014 and one press could have made it so",
+   s: ["The plan was to go through past Smith sets logged at a gym whose carriage "
+     + "differs from your usual one, and offer to correct each. Measuring the log first "
+     + "showed there is nothing to correct.",
+     "You write loads as <b>bar + plates</b>, so the number you type is the whole lift "
+     + "and the app adds nothing to it. The carriage setting never entered a stored "
+     + "figure, and no entry in your log carries one. What the wrong carriage did affect "
+     + "\u2014 warm-ups, the plate line, what gets suggested next \u2014 is worked out fresh "
+     + "each time and was fixed in the last release.",
+     "<b>One press could still have caused the damage.</b> Switching to \u201cplates only\u201d "
+     + "takes a carriage off every Smith set you have logged. It was taking your usual "
+     + "one, so a set performed where the carriage is heavier would have had too little "
+     + "removed and the wrong figure recorded behind it. It now takes off the carriage "
+     + "of the gym each session was actually performed at.",
+     "Switching back still returns every figure exactly, as it always has."]},
   {k: "The last six Settings screens, and that is all fifteen",
    s: ["Your account, Your data, Plan patches, Storage, Help and Licensing are built "
      + "from the same set of controls as the other nine. Every one leads with the fact "
@@ -66681,16 +66696,30 @@ function barWeightFor(name, sess){
    wrong wants something different from somebody switching how they will log it from now
    on. And it is its own undo: switch back, convert again, and every figure returns,
    because adding and subtracting the same implement weight is reversible. */
-/* ALSO PINNED TO THE GLOBAL PROFILE \u2014 see logFixConvert for the reason. Switching the
-   convention you write loads in rewrites sets that are already in the log, which is Part
-   2\u2019s territory and not Part 1\u2019s. Reading each session\u2019s own gym here would be more
-   correct and would also change, silently and in bulk, numbers the person has not been
-   shown. */
+/* ITEM 26 PART 2: THIS READS EACH SESSION’S OWN GYM.
+
+   Part 1 pinned this to the global profile on the grounds that rewriting sets already in
+   the log was Part 2’s territory. Measuring the log for Part 2 showed that the pin was
+   itself the bug, and the only one left.
+
+   NOTHING IN THE LOG IS WRONG TODAY. Under "bar + plates" the number you type IS the
+   whole load, the app adds nothing to it, and barAddendFor() returns zero — so no entry
+   carries a barAdd stamp and no stored figure was ever touched by the carriage setting.
+
+   But switching to "plates only" subtracts a carriage from every Smith set and stamps
+   what it took off. Pinned to the global profile it would have taken 25 off a set
+   performed at a gym whose carriage is 35: writing 50 where the plates were 40, and
+   stamping the wrong figure behind it. One press would MANUFACTURE the exact
+   wrong-carriage data Part 2 was written to repair.
+
+   So the conversion reads the gym each session was performed at. The other direction is
+   unchanged and always was right: it adds back the stamp, which records what the lift
+   was actually done under rather than what any setting says now. */
 function barModeConvertPlan(to){
   const out = {sets: [], entries: [], plan: [], skipped: 0};
   (S.sessions || []).forEach(sess=> (sess.entries || []).forEach(en=>{
     if(!en || !en.name) return;
-    const imp = implementWeight(en.name, null);
+    const imp = implementWeight(en.name, sess);
     const stamped = Number(en.barAdd) || 0;
     const wasPlates = stamped > 0;
     // already written in the convention we are moving to
@@ -66719,7 +66748,9 @@ function barModeConvertPlan(to){
   DAYS.concat(["finisher"]).forEach(wid=> (S.program[wid] || []).forEach(e=>{
     [e, e && e.alt].forEach(t=>{
       if(!t || !t.name) return;
-      const imp = implementWeight(t.name, null);
+      /* A prescription is for wherever you next train, so it takes the kit in force —
+         the room you are in if a session is running, your home gym otherwise. */
+      const imp = implementWeight(t.name);
       const w = parseFloat(t.weight);
       if(!(imp > 0) || !isFinite(w) || w <= 0) return;
       const nw = w + (to === "total" ? imp : -imp);

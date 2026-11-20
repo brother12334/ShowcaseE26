@@ -923,13 +923,65 @@ tagged session the chain is this gym, then the global profile; home only stands 
 there is no session at all. "Inherited from home" would be a plausible-sounding lie on any
 gym that is not home, and `gympick.mjs` §4 asserts the screen never says it.
 
-## 26b. Past Smith sets at Lotus and Uptown — OPEN (Part 2)
+## 26b. Past Smith sets — NOTHING TO REPAIR, AND ONE PATH CLOSED (2026.11.17.59)
 
-Scope on the real export: 2 sessions, one at each. Not automatic — confirmed per session,
-showing date, gym, exercise, logged weight and what it would become, with Accept or Skip;
-undoable through the plan-patch mechanism; accepted changes logged to plan history with a
-reason; and stall rebuild, progression state, PRs and regrade rerun after any accepted
-change. A skipped session never comes up again unless that gym's carriage changes.
+Part 2 was going to walk the past Smith sets logged at a gym whose carriage differs from
+the one in force at the time, and offer to correct each: Accept or Skip per session,
+undoable, with the dependent state rebuilt after. Measuring the log before building it
+showed there is nothing to correct.
+
+### Why there is nothing
+
+`barMode` is **"bar + plates"**. Under it the number you type IS the whole load,
+`barAddendFor()` returns zero, and the app adds nothing to what you wrote. The stamp is
+only written when the addend is non-zero, so **no entry in the log carries a `barAdd`** —
+checked, all 74 sessions. No stored figure was ever touched by the carriage setting.
+
+What the wrong carriage did affect — warm-up rungs, the plate line, the impossible-load
+check, every future prescription — is computed live and was fixed in Part 1. `en.warm`
+stores only the *kind* of ramp ("full"/"light"), not weights, so nothing derived was
+frozen into the log either.
+
+### A number I got wrong, and the user acted on
+
+I reported the scope as "2 sessions (1 at Lotus, 1 at Uptown)". That was sessions **at**
+those gyms. Sessions **with Smith work** away from home is **one**: Lotus, 2026-10-14,
+Smith Machine Shoulder Press, 75/75/75. Uptown's single session is pulldowns, rows and
+curls — no Smith work at all.
+
+### The one path that could still have caused it, which Part 1 left open
+
+Switching to "plates only" subtracts a carriage from every Smith set and stamps what it
+took off. **Part 1 pinned that conversion to the global profile on purpose**, on the
+grounds that rewriting logged sets was Part 2's business. That pin was the bug: one press
+would have taken 25 off the Lotus set, writing **50 where the plates were 40** and
+stamping 25 behind it — manufacturing, in a single action, the exact wrong-carriage data
+the migration was meant to repair.
+
+`barModeConvertPlan` now reads the gym each session was performed at. The other direction
+is unchanged and always was right: it adds back the stamp, which records what the lift was
+actually done under rather than what any setting says now. Switching out and back still
+returns every figure exactly.
+
+`smithmode.mjs` holds all of it, including the controls that make the "nothing to repair"
+claim mean something: there IS a Smith set logged away from home, at a gym whose carriage
+differs, and its stored figure is untouched by either.
+
+### Not built, pending a decision
+
+The Accept/Skip migration itself. It would find nothing on this profile. It would only
+have something to find on a profile written in **"plates only"**, where `barAdd` is
+stamped per entry and could record a carriage that was wrong at the time. This one has
+never been in that mode.
+
+## 26c. Comments carry literal `\u2014` escape text — OPEN, cosmetic
+
+About 1013 occurrences of `\u2014` / `\u2019` across the file. Inside a string literal
+that is correct and produces the character; inside a `/* comment */` it is read by a
+person as gibberish. Long-standing, and this session added some. Not fixed here: the
+distinction between the two cases has to be got right or a mass edit breaks strings, and
+a 1000-line diff for a comment typo is not reviewable. Worth a careful scripted pass that
+only touches comment bodies.
 
 
 
