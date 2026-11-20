@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.51";
+const APP_VERSION = "2026.11.17.52";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -26126,6 +26126,29 @@ function volStartTarget(opts){
 /* The snapshot the migration leaves behind, valid only for the block it was taken in.
    Read, never written, from inside the landmark chain: a getter that saves would write
    on every render. Expiry is by comparison rather than deletion for the same reason. */
+/* A HOLD PROTECTS YOU FROM THE APP, NOT FROM YOURSELF.
+
+   A block already under way finishes on the numbers it started on, so a change to the
+   volume model cannot move a target somebody is three weeks into chasing.
+   adjustedLandmarks states the exception in its own comment -- "a number the person set
+   by hand is never held" -- and honours it for a hand-set MEV, MAV or MRV.
+
+   THREE OTHER DELIBERATE CHOICES MOVE LANDMARKS AND WERE NOT EXEMPT: the scale dial,
+   the training goal, and where the figures come from. Each of them wrote its setting,
+   logged it, re-rendered, and changed nothing a reader could see until the block ended.
+   The goal's own description says it "moves the volume targets the Body tab measures you
+   against", and settingsPlanHTML records that this control was once deleted BECAUSE its
+   description was a lie and restored because the claim had become true. It was not true
+   again while a hold was in force.
+
+   So the hold lets go when any of the three is used. Dropped rather than rescaled: what
+   it stores was snapshotted under whatever settings were in force then, so re-deriving
+   from it would stack one adjustment on another. */
+function releaseVolHold(){
+  if(!S.volHold) return false;
+  S.volHold = null;
+  return true;
+}
 function volHoldFor(g){
   const h = S.volHold;
   if(!h || !h.lm) return null;
@@ -47548,7 +47571,7 @@ function tgCommit(pct, was){
      with whatever scale was in force at the time, so multiplying it again would stack one
      scale on another. Dropping it puts every muscle back on the live chain, which is what
      somebody moving this dial is asking for. */
-  if(S.volHold) S.volHold = null;
+  releaseVolHold();
   logPlanChange("rule", null, "Volume targets",
     [was + "% → " + pct + "% of the published figures"],
     {note: "You scaled every muscle's targets from Settings."});
@@ -48063,73 +48086,80 @@ let TG_OPEN = null;
 function settingsPlanHTML(){
   /* WHAT'S HERE, WHAT ISN'T, AND WHY IT CAME BACK.
 
-     "What you're training for" was deleted because its own description was a lie: it
-     claimed to decide what the Body tab measures you against, and the only thing that
-     actually read S.setup.goal was applyGoalReps(). A control that does nothing you can
-     see is worse than no control.
-
-     It is back because the claim is now true. The goal scales every volume landmark
-     through GOAL_SCALE — the floor you have to clear, the productive ceiling, and the
-     point at which the app starts telling you to cut sets — and it changes what the
-     findings SAY, because a shortfall while eating less is a muscle-retention problem
-     and a shortfall while eating more is a growth one. With the goal driving the
-     numbers, onboarding cannot be the only place it can ever be set: someone who
-     finishes a cut has no way to tell the app the cut is over.
+     "What you're training for" was deleted once because its own description was a lie:
+     it claimed to decide what the Body tab measures you against, and the only thing that
+     read S.setup.goal was applyGoalReps(). A control that does nothing you can see is
+     worse than no control. It is back because the claim is now true -- the goal scales
+     every volume landmark through GOAL_SCALE, and it changes what the findings SAY,
+     because a shortfall while eating less is a muscle-retention problem and a shortfall
+     while eating more is a growth one.
 
      "Change the schedule" is still not here. It is not a setting, it is the plan, and it
-     sits on the Program tab next to the rotation it rebuilds. */
+     sits on the Program tab next to the rotation it rebuilds.
+
+     CONVERTED TO THE SHARED LIBRARY (design/settings-reconcile.md, variation A). This
+     screen carried .ob-opt, the option list borrowed from onboarding -- the SECOND of the
+     two components doing one job that the inventory found in Settings. Converting it
+     leaves one. data-setgoal, data-eat and the two deload buttons are unchanged. */
   const gnow = trainingGoal();
-  let h = setBlock("What you're training for",
-    "This moves the volume targets the Body tab measures you against, and the wording of what it tells you. It never rewrites your plan: the sets and reps stay whatever your programme says.",
-    `<div class="ob-opts" style="gap:7px">${Object.keys(GOALS).map(k=>
-      `<button class="ob-opt${gnow===k?" on":""}" data-setgoal="${k}" style="padding:11px 13px">
-        <span class="ob-opt-t">${esc(GOALS[k].name)}</span>
-        <span class="ob-opt-s">${esc(GOALS[k].sub)}</span>
-        <span class="ob-tick">${ICON.check}</span>
-      </button>`).join("")}</div>
-     <div class="set-says">Your targets are set on the basis that ${esc((GOAL_SCALE[gnow]||{}).note || "")}.</div>`);
+  const ep = eatPhase();
+  const G = GOALS[gnow] || {};
+  const reps = G.reps || {};
+
+  let h = sdHeroW("WHAT YOU'RE TRAINING FOR", esc(G.name || gnow),
+      "This moves the volume targets the Body tab measures you against, and the wording "
+      + "of what it tells you. <b>It never rewrites your plan</b> \u2014 the sets and reps stay "
+      + "whatever your programme says.")
+    + sdSeg(Object.keys(GOALS).map(k=> ({v:k, t:GOALS[k].name, d:esc(GOALS[k].sub)})),
+            "data-setgoal", gnow)
+    + sdSays("Your targets are set on the basis that "
+        + esc((GOAL_SCALE[gnow] || {}).note || "") + "."
+        + (reps.heavy ? " Rep ranges: heavy <b>" + esc(reps.heavy) + "</b>, second <b>"
+            + esc(reps.second) + "</b>, isolation <b>" + esc(reps.iso) + "</b>, abs <b>"
+            + esc(reps.abs) + "</b>." : ""));
+
   /* THE EATING PHASE. Not a calorie tracker and not trying to be one: the app does not
      want to know what you ate, only what you are trying to do, because without that the
-     bodyweight chart on the Body tab is a line with no opinion. With it, the trend can be
-     compared against a rate worth aiming at. */
-  const ep = eatPhase();
-  h += setBlock("What you're eating for",
-    "Element 26 does not count calories. It asks this so the bodyweight trend on the Body tab "
-    + "means something \u2014 gaining at a beginner's rate when you are not a beginner is mostly "
-    + "gaining fat, and there is no way to say so without knowing you were trying to gain.",
-    `<div class="ob-opts" style="gap:7px">${Object.keys(EAT_PHASES).map(k=>
-      `<button class="ob-opt${ep===k?" on":""}" data-eat="${k}" style="padding:11px 13px">
-        <span class="ob-opt-t">${esc(EAT_PHASES[k].t)}</span>
-        <span class="ob-opt-s">${esc(EAT_PHASES[k].s)}</span>
-        <span class="ob-tick">${ICON.check}</span>
-      </button>`).join("")}</div>
-     ${(()=>{ const lvl = (()=>{ try{ return inferExperience(); }catch(e){ return "intermediate"; } })();
-        if(ep === "gain"){ const bd = gainBandFor(lvl);
-          return `<div class="set-says">At your training age, <b>${bd[0]}\u2013${bd[1]}% of bodyweight a week</b> is the range worth gaining at.</div>`; }
-        if(ep === "lose")
-          return `<div class="set-says">A sustainable rate is <b>${LOSS_RATE_PCT_WK[0]}\u2013${LOSS_RATE_PCT_WK[1]}% of bodyweight a week</b>.</div>`;
-        return `<div class="set-says">Holding means staying within about <b>${MAINTAIN_BAND_PCT_WK}% a week</b> either way.</div>`;
-      })()}`);
-  h += setBlock("Deload",
-    "Same loads, every exercise cut to about half its sets, everything stopped 3-4 reps short of failure. Due every " +
-    DELOAD_EVERY_WEEKS + " weeks, or earlier if your check-ins and RPE start showing warning signs.",
-    `<div class="btn-row" style="margin-top:0">${deloadActive()
-      ? `<button class="btn ghost small" id="endDeloadBtn2" style="flex:1">End the deload</button>`
-      : `<button class="btn ghost small" id="startDeloadBtn2" style="flex:1">Start a deload week</button>`}</div>
-    <div class="set-says num">${Math.floor(weeksSince(blockStartAt()))} weeks into this block${
-      deloadSignals().length ? " · signs showing: " + esc(deloadSignals().join("; ")) : ""}</div>`);
-  /* THE TWO NUMBERS THAT USED TO BE DIALS.
+     bodyweight chart on the Body tab is a line with no opinion. */
+  const rate = (()=>{
+    const lvl = (()=>{ try{ return inferExperience(); }catch(e){ return "intermediate"; } })();
+    if(ep === "gain"){ const bd = gainBandFor(lvl);
+      return "At your training age, <b>" + bd[0] + "\u2013" + bd[1]
+        + "% of bodyweight a week</b> is the range worth gaining at."; }
+    if(ep === "lose")
+      return "A sustainable rate is <b>" + LOSS_RATE_PCT_WK[0] + "\u2013"
+        + LOSS_RATE_PCT_WK[1] + "% of bodyweight a week</b>.";
+    return "Holding means staying within about <b>" + MAINTAIN_BAND_PCT_WK
+      + "% a week</b> either way.";
+  })();
+  h += sdSec("What you're eating for");
+  h += sdGroup(sdItem("",
+      "Element 26 does not count calories. It asks this so the bodyweight trend on the "
+      + "Body tab means something \u2014 gaining at a beginner's rate when you are not a "
+      + "beginner is mostly gaining fat, and there is no way to say so without knowing "
+      + "you were trying to gain.",
+      sdSeg(Object.keys(EAT_PHASES).map(k=> ({v:k, t:EAT_PHASES[k].t, d:esc(EAT_PHASES[k].s)})),
+            "data-eat", ep),
+      rate));
 
-     A volume window and a training level are both things the app can read off your
-     own log, and both were asking you to answer a question you have less information
-     about than it does. The window now always counts the cycle and falls back to a
-     rolling week on its own whenever the cycle cannot be read — which was the
-     recommended setting and the only one that scales thresholds to a rotation that is
-     rarely seven days long. The level is inferred continuously from how long and how
-     often you have trained here, seeded by what you told the importer until there is
-     enough log to judge. Neither is gone; both stopped being a switch. */
+  h += sdSec("Deload");
+  h += sdGroup(sdItem("",
+      "Same loads, every exercise cut to about half its sets, everything stopped 3-4 reps "
+      + "short of failure. Due every " + DELOAD_EVERY_WEEKS + " weeks, or earlier if your "
+      + "check-ins and RPE start showing warning signs.",
+      `<div class="btn-row" style="margin-top:10px">${deloadActive()
+        ? `<button class="btn ghost small" id="endDeloadBtn2" style="flex:1">End the deload</button>`
+        : `<button class="btn ghost small" id="startDeloadBtn2" style="flex:1">Start a deload week</button>`}</div>`,
+      `<span class="num">${Math.floor(weeksSince(blockStartAt()))} weeks into this block</span>${
+        deloadSignals().length ? " \u00b7 signs showing: " + esc(deloadSignals().join("; ")) : ""}`));
+
+  /* THE TWO NUMBERS THAT USED TO BE DIALS. A volume window and a training level are both
+     things the app can read off your own log, and both were asking you to answer a
+     question you have less information about than it does. Neither is gone; both stopped
+     being a switch. */
   if(S.sessions.length){
-    h += `<div class="set-block">${landmarkExplainerHTML(bodyAnalysis())}</div>`;
+    h += sdMore("Where your volume targets come from",
+      `<div class="set-block" style="margin:0">${landmarkExplainerHTML(bodyAnalysis())}</div>`);
   }
   return h;
 }
@@ -50393,6 +50423,8 @@ function bind(){
     const off = b.dataset.lmcal === "pub";
     if(off === calibrationOff()) return;
     S.prefs = Object.assign({}, S.prefs, {lmNoCal: off});
+    /* Same reason as the goal and the dial: this is your hand, not the app's. */
+    releaseVolHold();
     save(); queueSync(); render();
     toast(off ? "Back to the published figures" : "Using what your own training says", "good");
   });
@@ -51484,6 +51516,9 @@ function bind(){
   document.querySelectorAll("[data-setgoal]").forEach(b=> b.onclick = ()=>{
     S.setup = Object.assign({name:"Me", level:"intermediate", gear:"full", at:Date.now()},
                             S.setup || {}, {goal: b.dataset.setgoal});
+    /* The goal scales every landmark through GOAL_SCALE, so a block hold would swallow
+       it whole -- see releaseVolHold. */
+    releaseVolHold();
     save(); queueSync(); render();
     toast("Training for " + ((GOALS[b.dataset.setgoal]||{}).name || "").toLowerCase());
   });
@@ -63560,8 +63595,24 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.51";
+const NEWS_FOR = "2026.11.17.52";
 const NEWS = [
+  {k: "Your goal moves your targets again",
+   s: ["Changing what you are training for \u2014 or where the figures come from \u2014 set the "
+     + "choice, wrote it to your plan history, and then left every volume target exactly "
+     + "where it was. The same was true of the scale dial until the last release.",
+     "One rule was behind all three. A block already under way finishes on the numbers "
+     + "it started on, so a change to the model cannot move a target you are weeks into "
+     + "chasing \u2014 and that rule always made an exception for figures you set yourself. "
+     + "These three were not on the list. They are now: your hand releases the hold, the "
+     + "app's does not.",
+     "Switch to <b>Get stronger</b> and every muscle's floor, target and ceiling move "
+     + "with it, immediately."]},
+  {k: "Your plan, rebuilt",
+   s: ["What you are training for is the headline now, with the rep ranges it sets "
+     + "spelled out underneath, then eating and deloads.",
+     "This was the last screen in Settings using a second style of option list, borrowed "
+     + "from the setup questions. There is one kind of choice in Settings now."]},
   {k: "Where you train, counted",
    s: ["The screen opens with how many gyms Element 26 knows and which one is your "
      + "usual, then the gyms themselves, then the kit. Recognising where you are folds "

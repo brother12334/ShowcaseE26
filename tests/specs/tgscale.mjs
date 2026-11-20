@@ -145,6 +145,49 @@ ck("CONTROL: the dial moved", after4.scale < 100, after4.scale + "%");
 ck("a floor you set by hand is not scaled with the rest",
    Math.abs(after4.mine2 - r.mine1) < 0.001, r.mine1 + " -> " + after4.mine2);
 
+console.log("\n5. THE OTHER TWO DELIBERATE CHOICES RELEASE IT TOO");
+/* The dial was the first found. The goal and the calibration source also move every
+   landmark and were held by the same rule, so each changed its setting, logged it,
+   re-rendered and did nothing anybody could see. All three are one rule now, and a
+   regression in any of them would otherwise look exactly like the screen working. */
+for(const [what, page, sel, kind, movesNow] of [
+  ["the training goal", "plan", '[data-setgoal="strength"]', "goal", true],
+  ["where the figures come from", "targets", '[data-lmcal="pub"]', "cal", false]
+]){
+  const res = await p.evaluate(async ([page, sel, kind])=>{
+    boot(S2=>{
+      S2.volHold = {blockStart: S2.blockStart || 0, at: Date.now(),
+        lm: {chest: {mev: 10, mav: 19, mrv: 20}}};
+    });
+    /* Each control lives on its own screen; boot() lands on targets. */
+    TAB='sync'; SET_PAGE=page; render();
+    const heldFirst = !!S.volHold;
+    const was = Math.round(bodyAnalysis().lm.chest.mev * 100) / 100;
+    const el = document.querySelector('#app ' + sel);
+    if(!el) return {none:true, heldFirst};
+    el.click();
+    await new Promise(x=> setTimeout(x, 80));
+    return {heldFirst, was, now: Math.round(bodyAnalysis().lm.chest.mev * 100) / 100,
+            held: !!S.volHold,
+            changed: kind === "goal" ? trainingGoal() : String(calibrationOff())};
+  }, [page, sel, kind]);
+  ck("CONTROL: a hold was in force before " + what + " changed", res.heldFirst === true);
+  ck("CONTROL: " + what + " was on its screen and changed", !res.none && !!res.changed,
+     res.none ? "control not found" : res.changed);
+  ck(what + " lets the hold go", res.held === false, String(res.held));
+  if(movesNow){
+    ck("and the landmarks move", res.was !== res.now, res.was + " -> " + res.now);
+  } else {
+    /* THE CALIBRATION CANNOT MOVE ANYTHING YET, and that is not this fix failing.
+       landmarkCalibration() returns 1 for every muscle until its Part B is filled in --
+       adjustedLandmarks says so in its own comment -- so switching the source off
+       subtracts a factor of one. What matters here is that the hold no longer swallows
+       the switch; the day calibration has a value, it will be free to move. */
+    ck("CONTROL: and it has nothing to move yet, which is why the figure holds",
+       res.was === res.now, res.was + " -> " + res.now);
+  }
+}
+
 ck("no page errors", errs.length === 0, errs.join(" | "));
 await b.close();
 console.log(bad ? "\nFAILED: " + bad : "\nAll good");
