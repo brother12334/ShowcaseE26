@@ -611,7 +611,9 @@ console.log("\n17 - AND THE WHOLE THING THROUGH THE REAL SCREEN");
                                         log: (S.patchLog || []).length,
                                         onPushA: (S.program.pushA || []).map(e=> e.name).indexOf("Cable Lateral Raise")}));
   ck("Apply applies it", after.log === 1 && after.onPushA === 4, "log " + after.log + ", at " + after.onPushA);
-  ck("the box is cleared and the patch is in the history", !after.box && /Patch history/.test(after.text),
+  /* CASE-INSENSITIVE: "Patch history" is a library section heading now, and .sd-sec
+     renders uppercase, so innerText gives "PATCH HISTORY". The heading did not go away. */
+  ck("the box is cleared and the patch is in the history", !after.box && /patch history/i.test(after.text),
      after.box ? "box still full" : "cleared");
   ck("the history row offers Undo and a whole roll-back", after.undo && after.roll,
      JSON.stringify({undo: after.undo, roll: after.roll}));

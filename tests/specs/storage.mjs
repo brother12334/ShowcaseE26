@@ -281,11 +281,19 @@ console.log("\n7 - THE STORAGE SCREEN");
      screen is lying about one of them. */
   ck("the breakdown adds up to the total", r.sumOfCats === r.used,
      r.sumOfCats + " vs " + r.used);
+  /* THE FIGURE MOVED INTO THE HERO, so it is read from where it now is rather than from
+     the one string "824 KB of about 5120 KB" it used to be printed as. The number is the
+     hero's readout and the quota is the sentence under it; both are still on the screen,
+     and the assertion is still that the screen's number equals the one actually stored. */
+  const shownKB = (html)=>{
+    const m = String(html).match(/sd-hero-v">([\d.]+)<i>/);
+    return m ? parseFloat(m[1]) : NaN;
+  };
+  const wantKB = Math.round(r.used / 1024 * 10) / 10 >= 100
+    ? Math.round(r.used / 1024) : Math.round(r.used / 1024 * 10) / 10;
   ck("and the total is what the screen prints",
-     r.card.indexOf(">" + (Math.round(r.used / 1024 * 10) / 10 >= 100
-       ? Math.round(r.used / 1024) : Math.round(r.used / 1024 * 10) / 10) + " KB of about") > -1
-     || /\d+(\.\d)? KB of about \d+(\.\d)? KB/.test(r.card),
-     (r.card.match(/[\d.]+ KB of about [\d.]+ KB/) || ["missing"])[0]);
+     shownKB(r.card) === wantKB && /of about [\d.]+ KB/.test(r.card),
+     shownKB(r.card) + " KB shown, " + wantKB + " KB stored");
 
   /* 1. PROTECTED DATA HAS NO BUTTON - not a disabled one, not a confirmation, none. */
   const live = r.cats.find(c=> c.id === "live");
@@ -329,11 +337,12 @@ console.log("\n7 - THE STORAGE SCREEN");
 
   /* 5. THE FIGURE AT THE TOP IS READ FRESH, so a delete updates it. */
   const fresh = await p.evaluate(()=>{
-    const before = (storageCardHTML().match(/([\d.]+) KB of about/) || [])[1];
+    const read = ()=>{ const m = storageCardHTML().match(/sd-hero-v">([\d.]+)<i>/);
+      return m ? parseFloat(m[1]) : NaN; };
+    const before = read();
     const item = storageDisposable()[0];
     if(item) storageFreeKey(item.key);
-    const after = (storageCardHTML().match(/([\d.]+) KB of about/) || [])[1];
-    return {before: parseFloat(before), after: parseFloat(after), dropped: !!item};
+    return {before, after: read(), dropped: !!item};
   });
   ck("the usage figure moves as soon as something is freed",
      fresh.dropped && fresh.after < fresh.before,

@@ -150,3 +150,39 @@ screen that has one thing you edit often and two you almost never do.
 The per-gym equipment **sheet** is gone with the same change: it edited the same seven
 numbers from a second place, which is exactly the drift this library exists to end. The
 equipment button on a gym row selects that gym in the section instead.
+
+
+## Batch 4 built — all fifteen, 2026.11.17.58
+
+| screen | shipped | shape as built |
+|---|---|---|
+| acct | .58 | HERO > SEC > group > says > SEC > MORE |
+| data | .58 | HERO > buttons > says > MORE > SEC(danger) |
+| patch | .58 | HERO > SEC > group > says > MORE > SEC(history) |
+| storage | .58 | HERO > bar > button > says > SEC > MORE |
+| help | .58 | HERO > SEC × 2 |
+| legal | .58 | HERO > SEC > MORE |
+
+Four of the six have no control under the hero, which is rule 2: where the hero is a fact
+rather than a setting, the first group follows it directly.
+
+### Two deliberate departures
+
+**`data` ends on its loudest section.** Every other screen puts `MORE` last. This one puts
+the two irreversible buttons there, under a heading that says there is no way back, below
+the export and below the repairs — so everything that could make the trip unnecessary
+comes first.
+
+**`patch` keeps one `.set-block`.** The patch history is a list of past changes with three
+buttons a row and a clash state to explain. It is not a settings control and the library
+has no shape for it, so it keeps its own markup under a library `SEC`. `actionpref.mjs`
+asserts it is the *only* old block left across the six, so this stays a decision rather
+than something overlooked.
+
+### What the pass found
+
+- `storage`'s "can be freed" section and `data`'s third repair never render on the
+  fixture, so a spec that drew only the fixture would have called both converted without
+  seeing them. Both are planted in `actionpref.mjs`.
+- "Repairs — three things worth checking" was wrong on any profile that had not hit the
+  attachment bug, which is most of them. Counted now.

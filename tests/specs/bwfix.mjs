@@ -42,10 +42,24 @@ console.log("1 - IT FINDS WHAT WAS LOGGED WITHOUT YOU");
   const r = await p.evaluate(()=>({
     moves: bwFixMoves().map(m=> ({name:m.name, sets:m.sets, sessions:m.sessions})),
     btn: !!document.querySelector("#bwFixBtn"),
-    blockTxt: (()=>{ const el=[...document.querySelectorAll(".set-name,.set-block")]
-      .map(x=>x.textContent).join(" "); return /logged without you/i.test(el); })()
+    /* READ FROM THE SCREEN, NOT FROM TWO CLASS NAMES. This looked inside .set-name and
+       .set-block, which is what "Your data" was built from before it moved to the shared
+       library; the sentence is still there, under .sd-label now. A spec that names the
+       furniture fails when the furniture changes and the copy does not.
+
+       AND THE REPAIRS FOLD AWAY, which is deliberate -- each is a thing to run once, if
+       at all, and three of them above the export pushed it off the screen. So the fold
+       is opened first, and the summary is required to say what is inside it, or
+       "behind More" would be indistinguishable from "gone". */
+    foldSays: /repairs/i.test(((document.querySelector("#app .sd-more > summary")
+      || {}).textContent || "")),
+    blockTxt: (()=>{
+      document.querySelectorAll("#app details").forEach(d=> d.open = true);
+      return /logged without you/i.test(document.getElementById("app").innerText);
+    })()
   }));
   ck("the setting is on the Your data page", r.btn, String(r.btn));
+  ck("CONTROL: the fold it lives behind says what is in it", r.foldSays, String(r.foldSays));
   ck("and it is named for what it is", r.blockTxt, String(r.blockTxt));
   ck("it finds the dips", r.moves.some(m=> /dip/i.test(m.name) && m.sets === 12), JSON.stringify(r.moves));
   ck("and the pull-ups", r.moves.some(m=> /pull/i.test(m.name) && m.sets === 4), JSON.stringify(r.moves));
