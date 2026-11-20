@@ -55,6 +55,12 @@ await p.evaluate(()=>{
     Object.keys(fx).forEach(k=>{ S[k] = JSON.parse(JSON.stringify(fx[k])); });
     S.tourDone = true;
     migrate(); try{ applySplit(); }catch(e){}
+  /* A REAL BOOT, not just a load. The one-time repairs used to run from the first
+     render, and this called render() to get them. They run from the startup block at the
+     end of index.html now, because a render that writes is a render nobody can reason
+     about \u2014 see renderpure.mjs. This does what that block does. */
+  try{ SEEDS_RUN = false; appHeartbeat(); runOneTimeSeeds(); }catch(e){}
+
     try{ SEEDS_RUN = false; }catch(e){}
     render(); save();
   };

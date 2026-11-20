@@ -35,7 +35,10 @@ const setup = (daysAgo)=> p.evaluate((d)=>{
      spec happens to run. */
   const st = new Date(); st.setHours(12, 0, 0, 0); st.setDate(st.getDate() - Math.floor(d));
   S.deload={startedAt:st.getTime(), endedAt:null, reason:"manual"};
-  save(); TAB="body"; BODY_OPEN.nbflags=true; render();
+  /* The deload sweep is part of the launch heartbeat now, not something a render does
+     on the way past \u2014 see renderpure.mjs. */
+  save(); try{ appHeartbeat(); }catch(e){}
+  TAB="body"; BODY_OPEN.nbflags=true; render();
   const note = deloadNote() || {};
   return {active: deloadActive(), held: !!flagDeloadHeld(S.flags[0]),
           label: note.label, line: note.line,

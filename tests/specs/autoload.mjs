@@ -32,14 +32,23 @@ const loaded = await p.evaluate(fx=>{
      would, so every rule under test sees what the device sees. */
   Object.keys(fx).forEach(k=>{ S[k] = fx[k]; });
   S.tourDone = true;
+  /* THIS BOOT MERGES RATHER THAN REPLACES, so anything the page's own startup left on S
+     survives it. The seeds now run at startup instead of on the first render, so by the
+     time this plants the fixture the empty profile has already been stamped
+     attachSplitV1 -- and the repair under test would be skipped as already done. The
+     stamp goes with the state it belongs to. */
+  delete S.attachSplitV1; delete S.attachFixUndo;
   try{ migrate(); }catch(e){ return {err: String(e && e.message || e)}; }
   try{ applySplit(); }catch(e){}
-  /* A REAL BOOT, not just a load. The one-time repairs run on the first render, which is
-     where they have to run: migrate() is too early for anything that walks the programme
-     through functions whose constants are still in their temporal dead zone. This page
-     already rendered once on an empty profile, so the flag is cleared to put the state
-     in front of them the way a device start does. */
-  try{ SEEDS_RUN = false; }catch(e){}
+  /* A REAL BOOT, not just a load. The one-time repairs used to run from the first
+     render, and this called render() to get them. They run from the startup block at the
+     end of index.html now, because a render that writes is a render nobody can reason
+     about \u2014 see renderpure.mjs. This does what that block does. */
+  SEEDS_RUN = false;
+  let bootErr = null;
+  try{ appHeartbeat(); }catch(e){ bootErr = "heartbeat: " + String(e && e.message || e); }
+  try{ runOneTimeSeeds(); }catch(e){ bootErr = "seeds: " + String(e && e.message || e); }
+  if(bootErr) return {err: bootErr};
   try{ render(); }catch(e){ return {err: "render: " + String(e && e.message || e)}; }
   save();
   const last = S.sessions[S.sessions.length-1];

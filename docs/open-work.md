@@ -894,6 +894,77 @@ UI job, not done here.
   sweep against the previous build changes **only** Lotus and Uptown, and only on Smith
   work.
 
+## 28. Rendering wrote to the log — FIXED (2026.11.17.60)
+
+`runOneTimeSeeds()` was called from the top of `render()`, and through it a render could
+reach **four** write paths:
+
+| what | writes |
+|---|---|
+| `sweepDeload()` | closes a deload whose week ran out, `saveQuiet()` |
+| `requestPersistentStorage()` | files the browser's answer, `saveQuiet()` |
+| `storageBoot()` → `storagePrune()` | deletes keys |
+| the one-time repairs | `saveQuiet()` at the end |
+
+On the Nov-17 fixture, rendering **Today** renamed six logged entries and saved them before
+anything was painted:
+
+| date | was | became |
+|---|---|---|
+| 2026-08-02 | Overhead Cable Triceps Extension (V-bar) | Overhead Cable Triceps Extension |
+| 2026-08-23 | Overhead Cable Triceps Extension (V-bar) | Overhead Cable Triceps Extension |
+| 2026-08-31 | OVERHEAD CABLE TRICEP EXTENSION (V-bar) | Overhead Cable Triceps Extension |
+| 2026-09-10 | Overhead Cable Triceps Extension (V-bar) | Overhead Cable Triceps Extension |
+| 2026-09-22 | Overhead Cable Triceps Extension (V-bar) | Overhead Cable Triceps Extension |
+| 2026-10-01 | Overhead Cable Triceps Extension (V-bar) | Overhead Cable Triceps Extension |
+
+That is `splitAttachmentAliases()`, the Rule-A repair: an alias had merged two different
+attachments of one movement and relabelled the other day's sets to match. **The rename is
+correct** and it leaves an undo under *Your data*. On the live export it has already run —
+`attachSplitV1 = {renamed: 6}` — so this changed nothing that was not already changed. The
+problem was never what it did; it was where it was called from.
+
+### The fix
+
+`runOneTimeSeeds()` is split in two. `appHeartbeat()` is what a launch or a return to the
+foreground owes — the deload sweep, the storage question, the prune. `runOneTimeSeeds()`
+is the repairs, once per loaded state. **Neither is called from `render()`.** Both are
+called from the startup block at the end of the file, which is the only other place they
+*can* be: `migrate()` runs at module level before `GROUPS` and the analysis constants
+exist, so a seed touching them dies in the temporal dead zone. By the end of the file the
+module is fully built — the same guarantee the first render used to provide, without
+painting anything.
+
+`appHeartbeat()` also runs on `visibilitychange`, so a deload that lapsed while the app
+was backgrounded still closes.
+
+### Two gaps the move exposed, both closed
+
+`SEEDS_RUN` guards one loaded state against doing the work twice. It is not a guard
+against a **second** state never having it done, and with `render()` no longer seeding,
+nothing else would reach one. Both places that replace `S` wholesale now reset it and run
+the pair: `switchProfile()`, and `adoptBackup()` — so **an imported backup written before a
+repair existed is now repaired on import** rather than by accident on the next launch.
+
+### How it is held
+
+`renderpure.mjs` intercepts `Storage.prototype.setItem`/`removeItem` and requires fifteen
+screens, rendered twice, to produce **no write at all**. Interception is at the storage
+layer because counting calls to `save()` does not work — `saveQuiet()` does not go through
+it, and an earlier probe of mine reported "0 saves" while the data on disk had changed
+underneath it. Its controls: the same watch must *see* `save()` and `saveQuiet()`; the
+previous build must *fail* it; and the repairs must still run, still write, and still
+leave their undo when the startup block calls them — or "render writes nothing" would be
+satisfied by an app that does nothing.
+
+### Four specs depended on the old behaviour
+
+`autoload`, `exkey`, `platestep` and `delend` each booted a fixture and rendered to get
+the seeding. They do what the startup block does now. `autoload` needed one more thing: its
+boot *merges* the fixture into `S` rather than replacing it, so the `attachSplitV1` stamp
+left by the page's own startup survived and the repair under test was skipped as already
+done. The stamp is cleared with the state it belongs to.
+
 ## 26a. The plate picker edited the global list and looked like it edited a gym — FIXED (2026.11.17.57)
 
 Item 26 taught the engine to read the gym you are standing in. The picker on "Where you

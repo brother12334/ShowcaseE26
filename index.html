@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.59";
+const APP_VERSION = "2026.11.17.60";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -14386,6 +14386,12 @@ function switchProfile(id){
   saveProfiles();
   S = load();
   applySplit();
+  /* ANOTHER PROFILE IS ANOTHER STATE, and its repairs have not run. SEEDS_RUN guards
+     against doing the work twice for one loaded state, not against doing it for a
+     second one -- and with render() no longer seeding, nothing else would reach this. */
+  SEEDS_RUN = false;
+  try{ appHeartbeat(); }catch(e){}
+  try{ runOneTimeSeeds(); }catch(e){}
   const p = activeProfile();
   // the profile record is the authority on which key and which gist this person uses
   if(p && p.token) S.sync.token = p.token;
@@ -23108,14 +23114,39 @@ function seedJointFromHurts(){
   });
   S.jointSeeded = {at: Date.now(), n};
 }
-function runOneTimeSeeds(){
-  /* Not a one-time seed, but it belongs on the same heartbeat: a deload that has run its
-     week is closed the next time the app is opened. */
-  try{ if(sweepDeload()) queueSync(); }catch(e){}
+/* RENDERING MUST NEVER WRITE, AND FOR A LONG TIME IT DID.
+
+   Both of these used to be one function, called from the top of render(). Between them
+   they reach four separate write paths — a lapsed deload being closed, the persistent
+   storage answer being filed, a storage prune, and the one-time repairs below — so
+   merely drawing a screen could change what was on disk. On a profile that had not yet
+   run the attachment split, opening the app rewrote six logged exercise names and saved
+   them, before anything was painted.
+
+   Each of those writes is right in itself and none is a per-render cost: they are all
+   guarded, and most renders wrote nothing. But "most" is the problem. A render is a
+   reader, every timer and visibility handler in the app calls it, and a reader that
+   occasionally writes is a thing nobody can reason about.
+
+   So they are split and moved to the door. appHeartbeat() is the work a launch or a
+   return-to-foreground owes; runOneTimeSeeds() is the repairs, once per loaded state.
+   Both are called from the startup block at the end of this file — which is also the
+   only place they CAN be called from, and the reason they were in render() to begin
+   with: migrate() runs at module level before GROUPS and the analysis constants are
+   evaluated, so anything touching them dies in the temporal dead zone. By the end of the
+   file the module is fully built, which is exactly what the first render used to provide
+   and the startup block provides without drawing anything. */
+function appHeartbeat(){
+  let moved = false;
+  /* A deload that has run its week is closed the next time the app is opened. */
+  try{ if(sweepDeload()){ queueSync(); moved = true; } }catch(e){}
   /* M10 — and ask the browser to keep the data, once, on the way in. Asynchronous and
      unawaited: nothing here waits on a permission check, and a refusal is not an error. */
   try{ if(!S.storagePersisted) requestPersistentStorage(); }catch(e){}
   try{ storageBoot(); }catch(e){}
+  return moved;
+}
+function runOneTimeSeeds(){
   if(SEEDS_RUN) return;
   SEEDS_RUN = true;
   let dirty = false;
@@ -35107,10 +35138,12 @@ function render(){
      read-only page with somebody else's Today tab mid-read. One gate, at the only door
      that draws anything. */
   if(document.body.classList.contains("share-view")) return;
-  /* GUARDED BECAUSE A THROW HERE COSTS EVERY TAB, NOT ONE. These run before anything is
-     drawn, so one bad record in a migration or a seed took the whole app down — which
-     is a blank screen on every tab at once and no way to reach an export. */
-  try{ runOneTimeSeeds(); }catch(e){ try{ console.error("Element 26: a one-time seed threw", e); }catch(e2){} }
+  /* NOTHING IS SEEDED, SWEPT OR SAVED FROM HERE. runOneTimeSeeds() used to be called on
+     this line, and through it a render could close a deload, answer the persistent-storage
+     question, prune storage, or run the one-time repairs — four write paths behind a
+     function whose job is to draw. They run from the startup block at the end of the file
+     now, and from the visibility handler, which is where a launch and a return belong.
+     render() is a reader. renderpure.mjs holds it to that. */
   const app = $("#app");
   /* No account, no app. Signing up comes before everything — the plan, the wizard, the
      tab bar — because every byte the app is about to write belongs to an account, and
@@ -64202,8 +64235,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.59";
+const NEWS_FOR = "2026.11.17.60";
 const NEWS = [
+  {k: "Opening a screen no longer changes anything",
+   s: ["Element 26 runs a handful of one-time repairs on the way in \u2014 closing a deload "
+     + "whose week ran out, asking the browser to keep your data, and a few fixes to "
+     + "older records. They were being run by the code that draws a screen, so merely "
+     + "looking at a tab could write to your log.",
+     "Every one of those writes was correct and each happens at most once. But drawing "
+     + "is reading, and a reader that occasionally writes is a thing nobody can reason "
+     + "about. They run when the app opens now, and when you come back to it \u2014 before "
+     + "anything is painted, which is where they always belonged.",
+     "Nothing about what they do has changed, including the undo that the attachment "
+     + "repair leaves under <b>Your data</b>."]},
   {k: "Nothing in your log was wrong \u2014 and one press could have made it so",
    s: ["The plan was to go through past Smith sets logged at a gym whose carriage "
      + "differs from your usual one, and offer to correct each. Measuring the log first "
@@ -72976,6 +73020,14 @@ function adoptBackup(d, mode){
      MERGE the sessions are a union of two devices and the counters came from one of
      them. Replaying is the only answer correct for both, and it costs milliseconds. */
   try{ rebuildStalls(); }catch(e){}
+  /* AN IMPORTED BACKUP IS A DIFFERENT STATE, and its one-time repairs have not run
+     against it. SEEDS_RUN guards one loaded state against doing the work twice; it is
+     not a guard against a second state never having it done, and a file written before
+     a repair existed is exactly what those repairs are for. Reached only by accident
+     before, on the next launch, because render() did the seeding. */
+  SEEDS_RUN = false;
+  try{ appHeartbeat(); }catch(e){}
+  try{ runOneTimeSeeds(); }catch(e){}
   save();
   queueSync();                                   // and up to the account, if there is one
   render();
@@ -75294,6 +75346,21 @@ if("serviceWorker" in navigator && location.protocol.indexOf("http") === 0){
    beside load(): `OB` is a `let` declared with the onboarding code far below, so
    touching it any earlier is a temporal-dead-zone ReferenceError that takes the whole
    app down before it paints. */
+/* THE DOOR, and the only place the one-time work can run.
+
+   It cannot go beside load(): migrate() is called at module level, long before the
+   analysis constants exist, and anything touching them dies in the temporal dead zone.
+   It used to run from the first render for exactly that reason, which made drawing a
+   screen a thing that could write. Here, at the end of the file, the module is fully
+   built and nothing has been painted yet — the same guarantee, without the side effect.
+
+   GUARDED BECAUSE A THROW HERE COSTS EVERY TAB, NOT ONE. One bad record in a seed took
+   the whole app down before it painted: a blank screen on every tab at once, and no way
+   to reach an export. */
+if(hasAccount()){
+  try{ appHeartbeat(); }catch(e){ try{ console.error("Element 26: the heartbeat threw", e); }catch(e2){} }
+  try{ runOneTimeSeeds(); }catch(e){ try{ console.error("Element 26: a one-time seed threw", e); }catch(e2){} }
+}
 if(!hasAccount()) startAccountFlow("signup");
 else if(needsOnboarding()) startOnboarding();
 else render();
@@ -75313,6 +75380,9 @@ setTimeout(flushReports, 2500);
    session was logged on another device. */
 document.addEventListener("visibilitychange", ()=>{
   if(document.visibilityState !== "visible") return;
+  /* A week can lapse while the app is in the background, and the deload that ran out
+     while it was away is closed here rather than by whichever render happens next. */
+  try{ if(appHeartbeat()) render(); }catch(e){}
   if(accountAuth()) accountPull().then(ok=>{ if(ok) render(); });
   /* A timer set with setTimeout does not survive a phone that suspends the page, so
      coming back re-arms the one that is still ahead of us and quietly settles the one
