@@ -1056,28 +1056,35 @@ the real bug and requires it to be caught. §4 drives a real mode switch on the 
 build and requires the detector to object to nothing — which is the end of it: the code
 path can no longer produce the state.
 
-## 26c. Comments carry literal `\u2014` escape text — OPEN, cosmetic
+## 26c. Comments carried literal `\u2014` escape text — DONE (2026.11.17.60, comments only)
 
-About 1013 occurrences of `\u2014` / `\u2019` across the file. Inside a string literal
-that is correct and produces the character; inside a `/* comment */` it is read by a
-person as gibberish. Long-standing, and this session added some. Not fixed here: the
-distinction between the two cases has to be got right or a mass edit breaks strings, and
-a 1000-line diff for a comment typo is not reviewable. Worth a careful scripted pass that
-only touches comment bodies.
+Inside a string literal `\u2014` is correct and produces the character. Inside a
+`/* comment */` it is read by a person as gibberish, and the file was full of it.
 
+**The grep figure I first quoted — about 1013 — was wrong**, because it counted every
+occurrence in the file including the legitimate ones in strings. Scanned properly, with
+quote and comment state tracked: **344 inside comments, on 315 lines; 1157 in strings and
+code, which must not be touched.** That ratio is the whole reason this needed a scanner
+rather than a find-and-replace.
 
+### How it was done safely
 
-`kitFor(sess)` merges a gym's own `plateStep` over the global one, and the gym kit editor
-lets you record each gym's `plates` list. **Neither reaches the load engine.**
-`smallestPlate()` reads `trainPrefs()` only, and `loadStepFor()` calls it with no session
-and no gym. So a gym's plate list and its plate step are both stored, both displayed on the
-"Where you train" screen, and both ignored when a weight is suggested — training at Lotus
-Gym gets Palma Vista's grid.
+A character-by-character pass over the file tracking `code | // line | /* block | ' | " |
+backtick`, collecting the byte ranges of comments only, then decoding `\uXXXX` within
+those ranges — and only where the result is printable and is not one of `*` `/` `\` `'`
+`"` or a backtick, so a comment cannot be made to end early or a quote introduced.
 
-Not fixed with item 25 on purpose: making the engine gym-aware changes the rounding at
-every gym that is not your usual one, which is a real behaviour change beyond the exception
-granted for the derivation. Needs a decision, then a spec that prescribes at two gyms with
-different plates in the same run.
+### How it was proved
+
+Changing a comment must change nothing at all, so that is what was measured rather than
+argued: **22 rendered surfaces — six tabs and all fifteen Settings screens, plus the whole
+`NEWS` array, which lives in template literals — are byte-identical between the build
+before and after.** 347 escapes converted, 316 lines changed, every one of them prose.
+Three changed lines matched a "looks like code" pattern on inspection and all three are
+comments that happen to begin with the words *squat*, *returns* and *strings*.
+
+**No version bump.** The bytes that execute are unchanged, so there is nothing for a user
+to fetch — the same reasoning as a test-only change.
 
 ## 25. The bar's jump is derived from the plates you own — DONE (2026.11.17.43)
 
