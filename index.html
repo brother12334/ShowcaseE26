@@ -7705,7 +7705,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.60";
+const APP_VERSION = "2026.11.17.61";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -47018,27 +47018,28 @@ function viewProgram(){
     <button class="btn ghost small" id="planBtn" style="flex:1">${ICON.doc} Full plan</button>
     <button class="btn ghost small" id="buildPlanBtn" style="flex:1">Build a new plan</button>
   </div>
-  <div class="btn-row" style="margin-bottom:10px">
-    <button class="btn ghost small" id="rescueFull" style="flex:1">Normal export</button>
-  </div>
-  ${/* ALWAYS REACHABLE, NOT ONLY WHILE THE NOTICE IS UP. The Today card goes the moment
-        you say you have read it, and the records it was about do not. */
-    haveBadRecords() ? `<div class="btn-row" style="margin-bottom:10px">
-    <button class="btn ghost small" id="badRecCopy" style="flex:1">Copy set-aside records</button>
-    <button class="btn ghost small" id="badRecFile" style="flex:1">Save them as a file</button>
-  </div>` : ""}
-  ${haveBadRecords() ? `<div class="sub" style="margin:-4px 2px 14px;font-size:var(--fs-3);color:var(--faint)">
-    <b>Set-aside records</b> are logged exercises whose shape nothing in the app could
-    read. They were moved out of the readers' way rather than deleted, and these two
-    buttons hand over just those records and the sessions they came from — no account id
-    or key, no tokens, nothing else.</div>` : ""}
+  <div class="sub" style="margin:-4px 2px 14px;font-size:var(--fs-3);color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>
   <div class="btn-row" style="margin-bottom:16px">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
     <button class="btn ghost small" id="planHistBtn" style="flex:1">What changed${
       (()=>{ const n = (S.planLog || []).filter(planChangeBig).length;
              return n ? ' <span class="nb-count">' + n + '</span>' : ""; })()}</button>
-  </div>
-  <div class="sub" style="margin:-8px 2px 16px;font-size:var(--fs-3);color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>`;
+  </div>`;
+  /* WHAT THIS TAB IS FOR, AND WHAT IT IS NOT.
+
+     Four buttons here had nothing to do with running a programme. "Normal export" called
+     exportJSON() — the very same function as Settings › Your data › Export my data, so
+     it was not even a shortcut to somewhere else, it was a second copy of one button on
+     a tab about your training week. The two set-aside record buttons hand over a
+     diagnostic bundle, which is Your data's subject exactly.
+
+     Item 23 cleared the raw-export buttons off every page for this reason and left the
+     normal one here, saying so at the time. It should have gone with them.
+
+     What stays is what the tab is about: the plan as a document, building a new one,
+     importing one, and what has changed in it. The document sentence moved up to sit
+     under the button it describes — it had drifted four rows down the screen, below
+     Import a plan, explaining a button nowhere near it. */
   // Anything an imported document said about running the programme — phases, deloads,
   // progression rules — kept where it can be read rather than discarded at import.
   h += volMigrationCardHTML();
@@ -49223,12 +49224,35 @@ function settingsDataHTML(){
         + (bu ? `<div class="lf-undo">${bu.sets.length} set${bu.sets.length === 1 ? "" : "s"} corrected
             ${esc(fmtDateShort(dayStr(bu.at)))}
             <button class="linklike" id="bwFixUndoBtn">undo that</button></div>` : ""));
+  /* THE SET-ASIDE RECORDS LIVE HERE NOW, not on the Program tab.
+
+     They are logged exercises the app could not read, handed over as a diagnostic
+     bundle: that is this screen's subject, and Program's is the training week. They were
+     put on Program because the Today card that announces them is dismissible and the
+     records are not \u2014 which is a good reason to keep them permanently reachable and no
+     reason at all for them to be there. Settings is permanent too. */
+  const bad = (()=>{ try{ return haveBadRecords() ? badRecordsReport() : null; }
+                     catch(e){ return null; } })();
+  const repairs2 = repairs + (bad
+    ? sdItem("Records the app could not read",
+        "Logged exercises whose shape nothing in the app could read. They were moved out "
+        + "of the readers\u2019 way rather than deleted, and these two buttons hand over just "
+        + "those records and the sessions they came from.",
+        `<div class="btn-row" style="margin:0">
+          <button class="btn ghost small" id="badRecCopy" style="flex:1">Copy set-aside records</button>
+          <button class="btn ghost small" id="badRecFile" style="flex:1">Save them as a file</button>
+        </div>`,
+        "<b>No account id or key, no tokens, nothing else</b> \u2014 just the "
+        + bad.sessions.length + " session"
+        + (bad.sessions.length === 1 ? "" : "s") + " they came from.")
+    : "");
   /* COUNTED, NOT ASSUMED. The first repair only appears where it actually did something,
      so "three things worth checking" was wrong on every profile that had not hit the
      attachment bug -- which is most of them, and was this fixture. */
-  const repairN = (au && (au.renamed || []).length ? 1 : 0) + 2;
-  h += sdMore("Repairs \u2014 " + (repairN === 3 ? "three" : "two") + " things worth checking",
-    sdGroup(repairs));
+  const WORD = ["no", "one", "two", "three", "four"];
+  const repairN = (au && (au.renamed || []).length ? 1 : 0) + 2 + (bad ? 1 : 0);
+  h += sdMore("Repairs \u2014 " + (WORD[repairN] || repairN) + " things worth checking",
+    sdGroup(repairs2));
 
   /* AND THE TWO THAT CANNOT BE UNDONE, LAST, UNDER A HEADING THAT SAYS SO. */
   h += `<div class="sd-sec sd-sec-danger">There is no way back from these</div>`
@@ -64235,8 +64259,19 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.60";
+const NEWS_FOR = "2026.11.17.61";
 const NEWS = [
+  {k: "Program is about your training week again",
+   s: ["Seven buttons sat above the plan check, and four of them were not about running "
+     + "a programme. <b>Normal export</b> called the very same function as "
+     + "<b>Settings \u203a Your data \u203a Export my data</b> \u2014 not a shortcut to it, a second "
+     + "copy of it on the wrong tab. The two set-aside record buttons hand over a "
+     + "diagnostic bundle, which is Your data\u2019s job.",
+     "They are in <b>Settings \u203a Your data</b> now, the set-aside records alongside the "
+     + "other repairs. What is left on Program is what Program is for: your plan as a "
+     + "document, building a new one, importing one, and what has changed in it.",
+     "The sentence describing the plan document also moved up to sit under the button it "
+     + "describes. It had drifted four rows down the screen."]},
   {k: "Opening a screen no longer changes anything",
    s: ["Element 26 runs a handful of one-time repairs on the way in \u2014 closing a deload "
      + "whose week ran out, asking the browser to keep your data, and a few fixes to "

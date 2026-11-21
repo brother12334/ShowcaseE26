@@ -75,7 +75,12 @@ for(const page of PAGES){
     return {ids: window.ids(), text: document.getElementById('app').innerText.length}; }, page);
   const c = await newP.evaluate(pg=>{ boot(pg); return window.ids(); }, page);
   const gone = a.ids.filter(x=> c.indexOf(x) < 0);
-  const made = c.filter(x=> a.ids.indexOf(x) < 0);
+  /* THE TWO THAT MOVED IN. The set-aside record buttons came off the Program tab and
+     onto Your data, where handing over a diagnostic bundle is the subject. They are new
+     to THIS screen and were not invented -- progexport.mjs holds both ends of the move,
+     including that Program no longer has them. */
+  const MOVED_IN = ["#badRecCopy", "#badRecFile"];
+  const made = c.filter(x=> a.ids.indexOf(x) < 0 && MOVED_IN.indexOf(x) < 0);
   ck("  CONTROL: " + page + " drew a screen on the old build", a.text > 300,
      a.text + " chars, handles: " + a.ids.join(", "));
   ck("  " + page + " kept every one of its handles", gone.length === 0, gone.join(", "));
@@ -180,19 +185,33 @@ ck("  and a way to see what is in it", r.after.open >= 1, r.after.open);
 ck("  which lists the items one by one", r.items >= 1, r.items);
 
 console.log("\n5. YOUR DATA DRAWS ITS THIRD REPAIR WHEN THERE IS ONE");
+/* THE COUNT HAS THREE INPUTS NOW, not two: the two standing checks, the attachment undo
+   where it applies, and the set-aside records where there are any. This fixture HAS
+   set-aside records, which is why the baseline reads three rather than two — an earlier
+   version of this section assumed the only variable was the attachment undo. */
 r = await newP.evaluate(()=>{
-  boot("data");
-  const two = (document.querySelector('#app .sd-more > summary')||{textContent:""}).textContent.trim();
-  const twoN = document.querySelectorAll('#app #logFixBtn, #app #bwFixBtn, #app #attachFixUndoBtn').length;
+  const clearBad = S2=>{
+    (S2.sessions || []).forEach(s=>{ delete s.badEntries;
+      (s.entries || []).forEach(e=>{ if(e) delete e.badSets; }); });
+    if(S2.active){ delete S2.active.badEntries; }
+  };
+  const read = ()=> ({
+    label: (document.querySelector('#app .sd-more > summary')||{textContent:""}).textContent.trim(),
+    n: document.querySelectorAll('#app #logFixBtn, #app #bwFixBtn, #app #attachFixUndoBtn, #app #badRecCopy').length});
+  boot("data", clearBad);
+  const two = read();
+  boot("data");                                     // set-aside records back
+  const three = read();
   boot("data", S2=>{ S2.attachFixUndo = {at: Date.now(), renamed: [{a:1},{a:2}]}; });
-  const three = (document.querySelector('#app .sd-more > summary')||{textContent:""}).textContent.trim();
-  const threeN = document.querySelectorAll('#app #logFixBtn, #app #bwFixBtn, #app #attachFixUndoBtn').length;
-  return {two, twoN, three, threeN};
+  const four = read();
+  return {two, three, four};
 });
-ck("CONTROL: with nothing to put back there are two repairs", r.twoN === 2, r.twoN);
-ck("and the fold counts two, not three", /two things/.test(r.two), r.two);
-ck("CONTROL: with something to put back there are three", r.threeN === 3, r.threeN);
-ck("and the fold counts three", /three things/.test(r.three), r.three);
+ck("CONTROL: with nothing else to show there are two repairs", r.two.n === 2, r.two.n);
+ck("and the fold counts two", /two things/.test(r.two.label), r.two.label);
+ck("CONTROL: the set-aside records make a third", r.three.n === 3, r.three.n);
+ck("and the fold counts three", /three things/.test(r.three.label), r.three.label);
+ck("CONTROL: and the attachment undo a fourth", r.four.n === 4, r.four.n);
+ck("and the fold counts four", /four things/.test(r.four.label), r.four.label);
 
 console.log("\n6. THE ACCOUNT STILL HIDES THE HALF THAT MATTERS");
 r = await newP.evaluate(()=>{

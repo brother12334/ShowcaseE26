@@ -118,33 +118,44 @@ ck("but the file says a note exists", rep && rep.sessions[0].noteOmitted === tru
 ck("it is small enough to paste", txt.length < 20000, txt.length + " bytes");
 
 console.log("\n4. the buttons are reachable after the notice is dismissed");
+/* STILL THE POINT, DIFFERENT SCREEN. The Today card is dismissible and the records it
+   announces are not, so the buttons have to live somewhere permanent. That was Program;
+   it is Settings > Your data now, because handing over a diagnostic bundle is that
+   screen's subject and running a programme is not. What this section is for -- that
+   dismissing the notice does not strand the records -- is unchanged. */
 const d4 = await p.evaluate(()=>{
   (S.dataIssues || []).forEach(x=>{ if(x) x.seen = true; });
   TAB = "today"; render();
   const onToday = !!document.getElementById("badRecCopy");
-  TAB = "program"; render();
+  TAB = "program"; SET_PAGE = null; render();
+  const onProgram = !!document.getElementById("badRecCopy");
+  TAB = "sync"; SET_PAGE = "data"; render();
+  document.querySelectorAll("#app details").forEach(d=> d.open = true);
   const b = document.getElementById("badRecCopy"), f = document.getElementById("badRecFile");
-  return {onToday, onProgram: !!b, wired: !!(b && b.onclick), file: !!(f && f.onclick)};
+  return {onToday, onProgram, onSettings: !!b,
+          wired: !!(b && b.onclick), file: !!(f && f.onclick)};
 });
 ck("the Today card has gone, as asked", !d4.onToday);
-ck("but Program still carries the buttons", d4.onProgram);
+ck("CONTROL: and Program does not carry them either any more", !d4.onProgram);
+ck("but Settings > Your data does", d4.onSettings);
 ck("and both are wired", d4.wired && d4.file);
 
 console.log("\n5. they vanish once there is nothing to hand over");
 const d5 = await p.evaluate(()=>{
   S.sessions.forEach(s=>{ delete s.badEntries; (s.entries||[]).forEach(e=>{ delete e.badSets; }); });
   if(S.active){ delete S.active.badEntries; }
-  TAB = "program"; render();
-  /* The control is Program's NORMAL export rather than the raw one: the raw button has
-     moved to Settings > Storage, so its absence here no longer tells us whether the page
-     drew. What the control is for is unchanged — proving the two gone buttons above went
-     because there was nothing to hand over, and not because the screen rendered empty. */
+  TAB = "sync"; SET_PAGE = "data"; render();
+  document.querySelectorAll("#app details").forEach(d=> d.open = true);
+  /* THE CONTROL IS A BUTTON THAT IS ALWAYS ON THIS SCREEN, proving the two gone ones
+     above went because there was nothing to hand over and not because the screen
+     rendered empty. It used to be Program's "Normal export", which has since gone: it
+     called the same function as this very button, so it was one action drawn twice. */
   return {have: haveBadRecords(), btn: !!document.getElementById("badRecCopy"),
-          raw: !!document.getElementById("rescueFull")};
+          raw: !!document.getElementById("exportBtn")};
 });
 ck("haveBadRecords() says no", !d5.have);
 ck("the buttons are gone", !d5.btn);
-ck("and Program's normal export is still there (control)", d5.raw);
+ck("and the screen still drew, export and all (control)", d5.raw);
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");
 if(errs.length) bad++;

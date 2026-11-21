@@ -894,6 +894,50 @@ UI job, not done here.
   sweep against the previous build changes **only** Lotus and Uptown, and only on Smith
   work.
 
+## 29. Export machinery on the Program tab — MOVED (2026.11.17.61)
+
+**Asked for as "put all these export things into settings, it doesn't match here."**
+
+Seven buttons sat above the plan check. Four were not about running a programme:
+
+| button | what it was | where it went |
+|---|---|---|
+| Normal export | `exportJSON()` — **the same function** as Settings › Your data › Export my data | deleted; Settings already had it |
+| Copy set-aside records | a diagnostic bundle | Settings › Your data, in the Repairs fold |
+| Save them as a file | the same bundle, written out | the same |
+
+"Normal export" was not a shortcut to somewhere else. It was a second copy of one button,
+on a tab about the training week, and `progexport.mjs` §4 proves it by stubbing
+`exportJSON` on the old build and clicking both: one call each.
+
+Item 23 cleared the raw-export buttons off every page for this reason and left the normal
+one here, saying so at the time. It should have gone with them.
+
+**Also fixed:** the sentence describing the plan document ("The whole schedule as a
+document… hand it to a coach") sat four rows below the **Full plan** button it describes,
+under *Import a plan*. It is under Full plan now.
+
+**What stays on Program:** Full plan, Build a new plan, Import a plan, What changed — the
+plan as a document, making one, bringing one in, and what has changed in it.
+
+### Why the set-aside buttons were on Program at all
+
+The Today card that announces them is dismissible and the records are not, so they needed
+somewhere permanent. That was a good reason to keep them reachable and no reason for them
+to be on Program. Settings is permanent too. `handover.mjs` §4 still asserts exactly that
+— dismissing the notice must not strand the records — and now looks for them on Your data.
+
+### Two specs encoded the old arrangement
+
+`actionpref.mjs` treated the two arriving buttons as invented, and its repair-count
+section assumed the only variable was the attachment undo. The count has three inputs now
+— the two standing checks, the attachment undo, and the set-aside records — and the
+section walks two, three and four.
+
+`progexport.mjs` §7 tested the empty case by deleting a `badRecords` field that does not
+exist, so nothing was cleared and it printed a note instead of testing anything. The
+records live on the sessions as `badEntries` and `entry.badSets`.
+
 ## 28. Rendering wrote to the log — FIXED (2026.11.17.60)
 
 `runOneTimeSeeds()` was called from the top of `render()`, and through it a render could
