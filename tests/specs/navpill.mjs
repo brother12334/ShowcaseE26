@@ -21,6 +21,7 @@ await p.evaluate(()=>{
   const sp=document.getElementById('splash'); if(sp) sp.remove();
   try{OB=null}catch(e){} hideModal(); document.body.classList.remove('ai-open','onboarding');
   S.setup={name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()};
+  S.introSeen=INTRO_GEN;
   S.tourDone=true; S.geo='off'; S.sleepAsked=todayStr(); S.seenNews=NEWS_FOR;
   S.prefs=Object.assign({}, S.prefs, {sleepPrompt:false, warmups:'off'});
   S.splitId=DEFAULT_SPLIT; applySplit();
@@ -81,9 +82,13 @@ console.log("\n4 - ONE SOURCE OF TRUTH, NOT TWO GUESSES");
      variable, the computed offset moves by exactly as much.
      Measured after the transition rather than during it — getComputedStyle returns the
      interpolated value mid-transition, which is the old number for a frame. */
-  const at = g=> p.evaluate(v=>{
+  const at = g=> p.evaluate(async v=>{
+    const pill = document.getElementById('restUI');
     document.documentElement.style.setProperty('--navGap', v);
-    return new Promise(r=> setTimeout(()=> r(getComputedStyle(document.getElementById('restUI')).bottom), 400));
+    const style = getComputedStyle(pill);
+    // Flush the new style so the browser creates the transition before we await it.
+    if(style.bottom) await Promise.all(pill.getAnimations().map(animation=> animation.finished));
+    return style.bottom;
   }, g);
   const b0 = await at('0px'), b30 = await at('30px');
   console.log("   ", b0, "->", b30);
