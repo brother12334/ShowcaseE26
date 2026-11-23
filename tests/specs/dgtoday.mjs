@@ -463,6 +463,33 @@ ck("CONTROL: there are distinct exercise cards and a note", r.lifts > 1 && r.ope
 ck("every lift still has a jump target", r.lifts === r.rows);
 ck("exercise and note labels use Instrument Sans", r.liftFont && r.noteFont);
 ck("the weigh-in status uses Instrument Sans", r.weighFont === true);
+r = await newP.evaluate(()=>{
+  const styles = (element, keys)=> element && keys.map(key=> getComputedStyle(element)[key]);
+  const lift = el=> styles(el, ['backgroundColor','borderColor','borderRadius','padding']);
+  const title = el=> styles(el, ['fontFamily','fontSize','fontWeight']);
+  const notice = el=> styles(el, ['backgroundColor','borderColor','borderRadius','padding']);
+  const preview = document.querySelector('[data-today-lift]');
+  const today = {lift:lift(preview), title:title(preview.querySelector('.ex-head b')),
+    notice:notice(document.querySelector('[data-today-extra] [data-glass-notice]'))};
+  startWorkout(todaysWorkoutId());
+  document.getElementById('preflight')?.remove();
+  PF = null;
+  TAB = 'workout';
+  render();
+  const workoutLift = document.querySelector('[data-workout-lift]');
+  const workout = {lift:lift(workoutLift), title:title(workoutLift?.querySelector('.ex-head b')),
+    notice:notice(document.querySelector('[data-dg-screen="workout"] [data-glass-notice]'))};
+  boot();
+  return {today, workout};
+});
+ck("CONTROL: both views rendered a lift and an action notice",
+   r.today.lift && r.workout.lift && r.today.notice && r.workout.notice);
+ck("Today and Workout use the same lift surface and heading",
+   JSON.stringify(r.today.lift) === JSON.stringify(r.workout.lift) &&
+   JSON.stringify(r.today.title) === JSON.stringify(r.workout.title));
+ck("Today action notes match the Workout notice surface",
+   JSON.stringify(r.today.notice) === JSON.stringify(r.workout.notice),
+   JSON.stringify([r.today.notice, r.workout.notice]));
 await newP.locator('[data-today-extra]').first().evaluate(el=>{
   el.querySelectorAll('details').forEach(details=> details.open = false);
   scrollTo(0, el.getBoundingClientRect().top + scrollY - 110);
