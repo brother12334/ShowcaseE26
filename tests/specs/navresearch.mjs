@@ -70,8 +70,11 @@ console.log("2 - THE FOUR SURVIVORS WERE NOT TOUCHED");
     ck(k + " still opens and renders something", r[k].tab === k && !r[k].empty,
        JSON.stringify(r[k]));
   });
+  /* EVERY SCREEN'S TITLE IS LOWER CASE NOW. The dark glass header writes the screen's
+     name as the design sets it — "body", not "BODY" — so these compare without case.
+     What is being asserted is unchanged: Body is its own tab with its own name on it. */
   ck("Body is still its own tab, not merged into Research",
-     /BODY|Body/.test(r.body.h1), r.body.h1);
+     /^body$/i.test((r.body.h1 || "").trim()), r.body.h1);
   ck("and Program is still where it was", r.program.tab === "program", r.program.tab);
 }
 
@@ -87,7 +90,14 @@ console.log("3 - RESEARCH IS A REAL DESTINATION");
     icon: !!document.querySelector('nav [data-tab="research"] svg path')
   }));
   ck("the tab opens", r.tab === "research", r.tab);
-  ck("THE PAGE IS TITLED RESEARCH LAB", r.h1 === "Research Lab", r.h1);
+  /* The screen is headed "research" and the words "Research Lab" are still on it, as
+     the heading of the list itself. Both are checked, because the point of this
+     assertion is that the destination is named and recognisable — losing the name
+     entirely is the regression it exists to catch. */
+  ck("the page is headed research", /^research$/i.test((r.h1 || "").trim()), r.h1);
+  ck("AND IT IS STILL THE RESEARCH LAB",
+     /research lab/i.test(await p.evaluate(()=> document.getElementById("app").innerText)),
+     "not on the screen");
   ck("with the subtitle the brief asked for",
      r.sub === "New science for better training.", r.sub);
   ck("it is in TAB_ORDER, so swipes and view transitions know where it is",
@@ -121,7 +131,8 @@ console.log("4 - SETTINGS IS ONE TAP FROM TODAY, AND INTACT");
   const after = await ev(()=> ({tab: TAB, h1: (document.querySelector('h1')||{}).textContent,
                                 cards: document.querySelectorAll('.card').length,
                                 back: !!document.querySelector('#setToToday')}));
-  ck("tapping it opens Settings", after.tab === "sync" && after.h1 === "SETTINGS",
+  ck("tapping it opens Settings",
+     after.tab === "sync" && /^settings$/i.test((after.h1 || "").trim()),
      JSON.stringify(after));
   ck("with its content, not an empty shell", after.cards > 3, String(after.cards));
   ck("AND A WAY BACK, because there is no lit tab to leave from", after.back === true, "");

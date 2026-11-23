@@ -108,12 +108,21 @@ console.log("8 - THE WIRING READS THE REAL BAR");
     const nav = document.querySelector("nav");
     const vv = window.visualViewport;
     const rect = nav.getBoundingClientRect();
-    return {bottom: Math.round(rect.bottom),
+    /* AT ITS RESTING HEIGHT ABOVE THE VISIBLE BOTTOM, not on it. The bar was a slab on
+       the bottom edge when this was written; the dark glass design floats it clear by
+       --navLift, so "pinned to the visible bottom" would now describe a bar that has
+       lost its float. The claim is unchanged — the bar tracks the VISIBLE bottom rather
+       than the layout one — only the offset it tracks at is named. */
+    const lift = Math.round(parseFloat(getComputedStyle(document.documentElement)
+      .getPropertyValue("--navLift")) || 0);
+    const want = (vv ? vv.offsetTop + vv.height : rect.bottom) - lift;
+    return {bottom: Math.round(rect.bottom), lift,
       visible: vv ? Math.round(vv.offsetTop + vv.height) : null,
       gap: getComputedStyle(nav).getPropertyValue("--navGap").trim(),
-      pinned: Math.abs(rect.bottom - (vv ? vv.offsetTop + vv.height : rect.bottom)) < 2};
+      pinned: Math.abs(rect.bottom - want) < 2};
   });
-  ck("the bar is on the bottom of the visible area", r.pinned === true, JSON.stringify(r));
+  ck("CONTROL: the bar has a resting float to track at", r.lift > 0, r.lift + "px");
+  ck("the bar tracks the bottom of the visible area", r.pinned === true, JSON.stringify(r));
   ck("with no correction applied, because none is needed",
      r.gap === "" || r.gap === "0px", "'" + r.gap + "'");
 }
@@ -141,10 +150,12 @@ console.log("9 - SCROLLING TO THE TOP AND PULLING UP LEAVES IT THERE");
       await new Promise(r2=> setTimeout(r2, 40));
     }
     await new Promise(r2=> setTimeout(r2, 700));     // past both confirmation passes
-    return {top, after: at(), h: window.innerHeight,
+    const lift = Math.round(parseFloat(getComputedStyle(document.documentElement)
+      .getPropertyValue("--navLift")) || 0);
+    return {top, after: at(), h: window.innerHeight - lift, lift,
       gap: getComputedStyle(nav).getPropertyValue("--navGap").trim()};
   });
-  ck("the bar is on the bottom at the top of the page", Math.abs(r.top - r.h) < 2,
+  ck("the bar is at its resting height at the top of the page", Math.abs(r.top - r.h) < 2,
      JSON.stringify(r));
   ck("AND IT IS STILL THERE AFTER PULLING UP AT THE TOP", Math.abs(r.after - r.h) < 2,
      JSON.stringify(r));

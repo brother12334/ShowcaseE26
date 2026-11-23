@@ -39,12 +39,25 @@ const open = async (ua)=>{
   await p.evaluate(clear);
   return {p, errs, ctx};
 };
-/* Where the bar actually sits, and where it should sit: flush with the bottom. */
+/* WHERE THE BAR ACTUALLY SITS, AND WHERE IT SHOULD SIT.
+
+   It used to be flush with the bottom, and every assertion below said so. The dark
+   glass design floats it clear of the edge by --navLift, so "flush" now describes a bar
+   that has LOST its float rather than one that is working. `rest` is where it belongs:
+   the bottom of the visible area, less that float. Read from the stylesheet rather than
+   written as 22 here, so changing the design's number does not make this spec wrong.
+
+   Nothing else about the behaviour changed, and the parts of it that matter are still
+   checked exactly as they were: the correction lifts the bar by precisely the toolbar
+   strip, puts it back when the strip goes, never slides, and never parks in between. */
 const where = p=> p.evaluate(()=>{
   const n = document.querySelector("nav");
   const r = n.getBoundingClientRect();
+  const lift = Math.round(parseFloat(getComputedStyle(document.documentElement)
+    .getPropertyValue("--navLift")) || 0);
   return {bottom: Math.round(r.bottom), top: Math.round(r.top),
-          h: window.innerHeight, gap: n.style.getPropertyValue("--navGap").trim(),
+          h: window.innerHeight, lift, rest: window.innerHeight - lift,
+          gap: n.style.getPropertyValue("--navGap").trim(),
           y: n.style.getPropertyValue("--navY").trim()};
 });
 
@@ -66,19 +79,22 @@ console.log("1 - THE BAR SITS ON THE BOTTOM OF THE VISIBLE AREA, WHATEVER THE BR
      needs the app to guess what it is running on. */
   const {p, errs} = await open(ANDROID);
   const a = await where(p);
-  ck("flush with the bottom to start", a.bottom === a.h, a.bottom+" of "+a.h);
+  ck("CONTROL: the bar has a resting float, or 'at rest' means nothing", a.lift > 0,
+     a.lift + "px");
+  ck("at its resting height to start", a.bottom === a.rest, a.bottom+" of "+a.rest);
   await p.evaluate(()=> window.__setStrip(72));
   await p.waitForTimeout(600);          // the correction confirms itself at 180ms and 520ms
   const c = await where(p);
   ck("a bottom strip lifts it clear, by exactly the strip", c.gap === "72px", c.gap || "(unset)");
-  ck("so it rests on the visible bottom", c.bottom === c.h - 72, c.bottom+" of "+(a.h-72));
+  ck("so it rests above the visible bottom", c.bottom === c.h - 72 - c.lift,
+     c.bottom+" of "+(c.h - 72 - c.lift));
   /* AND THIS IS THE HALF THE OLD RULE COULD NOT DO. Its correction was computed from a
      quantity that is always positive, so a bar that had been lifted could never come back
      down. The residual has a sign, so the strip going away puts it back. */
   await p.evaluate(()=> window.__setStrip(0));
   await p.waitForTimeout(600);
   const d = await where(p);
-  ck("and the strip going away puts it back down", d.bottom === d.h, d.bottom+" of "+d.h);
+  ck("and the strip going away puts it back down", d.bottom === d.rest, d.bottom+" of "+d.rest);
   ck("with the correction returned to zero", d.gap === "0px" || d.gap === "", d.gap || "(unset)");
   ck("no page errors", errs.length===0, errs.join(" | "));
 }
@@ -90,7 +106,8 @@ console.log("2 - ON iOS, WHERE THE TOOLBAR IS AT THE BOTTOM, THE CORRECTION STIL
   await p.waitForTimeout(420);          // the bar slides, it does not jump
   const a = await where(p);
   ck("the bar is lifted clear of the toolbar", a.gap === "72px", a.gap);
-  ck("by exactly the strip, no more", a.bottom === a.h - 72, a.bottom+" of "+a.h);
+  ck("by exactly the strip, no more", a.bottom === a.h - 72 - a.lift,
+     a.bottom+" of "+(a.h - 72 - a.lift));
   console.log("2b - AND A KEYBOARD IS NOT A TOOLBAR");
   const kb = await p.evaluate(async ()=>{
     /* the keyboard sweeps the whole range on its way up, including the 1-90 band */
@@ -143,10 +160,13 @@ console.log("3 - IT IS ON THE BOTTOM IN EVERY STATE THE APP HAS");
       const htmlT = getComputedStyle(document.documentElement);
       const capt = s=> s.transform !== "none" || s.filter !== "none"
                     || (s.backdropFilter && s.backdropFilter !== "none") || s.perspective !== "none";
+      const lift = Math.round(parseFloat(getComputedStyle(document.documentElement)
+        .getPropertyValue("--navLift")) || 0);
       return {bottom: Math.round(rect.bottom), h: window.innerHeight,
+              rest: window.innerHeight - lift,
               captured: capt(bodyT) || capt(htmlT)};
     }, name);
-    ck(name+": flush with the bottom", r.bottom === r.h, r.bottom+" of "+r.h);
+    ck(name+": at its resting height", r.bottom === r.rest, r.bottom+" of "+r.rest);
     ck(name+": nothing above it claims the fixed bar", !r.captured, String(r.captured));
   }
   ck("no page errors", errs.length===0, errs.join(" | "));
@@ -178,9 +198,14 @@ console.log("4 - THE BAR DOES NOT MOVE ON SCROLL, EVER");
     return out;
   });
   console.log("    " + JSON.stringify(r));
+  /* `off` is measured as bottom minus innerHeight, so a bar resting --navLift above the
+     edge reads as minus the lift. */
+  const lift = await p.evaluate(()=> Math.round(parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue("--navLift")) || 0));
   ck("nothing ever writes the slide variable", r.every(x=> x.y === ""), JSON.stringify(r.map(x=>x.y)));
-  ck("and the bar is flush with the bottom at every scroll position",
-     r.every(x=> Math.abs(x.off) <= 1), JSON.stringify(r.map(x=>x.off)));
+  ck("and the bar is at its resting height at every scroll position",
+     r.every(x=> Math.abs(x.off + lift) <= 1),
+     JSON.stringify(r.map(x=>x.off)) + " against -" + lift);
   ck("no page errors", errs.length===0, errs.join(" | "));
 }
 
@@ -237,8 +262,16 @@ console.log("6 - A TAP IS NEVER WAITED ON FOR A DOUBLE-TAP");
   const css = await (await import('node:fs/promises')).readFile(appFile('index.html'),'utf8');
   const blk = (css.match(/\nnav\{[^}]*\}/) || [""])[0];
   ck("the bar opts out of the 300ms delay", /touch-action:\s*manipulation/.test(blk), blk.slice(0,120));
+  /* The claim is where the correction rides, not how the value is spelled. It used to
+     be `bottom:var(--navGap)` exactly; the bar now also carries its resting float, so
+     it is `bottom:calc(var(--navGap...) + var(--navLift...))`. Still bottom, still not
+     the transform, which is the thing that must never change: a correction sharing the
+     transform turns a one-pixel adjustment into a 260ms animation, and a tap landing
+     during an animation lands where the button was. */
+  const bottomDecl = (blk.match(/bottom:[^;]*;/) || [""])[0];
   ck("the correction rides on bottom, not the animated transform",
-     /bottom:var\(--navGap/.test(blk) && !/translate3d\(0,[^)]*--navGap/.test(blk), blk.slice(0,120));
+     /--navGap/.test(bottomDecl) && !/translate3d\([^)]*--navGap/.test(blk),
+     bottomDecl || blk.slice(0,120));
 }
 
 console.log(bad ? ("BROKEN: "+bad) : "all good");

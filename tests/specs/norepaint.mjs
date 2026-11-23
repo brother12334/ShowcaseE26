@@ -130,7 +130,15 @@ console.log("4 - THE APP HAS ONE ENTRANCE, NOT TWO");
      dgtoday.mjs, where the wrapper that made this necessary is described. */
   const r = await p.evaluate(()=>{
     goTab("sync"); goTab("program");
-    const kid = document.querySelector("#app.view-in > .card");
+    /* Program is a dark glass screen too now, so its cards are inside the screen's own
+       wrapper rather than directly under #app — the same reason this moved off Today in
+       the first place. The entrance reaches one level through that wrapper, and these
+       are the sections it staggers. Claim unchanged: the app has one entrance and the
+       screen's parts use it. */
+    const app = document.getElementById("app");
+    if(!app.classList.contains("view-in")) return "not animating";
+    const wrap = app.querySelector(":scope > .dg");
+    const kid = (wrap || app).firstElementChild;
     return kid ? getComputedStyle(kid).animationName : "none";
   });
   ck("CONTROL: a card was found at the top level of the tab, or this tests nothing",

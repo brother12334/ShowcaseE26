@@ -146,6 +146,9 @@
      screens ended up as a wall of blocks touching each other and touching the edges.
      One gutter and one vertical step, both fluid, so the same layout stays airy on a
      small screen and stays proportionate on a large one instead of just spreading out. */
+  /* How far the tab bar floats clear of the bottom edge. The bar uses it, and so does
+     anything pinned above the bar, so one number moves all of them together. */
+  --navLift:22px;
   --gut:clamp(18px, 5.6vw, 26px);
   --air:clamp(14px, 2.4vh, 22px);
 
@@ -3894,7 +3897,7 @@ nav{
      translateZ(0) and nothing else: the layer is for the compositor, not for motion. */
   /* 22 up from the bottom as the design has it, but never under the home indicator,
      and still riding on --navGap so Safari's toolbar cannot leave it floating. */
-  bottom:calc(var(--navGap, 0px) + max(22px, var(--sab)));
+  bottom:calc(var(--navGap, 0px) + var(--navLift, 22px));
   transform:translateZ(0);
   /* No double-tap-to-zoom delay on the one control people hit fastest. */
   touch-action:manipulation;
@@ -5456,13 +5459,18 @@ body.cele-open{overscroll-behavior:contain}
 /* THE PILL RIDES ON THE BAR, rather than beside it on a guess. 86px was measured once
    against a tab bar sitting flat on the bottom of the screen; the bar then moves for
    Safari's toolbar, so with a rest running every scroll had the two of them drift apart
-   and then collide. --navGap is the same correction the bar itself uses. */
+   and then collide. --navGap is the same correction the bar itself uses.
+
+   AND THE BAR DOES NOT SIT FLAT ANY MORE. The dark glass design floats it 22px up from
+   the bottom, so a pill pinned at the old 86 sat on top of it. --navLift is that float,
+   written once here and used by both pills and by the bar itself, so the three cannot
+   drift apart again. */
 /* BACK TO THE SET YOU ARE ON. Mirror of the rest clock — same height off the bottom,
    same anchor, the other side of the screen — so the two can never be in each other's
    way however the tab bar moves. */
 .live-jump{
   position:fixed;left:12px;
-  bottom:calc(86px + env(safe-area-inset-bottom) + var(--navGap, 0px));z-index:150;
+  bottom:calc(86px + var(--navLift, 0px) + env(safe-area-inset-bottom) + var(--navGap, 0px));z-index:150;
   transition:bottom var(--t-mid, .2s) var(--ease, ease);
   display:flex;align-items:center;gap:7px;background:var(--card);
   border:1px solid var(--acc-line);border-radius:var(--r-pill);
@@ -5474,7 +5482,7 @@ body.cele-open{overscroll-behavior:contain}
 .live-jump .lj-txt{font:var(--fs-2) var(--mono);letter-spacing:.04em;color:var(--dim)}
 .rest-mini{
   position:fixed;right:12px;
-  bottom:calc(86px + env(safe-area-inset-bottom) + var(--navGap, 0px));z-index:150;
+  bottom:calc(86px + var(--navLift, 0px) + env(safe-area-inset-bottom) + var(--navGap, 0px));z-index:150;
   transition:bottom var(--t-mid, .2s) var(--ease, ease);
   display:flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--line);
   border-radius:var(--r-pill);padding:6px 7px 6px 6px;box-shadow:0 8px 28px rgba(0,0,0,.55);
@@ -7809,7 +7817,11 @@ body.news-open{overscroll-behavior:contain}
    cannot know about: this app's own stage while it is being transitioned onto, and the
    stand-in for the design being transitioned from. */
 .intro-stage{position:fixed;inset:0;z-index:60}
-body.intro-on{overflow:hidden}
+/* NO overflow:hidden ON body, not even for three seconds. navlock scans the source for
+   exactly that and the scan is right: a lock that fails to lift leaves the app unable
+   to scroll, and "it is only during the intro" is what every stuck lock said first.
+   The intro stage is position:fixed over the whole screen, so there is nothing behind
+   it to see scroll anyway. */
 /* The live app, for the three seconds it spends inside the intro stage. */
 .intro-stage > #stage.intro-next{position:absolute;inset:0;overflow:hidden}
 /* THE DAY BEFORE. A reconstruction, not a screenshot: the old design is not in this
@@ -27868,6 +27880,16 @@ document.querySelectorAll("nav button").forEach(b=>{
    described Safari's toolbar described Android Chrome's URL bar, where nothing was
    hidden and the bar was lifted anyway. */
 const NAV_GAP_MAX = 90;    // a toolbar is 40-90px; a keyboard is 250 and is not ours
+/* How far the bar floats clear of the bottom edge, read from the stylesheet rather than
+   written twice: --navLift is the design's number and this arithmetic has to use the
+   same one or the bar and the correction disagree about where "resting" is. */
+function navLiftNow(){
+  try{
+    const v = parseFloat(getComputedStyle(document.documentElement)
+      .getPropertyValue("--navLift"));
+    return isFinite(v) ? v : 0;
+  }catch(e){ return 0; }
+}
 function navGapFor(m){
   /* A KEYBOARD IS NOT A TOOLBAR. A weight is being typed; the tab bar is not what
      anybody is aiming for, so it stays where it is rather than climbing to sit on it. */
@@ -27976,7 +27998,13 @@ let refreshNavBounds = ()=>{};
     const gap = navGapFor({
       gapNow, typing,
       navBottom: rect.bottom,
-      visibleBottom: vv.offsetTop + vv.height,
+      /* LESS THE BAR'S OWN FLOAT. The correction drives navBottom towards
+         visibleBottom, which was exactly right while the bar was a slab on the bottom
+         edge. The dark glass bar rests --navLift above the edge, so aiming it at the
+         visible bottom lands it flush against Safari's toolbar and the float is gone —
+         with a 72px toolbar the lift it asked for was 50, which is 72 minus the 22 it
+         was already clear by. The target is the bar's resting height, not the edge. */
+      visibleBottom: vv.offsetTop + vv.height - navLiftNow(),
       overscrolled: raw < -0.5 || raw > maxY + 1 || vv.offsetTop > 0.5
     });
     /* A CORRECTION UNDER FOUR PIXELS IS NOISE, NOT A CORRECTION. iOS reports the visual

@@ -147,10 +147,20 @@ console.log("5 - THE TAB BAR IS FIXED TO THE BOTTOM, AND STAYS THERE");
   console.log("   ", JSON.stringify(r));
   ck("it is fixed at every scroll position", r.every(x=> x.pos === "fixed"),
      JSON.stringify(r.map(x=>x.pos)));
-  /* Either flush with the bottom, or slid fully out of the way by the auto-hide. Never
-     parked somewhere in the middle. */
+  /* AT ITS RESTING HEIGHT, or slid fully out of the way by the auto-hide. Never parked
+     somewhere in the middle.
+
+     The resting height used to be zero, because the bar was a slab on the bottom edge.
+     The dark glass design floats it clear by --navLift, so "flush" is no longer the
+     right description of a bar that is working — it is the right description of one
+     that has lost its float. Read off the live value rather than written as 22 here, so
+     changing the design's number does not make this spec wrong. */
+  const lift = await p.evaluate(()=> Math.round(parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue("--navLift")) || 0));
+  ck("CONTROL: the bar has a resting float to be at", lift > 0, lift + "px");
   ck("and never parked halfway up the screen",
-     r.every(x=> x.offBottom <= 1 || x.offBottom < -40), JSON.stringify(r.map(x=>x.offBottom)));
+     r.every(x=> Math.abs(x.offBottom - lift) <= 1 || x.offBottom < -40),
+     JSON.stringify(r.map(x=>x.offBottom)) + " against " + lift);
 }
 
 console.log(errs.length ? ("PAGE ERRORS: "+errs.join(" | ")) : "no page errors");

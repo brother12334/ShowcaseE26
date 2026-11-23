@@ -144,7 +144,13 @@ console.log("5 - THE TAB BAR FITS ITS OWN LABELS MID-SESSION");
   });
   ck("the pair is held to what two labels need", r.pairW > 0 && r.pairW <= 152,
      String(r.pairW));
-  ck("the other tabs get the rest", r.tabW >= 60, String(r.tabW));
+  /* 44, NOT 60. 60 was what a tab got when the bar ran the full width of the screen.
+     The dark glass bar is inset 16 from each edge with 6 of its own padding, so six
+     tabs mid-session share 346px rather than 390 and each gets about 50. 44 is the
+     floor that actually matters — it is the smallest reliable tap target — and the
+     claim this was a proxy for, that no label is clipped, is measured directly on the
+     line below rather than inferred from a width. */
+  ck("the other tabs are still a tap target wide", r.tabW >= 44, String(r.tabW));
   ck("NO LABEL IS CLIPPED OR COVERED BY THE PAIR", r.over.length === 0,
      JSON.stringify(r.over));
 }
