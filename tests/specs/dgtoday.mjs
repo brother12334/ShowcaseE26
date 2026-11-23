@@ -276,7 +276,34 @@ ck("CONTROL: there was a layer to keep", r.had === true);
 ck("three renders later it is the very same element", r.same === true, r.key);
 ck("and it is beside the app, not inside it", r.inApp === false);
 
-console.log("\n9. NOTHING FAILED TO LOAD, AND NOTHING THREW");
+console.log("\n9. THE SCREEN STILL ARRIVES THE WAY EVERY OTHER SCREEN DOES");
+/* .dg is one full-bleed element, so Today went from a dozen direct children of #app to
+   one and the whole screen began arriving as a block instead of settling in part by
+   part. This is the half of that claim norepaint.mjs can no longer make, because a card
+   on this screen is no longer a direct child of #app. */
+r = await newP.evaluate(()=>{
+  boot();
+  const app = document.getElementById('app');
+  app.classList.add('view-in');
+  const kids = [...app.querySelectorAll('.dg > *')];
+  const names = kids.map(k=> getComputedStyle(k).animationName);
+  const delays = kids.map(k=> getComputedStyle(k).animationDelay);
+  const wrapper = getComputedStyle(app.querySelector('.dg')).animationName;
+  /* Nothing deeper than the screen's own sections may animate, or the notices below the
+     door each arrive on their own schedule. */
+  const deep = app.querySelector('.dg-extra > *');
+  return {n: kids.length, names, delays, wrapper,
+          deep: deep ? getComputedStyle(deep).animationName : "none"};
+});
+ck("CONTROL: the screen has several sections to stagger", r.n >= 4, r.n + " sections");
+ck("every one of them uses the app's one entrance",
+   r.names.length > 0 && r.names.every(x=> x === "viewIn"), r.names.join(", "));
+ck("and they are staggered, not simultaneous",
+   new Set(r.delays).size > 1, r.delays.join(", "));
+ck("the wrapper itself does not animate as well", r.wrapper === "none", r.wrapper);
+ck("and nothing nested deeper animates", r.deep === "none", r.deep);
+
+console.log("\n10. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
 ck("no page errors", pageErr.length === 0, pageErr.join(" | ") || "none");
 

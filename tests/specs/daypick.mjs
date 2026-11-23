@@ -112,28 +112,41 @@ console.log("6 - ON SCREEN: THE STRIP, THE CARD AND THE WAY BACK");
     S.prefs = Object.assign({}, S.prefs, {dayOrder:"any"}); save();
     TAB="today"; render();
   });
+  /* THE STRIP ON TODAY IS THE DARK GLASS CYCLE NOW, not the plate strip — a redesign,
+     not a loosening. Every claim below is the same claim: each training day is live
+     under free choice, tapping one changes today's session, the mark moves to it, and a
+     day you chose is distinguishable from the day the rotation was on. Only the classes
+     that carry those states changed: .plate -> .dg-cy, .cur -> .dg-at, .pickd ->
+     .dg-pickd, and "inert" is now aria-disabled, which is what it always meant. The
+     plate strip itself still exists and is still covered by its own byte-for-byte
+     comparison; it is simply not what Today draws. */
   const strip = await p.evaluate(()=>{
-    const plates = [...document.querySelectorAll(".plate[data-slot]")];
-    return {n: plates.length, inert: plates.filter(x=> x.classList.contains("inert")).length};
+    const plates = [...document.querySelectorAll(".dg-cy[data-slot]")];
+    return {n: plates.length, inert: plates.filter(x=> x.hasAttribute("aria-disabled")).length};
   });
-  ck("every training plate is live under free choice", strip.n > 0 && strip.inert === 0,
+  ck("every training day is live under free choice", strip.n > 0 && strip.inert === 0,
      JSON.stringify(strip));
-  /* tap the third plate the way a thumb would */
+  /* tap the third day the way a thumb would */
   await p.evaluate(()=>{
-    const plates = [...document.querySelectorAll(".plate[data-slot]")];
+    const plates = [...document.querySelectorAll(".dg-cy[data-slot]")];
     const t = plates.find(x=> x.dataset.slot === "2");
     t.click();
   });
   const after = await p.evaluate(()=>({
     today: todaysWorkoutId(), want: ROTATION[2],
-    ring: (document.querySelector(".plate.cur[data-slot]")||{}).dataset
-          ? document.querySelector(".plate.cur[data-slot]").dataset.slot : null,
-    pickd: !!document.querySelector(".plate.pickd"),
+    ring: (document.querySelector(".dg-cy.dg-at[data-slot]")||{}).dataset
+          ? document.querySelector(".dg-cy.dg-at[data-slot]").dataset.slot : null,
+    pickd: !!document.querySelector(".dg-cy.dg-pickd"),
     line: ([...document.querySelectorAll(".day-open-sub")]
             .map(x=> x.textContent.replace(/\s+/g," ").trim())
             .find(t=> /picked this for today/.test(t)) || ""),
     back: !!document.getElementById("dayPickClear"),
-    startSays: (document.getElementById("startBtn")||{}).textContent || ""
+    startSays: (document.getElementById("startBtn")||{}).textContent || "",
+    /* The hero: its baked-art heading, or its live word. Either names the day. */
+    names: [...document.querySelectorAll(".dg-hero h2")].map(x=> x.textContent).join(" "),
+    /* The day's NAME, not its id: the hero is headed "upper b", the rotation calls it
+       upperB, and matching the id against the heading fails on the space. */
+    wantName: dayName(ROTATION[2])
   }));
   ck("tapping a plate changes today's session", after.today === after.want,
      after.today + " / " + after.want);
@@ -141,9 +154,16 @@ console.log("6 - ON SCREEN: THE STRIP, THE CARD AND THE WAY BACK");
   ck("and it is marked as a choice", after.pickd, String(after.pickd));
   ck("the card says so, and names what is still next",
      /picked this for today/.test(after.line) && /still next/.test(after.line), after.line);
-  ck("the start button offers the day you picked",
-     new RegExp(after.want.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"), "i").test(after.startSays)
-       || after.startSays.length > 0, after.startSays.trim());
+  /* THE BUTTON NO LONGER CARRIES THE DAY'S NAME, and the old assertion would not have
+     noticed: its `|| startSays.length > 0` fallback passed on any non-empty label at
+     all. On the dark glass screen the day IS the screen — the name is the hero, set
+     across it — and the button is the door. So what is checked is that the door is
+     there and that the screen names the day you picked, which is the thing the old
+     assertion was reaching for through the label. */
+  ck("the door is there", after.startSays.trim().length > 0, after.startSays.trim());
+  ck("and the screen names the day you picked",
+     after.names.trim().toLowerCase() === after.wantName.toLowerCase(),
+     after.names.trim() + " / " + after.wantName);
   ck("there is a way back to the rotation", after.back, String(after.back));
   /* and it undoes itself */
   await p.evaluate(()=> document.getElementById("dayPickClear").click());

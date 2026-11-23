@@ -121,11 +121,20 @@ console.log("3b - NOR DOES IT WITH EVERY DISCLOSURE ON THE TAB OPEN");
 
 console.log("4 - THE APP HAS ONE ENTRANCE, NOT TWO");
 {
+  /* ON PROGRAM, NOT ON TODAY, and the change of tab is the finding rather than a
+     loosening. Today is a dark glass screen now: it is one full-bleed element with the
+     screen's sections inside it, so a card is no longer a direct child of #app and this
+     selector matched nothing. What it was asserting — that the app has ONE entrance and
+     a card uses it — is unchanged and is still asserted, on a tab that still puts cards
+     at the top level. That Today's own sections arrive the same way is asserted in
+     dgtoday.mjs, where the wrapper that made this necessary is described. */
   const r = await p.evaluate(()=>{
-    goTab("sync"); goTab("today");
+    goTab("sync"); goTab("program");
     const kid = document.querySelector("#app.view-in > .card");
     return kid ? getComputedStyle(kid).animationName : "none";
   });
+  ck("CONTROL: a card was found at the top level of the tab, or this tests nothing",
+     r !== "none", r);
   ck("a card uses the staggered arrival, not the old half-second slide",
      r === "viewIn", r);
 }

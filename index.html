@@ -7428,6 +7428,21 @@ body.news-open{overscroll-behavior:contain}
    640px black rectangle where the hero should be. The page's own dark ground is on
    #stage, where nothing is stacked over it. */
 #stage{background:var(--e26-bg)}
+/* THE ENTRANCE REACHES THROUGH THE WRAPPER.
+
+   .dg is one full-bleed element, so Today went from a dozen direct children of #app to
+   a single one — and the whole screen arrived as a block instead of settling in part by
+   part. The app has one entrance and this keeps it: the same animation, the same
+   stagger, one level deeper. A child selector rather than a descendant one, because
+   nothing nested below the screen's own sections should animate. */
+#app.view-in > .dg{animation:none}
+#app.view-in > .dg > *{animation:viewIn var(--t-nav) var(--ease-nav) backwards}
+#app.view-in > .dg > *:nth-child(1){animation-delay:0ms}
+#app.view-in > .dg > *:nth-child(2){animation-delay:calc(var(--stagger) * 1)}
+#app.view-in > .dg > *:nth-child(3){animation-delay:calc(var(--stagger) * 2)}
+#app.view-in > .dg > *:nth-child(4){animation-delay:calc(var(--stagger) * 3)}
+#app.view-in > .dg > *:nth-child(5){animation-delay:calc(var(--stagger) * 4)}
+#app.view-in > .dg > *:nth-child(n+6){animation-delay:calc(var(--stagger) * 5)}
 .dg{position:relative;font-family:var(--e26-font);background:transparent;color:var(--e26-ink);
   min-height:100svh;padding:0 0 128px;
   margin:calc(-16px - env(safe-area-inset-top)) -14px -20px}
@@ -7446,17 +7461,22 @@ body.news-open{overscroll-behavior:contain}
 
    They stay first in the DOM, so the screen is still read as today, the date, where you
    are in the cycle, then the day. */
-.dg-top{position:absolute;left:0;right:0;z-index:2;
-  display:flex;justify-content:space-between;align-items:baseline;
-  padding:calc(56px + env(safe-area-inset-top)) var(--e26-pad) 0}
+/* OFFSET WITH top, NOT WITH padding-top. Written as padding the box still starts at
+   y=0, so the cycle's box covered the header and the header's box covered the top of
+   the screen — and both swallowed taps meant for what was underneath. A spec that
+   clicks through to the research tab timed out on "`.dg-cycle` intercepts pointer
+   events". Each box now covers its own content and nothing else. */
+.dg-top{position:absolute;left:0;right:0;top:calc(56px + env(safe-area-inset-top));
+  z-index:2;display:flex;justify-content:space-between;align-items:baseline;
+  padding:0 var(--e26-pad)}
 /* Lower case, as the design sets it: the app's own h1 is upper-cased. */
 .dg-top h1{margin:0;font-size:17px;font-weight:600;letter-spacing:0;text-transform:none}
 .dg-top time{font-size:14px;color:var(--e26-ink-2)}
 /* The cycle: one pill per day of the layout, the current one purple. The pills are the
    package's own images, so nothing is drawn here. */
-.dg-cycle{position:absolute;left:0;right:0;z-index:2;
-  display:flex;justify-content:space-between;gap:2px;
-  padding:calc(90px + env(safe-area-inset-top)) var(--e26-pad) 0}
+.dg-cycle{position:absolute;left:0;right:0;top:calc(90px + env(safe-area-inset-top));
+  z-index:2;display:flex;justify-content:space-between;gap:2px;
+  padding:0 var(--e26-pad)}
 .dg-cy{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10px;
   font-weight:500;color:var(--e26-ink-3);background:none;border:0;padding:0;
   min-width:0;flex:1 1 0}
@@ -7468,6 +7488,8 @@ body.news-open{overscroll-behavior:contain}
 .dg-cy.dg-at{color:var(--e26-ink);font-weight:600}
 .dg-cy.dg-at i{background-image:url(assets/ui/pill-purple.webp)}
 .dg-cy.dg-soon{opacity:.5}
+/* The day you chose, rather than the one the rotation was on: the same pill, ringed. */
+.dg-cy.dg-pickd i{box-shadow:0 0 0 1.5px var(--e26-ink)}
 /* The hero. A video with the word baked in, or real text with a glass overlay over it
    where the day has no art of its own. Either way it is 390x640 at the reference width
    and scales with the screen. */
@@ -37579,7 +37601,12 @@ function dgCycleHTML(){
     /* "Later" is the rotation's own word for it: a day it has not reached yet. A day
        already done this cycle is a record, not a thing to come, so it is not dimmed. */
     const later = !sl.done && !sl.isCur && (sl.locked || sl.i > C.cur);
-    return `<button class="dg-cy${sl.isCur ? " dg-at" : ""}${later ? " dg-soon" : ""}"
+    /* A DAY YOU CHOSE LOOKS DIFFERENT FROM THE DAY THE ROTATION IS ON, and both are
+       "current". The strip this replaces marked it, and dropping the mark would have
+       left the purple pill saying the same thing about a day the plan picked and a day
+       you overrode it with. */
+    return `<button class="dg-cy${sl.isCur ? " dg-at" : ""}${later ? " dg-soon" : ""}${
+      sl.picked ? " dg-pickd" : ""}"
       type="button" data-slot="${sl.i}"${sl.past || sl.locked ? ' aria-disabled="true"' : ""}
       aria-label="${esc(m.name)}${sl.done ? ", done" : sl.past ? ", already passed this cycle"
         : sl.locked ? ", not yet — the rotation is on " + esc(dayName(ROTATION[C.cur]))
@@ -37675,9 +37702,17 @@ function dgBriefFor(wid){
      in one session can shorten to the same words, and a summary that renames your lifts
      is worse than one that counts them. The full list is further down the screen, under
      its real names. */
-  /* 110, measured rather than chosen: the brief's column is 172px of 12px uppercase,
-     which is about 28 characters a line, and the close region has four lines of room
-     before the door would have to move down into the nav. */
+  /* 110, and it was measured twice.
+
+     The column is about 173px of 12px uppercase, which a character count says should
+     hold 34 to a line and four lines. It does not: the text is JUSTIFIED, so a long
+     word that will not fit is pushed down whole and the line it left is stretched to
+     the margin. 135 looked right arithmetically and clamped mid-word on the real
+     plan — "FIRST, THEN INCLI…" — which is the one thing the clamp exists to never do
+     on an ordinary day. 110 renders four clean lines ending in the count.
+
+     The clamp in .dg-brief stays as the backstop for a plan nobody has seen; this is
+     the budget that keeps the sentence from reaching it. */
   const BRIEF_MAX = 110;
   const rest = list.slice(1);
   let shown = 0, line = "";
