@@ -1,16 +1,25 @@
 /* layout.js — where every shape on every screen is placed. Change a number here and the
  * app moves it. Loaded as a plain script; scene.js reads window.GLASS_LAYOUT.
  *
- * SPIN IS CAPPED AT THREE PER SCREEN, which is the design brief's own hard limit:
- * "At most 6 shapes per screen, at most 3 of them spinning. A spin sheet is 25 to 50 MB
- * decoded." Five screens shipped with five spinning shapes each, which is 125 to 250 MB
- * of decoded sprite sheet and five elements repositioned on every animation frame.
- * Nothing was removed: every shape is still on its screen, at its coordinates, at its
- * size. The ones over the cap are drawn from their still image instead of their sheet,
- * which is a path scene.js already supports (`spin: false`).
+ * SPIN IS OFF EVERYWHERE, and it was measured rather than decided.
  *
- * The three kept spinning on each screen are the largest, because that is where motion
- * reads. To change which, set `spin` yourself on the shapes you want.
+ * A spin sheet is 3840x960 holding 36 frames in 12 columns, so ONE FRAME IS 320x320.
+ * Program's jack is drawn at 250pt, which on a 3x phone is 750 device pixels asked of a
+ * 320 pixel frame — a 2.3x upscale, and that is why the spinning shapes looked soft on
+ * the device while the still ones looked sharp. The stills are 500 to 550px square and
+ * have pixels to spare at every size used here.
+ *
+ * The same sheet is about 15 MB decoded, three of them to a screen, which is the other
+ * half of the complaint: the shapes were heavy AND blurry, and both came from the same
+ * file. Drawing from the still fixes both at once.
+ *
+ * NOTHING STOPPED MOVING. glass-motion.js animates every shape's float, parallax and
+ * tilt whether or not it has frames; `spin` only chooses the sheet over the still. The
+ * shapes still drift and bob, they are simply no longer flipping through frames.
+ *
+ * To put a shape's rotation back, set `spin: true` on it. It will be sharper first if
+ * the sheet is re-rendered at 2x (tools/README.md) — at 640px a frame it would be
+ * crisp at these sizes.
  */
 window.GLASS_LAYOUT = {
  "shapes": {
@@ -123,7 +132,8 @@ window.GLASS_LAYOUT = {
      "w": 250,
      "h": 250,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "capsule-amber",
@@ -132,7 +142,8 @@ window.GLASS_LAYOUT = {
      "w": 188,
      "h": 188,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "blob",
@@ -141,7 +152,8 @@ window.GLASS_LAYOUT = {
      "w": 212,
      "h": 212,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "sphere-xs",
@@ -150,7 +162,8 @@ window.GLASS_LAYOUT = {
      "w": 45,
      "h": 45,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "capsule-xs",
@@ -180,7 +193,8 @@ window.GLASS_LAYOUT = {
      "w": 238,
      "h": 238,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "links",
@@ -189,7 +203,8 @@ window.GLASS_LAYOUT = {
      "w": 288,
      "h": 240,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "capsule-m",
@@ -198,7 +213,8 @@ window.GLASS_LAYOUT = {
      "w": 238,
      "h": 238,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "sphere-xs",
@@ -207,7 +223,8 @@ window.GLASS_LAYOUT = {
      "w": 45,
      "h": 45,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "x-s",
@@ -216,7 +233,8 @@ window.GLASS_LAYOUT = {
      "w": 92,
      "h": 92,
      "layer": "front",
-     "depth": 0.7
+     "depth": 0.7,
+     "spin": false
     }
    ]
   },
@@ -239,7 +257,8 @@ window.GLASS_LAYOUT = {
      "w": 190,
      "h": 190,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "links",
@@ -248,7 +267,8 @@ window.GLASS_LAYOUT = {
      "w": 180,
      "h": 150,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "jack",
@@ -257,7 +277,8 @@ window.GLASS_LAYOUT = {
      "w": 190,
      "h": 190,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "sphere-xs",
@@ -266,7 +287,8 @@ window.GLASS_LAYOUT = {
      "w": 74,
      "h": 74,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "capsule-xs",
@@ -275,7 +297,8 @@ window.GLASS_LAYOUT = {
      "w": 92,
      "h": 92,
      "layer": "front",
-     "depth": 0.7
+     "depth": 0.7,
+     "spin": false
     }
    ]
   },
@@ -298,7 +321,8 @@ window.GLASS_LAYOUT = {
      "w": 150,
      "h": 150,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "torus-m",
@@ -307,7 +331,8 @@ window.GLASS_LAYOUT = {
      "w": 170,
      "h": 170,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "sphere-xs",
@@ -316,7 +341,8 @@ window.GLASS_LAYOUT = {
      "w": 66,
      "h": 66,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "capsule-xs",
@@ -325,7 +351,8 @@ window.GLASS_LAYOUT = {
      "w": 80,
      "h": 80,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     }
    ]
   },
@@ -346,7 +373,8 @@ window.GLASS_LAYOUT = {
      "w": 238,
      "h": 238,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "capsule-m",
@@ -355,7 +383,8 @@ window.GLASS_LAYOUT = {
      "w": 238,
      "h": 238,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "blob",
@@ -364,7 +393,8 @@ window.GLASS_LAYOUT = {
      "w": 212,
      "h": 212,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "sphere-xs",
@@ -373,7 +403,8 @@ window.GLASS_LAYOUT = {
      "w": 48,
      "h": 48,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "capsule-xs",
@@ -397,7 +428,8 @@ window.GLASS_LAYOUT = {
      "w": 138,
      "h": 138,
      "layer": "front",
-     "depth": 0.7
+     "depth": 0.7,
+     "spin": false
     },
     {
      "shape": "torus-m",
@@ -406,7 +438,8 @@ window.GLASS_LAYOUT = {
      "w": 250,
      "h": 250,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "jack",
@@ -415,7 +448,8 @@ window.GLASS_LAYOUT = {
      "w": 250,
      "h": 250,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "sphere-xs",
@@ -424,7 +458,8 @@ window.GLASS_LAYOUT = {
      "w": 50,
      "h": 50,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "x-s",
@@ -433,7 +468,8 @@ window.GLASS_LAYOUT = {
      "w": 100,
      "h": 100,
      "layer": "front",
-     "depth": 0.7
+     "depth": 0.7,
+     "spin": false
     }
    ]
   },
@@ -447,7 +483,8 @@ window.GLASS_LAYOUT = {
      "w": 225,
      "h": 225,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "rbox-s",
@@ -456,7 +493,8 @@ window.GLASS_LAYOUT = {
      "w": 112,
      "h": 112,
      "layer": "front",
-     "depth": 0.7
+     "depth": 0.7,
+     "spin": false
     },
     {
      "shape": "capsule-xs",
@@ -465,7 +503,8 @@ window.GLASS_LAYOUT = {
      "w": 68,
      "h": 68,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     }
    ]
   },
@@ -479,7 +518,8 @@ window.GLASS_LAYOUT = {
      "w": 262,
      "h": 219,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "star",
@@ -488,7 +528,8 @@ window.GLASS_LAYOUT = {
      "w": 238,
      "h": 238,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     },
     {
      "shape": "sphere-xs",
@@ -497,7 +538,8 @@ window.GLASS_LAYOUT = {
      "w": 50,
      "h": 50,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "x-s",
@@ -506,7 +548,8 @@ window.GLASS_LAYOUT = {
      "w": 112,
      "h": 112,
      "layer": "front",
-     "depth": 0.7
+     "depth": 0.7,
+     "spin": false
     }
    ],
    "note": "the body page keeps its 6 iridescent Figma shapes (assets/body) as plain images; only these glass shapes are driven from here"
@@ -521,7 +564,8 @@ window.GLASS_LAYOUT = {
      "w": 84,
      "h": 84,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "sphere-xs",
@@ -530,7 +574,8 @@ window.GLASS_LAYOUT = {
      "w": 58,
      "h": 58,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     },
     {
      "shape": "x-s",
@@ -539,7 +584,8 @@ window.GLASS_LAYOUT = {
      "w": 112,
      "h": 112,
      "layer": "front",
-     "depth": 0.7
+     "depth": 0.7,
+     "spin": false
     },
     {
      "shape": "star",
@@ -548,7 +594,8 @@ window.GLASS_LAYOUT = {
      "w": 170,
      "h": 170,
      "layer": "front",
-     "depth": 0.4
+     "depth": 0.4,
+     "spin": false
     }
    ]
   }

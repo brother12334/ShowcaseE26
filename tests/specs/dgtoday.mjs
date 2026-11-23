@@ -69,6 +69,11 @@ async function openApp(url, watch){
       Object.keys(S).forEach(k=>{ delete S[k]; });
       Object.keys(fx).forEach(k=>{ S[k] = JSON.parse(JSON.stringify(fx[k])); });
       S.tourDone = true; S.active = null;
+      /* The intro now fires from render() when it is owed, and it MOVES #stage into its
+         own stage for three seconds — so a spec that plants a state and renders would
+         find the hero missing. This one is about Today, not the intro; dgintro covers
+         that. Marking it seen is the same thing a person who has seen it has. */
+      S.introSeen = (typeof INTRO_GEN === "number") ? INTRO_GEN : 1;
       if(mutate) mutate(S);
       migrate(); try{ applySplit(); }catch(e){}
       TAB = "today"; SET_PAGE = null; render();

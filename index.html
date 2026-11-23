@@ -8229,7 +8229,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.66";
+const APP_VERSION = "2026.11.17.67";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -36019,6 +36019,25 @@ function playIntro(){
   }catch(e){ finish(); return Promise.resolve(false); }
   return p.then(finish, finish).then(()=> true);
 }
+/* ONE SHOT AT LOAD WAS NOT ENOUGH, which is why it never played on the phone.
+
+   The startup block fired it 260ms after load, and at that instant any one of the
+   splash, the onboarding flow or the account flow can still be up — in which case
+   introDue() says no, the single attempt is spent, and the intro is gone for good on a
+   generation it was never shown for. Measured: introDue() true, E26Intro loaded, and
+   the startup attempt had already come and gone.
+
+   So it is attempted from render() as well, which runs whenever a normal screen is
+   drawn. Every guard that matters is inside introDue() — not during onboarding, the
+   account flow or a share view, not twice, not once it has been seen — and the splash
+   is checked here because a transition onto a screen nobody can see yet is wasted. */
+function introMaybe(){
+  try{
+    if(!introDue()) return;
+    if(document.getElementById("splash")) return;
+    playIntro();
+  }catch(e){}
+}
 /* Settings offers it again. It does not change INTRO_GEN — watching it twice on purpose
    is not the same as never having seen it. */
 function replayIntro(){
@@ -36118,6 +36137,9 @@ function render(){
   renderTabInto(app);
   /* THE GLASS LAYER, mounted per SCREEN rather than per render. See glassSync(). */
   try{ glassSync(); }catch(e){ try{ console.error("Element 26: the glass layer threw", e); }catch(e2){} }
+  /* AND THE INTRO, IF IT IS STILL OWED. Guarded entirely inside introDue(); see the
+     note there for why one attempt at startup was not enough. */
+  introMaybe();
   // the page just changed height, so the tab bar's "am I at the bottom?" test needs
   // the new figure. Read it here, once, rather than inside the scroll handler.
   refreshNavBounds();
@@ -65501,8 +65523,18 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.66";
+const NEWS_FOR = "2026.11.17.67";
 const NEWS = [
+  {k: "Sharper shapes, and the intro actually plays",
+   s: ["The glass shapes were being drawn from their spin sheets, where one frame is "
+     + "320px square \u2014 shown at up to 250 points on a 3x phone that is a 2.3x upscale, "
+     + "which is why they looked soft. Each sheet is also about 15MB once decoded, three "
+     + "to a screen. They are drawn from the still renders now, which are 500 to 550px "
+     + "and have pixels to spare. They still drift and bob; they just stopped flipping "
+     + "through frames.",
+     "And the intro was only ever attempted once, a quarter second after launch \u2014 if "
+     + "the splash or anything else was still up at that moment it was gone for good. It "
+     + "is attempted whenever a normal screen is drawn now, until it has played."]},
   {k: "The tab bar, and the intro",
    s: ["The bar at the bottom is a floating glass pill now, inset from the edges and "
      + "frosted, with the tab you are on filled in. Same five tabs, same order, same "
