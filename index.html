@@ -5994,8 +5994,8 @@ body.cele-open{overscroll-behavior:contain}
 .bm-fig{flex:1;min-width:0;max-width:260px;display:flex;flex-direction:column;align-items:center;gap:7px}
 .bm-fig svg{width:100%;height:auto;display:block;overflow:visible}
 .bm-fig-label{
-  font-family:var(--disp);font-size:var(--fs-3);font-weight:700;text-transform:uppercase;
-  letter-spacing:.16em;color:var(--dim);
+  font-family:var(--e26-font);font-size:var(--fs-3);font-weight:600;text-transform:none;
+  letter-spacing:.02em;color:var(--e26-ink-2);
 }
 /* Three layers. `bm-weld` is every path stroked thickly in one dark tone: the strokes
    overlap so the whole body fuses into a single silhouette, which both outlines the
@@ -6003,9 +6003,11 @@ body.cele-open{overscroll-behavior:contain}
    muscles then sit on top with their own thin dark stroke, and those thin strokes are
    what read as the black separations on an anatomy chart. */
 .bm-fig svg{shape-rendering:geometricPrecision}
-.bm-weld{fill:#1c1c24;stroke:#1c1c24;stroke-width:9;stroke-linejoin:round;stroke-linecap:round}
-.bm-inert{fill:#2e2e38;stroke:#0b0b0e;stroke-width:2;stroke-linejoin:round}
-.bm-m{cursor:pointer;stroke:#0b0b0e;stroke-width:2.4;stroke-linejoin:round;transition:opacity var(--t-mid)}
+/* The body itself sits on the package's black now, so the silhouette and the parts
+   that carry no reading are a shade off it rather than the old blue-slate. */
+.bm-weld{fill:#141418;stroke:#141418;stroke-width:9;stroke-linejoin:round;stroke-linecap:round}
+.bm-inert{fill:#22222a;stroke:#0a0a0a;stroke-width:2;stroke-linejoin:round}
+.bm-m{cursor:pointer;stroke:#0a0a0a;stroke-width:2.4;stroke-linejoin:round;transition:opacity var(--t-mid)}
 .bm-m:active{opacity:.68}
 .bm-proj-say{font-size:var(--fs-2);color:var(--faint);line-height:1.5;margin:6px 4px 0;text-align:center}
 .bm-legend{display:flex;flex-wrap:wrap;gap:7px 14px;justify-content:center;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
@@ -7482,6 +7484,14 @@ body.news-open{overscroll-behavior:contain}
    part. The app has one entrance and this keeps it: the same animation, the same
    stagger, one level deeper. A child selector rather than a descendant one, because
    nothing nested below the screen's own sections should animate. */
+/* A SCREEN WITH NO HERO HAS NOTHING FOR THE HEADER TO SIT ON.
+
+   .dg-top is taken out of the flow so it can ride over the art. Body has no hero in
+   layout.js, so there was no art and no space either: the word "body" was printed on
+   top of the first line of the screen. With no hero the header goes back in the flow
+   and takes its own room, which is what every screen in the app did before. */
+.dg-nohero .dg-top{position:static;padding:calc(56px + env(safe-area-inset-top))
+  var(--e26-pad) 18px}
 #app.view-in > .dg{animation:none}
 #app.view-in > .dg > *{animation:viewIn var(--t-nav) var(--ease-nav) backwards}
 #app.view-in > .dg > *:nth-child(1){animation-delay:0ms}
@@ -35725,9 +35735,18 @@ let GLASS_HERO_IO = null, GLASS_HERO_SEEN = false, GLASS_HERO_T = 0;
 
    160ms after the last scroll event, which is long enough not to flicker on a flick and
    short enough that it feels like it never stopped. */
+/* The design's own numbers, with the defaults this app needs if the file is missing. */
+function glassCfg(k, dflt){
+  try{ const v = (window.GLASS_CONFIG || {})[k]; return v == null ? dflt : v; }
+  catch(e){ return dflt; }
+}
 function glassHeroPlay(){
   const v = document.querySelector("#stage .glass-layer video.hero-media");
   if(!v) return;
+  /* Set every time rather than once: a video that has been paused and resumed, or
+     re-created with the screen, comes back at 1. */
+  const rate = Number(glassCfg("heroRate", 1)) || 1;
+  if(v.playbackRate !== rate) v.playbackRate = rate;
   if(GLASS_HERO_SEEN && !document.hidden) v.play().catch(()=>{});
 }
 function glassHeroStill(){
@@ -35747,12 +35766,12 @@ function glassHeroWatch(stage){
   GLASS_HERO_IO = new IntersectionObserver(es=>{
     es.forEach(e=>{
       GLASS_HERO_SEEN = e.isIntersecting;
-      if(e.isIntersecting) v.play().catch(()=>{});
+      if(e.isIntersecting) glassHeroPlay();
       else v.pause();
     });
   }, {rootMargin: "64px"});
   GLASS_HERO_IO.observe(v);
-  if(!glassHeroWatch.scrollWired){
+  if(!glassHeroWatch.scrollWired && glassCfg("heroPauseOnScroll", true)){
     glassHeroWatch.scrollWired = true;
     addEventListener("scroll", glassHeroScroll, {passive: true});
   }
@@ -38045,7 +38064,7 @@ function dgScreenHTML(o, inner){
         ? `<p class="hero-word dg-num">${esc(o.heroWord)}</p>` : ""}${o.heroSays
         ? `<span class="dg-num-say">${esc(o.heroSays)}</span>` : ""}</div>`
     : `<div class="dg-ghero dg-noart"></div>`;
-  return `<div class="dg dg-screen">
+  return `<div class="dg dg-screen${show ? "" : " dg-nohero"}">
     ${show ? `<div class="dg-scrim" aria-hidden="true"></div>` : ""}
     <div class="dg-top"><h1>${esc(o.title)}</h1>${
       o.right ? `<span class="dg-top-r">${o.right}</span>` : ""}</div>
@@ -40322,8 +40341,23 @@ function focusFooter(a, atEnd){
    The same six values, written as numbers. They are identical to the :root declarations
    and there is no second theme to track them against, so nothing is lost and the map
    gets its colours back. */
-const C_GREY="#c4c2bd", C_NONE="#26262c", C_LOW="#41597f",
-      C_OK="#4a9358", C_WARN="#c99a34", C_BAD="#d1584f", C_FLAT="#83817c";
+/* THE FIGURE'S PALETTE, MOVED TO THE DARK GLASS THEME.
+
+   The figure itself is unchanged — it is the same anatomy, the same paths, the same
+   muscle-by-muscle reading. What changed is where the colours sit: the old ramp was
+   mixed at full saturation against a #0e0e10 page, and against #0A0A0A with the glass
+   it read as a poster rather than a reading.
+
+   HUE IS KEPT, BECAUSE HUE IS THE MEANING. fresh / getting tired / very tired is a
+   three-step semantic scale and a monochrome ramp cannot say it — somebody glancing at
+   a leg needs to know at once whether it is fine or cooked. So the hues are the same
+   hues, pulled down in saturation and lifted slightly in value so they sit in the
+   package's near-monochrome without shouting, exactly as the note on :root says the
+   day and muscle hues are treated. The accent purple is deliberately not used here: it
+   means "the thing to act on" everywhere else in the app, and a whole leg painted in it
+   would say something this screen does not mean. */
+const C_GREY="#cfccc6", C_NONE="#1a1a1f", C_LOW="#4a6180",
+      C_OK="#5f8f69", C_WARN="#b8974f", C_BAD="#c4675f", C_FLAT="#83817c";
 function hex2rgb(h){ h=h.replace("#",""); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
 function lerpHex(a,b,t){
   t = Math.max(0,Math.min(1,t));

@@ -77,7 +77,14 @@ console.log("4 - THE SCREEN ARRIVES FROM THE SIDE YOUR THUMB CAME FROM");
      await p.evaluate(()=> !document.getElementById("app").classList.contains("view-in")), "still animating");
   const st = await p.evaluate(()=>{
     goTab("body");
-    const kids = [...document.querySelectorAll("#app.view-in > *")].slice(0,6);
+    /* A DARK GLASS SCREEN IS ONE ELEMENT, and its sections are inside it. Body is one
+       now, so "the direct children of #app" is a list of one and there is nothing to
+       stagger. The entrance reaches one level through the wrapper (see the note beside
+       .dg in the stylesheet) and these are the things it staggers. The claim is
+       unchanged: the parts of the screen arrive one after another. */
+    const app = document.getElementById("app");
+    const wrap = app.querySelector(":scope > .dg");
+    const kids = [...(wrap || app).children].slice(0, 6);
     return kids.map(k=> getComputedStyle(k).animationDelay);
   });
   ck("the cards come in one after another", st.length > 1 && st[0] !== st[1], st.join(","));

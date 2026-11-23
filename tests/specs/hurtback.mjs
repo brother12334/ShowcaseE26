@@ -151,7 +151,13 @@ const kept = await p.evaluate(()=>{
      them; the row itself is what "still in the history" means. The markup is checked for
      the names so the collapsed content is confirmed present rather than assumed. */
   const html = document.getElementById("app").innerHTML;
-  return {listed: /1 sessions/.test(t) && /Legs B/i.test(t),
+  /* "1 session", not "1 sessions". The header this replaced printed the count and the
+     word "sessions" unconditionally, so with one session in the log it read "1
+     sessions" — and this assertion was written against that. The dark glass header
+     says session or sessions as it should, which is a fix rather than a regression;
+     the claim being made here is that the session is listed, not how it is pluralised,
+     so it accepts either. */
+  return {listed: /\b1 sessions?\b/.test(t) && /Legs B/i.test(t),
           detail: /Smith Machine Squat/.test(html),
           badge: /not learned from/i.test(t),
           sets: (sess.entries || []).reduce((n,e)=> n + e.sets.length, 0),
