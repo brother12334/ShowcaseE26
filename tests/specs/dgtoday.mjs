@@ -303,7 +303,90 @@ ck("and they are staggered, not simultaneous",
 ck("the wrapper itself does not animate as well", r.wrapper === "none", r.wrapper);
 ck("and nothing nested deeper animates", r.deep === "none", r.deep);
 
-console.log("\n10. NOTHING FAILED TO LOAD, AND NOTHING THREW");
+console.log("\n10. NO ART ON A SCREEN THAT HAS NOT BEEN BUILT FOR IT");
+/* layout.js places each shape against that screen's REDESIGNED layout. Mounted over the
+   screen that is still there, Program's shapes landed on the plan buttons and across the
+   sentence describing them. A screen gets its art when it is built to hold it. */
+r = await newP.evaluate(async ()=>{
+  const look = async (tab)=>{
+    boot(); TAB = tab; SET_PAGE = null; render(); glassSync();
+    await new Promise(ok=> setTimeout(ok, 120));
+    /* WHERE THE APP ACTUALLY WENT, not where it was sent. With no session running the
+       workout tab shows Today, so asserting "no art on workout" against a screen that
+       is Today asserts the opposite of the truth. */
+    return {key: GLASS_AT, landed: TAB,
+            layer: !!document.querySelector('#stage > .glass-layer'),
+            wide: document.documentElement.scrollWidth > innerWidth + 1};
+  };
+  const out = {};
+  for(const t of ["today","program","history","body","research","workout"]) out[t] = await look(t);
+  return {out, ready: Object.keys(GLASS_READY)};
+});
+ck("CONTROL: Today, which IS built for it, mounts its art",
+   r.out.today.layer === true && !!r.out.today.key, r.out.today.key);
+["program","history","body","research","workout"].forEach(t=>{
+  if(r.ready.indexOf(t) > -1){ console.log("     (" + t + " is listed as built — skipped)"); return; }
+  if(r.out[t].landed !== t){
+    console.log("     (" + t + " redirected to " + r.out[t].landed + " — nothing to check)");
+    return;
+  }
+  ck("no art on " + t + ", which is not built for it yet",
+     r.out[t].layer === false && r.out[t].key === "", r.out[t].key || "no key");
+});
+Object.keys(r.out).forEach(t=>
+  ck("and " + t + " does not scroll sideways", r.out[t].wide === false, String(r.out[t].wide)));
+
+console.log("\n11. THE HERO STOPS WHEN IT IS NOT ON THE SCREEN");
+/* It is 780x1280 at 30fps and nothing was watching it: GlassMotion pauses the shapes,
+   and the hero is not one of them. It went on decoding every frame while the screen was
+   scrolled past, which is what made the page feel heavy on a phone. */
+r = await newP.evaluate(async ()=>{
+  boot(); glassSync();
+  await new Promise(ok=> setTimeout(ok, 400));
+  const v = document.querySelector('#stage .glass-layer video.hero-media');
+  if(!v) return {none: true};
+  const playingAtTop = !v.paused;
+  scrollTo(0, 4000);
+  await new Promise(ok=> setTimeout(ok, 500));
+  const pausedAway = v.paused;
+  scrollTo(0, 0);
+  await new Promise(ok=> setTimeout(ok, 500));
+  const backOn = !v.paused;
+  return {playingAtTop, pausedAway, backOn,
+          /* And it is not under a transform, which is the compositor's slow path for a
+             video; the shapes are scaled in a wrapper of their own instead. */
+          heroTransform: getComputedStyle(v).transform,
+          inShapes: !!v.closest('.dg-shapes')};
+});
+ck("CONTROL: it was playing while on screen", r.playingAtTop === true, String(r.playingAtTop));
+ck("scrolled past, it stops", r.pausedAway === true, String(r.pausedAway));
+ck("and starts again when it comes back", r.backOn === true, String(r.backOn));
+ck("the hero carries no transform of its own",
+   r.heroTransform === "none", r.heroTransform);
+ck("and is not inside the scaled shape wrapper", r.inShapes === false, String(r.inShapes));
+
+console.log("\n12. THE TOP BAND IS READABLE OVER WHATEVER THE ART IS DOING");
+/* The brief requires 4.5:1 over glass and says to move a shape that sits on text — but
+   the hero is a baked video, so the only thing that can move is a scrim. */
+r = await newP.evaluate(()=>{
+  boot();
+  const sc = document.querySelector('#app .dg-scrim');
+  if(!sc) return {none: true};
+  const s2 = sc.getBoundingClientRect(), cy = document.querySelector('.dg-cycle').getBoundingClientRect();
+  const z = n2=> parseInt(getComputedStyle(n2).zIndex, 10) || 0;
+  return {covers: s2.bottom >= cy.bottom,
+          overArt: z(sc) > 0,
+          underText: z(sc) < z(document.querySelector('.dg-top')),
+          hidden: sc.getAttribute('aria-hidden') === "true",
+          h: Math.round(s2.height), cyBottom: Math.round(cy.bottom)};
+});
+ck("there is a scrim", !r.none);
+ck("it reaches past the cycle", r.covers === true, r.h + " vs " + r.cyBottom);
+ck("it sits over the art and under the text",
+   r.overArt && r.underText, "z over art " + r.overArt + ", under text " + r.underText);
+ck("and it is not announced", r.hidden === true);
+
+console.log("\n13. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
 ck("no page errors", pageErr.length === 0, pageErr.join(" | ") || "none");
 

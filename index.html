@@ -7409,7 +7409,27 @@ body.news-open{overscroll-behavior:contain}
    The column, not the viewport: #app is max-width 600 and centred, so the art has to be
    centred on the same column or it drifts off the text on a tablet. */
 #stage{--dg-k:calc(min(100vw, 600px) / 390)}
-#stage > .glass-layer{position:absolute;left:50%;top:0;width:390px;height:0;
+/* THE HERO IS SIZED, NOT SCALED. Everything in the layer used to sit under one
+   transform, the video included — and a <video> inside a scaled, clipped ancestor is
+   the compositor's slow path. The hero does not need the transform: it is a single
+   full-width picture, so it is simply given the width and left alone. Only the shapes,
+   whose coordinates are written on a 390 canvas, are scaled. */
+#stage > .glass-layer > .hero-media{left:0;top:0;width:100%;height:auto;
+  transform:none}
+#stage > .glass-layer{position:absolute;left:0;top:0;right:0;height:0;
+  overflow:visible;pointer-events:none}
+/* THE SHAPES ARE SCALED; THE HERO IS NOT.
+
+   layout.js writes every shape's x, y, width and height onto the element as inline px
+   on a 390-wide canvas, so a stylesheet cannot reposition them one by one — and should
+   not try, because those coordinates are the design and belong in that file. They are
+   moved into this wrapper instead, which is 390 wide and scaled as a whole: every
+   coordinate still means what it says, at any screen width.
+
+   The hero stays outside it. It is a video, and a video under a scale transform inside
+   a clipped ancestor is the compositor's slow path for no benefit — a single full-width
+   picture only needs a width. */
+#stage > .glass-layer > .dg-shapes{position:absolute;left:50%;top:0;width:390px;height:0;
   transform:translateX(-50%) scale(var(--dg-k));transform-origin:top center;
   overflow:visible;pointer-events:none}
 
@@ -7457,6 +7477,13 @@ body.news-open{overscroll-behavior:contain}
   min-height:100svh;padding:0 0 128px;
   margin:calc(-16px - env(safe-area-inset-top)) -14px -20px}
 .dg-top-r{display:flex;align-items:center;gap:10px}
+/* Tall enough to cover the header and the cycle, and gone by the time the hero word
+   starts. Transparent at the bottom so there is no edge to see. */
+.dg-scrim{position:absolute;left:0;right:0;top:0;z-index:1;pointer-events:none;
+  height:calc(170px + env(safe-area-inset-top));
+  background:linear-gradient(to bottom,
+    rgba(10,10,10,.92) 0%, rgba(10,10,10,.82) 46%, rgba(10,10,10,.42) 76%,
+    rgba(10,10,10,0) 100%)}
 /* The cycle's footer line: where you are in it, and the two controls that live nowhere
    else. Quieter than it was, because the strip above it now says the same thing in
    words rather than in two-letter codes. */
@@ -7980,7 +8007,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.62";
+const APP_VERSION = "2026.11.17.63";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -35443,14 +35470,28 @@ let GLASS_AT = null;
 /* Which scene in layout.js the screen you are on corresponds to, and the day it needs.
    Returns "" where there is no art for this screen, which unmounts rather than guessing:
    a shape placed by coordinates meant for another screen lands on somebody's text. */
+/* ART ONLY ON THE SCREENS THAT HAVE BEEN REDESIGNED FOR IT.
+
+   layout.js places every shape at a coordinate chosen against that screen's NEW layout:
+   a 250-wide jack at x=235, y=565 sits in a gap the redesigned Program leaves for it.
+   Mounted over the Program that is still there, it lands on the plan buttons and across
+   the sentence describing them — the brief's own rule is that a shape sitting on text
+   must be moved, and here every shape was.
+
+   So a screen gets its art when it has been built to hold it, and not before. Until
+   then the screen is exactly what it was, which is the whole point: a half-converted
+   app should look unconverted, not broken. Add a screen's key here as it is built. */
+const GLASS_READY = {today: 1, rest: 1};
 function glassSceneFor(){
   if(OB || ACCT_UI || PF) return "";                 // onboarding and the account flow
-  if(TAB === "workout") return "workout";
-  if(TAB === "history") return "history";
-  if(TAB === "body")    return "body";
-  if(TAB === "program") return DAY_EDIT ? "" : "program";
-  if(TAB === "research") return RESEARCH_PAPER ? "research-paper" : "research";
-  if(TAB === "sync")    return SET_PAGE ? "" : "settings";
+  if(TAB === "workout") return GLASS_READY.workout ? "workout" : "";
+  if(TAB === "history") return GLASS_READY.history ? "history" : "";
+  if(TAB === "body")    return GLASS_READY.body ? "body" : "";
+  if(TAB === "program") return (GLASS_READY.program && !DAY_EDIT) ? "program" : "";
+  if(TAB === "research") return RESEARCH_PAPER
+    ? (GLASS_READY["research-paper"] ? "research-paper" : "")
+    : (GLASS_READY.research ? "research" : "");
+  if(TAB === "sync")    return (GLASS_READY.settings && !SET_PAGE) ? "settings" : "";
   if(TAB === "today"){
     /* isRestToday(), NOT the workout id. todaysWorkoutId() names the day the rotation is
        on, which it goes on doing all through a rest day — so asking it whether today is
@@ -35483,6 +35524,56 @@ function glassSync(){
      overlay over it. */
   GlassScene.mount(stage, scene, {base: "", day: day === "live" ? null : day,
                                   hero: day !== "live"});
+  glassShapeScale(stage);
+  glassHeroWatch(stage);
+}
+
+/* Move the shapes into the scaled wrapper, leaving the hero where it is. Done here
+   rather than in scene.js because scene.js is the design package's own file and this is
+   this app's layout problem: the package's pages are a fixed 390 canvas and this one
+   has to be any width. */
+function glassShapeScale(stage){
+  const layer = stage.querySelector(".glass-layer");
+  if(!layer) return;
+  const shapes = [...layer.children].filter(n=> n.classList.contains("glass"));
+  if(!shapes.length) return;
+  const box = document.createElement("div");
+  box.className = "dg-shapes";
+  box.setAttribute("aria-hidden", "true");
+  layer.append(box);
+  shapes.forEach(n=> box.append(n));
+}
+
+/* THE HERO VIDEO STOPS WHEN IT IS NOT ON THE SCREEN.
+
+   GlassMotion pauses the SHAPES off-screen; the hero is a <video> and is not one of
+   them, so nothing was watching it. Today's hero is 780x1280 at 30fps and it went on
+   decoding every frame while you scrolled down to read the day's exercises — which is
+   what made the screen feel heavy on a phone, and is a rule the design package states
+   outright: pause when off-screen.
+
+   One observer, replaced with the scene, disconnected when the scene is torn down. */
+let GLASS_HERO_IO = null;
+function glassHeroWatch(stage){
+  if(GLASS_HERO_IO){ GLASS_HERO_IO.disconnect(); GLASS_HERO_IO = null; }
+  const v = stage.querySelector(".glass-layer video.hero-media");
+  if(!v || typeof IntersectionObserver !== "function") return;
+  GLASS_HERO_IO = new IntersectionObserver(es=>{
+    es.forEach(e=>{
+      if(e.isIntersecting) v.play().catch(()=>{});
+      else v.pause();
+    });
+  }, {rootMargin: "64px"});
+  GLASS_HERO_IO.observe(v);
+  /* And with the tab in the background, where no observer fires. */
+  if(!glassHeroWatch.wired){
+    glassHeroWatch.wired = true;
+    document.addEventListener("visibilitychange", ()=>{
+      const cur = document.querySelector("#stage .glass-layer video.hero-media");
+      if(!cur) return;
+      if(document.hidden) cur.pause(); else cur.play().catch(()=>{});
+    });
+  }
 }
 function render(){
   /* D6b — A SHARE LINK IS NOT THE APP, AND NOTHING MAY REDRAW IT INTO ONE. The viewer
@@ -37716,45 +37807,26 @@ function dgBriefFor(wid){
   const load = prescribedLoadShown(first);
   out += " " + first.name + (load != null ? " " + fmtLoad(load) : "")
        + (first.reps ? " × " + first.reps : "") + " first";
-  /* CAPPED BY LENGTH, NOT BY COUNT, because what overflows is characters.
+  /* THE OPENER AND A COUNT. Nothing in the middle.
 
-     The reference line is three lines of large uppercase. It gets there by writing
-     "incline, raises, extensions, pec deck" where the plan says Incline Dumbbell Bench
-     Press, and this app has to print the name the exercise actually has. Capping at a
-     fixed number of names does not bound anything: three names here is longer than six
-     of the mockup's. So names are added while the sentence still fits the space the
-     design gives it, and whatever is left is counted.
+     The reference line names four lifts after the opener, and it can because it writes
+     "incline, raises, extensions, pec deck" where a plan says Incline Dumbbell Bench
+     Press. This app has to print the name the exercise actually has, and no character
+     budget survives contact with that: the column is half the screen, so it holds about
+     24 characters a line on a 430 phone and 17 on a 320 one. A budget tuned to one is
+     wrong on the other, and tuned high it was cut off mid-word on a real phone —
+     "THEN SINGLE-ARM DUMBBELL ROW AND" with the count missing, which is worse than not
+     listing them at all.
+
+     So the sentence is bounded by ONE name: what you open with, and how many more there
+     are. It cannot run long no matter what the lifts are called, and the full list is
+     further down the screen under its real names.
 
      Shortening the names themselves was the other option and was dropped: two movements
      in one session can shorten to the same words, and a summary that renames your lifts
-     is worse than one that counts them. The full list is further down the screen, under
-     its real names. */
-  /* 110, and it was measured twice.
-
-     The column is about 173px of 12px uppercase, which a character count says should
-     hold 34 to a line and four lines. It does not: the text is JUSTIFIED, so a long
-     word that will not fit is pushed down whole and the line it left is stretched to
-     the margin. 135 looked right arithmetically and clamped mid-word on the real
-     plan — "FIRST, THEN INCLI…" — which is the one thing the clamp exists to never do
-     on an ordinary day. 110 renders four clean lines ending in the count.
-
-     The clamp in .dg-brief stays as the backstop for a plan nobody has seen; this is
-     the budget that keeps the sentence from reaching it. */
-  const BRIEF_MAX = 110;
-  const rest = list.slice(1);
-  let shown = 0, line = "";
-  for(let i = 0; i < rest.length; i++){
-    const next = line ? line + ", " + rest[i].name : rest[i].name;
-    /* The tail has to fit too, or trimming to make room writes a longer sentence. */
-    const tail = (i + 1 < rest.length) ? " and " + (rest.length - i - 1) + " more" : "";
-    /* No `&& shown`: when even the first name will not fit, the honest line names none
-       and counts them all, rather than overrunning to guarantee one. */
-    if(out.length + 7 + next.length + tail.length > BRIEF_MAX) break;
-    line = next; shown++;
-  }
-  if(shown) out += ", then " + line
-    + (rest.length > shown ? " and " + (rest.length - shown) + " more" : "");
-  else if(rest.length) out += ", then " + rest.length + " more";
+     is worse than one that counts them. */
+  const more = list.length - 1;
+  if(more) out += ", and " + more + " more";
   return out + ".";
 }
 
@@ -37806,6 +37878,12 @@ function viewToday(){
     try{ return cycleFootHTML(cycleSlots()); }catch(e){ return ""; } })()}</div>`;
 
   let h = `<div class="dg">`;
+  /* THE TOP BAND IS PROTECTED. The brief's own rule is that text over glass keeps
+     4.5:1 and that a shape sitting on text should be moved — but the hero is a baked
+     video, so there is no shape to move. On a frame where the art comes up bright
+     behind the header the date and the far pills were washed out to nothing. A scrim
+     under the text and over the art is the one thing that can be moved. */
+  h += `<div class="dg-scrim" aria-hidden="true"></div>`;
   h += dgTopHTML(moonBtn + setBtn);
   h += dgCycleHTML();
 
@@ -64850,8 +64928,22 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.62";
+const NEWS_FOR = "2026.11.17.63";
 const NEWS = [
+  {k: "The new Today, on a real phone",
+   s: ["Three things the redesign got wrong, found by using it rather than by looking "
+     + "at it. The glass art was being drawn on every screen, but only Today has been "
+     + "built for it \u2014 each shape is placed against the layout of the screen it "
+     + "belongs to, so on the others it landed on the buttons and across the text. Art "
+     + "now appears only on a screen that has been built to hold it, and the rest look "
+     + "exactly as they did.",
+     "The hero behind the day\u2019s name is a video, and nothing was stopping it: it "
+     + "carried on playing while you scrolled down to read the session, which is what "
+     + "made the screen feel heavy. It stops when it is off the screen and when the app "
+     + "is in the background.",
+     "And the top of the screen is readable again whatever the art is doing behind it. "
+     + "The one-line summary of the session names what you open with and counts the "
+     + "rest, instead of listing lifts until the sentence was cut off mid-word."]},
   {k: "Today has been redesigned",
    s: ["The first screen is new. The day you are training is a full-bleed hero with its "
      + "name set across it, the cycle runs along the top as a row of pills, and under "
