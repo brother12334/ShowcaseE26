@@ -241,63 +241,33 @@ window.GLASS_LAYOUT = {
   "workout": {
    "height": 1700,
    "hero": {
-    "overlay": "assets/motion/overlay-workout",
+    "overlay": null,
     "still": "assets/hero-overlays/overlay-workout",
     "frames": 36,
     "cols": 12,
     "w": 390,
     "h": 340,
-    "note": "live text 18:42 sits underneath"
+    "note": "live elapsed time sits underneath"
    },
    "shapes": [
     {
-     "shape": "star",
-     "x": 268,
-     "y": 1392,
-     "w": 190,
-     "h": 190,
+     "shape": "capsule-xs",
+     "x": 8,
+     "y": 228,
+     "w": 70,
+     "h": 70,
      "layer": "front",
-     "depth": 0.4,
-     "spin": false
-    },
-    {
-     "shape": "links",
-     "x": 214,
-     "y": 1520,
-     "w": 180,
-     "h": 150,
-     "layer": "front",
-     "depth": 0.4,
-     "spin": false
-    },
-    {
-     "shape": "jack",
-     "x": -66,
-     "y": 1514,
-     "w": 190,
-     "h": 190,
-     "layer": "front",
-     "depth": 0.4,
+     "depth": 1,
      "spin": false
     },
     {
      "shape": "sphere-xs",
-     "x": 318,
-     "y": 296,
-     "w": 74,
-     "h": 74,
+     "x": 344,
+     "y": 255,
+     "w": 38,
+     "h": 38,
      "layer": "front",
-     "depth": 1.1,
-     "spin": false
-    },
-    {
-     "shape": "capsule-xs",
-     "x": 0,
-     "y": 224,
-     "w": 92,
-     "h": 92,
-     "layer": "front",
-     "depth": 0.7,
+     "depth": 1,
      "spin": false
     }
    ]
