@@ -48,8 +48,8 @@ let bad = 0;
 const ck=(what,ok,got)=>{ console.log((ok?"  ok   ":"  BROKEN ")+what+(got===undefined?"":"  ["+got+"]")); if(!ok) bad++; };
 
 const httpErr = [], pageErr = [];
-async function openApp(url, watch){
-  const p = await b.newPage({viewport:{width:390,height:844}});
+async function openApp(url, watch, device = {}){
+  const p = await b.newPage({viewport:{width:390,height:844}, ...device});
   p.on('dialog',d=>d.accept());
   if(watch){
     p.on('pageerror', e=> pageErr.push(e.message));
@@ -444,7 +444,83 @@ ck("it sits over the art and under the text",
    r.overArt && r.underText, "z over art " + r.overArt + ", under text " + r.underText);
 ck("and it is not announced", r.hidden === true);
 
-console.log("\n13. NOTHING FAILED TO LOAD, AND NOTHING THREW");
+console.log("\n13. THE CONTENT BELOW START USES THE SAME DESIGN");
+r = await newP.evaluate(()=>{
+  boot();
+  const lifts = [...document.querySelectorAll('[data-today-lift]')];
+  const note = document.querySelector('[data-today-extra] .nt-r');
+  const weigh = document.querySelector('[data-today-extra] #weighDue');
+  if(note) {
+    note.open = false;
+    note.querySelector('summary').click();
+  }
+  const font = el=> el && getComputedStyle(el).fontFamily.includes('Instrument Sans');
+  return { lifts:lifts.length, rows:document.querySelectorAll('[data-exrow]').length,
+    liftFont:font(lifts[0]), noteFont:font(note && note.querySelector('.nt-k')),
+    open:note?.open, weighFont:font(weigh && weigh.querySelector('.wd-t')) };
+});
+ck("CONTROL: there are distinct exercise cards and a note", r.lifts > 1 && r.open === true);
+ck("every lift still has a jump target", r.lifts === r.rows);
+ck("exercise and note labels use Instrument Sans", r.liftFont && r.noteFont);
+ck("the weigh-in status uses Instrument Sans", r.weighFont === true);
+await newP.locator('[data-today-extra]').first().evaluate(el=>{
+  el.querySelectorAll('details').forEach(details=> details.open = false);
+  scrollTo(0, el.getBoundingClientRect().top + scrollY - 110);
+});
+await newP.screenshot({path: shot("dgtoday-extra.png")});
+
+console.log("\n14. STILL SHAPES USE A PAUSABLE CSS ANIMATION");
+await newP.evaluate(()=>{
+  scrollTo(0, 0);
+  const shape = document.createElement('div');
+  shape.id = 'testGlass';
+  shape.className = 'glass';
+  shape.dataset.still = 'assets/shapes/glass-capsule-xs';
+  shape.style.cssText = 'position:absolute;top:180px;left:5px;width:60px;height:60px';
+  document.getElementById('stage').append(shape);
+  GlassMotion.mount(shape.parentElement);
+});
+const still = newP.locator('#testGlass .glass-img');
+await newP.waitForFunction(()=> !document.querySelector('#testGlass').hasAttribute('data-glass-paused'));
+ck("CONTROL: the still artwork is loaded into an animated CSS layer",
+   await still.evaluate(el=> getComputedStyle(el).animationName === 'glass-bob' &&
+     el.style.backgroundImage.includes('glass-capsule-xs.webp')));
+ck("no live backdrop filter is added to a still",
+   await newP.locator('#testGlass .glass-blur').count() === 0);
+r = await newP.evaluate(()=>{
+  dispatchEvent(new Event('scroll'));
+  return getComputedStyle(document.querySelector('#testGlass .glass-img')).animationPlayState;
+});
+ck("still shapes pause during scroll", r === 'paused', r);
+await newP.waitForFunction(()=> !document.querySelector('#testGlass').hasAttribute('data-glass-paused'));
+await newP.evaluate(()=> scrollTo(0, document.documentElement.scrollHeight));
+await newP.waitForFunction(()=> document.querySelector('#testGlass').hasAttribute('data-glass-paused'));
+await newP.waitForTimeout(200);
+ck("still shapes remain paused offscreen",
+   await still.evaluate(el=> getComputedStyle(el).animationPlayState === 'paused'));
+await newP.emulateMedia({reducedMotion:'reduce'});
+ck("reduced motion removes the bob",
+   await still.evaluate(el=> getComputedStyle(el).animationName === 'none'));
+await newP.emulateMedia({reducedMotion:'no-preference'});
+await newP.evaluate(()=>{ document.getElementById('testGlass').remove(); scrollTo(0, 0); });
+
+console.log("\n15. HIGH-DENSITY TOUCH SCREENS USE THE HERO STILL");
+const phone = await openApp(BASE, true, {isMobile:true, hasTouch:true, deviceScaleFactor:3});
+r = await phone.evaluate(async ()=>{
+  boot();
+  const image = document.querySelector('#stage img.hero-media');
+  if(image) await image.decode();
+  return {dense:matchMedia('(pointer: coarse) and (min-resolution: 2.5dppx)').matches,
+    image:image?.naturalWidth, src:image?.getAttribute('src'),
+    day:GLASS_DAY[todaysWorkoutId()],
+    video:!!document.querySelector('#stage video.hero-media')};
+});
+ck("CONTROL: this viewport is a high-density touch screen", r.dense === true);
+ck("the day-specific hero still loaded with no video", r.image > 0 &&
+   !!r.day && r.src === "assets/heroes/hero-today-" + r.day + ".webp" && !r.video, r.src);
+await phone.close();
+
+console.log("\n16. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
 ck("no page errors", pageErr.length === 0, pageErr.join(" | ") || "none");
 

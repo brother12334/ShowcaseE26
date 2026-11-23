@@ -6,8 +6,8 @@ window.GLASS_CONFIG = {
     amplitude: [4, 8],       // px, random per shape within this range
     period: [4, 7]           // seconds for one bob
   },
-  parallax: 0.15,            // how much shapes drift against the scroll. 0 turns it off
-  tilt: 10,                  // px a shape shifts toward the pointer / device tilt. 0 turns it off
+  parallax: 0.15,            // how much sprite shapes drift against the scroll
+  tilt: 10,                  // px a sprite shape shifts toward the pointer
   depth: 0.4,                // default depth: <1 sits far (moves less), >1 sits near (moves more)
   entrance: { stagger: 60 }, // ms between shapes arriving (look is set in tokens.css)
   pauseOffscreen: true,      // stop animating shapes that are scrolled out of view
@@ -20,6 +20,7 @@ window.GLASS_CONFIG = {
      pacing the shapes already run at (36 frames at 12fps is a 3-second rotation).
      1 is the clip as authored. */
   heroRate: 0.5,
+  stillHeroOnDenseTouch: true, // use the still on high-density touch screens
   heroPauseOnScroll: true,   // stop the hero while the page is moving. See the note in index.html
   reducedMotion: 'freeze'    // 'freeze' shows frame 0, no bob. keep this: it is an accessibility rule
 };

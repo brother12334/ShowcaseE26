@@ -5,7 +5,7 @@
  *   GlassScene.unmount();
  *
  * The container must be position:relative. Heroes with a baked word are drawn as <video> (a still
- * under reduced motion). Heroes with a live number are drawn as a glass overlay you place above the text.
+ * under reduced motion or on high-density touch screens). Heroes with a live number are drawn as a glass overlay you place above the text.
  * Needs glass-config.js, layout.js, glass-motion.js loaded first.
  */
 (function () {
@@ -24,7 +24,11 @@
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const fill = (s) => s.replace('{day}', o.day || 'push-b');
     if (h.video) {
-      if (reduce) {
+      // The 780px video is upscaled on 3x phones and competes with scrolling.
+      // Use the less compressed still on those displays.
+      const denseTouch = matchMedia('(pointer: coarse) and (min-resolution: 2.5dppx)').matches;
+      const stillOnDenseTouch = (window.GLASS_CONFIG || {}).stillHeroOnDenseTouch !== false;
+      if (reduce || (stillOnDenseTouch && denseTouch)) {
         const im = el('img', 'hero-media', { height: px(h.h) });
         im.alt = ''; im.src = o.base + fill(h.poster);
         container.append(im); return im;

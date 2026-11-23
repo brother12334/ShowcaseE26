@@ -15,20 +15,33 @@
   const D = { fps: 12, float: { amplitude: [4, 8], period: [4, 7] }, parallax: 0.15, tilt: 10, depth: 0.4, pauseOffscreen: true };
   const cfg = () => Object.assign({}, D, window.GLASS_CONFIG || {});
   const rnd = (r) => r[0] + Math.random() * (r[1] - r[0]);
-  let items = [], raf = 0, io = null, scrollY = 0;
+  let items = [], raf = 0, io = null, scrollY = 0, scrollTimer = 0;
+  let scrolling = false;
   const tilt = { x: 0, y: 0, tx: 0, ty: 0 };
 
   function build(el) {
     if (el.dataset.ready) return null;
     el.dataset.ready = '1';
     const C = cfg();
-    const blur = document.createElement('div');
     const img = document.createElement('div');
-    blur.className = 'glass-blur';
     img.className = 'glass-img';
-    el.append(blur, img);
+    el.append(img);
     const base = el.dataset.sheet || el.dataset.still;
     img.style.backgroundImage = `url(${base}.webp)`;
+    const bob = el.dataset.bob ? +el.dataset.bob : rnd(C.float.amplitude);
+    const period = el.dataset.period ? +el.dataset.period : rnd(C.float.period);
+    if (!el.dataset.sheet) {
+      if (bob > 0) {
+        el.setAttribute('data-float', '');
+        img.style.setProperty('--glass-bob', bob + 'px');
+        img.style.setProperty('--glass-period', period + 's');
+      }
+      return { el, frames: 1, visible: false };
+    }
+
+    const blur = document.createElement('div');
+    blur.className = 'glass-blur';
+    el.prepend(blur);
     blur.style.webkitMaskImage = blur.style.maskImage = `url(${base}-mask.png)`;
     const frames = +el.dataset.frames || 1, cols = +el.dataset.cols || 1, rows = Math.ceil(frames / cols);
     const size = `${cols * 100}% ${rows * 100}%`;
@@ -39,14 +52,13 @@
       fps: +el.dataset.fps || C.fps,
       depth: el.dataset.depth ? +el.dataset.depth : C.depth,
       phase: Math.random() * 1000,
-      bob: el.dataset.bob ? +el.dataset.bob : rnd(C.float.amplitude),
-      period: el.dataset.period ? +el.dataset.period : rnd(C.float.period),
-      visible: true, last: -1
+      bob, period,
+      visible: false, last: -1
     };
   }
 
   function setFrame(it, f) {
-    if (f === it.last) return;
+    if (!it.img || f === it.last) return;
     it.last = f;
     const c = f % it.cols, r = Math.floor(f / it.cols);
     const x = it.cols > 1 ? (c / (it.cols - 1)) * 100 : 0;
@@ -58,31 +70,44 @@
 
   function tick(now) {
     raf = 0;
-    if (document.hidden || reduce.matches) return;
+    if (scrolling || document.hidden || reduce.matches) return;
     const C = cfg(), t = now / 1000;
     tilt.x += (tilt.tx - tilt.x) * 0.08;
     tilt.y += (tilt.ty - tilt.y) * 0.08;
     for (const it of items) {
-      if (!it.visible && C.pauseOffscreen) continue;
+      if (it.frames <= 1 || (!it.visible && C.pauseOffscreen)) continue;
       if (it.frames > 1) setFrame(it, Math.floor((t + it.phase) * it.fps) % it.frames);
       const bob = Math.sin(((t + it.phase) / it.period) * Math.PI * 2) * it.bob;
       const par = -scrollY * (it.depth - 1) * C.parallax;
       it.el.style.transform = `translate3d(${tilt.x * C.tilt * it.depth}px, ${bob + par + tilt.y * C.tilt * it.depth}px, 0)`;
     }
-    raf = requestAnimationFrame(tick);
+    start();
   }
-  const start = () => { if (!raf && items.length) raf = requestAnimationFrame(tick); };
+  function start() {
+    if (scrolling || document.hidden || reduce.matches) return;
+    if (!raf && items.some(it => it.frames > 1 && (it.visible || !cfg().pauseOffscreen))) {
+      raf = requestAnimationFrame(tick);
+    }
+  }
+  function syncPlayback() {
+    const pauseOffscreen = cfg().pauseOffscreen;
+    for (const it of items) {
+      it.el.toggleAttribute('data-glass-paused', scrolling || document.hidden || (pauseOffscreen && !it.visible));
+    }
+    start();
+  }
 
   function mount(root) {
     const fresh = [...(root || document).querySelectorAll('.glass')].map(build).filter(Boolean);
     if (!io) {
       io = new IntersectionObserver((entries) => {
         for (const e of entries) { const it = items.find((i) => i.el === e.target); if (it) it.visible = e.isIntersecting; }
-      }, { rootMargin: '120px' });
+        syncPlayback();
+      });
     }
     for (const it of fresh) { io.observe(it.el); setFrame(it, 0); }
     items = items.concat(fresh);
-    start();
+    syncPlayback();
   }
   function unmount() {
     for (const it of items) io && io.unobserve(it.el);
@@ -96,12 +121,23 @@
     el.addEventListener('animationend', () => el.classList.remove('pulse'), { once: true });
   }
 
-  addEventListener('scroll', () => { scrollY = window.scrollY; }, { passive: true });
+  addEventListener('scroll', () => {
+    scrollY = window.scrollY;
+    if (!scrolling) {
+      scrolling = true;
+      syncPlayback();
+    }
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => {
+      scrolling = false;
+      syncPlayback();
+    }, 160);
+  }, { passive: true });
   addEventListener('pointermove', (e) => {
     tilt.tx = (e.clientX / innerWidth - 0.5) * 2;
     tilt.ty = (e.clientY / innerHeight - 0.5) * 2;
   }, { passive: true });
-  document.addEventListener('visibilitychange', start);
+  document.addEventListener('visibilitychange', syncPlayback);
   reduce.addEventListener('change', () => {
     if (reduce.matches) items.forEach((it) => { setFrame(it, 0); it.el.style.transform = ''; });
     start();
