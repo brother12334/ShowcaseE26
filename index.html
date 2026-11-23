@@ -7427,7 +7427,17 @@ body.news-open{overscroll-behavior:contain}
    then hides the art completely, which is what the first build of this screen did — a
    640px black rectangle where the hero should be. The page's own dark ground is on
    #stage, where nothing is stacked over it. */
-#stage{background:var(--e26-bg)}
+/* THE ART IS ALLOWED TO RUN OFF THE EDGE, AND THE PAGE IS NOT ALLOWED TO SCROLL FOR IT.
+
+   layout.js places shapes by design intent, not inside a box: program puts a 250-wide
+   jack at x=235, whose right edge is 485 on a 390 canvas. That is the composition —
+   the shape is meant to be cut off by the screen. Left to itself it instead widened
+   the document, and `fitwidth` caught a horizontal scrollbar on every single tab,
+   including ones this redesign has not reached yet.
+
+   `clip` rather than `hidden`: hidden on one axis forces the other to auto, which would
+   make #stage a scroll container and break anything sticky inside it. clip just cuts. */
+#stage{background:var(--e26-bg);overflow-x:clip}
 /* THE ENTRANCE REACHES THROUGH THE WRAPPER.
 
    .dg is one full-bleed element, so Today went from a dozen direct children of #app to
@@ -7480,8 +7490,17 @@ body.news-open{overscroll-behavior:contain}
 .dg-cy{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10px;
   font-weight:500;color:var(--e26-ink-3);background:none;border:0;padding:0;
   min-width:0;flex:1 1 0}
-.dg-cy i{display:block;width:100%;max-width:46px;height:17px;background-size:100% 100%;
+/* A DAY ALREADY DONE IS TICKED, as it was on the strip this replaces.
+
+   The reference page has no mark for one, because in a rotation drawn straight through
+   everything left of the current day has been done. This app's cycle is not always
+   straight through: skip a day and the rotation moves on without it, so position stops
+   encoding doneness and an unticked strip would quietly claim a session happened. */
+.dg-cy i{position:relative;display:flex;align-items:center;justify-content:center;
+  width:100%;max-width:46px;height:17px;background-size:100% 100%;
   background-repeat:no-repeat;background-image:url(assets/ui/pill-glass.webp)}
+.dg-tick{display:flex;color:var(--e26-ink)}
+.dg-tick svg{width:11px;height:11px;display:block}
 .dg-cy span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 /* PREFIXED, because a bare "is-now" is shared furniture and collides: cssdupe
    caught it against another section, exactly as it caught is-on and is-under. */
@@ -7490,6 +7509,12 @@ body.news-open{overscroll-behavior:contain}
 .dg-cy.dg-soon{opacity:.5}
 /* The day you chose, rather than the one the rotation was on: the same pill, ringed. */
 .dg-cy.dg-pickd i{box-shadow:0 0 0 1.5px var(--e26-ink)}
+/* INERT TO THE THUMB, not merely labelled. A day the cycle has spent, or has not
+   reached, is not a thing to choose; the plate strip made those plates take no press at
+   all, and carrying only aria-disabled across would have left them pressable, with the
+   handler quietly refusing. Being refused on every press is worse than no response.
+   The label still carries the reason for a screen reader. */
+.dg-cy[aria-disabled]{pointer-events:none}
 /* The hero. A video with the word baked in, or real text with a glass overlay over it
    where the day has no art of its own. Either way it is 390x640 at the reference width
    and scales with the screen. */
@@ -37595,7 +37620,8 @@ function dgCycleHTML(){
         aria-label="Rest${sl.isToday ? ", today" : sl.date ? ", taken " + sl.date
           : sl.due ? (C.restNext ? ", due tomorrow" : ", due next")
           : sl.fixed ? ", scheduled" : ", available"}"
-        ><i></i><span>rest</span></button>`;
+        ><i>${sl.resting ? `<b class="dg-tick">${ICON.check}</b>` : ""}</i
+        ><span>rest</span></button>`;
     }
     const m = sl.meta;
     /* "Later" is the rotation's own word for it: a day it has not reached yet. A day
@@ -37612,7 +37638,8 @@ function dgCycleHTML(){
         : sl.locked ? ", not yet — the rotation is on " + esc(dayName(ROTATION[C.cur]))
         : sl.picked ? ", the day you picked for today"
         : sl.isCur ? ", today" : daysFree() ? ", tap to do this one today" : ""}"
-      ><i></i><span>${esc(String(m.name).toLowerCase())}</span></button>`;
+      ><i>${sl.done ? `<b class="dg-tick">${ICON.check}</b>` : ""}</i
+      ><span>${esc(String(m.name).toLowerCase())}</span></button>`;
   });
   return `<div class="dg-cycle" aria-label="Your cycle">${cells.join("")}</div>`;
 }

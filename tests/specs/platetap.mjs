@@ -20,15 +20,27 @@ await p.evaluate(()=>{
 let bad=0;
 const ck=(n,c,extra)=>{ console.log((c?"  ok  ":"  BROKEN  ")+n+(c?"":" :: "+(extra||""))); if(!c) bad++; };
 
+/* THE STRIP ON TODAY IS THE DARK GLASS CYCLE NOW. Every claim in this spec is the same
+   claim about the same behaviour — a day the cycle has spent or has not reached takes no
+   press at all, a press on one says nothing, the day you are on still works, and a
+   scheduled rest is a marker while a floating one is a control. Only the class carrying
+   each state changed: .plate -> .dg-cy, and the old .inert is aria-disabled plus the
+   pointer-events rule it always stood for.
+
+   Running it against the new strip is what found the pointer-events missing: the pills
+   were labelled aria-disabled and still took the press, leaving the handler to refuse
+   it silently on every tap. Being refused is worse than no response, which is why the
+   plates were inert in the first place. */
 console.log("1 - THE DAYS YOU CANNOT CHOOSE ARE NOT PRESSABLE");
 {
   const r = await p.evaluate(()=>{
     const out=[];
-    document.querySelectorAll('.plate[data-slot]').forEach(el=>{
+    document.querySelectorAll('.dg-cy[data-slot]').forEach(el=>{
       const slot = parseInt(el.dataset.slot,10);
       out.push({slot, t: el.textContent.trim().slice(0,6),
         past: slotIsPast(slot), locked: slotIsLocked(slot),
-        inert: el.classList.contains('inert'),
+        /* aria-disabled, which is what the .inert class stood for. */
+        inert: el.hasAttribute('aria-disabled'),
         pe: getComputedStyle(el).pointerEvents});
     });
     return out;
@@ -45,7 +57,7 @@ console.log("1 - THE DAYS YOU CANNOT CHOOSE ARE NOT PRESSABLE");
 console.log("2 - A PRESS ON ONE SAYS NOTHING AND CHANGES NOTHING");
 {
   const r = await p.evaluate(async ()=>{
-    const el = [...document.querySelectorAll('.plate[data-slot]')]
+    const el = [...document.querySelectorAll('.dg-cy[data-slot]')]
       .find(e=> slotIsLocked(parseInt(e.dataset.slot,10)));
     if(!el) return {none:true};
     const before = S.pointer;
@@ -64,7 +76,7 @@ console.log("2 - A PRESS ON ONE SAYS NOTHING AND CHANGES NOTHING");
 console.log("3 - THE DAY YOU ARE ON STILL WORKS");
 {
   const r = await p.evaluate(()=>{
-    const el = [...document.querySelectorAll('.plate[data-slot]')]
+    const el = [...document.querySelectorAll('.dg-cy[data-slot]')]
       .find(e=>{ const s2=parseInt(e.dataset.slot,10); return !slotIsPast(s2) && !slotIsLocked(s2); });
     if(!el) return {none:true};
     const slot = parseInt(el.dataset.slot,10);
@@ -79,8 +91,9 @@ console.log("3 - THE DAY YOU ARE ON STILL WORKS");
 console.log("4 - A SCHEDULED REST IS A MARKER, A FLOATING ONE IS A CONTROL");
 {
   const r = await p.evaluate(()=>{
-    const read = ()=> [...document.querySelectorAll('.plate[data-rest]')]
-      .map(el=> ({inert: el.classList.contains('inert'), pe: getComputedStyle(el).pointerEvents}));
+    const read = ()=> [...document.querySelectorAll('.dg-cy[data-rest]')]
+      .map(el=> ({/* aria-disabled, which is what the .inert class stood for. */
+        inert: el.hasAttribute('aria-disabled'), pe: getComputedStyle(el).pointerEvents}));
     S.prefs = Object.assign({}, S.prefs, {restMode:"scheduled"}); save(); render();
     const sched = {float: restsFloat(), plates: read()};
     S.prefs = Object.assign({}, S.prefs, {restMode:"float"}); save(); render();
