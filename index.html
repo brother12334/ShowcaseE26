@@ -7415,7 +7415,17 @@ body.news-open{overscroll-behavior:contain}
    full-width picture, so it is simply given the width and left alone. Only the shapes,
    whose coordinates are written on a 390 canvas, are scaled. */
 #stage > .glass-layer > .hero-media{left:0;top:0;width:100%;height:auto;
-  transform:none}
+  transform:none;
+  /* THE ENTRANCE IS FOR SHAPES, NOT FOR THE BACKGROUND.
+
+     glass.css gives everything in the layer the same springy arrival, and its easing
+     overshoots: cubic-bezier(.2,.9,.25,1.15) takes the scale past 1 on the way in. On a
+     shape that is the point. On a full-bleed hero it meant the picture was briefly 404px
+     wide in a 390px window — a sideways scroll that appeared for 600ms and went away,
+     which is exactly the kind of thing nobody ever reproduces — and it put a running
+     transform on a <video> for the whole of that. A plain fade instead. */
+  animation:dgHeroIn var(--t-nav) var(--ease-nav) both}
+@keyframes dgHeroIn{from{opacity:0}to{opacity:1}}
 #stage > .glass-layer{position:absolute;left:0;top:0;right:0;height:0;
   overflow:visible;pointer-events:none}
 /* THE SHAPES ARE SCALED; THE HERO IS NOT.
@@ -7457,7 +7467,14 @@ body.news-open{overscroll-behavior:contain}
 
    `clip` rather than `hidden`: hidden on one axis forces the other to auto, which would
    make #stage a scroll container and break anything sticky inside it. clip just cuts. */
-#stage{background:var(--e26-bg);overflow-x:clip}
+#stage{background:var(--e26-bg)}
+/* ONLY WHEN THERE IS SOMETHING TO CLIP. A shape placed by layout.js can reach past the
+   screen edge on purpose and would otherwise widen the document — but clipping an
+   ancestor of a <video> is a known way to push it off the compositor's fast path on
+   iOS, and no screen with a hero has shapes yet. So the clip arrives with the shapes.
+   `clip` and not `hidden`: hidden on one axis forces the other to auto, which would
+   make #stage a scroll container. */
+#stage.dg-clip{overflow-x:clip}
 /* THE ENTRANCE REACHES THROUGH THE WRAPPER.
 
    .dg is one full-bleed element, so Today went from a dozen direct children of #app to
@@ -8007,7 +8024,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.63";
+const APP_VERSION = "2026.11.17.64";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -35533,10 +35550,12 @@ function glassSync(){
    this app's layout problem: the package's pages are a fixed 390 canvas and this one
    has to be any width. */
 function glassShapeScale(stage){
+  stage.classList.remove("dg-clip");
   const layer = stage.querySelector(".glass-layer");
   if(!layer) return;
   const shapes = [...layer.children].filter(n=> n.classList.contains("glass"));
   if(!shapes.length) return;
+  stage.classList.add("dg-clip");
   const box = document.createElement("div");
   box.className = "dg-shapes";
   box.setAttribute("aria-hidden", "true");
@@ -35553,18 +35572,52 @@ function glassShapeScale(stage){
    outright: pause when off-screen.
 
    One observer, replaced with the scene, disconnected when the scene is torn down. */
-let GLASS_HERO_IO = null;
+let GLASS_HERO_IO = null, GLASS_HERO_SEEN = false, GLASS_HERO_T = 0;
+/* THE HERO DOES NOT PLAY WHILE THE PAGE IS MOVING.
+
+   Pausing it off-screen was not enough: the stutter is while you scroll, and the reason
+   is compositing rather than decoding. A phone decodes this clip without noticing, but
+   the frame underneath a 4,500px page with text and a scrim drawn over it has to be
+   composited afresh on every scroll frame, and that is the moment smoothness is the
+   whole point.
+
+   So it plays when the screen is still and stops the instant you move. You cannot watch
+   an animation while scrolling past it, so nothing is lost — and scrolling costs exactly
+   what it cost before the redesign, because during a scroll there is no video at all.
+
+   160ms after the last scroll event, which is long enough not to flicker on a flick and
+   short enough that it feels like it never stopped. */
+function glassHeroPlay(){
+  const v = document.querySelector("#stage .glass-layer video.hero-media");
+  if(!v) return;
+  if(GLASS_HERO_SEEN && !document.hidden) v.play().catch(()=>{});
+}
+function glassHeroStill(){
+  const v = document.querySelector("#stage .glass-layer video.hero-media");
+  if(v) v.pause();
+}
+function glassHeroScroll(){
+  glassHeroStill();
+  clearTimeout(GLASS_HERO_T);
+  GLASS_HERO_T = setTimeout(glassHeroPlay, 160);
+}
 function glassHeroWatch(stage){
   if(GLASS_HERO_IO){ GLASS_HERO_IO.disconnect(); GLASS_HERO_IO = null; }
+  GLASS_HERO_SEEN = false;
   const v = stage.querySelector(".glass-layer video.hero-media");
   if(!v || typeof IntersectionObserver !== "function") return;
   GLASS_HERO_IO = new IntersectionObserver(es=>{
     es.forEach(e=>{
+      GLASS_HERO_SEEN = e.isIntersecting;
       if(e.isIntersecting) v.play().catch(()=>{});
       else v.pause();
     });
   }, {rootMargin: "64px"});
   GLASS_HERO_IO.observe(v);
+  if(!glassHeroWatch.scrollWired){
+    glassHeroWatch.scrollWired = true;
+    addEventListener("scroll", glassHeroScroll, {passive: true});
+  }
   /* And with the tab in the background, where no observer fires. */
   if(!glassHeroWatch.wired){
     glassHeroWatch.wired = true;
@@ -64928,8 +64981,18 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.63";
+const NEWS_FOR = "2026.11.17.64";
 const NEWS = [
+  {k: "Today scrolls like it should",
+   s: ["The hero behind the day\u2019s name stops the moment the page moves and starts "
+     + "again when it settles. The cost of a video is not decoding it, it is drawing the "
+     + "page on top of it again for every scrolled pixel \u2014 and you cannot watch an "
+     + "animation while you are scrolling past it, so nothing is lost and the screen "
+     + "moves the way it did before.",
+     "The hero also used to arrive with the same springy scale the glass shapes use, "
+     + "and that easing overshoots: for about half a second the picture was wider than "
+     + "the window, which let the screen be dragged sideways and kept a transform "
+     + "running on a video the whole time. It fades in now."]},
   {k: "The new Today, on a real phone",
    s: ["Three things the redesign got wrong, found by using it rather than by looking "
      + "at it. The glass art was being drawn on every screen, but only Today has been "

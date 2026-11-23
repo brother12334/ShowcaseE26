@@ -365,6 +365,59 @@ ck("the hero carries no transform of its own",
    r.heroTransform === "none", r.heroTransform);
 ck("and is not inside the scaled shape wrapper", r.inShapes === false, String(r.inShapes));
 
+console.log("\n11b. AND IT DOES NOT PLAY WHILE THE PAGE IS MOVING");
+/* Pausing off-screen was not enough on a real phone. The cost is compositing, not
+   decoding: the frame under a 4,500px page with text and a scrim over it is recomposited
+   on every scroll frame. You cannot watch an animation while scrolling past it, so it
+   stops the instant the page moves and comes back when it settles. */
+r = await newP.evaluate(async ()=>{
+  boot(); glassSync();
+  await new Promise(ok=> setTimeout(ok, 400));
+  const v = document.querySelector('#stage .glass-layer video.hero-media');
+  if(!v) return {none: true};
+  const before = !v.paused;
+  /* A small scroll, so the hero is still well on screen — this must be the scroll
+     stopping it, not the intersection observer. */
+  scrollTo(0, 40);
+  dispatchEvent(new Event('scroll'));
+  await new Promise(ok=> setTimeout(ok, 30));
+  const stillVisible = v.getBoundingClientRect().bottom > 100;
+  const duringScroll = v.paused;
+  await new Promise(ok=> setTimeout(ok, 420));
+  const afterSettling = !v.paused;
+  scrollTo(0, 0);
+  return {before, duringScroll, afterSettling, stillVisible};
+});
+ck("CONTROL: it was playing, and the hero is still on screen throughout",
+   r.before === true && r.stillVisible === true,
+   "playing " + r.before + ", visible " + r.stillVisible);
+ck("it stops the moment the page moves", r.duringScroll === true, String(r.duringScroll));
+ck("and comes back once the page settles", r.afterSettling === true, String(r.afterSettling));
+
+console.log("\n11c. THE HERO FADES IN; IT DOES NOT SPRING");
+/* glass.css gives everything in the layer the same springy arrival and its easing
+   overshoots past scale 1. On a shape that is the point; on a full-bleed hero it made
+   the picture wider than the window for 600ms — a sideways scroll that came and went —
+   and put a running transform on a video for the whole of it. */
+r = await newP.evaluate(async ()=>{
+  boot(); glassSync();
+  await new Promise(ok=> setTimeout(ok, 60));
+  const v = document.querySelector('#stage .glass-layer video.hero-media');
+  if(!v) return {none: true};
+  let widest = 0;
+  for(let i = 0; i < 24; i++){
+    widest = Math.max(widest, v.getBoundingClientRect().width,
+                      document.documentElement.scrollWidth);
+    await new Promise(ok=> requestAnimationFrame(ok));
+  }
+  return {widest: Math.round(widest), vw: document.documentElement.clientWidth,
+          name: getComputedStyle(v).animationName};
+});
+ck("it never grows past the window, at any point in its arrival",
+   r.widest <= r.vw + 1, r.widest + " in " + r.vw);
+ck("CONTROL: it is animating, so there was something to overshoot",
+   r.name && r.name !== "none", r.name);
+
 console.log("\n12. THE TOP BAND IS READABLE OVER WHATEVER THE ART IS DOING");
 /* The brief requires 4.5:1 over glass and says to move a shape that sits on text — but
    the hero is a baked video, so the only thing that can move is a scrim. */
