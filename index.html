@@ -267,7 +267,9 @@ body{
   background:var(--bg); color:var(--text);
   font:var(--fs-5)/1.56 var(--sans);
   -webkit-font-smoothing:antialiased;
-  padding-bottom:calc(80px + env(safe-area-inset-bottom));
+  /* The bar floats clear of the bottom now, so the content has to clear the bar AND
+     the gap under it: 64 of pill, 22 of gap, and room to breathe. */
+  padding-bottom:calc(104px + env(safe-area-inset-bottom));
   /* NO ZOOM. Three separate mechanisms, because no single one covers them all.
 
      `manipulation` is this one: it removes the ~300ms wait for a possible second tap,
@@ -3831,15 +3833,28 @@ nav{
      Without it the bar anchors to the layout bottom, which during and after a toolbar
      change sits BELOW the visible area — and the bar appears to float an inch up the
      screen. See the visualViewport handler in the tab-bar block. */
-  position:fixed;bottom:0;left:0;right:0;background:#141417;
-  border-top:1px solid var(--line);display:flex;justify-content:space-around;
+  /* THE FLOATING GLASS PILL (dark glass redesign).
+
+     It was a solid bar pinned to the bottom edge with a hairline on top. Every mockup
+     in the package draws it as a pill inset from the edges, floating over the content,
+     frosted. The values are the package's own page: 16px in from each side, 22 up from
+     the bottom, 64 tall, a 32 radius, and an 18px backdrop blur.
+
+     Changed here, in the tab bar's own section, rather than overridden from the
+     redesign's: cssdupe will not allow a second section to redefine these and it is
+     right — this is the bar changing, not something else reaching in to restyle it. */
+  position:fixed;left:16px;right:16px;height:64px;box-sizing:border-box;
+  border-radius:32px;background:rgba(255,255,255,.07);
+  border:1px solid rgba(255,255,255,.16);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+  display:flex;align-items:center;gap:2px;
   /* NOT 7px PLUS THE INSET. The home indicator's 34px is clearance the phone asks for,
      not a margin to build on top of — adding the bar's own 7px to it left a dead band
      below the labels as tall as the labels themselves, and the bar read as bottom-heavy
      on every device that has an indicator. The inset ABSORBS the padding instead, less
      the slack the buttons already carry, and max() keeps the plain 7px on hardware with
      no inset at all. */
-  padding:7px 0 max(7px, calc(var(--sab) - 12px));z-index:40;
+  padding:0 6px;z-index:40;
   /* THE CORRECTION IS NOT A MOVEMENT, AND IT IS NEVER ANIMATED.
 
      --navGap tells the bar where the bottom of the screen actually is. It rides on
@@ -3849,15 +3864,17 @@ nav{
      ignoring you, intermittently, for no reason anybody could reproduce on demand.
 
      translateZ(0) and nothing else: the layer is for the compositor, not for motion. */
-  bottom:var(--navGap, 0px);
+  /* 22 up from the bottom as the design has it, but never under the home indicator,
+     and still riding on --navGap so Safari's toolbar cannot leave it floating. */
+  bottom:calc(var(--navGap, 0px) + max(22px, var(--sab)));
   transform:translateZ(0);
   /* No double-tap-to-zoom delay on the one control people hit fastest. */
   touch-action:manipulation;
 }
 nav button{
-  background:none;border:none;color:var(--faint);cursor:pointer;flex:1;min-width:0;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-  padding:7px 2px 5px;border-radius:var(--r);
+  background:none;border:none;color:var(--e26-ink-3);cursor:pointer;flex:1 1 0;min-width:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  height:52px;padding:0 2px;border-radius:26px;
   transition:color var(--t-fast), background var(--t-fast);
 }
 /* AND `hidden` HAS TO MEAN HIDDEN. `nav button{display:flex}` is an author rule and the
@@ -3865,24 +3882,31 @@ nav button{
    which is why the Workout tab was painted, squeezed into the bar, on every screen from
    the moment it existed, with its own JS convinced it was hidden. */
 nav button[hidden]{display:none}
-nav button svg{width:22px;height:22px;display:block;flex-shrink:0}
+nav button svg{width:20px;height:20px;display:block;flex-shrink:0}
 /* Icon-only is the one change that reliably makes an app harder to learn, so each icon
    keeps a micro-label. It still reads as an icon bar; it just doesn't need decoding. */
+/* Lower case, in the design's face. The bar used to shout its labels in mono caps,
+   which was right next to a mono app and is wrong next to this one. */
 nav .nav-lbl{
-  font-family:var(--disp);font-size:var(--fs-1);font-weight:700;text-transform:uppercase;
-  letter-spacing:.07em;line-height:1;white-space:nowrap;transition:color var(--t-fast);
+  /* lower case, which is the design's register throughout. text-transform rather than
+     changing the strings, so the accessible name a screen reader announces is still
+     "Today" rather than "today". */
+  font-family:var(--e26-font);font-size:10px;font-weight:500;text-transform:lowercase;
+  letter-spacing:0;line-height:1;white-space:nowrap;transition:color var(--t-fast);
 }
 /* Duotone accent: every icon is plain outline, all the time. The only thing that
    changes on the active tab is colour (faint → accent) and a soft accent-tinted circle
    that appears behind the icon alone, not the whole button, so the highlight sits where
    your eye already is instead of drawing a box around the label too. */
 nav .nav-ic{
-  width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+  width:24px;height:24px;display:flex;align-items:center;justify-content:center;
   border-radius:var(--r);background:transparent;transition:background var(--t-mid) ease;
 }
-nav button.on{color:var(--acc)}
-nav button.on .nav-ic{background:var(--acc-soft)}
-nav button.on svg{filter:drop-shadow(0 0 7px rgba(201,138,75,.45))}
+/* THE WHOLE SEGMENT IS THE HIGHLIGHT NOW. It used to be a soft accent circle behind
+   the icon alone; the design fills the segment with the ink colour and inverts the
+   text, which is legible on glass in a way a tinted circle is not. */
+nav button.on{background:var(--e26-ink);color:var(--e26-bg)}
+nav button.on .nav-ic{background:transparent}
 nav button:active{transform:scale(.94)}
 /* The live dot on the Workout tab. It is the only moving thing in the bar, which is
    the point: something is running and it is over here. */
@@ -3892,7 +3916,7 @@ nav .nav-ic{position:relative}
   background:var(--acc);box-shadow:0 0 0 2px #141417;
   animation:navPulse 2s ease-in-out infinite;
 }
-nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px #141417}
+nav button.on .nav-live{background:var(--ok);box-shadow:0 0 0 2px var(--e26-ink)}
 @keyframes navPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
 @media (prefers-reduced-motion: reduce){ .nav-live{animation:none} }
 /* =====================================================================
@@ -7507,9 +7531,13 @@ body.news-open{overscroll-behavior:contain}
 /* Tall enough to cover the header and the cycle, and gone by the time the hero word
    starts. Transparent at the bottom so there is no edge to see. */
 .dg-scrim{position:absolute;left:0;right:0;top:0;z-index:1;pointer-events:none;
-  height:calc(170px + env(safe-area-inset-top));
+  height:calc(160px + env(safe-area-inset-top));
+  /* LIGHTER THAN THE FIRST ATTEMPT. It only has to rescue the frames where the art
+     comes up bright behind the header; at .92 it was laying a grey haze over the top of
+     every frame and the screen no longer matched the mockup, whose art is simply dark
+     there. Enough to hold the text, not enough to see. */
   background:linear-gradient(to bottom,
-    rgba(10,10,10,.92) 0%, rgba(10,10,10,.82) 46%, rgba(10,10,10,.42) 76%,
+    rgba(10,10,10,.72) 0%, rgba(10,10,10,.58) 48%, rgba(10,10,10,.26) 78%,
     rgba(10,10,10,0) 100%)}
 /* The cycle's footer line: where you are in it, and the two controls that live nowhere
    else. Quieter than it was, because the strip above it now says the same thing in
@@ -7747,6 +7775,35 @@ body.news-open{overscroll-behavior:contain}
 .dg-screen .btn{border-radius:var(--e26-radius-pill);font-family:var(--e26-font);
   font-weight:600;letter-spacing:0;text-transform:none}
 .dg-screen .nb-link,.dg-screen .linklike{font-family:var(--e26-font)}
+
+/* ---- THE INTRO ---------------------------------------------------------------------
+   intro.css owns the stage, the bubble and the ring. These are the two things it
+   cannot know about: this app's own stage while it is being transitioned onto, and the
+   stand-in for the design being transitioned from. */
+.intro-stage{position:fixed;inset:0;z-index:60}
+body.intro-on{overflow:hidden}
+/* The live app, for the three seconds it spends inside the intro stage. */
+.intro-stage > #stage.intro-next{position:absolute;inset:0;overflow:hidden}
+/* THE DAY BEFORE. A reconstruction, not a screenshot: the old design is not in this
+   file any more. On screen for just over a second, behind a bubble, never interactive —
+   so it is written at the size it needs to read at a glance and no larger. */
+.intro-old{position:absolute;inset:0;background:#0e0e10;color:#e8e6e1;
+  font-family:var(--sans);padding:calc(18px + env(safe-area-inset-top)) 14px 0}
+.io-hdr{display:flex;justify-content:space-between;align-items:baseline;
+  font-size:12.5px;color:#9b9892;margin-bottom:14px}
+.io-mark{font-family:var(--disp);font-weight:700;font-size:15px;color:#e8e6e1;
+  letter-spacing:.02em}
+.io-card{background:#17171a;border:1px solid #28282f;border-radius:10px;padding:14px;
+  margin-bottom:12px}
+.io-k{font-family:var(--disp);font-size:9.5px;letter-spacing:.16em;color:#83817c;
+  text-transform:uppercase;margin-bottom:7px}
+.io-h{font-family:var(--disp);font-size:22px;font-weight:700;margin-bottom:3px}
+.io-s{font-size:12.5px;color:#9b9892;margin-bottom:12px}
+.io-go{background:#c98a4b;color:#0e0e10;border-radius:7px;text-align:center;
+  padding:11px;font-weight:700;font-size:14px}
+.io-row{display:flex;justify-content:space-between;font-size:13.5px;padding:7px 0;
+  border-top:1px solid #28282f;color:#e8e6e1}
+.io-row span:last-child{color:#83817c}
 
 /* A row, a label and a chip: the three shapes the package's pages are built from. */
 .dg-ss{display:flex;justify-content:space-between;align-items:center;min-height:62px;
@@ -8132,7 +8189,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.65";
+const APP_VERSION = "2026.11.17.66";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -35785,6 +35842,136 @@ function glassHeroWatch(stage){
     });
   }
 }
+/* =====================================================================
+   THE INTRO
+
+   The package's old-design-to-new transition: the old screen tightens, a glass bubble
+   inflates on it and bursts, a lens ring opens edge to edge, and inside it is the new
+   app. About 3.4 seconds. Tapping skips it, and under prefers-reduced-motion intro.js
+   makes it a 300ms cross-fade instead.
+
+   WHAT "next" HAS TO BE. intro.js reveals the new screen by animating a clip-path on
+   it, so `next` must be the real thing — a stand-in would clip an empty box. So #stage,
+   the live app, is MOVED into the intro stage for the duration and moved back when it
+   finishes. A move rather than a rebuild, so nothing in the app is re-rendered or
+   loses its state; the hero video restarts, which during an intro is not a cost.
+
+   WHAT "legacy" IS, AND WHY IT IS A STAND-IN. The transition is from the old design,
+   and the old design is not in this file any more — it was replaced, which is the whole
+   point of the update. So the left-hand side is a short, honest reconstruction of what
+   Element 26 looked like the day before: the wordmark header, a mono day card, a week
+   list. It exists for 1.3 seconds and is never interactive. The package's own demo does
+   the same thing and says so.
+
+   ONCE, AND THEN NEVER — AND ONCE MORE WHENEVER THAT CHANGES. S.introSeen holds the
+   generation of the intro a person has been shown. Raise INTRO_GEN and everybody sees
+   it one more time, whatever they have seen before, and then stops seeing it. That is
+   the whole mechanism; there is no "has it ever played" boolean to get stuck on.
+   ===================================================================== */
+const INTRO_GEN = 1;
+let INTRO_RUNNING = false;
+
+function introSupported(){
+  return !!(window.E26Intro && document.getElementById("stage"));
+}
+/* Not during onboarding, the account flow or a share view: the intro is a transition
+   between two versions of the app, and none of those are the app. */
+function introDue(){
+  if(!introSupported() || INTRO_RUNNING) return false;
+  if(OB || PF || ACCT_UI) return false;
+  if(document.body.classList.contains("share-view")) return false;
+  return (S.introSeen || 0) < INTRO_GEN;
+}
+/* The day before. Deliberately plain: it is on screen for just over a second, behind a
+   bubble, and anything more detailed would be a second design to maintain. */
+function introLegacyHTML(){
+  const m = (()=>{ try{ return dayMeta(todaysWorkoutId()); }catch(e){ return {name:"Push A"}; } })();
+  const rows = (()=>{ try{ return ROTATION.slice(0, 4).map(w=> dayName(w)); }
+                      catch(e){ return ["Push A","Pull A","Legs A","Rest"]; } })();
+  return `<div class="intro-old">
+    <div class="io-hdr"><span class="io-mark">Element 26</span><span>${esc(fmtDate(todayStr()))}</span></div>
+    <div class="io-card">
+      <div class="io-k">TODAY'S WORKOUT</div>
+      <div class="io-h">${esc(m.name)}</div>
+      <div class="io-s">${rows.length} exercises &middot; ~50 min</div>
+      <div class="io-go">Start Workout</div>
+    </div>
+    <div class="io-card">
+      <div class="io-k">THIS WEEK</div>
+      ${rows.map((r,i)=> `<div class="io-row"><span>${esc(r)}</span><span>${
+        i < 3 ? "Done" : "Rest"}</span></div>`).join("")}
+    </div>
+  </div>`;
+}
+
+function playIntro(){
+  if(!introSupported() || INTRO_RUNNING) return Promise.resolve(false);
+  const stage = document.getElementById("stage");
+  const body = document.body;
+  INTRO_RUNNING = true;
+
+  const wrap = document.createElement("div");
+  wrap.className = "intro-stage";
+  wrap.id = "introStage";
+  wrap.setAttribute("aria-hidden", "true");
+  const legacy = document.createElement("div");
+  legacy.className = "intro-legacy";
+  legacy.innerHTML = introLegacyHTML();
+  wrap.append(legacy);
+
+  /* Where #stage was, so it can go back exactly there. */
+  const anchor = document.createComment("stage");
+  stage.parentNode.insertBefore(anchor, stage);
+  stage.parentNode.insertBefore(wrap, anchor);
+  stage.classList.add("intro-next");
+  wrap.append(stage);
+  body.classList.add("intro-on");
+
+  /* The screen's own sections are what floats up, in the order they are read. */
+  const risers = [...stage.querySelectorAll("#app > .dg > *, #app > *")].slice(0, 8);
+  risers.forEach(n=> n.setAttribute("data-rise", ""));
+
+  const finish = ()=>{
+    try{
+      stage.classList.remove("intro-next");
+      stage.removeAttribute("style");
+      anchor.parentNode.insertBefore(stage, anchor);
+      anchor.remove();
+      wrap.remove();
+      body.classList.remove("intro-on");
+      risers.forEach(n=> n.removeAttribute("data-rise"));
+    }catch(e){}
+    INTRO_RUNNING = false;
+    /* Written down only once it has actually finished, so a crash or a closed tab
+       half way through does not cost somebody the intro. */
+    if((S.introSeen || 0) < INTRO_GEN){ S.introSeen = INTRO_GEN; save(); }
+    /* THE INTRO MOUNTS ITS OWN SCENE, and glassSync compares a key: the screen has not
+       changed, so left to itself it returns on the first line and the intro's four
+       shapes stay on Today for ever. The key is cleared so the next call rebuilds the
+       layer the screen actually asks for. */
+    try{ GLASS_AT = null; GlassScene.unmount(); glassSync(); }catch(e){}
+  };
+
+  let p;
+  try{
+    p = E26Intro.play({
+      stage: wrap, legacy, next: stage,
+      hero: stage.querySelector("video.hero-media") || undefined,
+      base: "", origin: {x: Math.round(innerWidth / 2), y: Math.round(innerHeight * 0.55)},
+      scene: "intro"
+    });
+  }catch(e){ finish(); return Promise.resolve(false); }
+  return p.then(finish, finish).then(()=> true);
+}
+/* Settings offers it again. It does not change INTRO_GEN — watching it twice on purpose
+   is not the same as never having seen it. */
+function replayIntro(){
+  const seen = S.introSeen;
+  return playIntro().then(ok=>{ S.introSeen = seen == null ? INTRO_GEN : seen;
+                                if(S.introSeen < INTRO_GEN) S.introSeen = INTRO_GEN;
+                                save(); return ok; });
+}
+
 function render(){
   /* D6b — A SHARE LINK IS NOT THE APP, AND NOTHING MAY REDRAW IT INTO ONE. The viewer
      replaces the page, but the app has timers, visibility handlers and a sync that all
@@ -37895,9 +38082,18 @@ function dataIssueCardHTML(){
    for it to go stale, and the two would disagree the first time a day gained art. */
 function glassDayArt(wid){ return GLASS_DAY[wid] || null; }
 
+/* THE DATE, AS THE DESIGN WRITES IT: "sat 21 nov". Lower case, no comma, day of the
+   month before the month. fmtDate gives "Mon, Nov 23", which is the app's own voice and
+   the wrong one here — every other word on this screen is lower case. */
+function dgDateText(d){
+  const t = d ? new Date(d + "T00:00:00") : new Date();
+  const day = t.toLocaleDateString("en-GB", {weekday: "short"}).toLowerCase();
+  const mon = t.toLocaleDateString("en-GB", {month: "short"}).toLowerCase();
+  return day + " " + t.getDate() + " " + mon;
+}
 function dgTopHTML(right){
   return `<div class="dg-top"><h1>today</h1><span class="dg-top-r">${right || ""}<time
-    datetime="${esc(todayStr())}">${esc(fmtDate(todayStr()))}</time></span></div>`;
+    datetime="${esc(todayStr())}">${esc(dgDateText(todayStr()))}</time></span></div>`;
 }
 
 /* THE CYCLE. One pill per slot in the layout, the current one purple, the ones the
@@ -65249,8 +65445,16 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.65";
+const NEWS_FOR = "2026.11.17.66";
 const NEWS = [
+  {k: "The tab bar, and the intro",
+   s: ["The bar at the bottom is a floating glass pill now, inset from the edges and "
+     + "frosted, with the tab you are on filled in. Same five tabs, same order, same "
+     + "everything it does \u2014 it just stopped being a slab welded to the bottom of the "
+     + "screen.",
+     "And the app now opens, once, with the transition from the old design to this one: "
+     + "the old screen tightens, a glass bubble bursts, and a lens opens onto the new "
+     + "Today. Tap to skip it. You will see it one time and then never again."]},
   {k: "The rest of the app, in the new design",
    s: ["History, Body, Program, Research, Settings and the workout screen now open the "
      + "way Today does: the hero at the top, the screen\u2019s name and the thing worth "
@@ -76442,6 +76646,9 @@ else render();
 try{ restoreSetCuts(); }catch(e){}   // a lapsed cut goes back on the plan at launch too
 try{ if(autoAsymRetest()) render(); }catch(e){}   // and the side re-test runs itself
 if(S.active && S.active.restTimer) showRestUI(S.active.restTimer.min);
+/* THE INTRO, after the first screen has been drawn and not before: it is a transition
+   onto the app, so the app has to be there to transition onto. */
+try{ if(introDue()) setTimeout(()=>{ if(introDue()) playIntro(); }, 260); }catch(e){}
 /* A signed-in account on a device that has been away: pull once, and only repaint if
    the server actually had something newer than what is on this device. */
 if(hasAccount() && accountAuth()) accountPull().then(ok=>{ if(ok) render(); });
