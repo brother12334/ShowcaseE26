@@ -21,7 +21,9 @@ const setup = ()=> p.evaluate(()=>{
   const el=document.getElementById('preflight'); if(el) el.remove();
   try{PF=null}catch(e){}
   S.setup={name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()};
-  S.tourDone=true; S.geo='off'; S.priorAsked=true; S.sleepAsked=todayStr();
+  S.tourDone=true;
+  S.introSeen = INTRO_GEN;
+  S.geo='off'; S.priorAsked=true; S.sleepAsked=todayStr();
   S.flags=[]; S.deload=null; S.viewMode="list"; S.planStart=Date.now()-200*86400e3;
   S.prefs=Object.assign({}, S.prefs, {sleepPrompt:false, warmups:"off"});
   S.splitId=DEFAULT_SPLIT; applySplit();

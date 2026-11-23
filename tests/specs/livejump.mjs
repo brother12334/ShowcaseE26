@@ -19,7 +19,9 @@ await p.evaluate(()=>{
   const sp=document.getElementById('splash'); if(sp) sp.remove();
   try{OB=null}catch(e){} hideModal(); document.body.classList.remove('ai-open','onboarding');
   S.setup={name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()};
-  S.tourDone=true; S.geo='off'; S.sleepAsked=todayStr(); S.seenNews=NEWS_FOR;
+  S.tourDone=true;
+  S.introSeen = INTRO_GEN;
+  S.geo='off'; S.sleepAsked=todayStr(); S.seenNews=NEWS_FOR;
   S.prefs=Object.assign({}, S.prefs, {sleepPrompt:false, warmups:'off'});
   S.viewMode="regular";
   S.splitId=DEFAULT_SPLIT; applySplit();

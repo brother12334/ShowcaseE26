@@ -16,6 +16,7 @@ const start = (prefs)=> p.evaluate((pf)=>{
   const af=document.getElementById('aiFull'); if(af) af.hidden=true;
   S.setup={name:"Fer",goal:"muscle",level:"intermediate",gear:"full",at:Date.now()};
   S.tourDone=true; S.geo='off'; S.sleepAsked=todayStr(); S.flags=[]; S.deload=null;
+  S.introSeen = INTRO_GEN;
   S.priorAsked=true;   // the experience question is asked elsewhere; it must not sit on top of this
   S.splitId=DEFAULT_SPLIT; applySplit();
   const wid=ROTATION[0], ex="Barbell Bench Press";

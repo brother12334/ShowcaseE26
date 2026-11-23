@@ -27,6 +27,8 @@ const loaded = await p.evaluate(fx=>{
   try{OB=null}catch(e){} hideModal(); document.body.classList.remove('ai-open','onboarding');
   Object.keys(fx).forEach(k=>{ S[k] = fx[k]; });
   S.tourDone = true;
+  S.introSeen = INTRO_GEN;
+
   try{ migrate(); }catch(e){ return {err: String(e && e.message || e)}; }
   try{ applySplit(); }catch(e){}
   try{ SEEDS_RUN = false; }catch(e){}
@@ -574,6 +576,8 @@ console.log("\n17 - AND THE WHOLE THING THROUGH THE REAL SCREEN");
   await p.evaluate(fx=>{
     Object.keys(fx).forEach(k=>{ S[k] = fx[k]; });
     S.patchLog = []; S.tourDone = true;
+    S.introSeen = INTRO_GEN;
+
     migrate(); try{ applySplit(); }catch(e){}
     document.body.classList.remove('ai-open','onboarding','pfl-open');
     ['preflight','aiFull'].forEach(id=>{ const el = document.getElementById(id); if(el) el.remove(); });

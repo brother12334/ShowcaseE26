@@ -1,4 +1,4 @@
-import { chromium, APP_URL, appFile } from './_e26.mjs';
+import { chromium, APP_URL, appFile, oldBuild } from './_e26.mjs';
 import { readFileSync } from 'node:fs';
 /* A VISUAL REDESIGN THAT CHANGES WHAT GETS STORED IS NOT A VISUAL REDESIGN.
 
@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
    the new screen and requires the stored preferences to come out byte-identical to the
    old screen's for the same taps. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
-const OLD = "file:///tmp/claude-0/-home-user-ShowcaseE26/cb903a36-3103-5d6a-a18b-78ade397246e/scratchpad/old/index.html";
+const OLD = oldBuild("a71826e");
 const b = await chromium.launch();
 let bad = 0;
 const ck=(what,ok,got)=>{ console.log((ok?"  ok   ":"  BROKEN ")+what+(got===undefined?"":"  ["+got+"]")); if(!ok) bad++; };
@@ -34,7 +34,9 @@ async function openApp(url){
       document.body.classList.remove('ai-open','onboarding','pfl-open');
       Object.keys(S).forEach(k=>{ delete S[k]; });
       Object.keys(fx).forEach(k=>{ S[k] = JSON.parse(JSON.stringify(fx[k])); });
-      S.tourDone = true; migrate(); try{ applySplit(); }catch(e){}
+      S.tourDone = true;
+      if(typeof INTRO_GEN === "number") S.introSeen = INTRO_GEN;
+      migrate(); try{ applySplit(); }catch(e){}
       TAB='sync'; SET_PAGE='sess'; render();
     };
     window.pairs = ()=>{

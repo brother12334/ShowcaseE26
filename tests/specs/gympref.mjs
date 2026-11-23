@@ -1,4 +1,4 @@
-import { chromium, APP_URL, appFile } from './_e26.mjs';
+import { chromium, APP_URL, appFile, oldBuild } from './_e26.mjs';
 import { readFileSync } from 'node:fs';
 /* THE THIRD CONVERSION, HELD AGAINST THE REAL SCREEN IT REPLACED.
 
@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
    who wrote the change. Everything on this screen lives in trainPrefs(), but the snapshot
    still covers S as well, so the comparison does not have to be re-reasoned per screen. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
-const OLD = "file:///tmp/claude-0/-home-user-ShowcaseE26/cb903a36-3103-5d6a-a18b-78ade397246e/scratchpad/old/index.html";
+const OLD = oldBuild("051df09");
 const b = await chromium.launch();
 let bad = 0;
 const ck=(what,ok,got)=>{ console.log((ok?"  ok   ":"  BROKEN ")+what+(got===undefined?"":"  ["+got+"]")); if(!ok) bad++; };
@@ -32,7 +32,9 @@ async function openApp(url){
       document.body.classList.remove('ai-open','onboarding','pfl-open');
       Object.keys(S).forEach(k=>{ delete S[k]; });
       Object.keys(fx).forEach(k=>{ S[k] = JSON.parse(JSON.stringify(fx[k])); });
-      S.tourDone = true; migrate(); try{ applySplit(); }catch(e){}
+      S.tourDone = true;
+      if(typeof INTRO_GEN === "number") S.introSeen = INTRO_GEN;
+      migrate(); try{ applySplit(); }catch(e){}
       TAB='sync'; SET_PAGE='gym'; render();
       document.querySelectorAll('#toasts .tst').forEach(el=> el.remove());
     };
