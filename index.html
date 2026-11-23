@@ -55,6 +55,21 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet" media="print" onload="this.media='all';this.onload=null">
 <noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
+<!-- THE DARK GLASS DESIGN PACKAGE.
+
+     These four files are the design, kept as files rather than folded into the <style>
+     below. The app is otherwise one file on purpose, and this is the one deliberate
+     exception: the package's whole promise is that changing a number in tokens.css,
+     layout.js or glass-config.js changes the app, and that only stays true while a
+     designer can open the file the number is in. They are tiny (52 KB all together) and
+     precached by the service worker with the shell, so the app still starts offline.
+
+     Instrument Sans is served from assets/ rather than from a font host: the hero words
+     ARE the design, a fallback stack cannot stand in for them at -0.07em tracking, and
+     this app has to work in a basement with no signal. -->
+<link rel="stylesheet" href="glass/tokens.css">
+<link rel="stylesheet" href="glass/glass.css">
+<link rel="stylesheet" href="glass/intro.css">
 <style>
 :root{
   /* ELEMENT 26 — the periodic-table palette.
@@ -7362,6 +7377,196 @@ body.news-open{overscroll-behavior:contain}
   .acct-warn{font-size:var(--fs-3);line-height:1.45}
   .idcard-id{font-size:clamp(20px,6.6vw,26px);margin-bottom:11px}
 }
+/* Instrument Sans is served from assets/ rather than a font host: the hero words ARE
+   the design, no fallback stands in for them at -0.07em, and this app has to work in
+   a basement with no signal. Precached with the shell in sw.js. */
+@font-face{font-family:'Instrument Sans';src:url(assets/fonts/InstrumentSans.ttf) format('truetype');
+  font-weight:400 700;font-display:swap}
+/* =====================================================================
+   DARK GLASS
+
+   The redesign's own rules, kept in the app's single stylesheet rather than in a
+   <style> of their own: cssdupe.mjs reads the first stylesheet in the file to prove no
+   class is defined twice, and a second <style> above it would have quietly become the
+   one it read. The design's VALUES are not here — they are in glass/tokens.css, which
+   is the file a designer edits.
+   ===================================================================== */
+/* THE STAGE. One stacking context holding #app and the glass layer, so a "back" shape
+   sits under the cards and a "front" shape over them. The layer itself is absolutely
+   positioned at the top of the document and scrolls with it, which is what layout.js's
+   y coordinates mean ("from the top of the scrolling page"). */
+#stage{position:relative;z-index:0}
+#app{position:relative;z-index:1}
+/* THE LAYER IS DRAWN IN THE PACKAGE'S OWN COORDINATE SYSTEM AND SCALED TO FIT.
+
+   layout.js places every shape at an absolute x/y on a 390-wide canvas, and scene.js
+   writes those straight onto the elements. Overriding each one here would make this file
+   the authority on where the art sits, which is exactly the thing the brief says must
+   stay in layout.js. So nothing is overridden: the layer is 390 wide and the whole of it
+   is scaled by however much wider the content column is. Every coordinate in layout.js
+   then means what it says at any screen width, and changing one still moves the shape.
+
+   The column, not the viewport: #app is max-width 600 and centred, so the art has to be
+   centred on the same column or it drifts off the text on a tablet. */
+#stage{--dg-k:calc(min(100vw, 600px) / 390)}
+#stage > .glass-layer{position:absolute;left:50%;top:0;width:390px;height:0;
+  transform:translateX(-50%) scale(var(--dg-k));transform-origin:top center;
+  overflow:visible;pointer-events:none}
+
+/* ---- DARK GLASS: TODAY -------------------------------------------------------------
+   Values come from tokens.css; nothing here invents a colour or a size the package did
+   not set. The reference page is a fixed 390 canvas with everything at absolute
+   coordinates, which is how a mockup is drawn and not how this app can be built: the
+   screen has to hold a readiness note of any length, an optional notice, and a phone
+   that is not 390 wide. So the metrics are the mockup's and the layout is flow. */
+/* FULL BLEED, BY CANCELLING #app's GUTTER RATHER THAN BY CHANGING #app.
+   The hero runs edge to edge and the design's own gutter is 20px, not the app's 14. Done
+   here, on .dg alone, so every other screen in the app is untouched. */
+/* TRANSPARENT, BECAUSE THE HERO IS BEHIND IT. #app sits above the glass layer so that
+   text lands on top of the art; giving #app's content an opaque background of its own
+   then hides the art completely, which is what the first build of this screen did — a
+   640px black rectangle where the hero should be. The page's own dark ground is on
+   #stage, where nothing is stacked over it. */
+#stage{background:var(--e26-bg)}
+.dg{position:relative;font-family:var(--e26-font);background:transparent;color:var(--e26-ink);
+  min-height:100svh;padding:0 0 128px;
+  margin:calc(-16px - env(safe-area-inset-top)) -14px -20px}
+.dg-top-r{display:flex;align-items:center;gap:10px}
+/* The cycle's footer line: where you are in it, and the two controls that live nowhere
+   else. Quieter than it was, because the strip above it now says the same thing in
+   words rather than in two-letter codes. */
+.dg-foot{padding:10px var(--e26-pad) 0;font-size:12px;color:var(--e26-ink-3)}
+/* THE HEADER AND THE CYCLE SIT ON THE HERO, NOT ABOVE IT.
+
+   Both are out of the flow, which is what lets the hero start at the very top of the
+   screen the way the reference page draws it. The first build left them in the flow and
+   the art, painted from the top of the stage by a layer that knows nothing about this
+   screen's boxes, ended up 300px above the space reserved for it: the word was behind
+   the cycle strip and there was a black gap under the picture.
+
+   They stay first in the DOM, so the screen is still read as today, the date, where you
+   are in the cycle, then the day. */
+.dg-top{position:absolute;left:0;right:0;z-index:2;
+  display:flex;justify-content:space-between;align-items:baseline;
+  padding:calc(56px + env(safe-area-inset-top)) var(--e26-pad) 0}
+/* Lower case, as the design sets it: the app's own h1 is upper-cased. */
+.dg-top h1{margin:0;font-size:17px;font-weight:600;letter-spacing:0;text-transform:none}
+.dg-top time{font-size:14px;color:var(--e26-ink-2)}
+/* The cycle: one pill per day of the layout, the current one purple. The pills are the
+   package's own images, so nothing is drawn here. */
+.dg-cycle{position:absolute;left:0;right:0;z-index:2;
+  display:flex;justify-content:space-between;gap:2px;
+  padding:calc(90px + env(safe-area-inset-top)) var(--e26-pad) 0}
+.dg-cy{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10px;
+  font-weight:500;color:var(--e26-ink-3);background:none;border:0;padding:0;
+  min-width:0;flex:1 1 0}
+.dg-cy i{display:block;width:100%;max-width:46px;height:17px;background-size:100% 100%;
+  background-repeat:no-repeat;background-image:url(assets/ui/pill-glass.webp)}
+.dg-cy span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+/* PREFIXED, because a bare "is-now" is shared furniture and collides: cssdupe
+   caught it against another section, exactly as it caught is-on and is-under. */
+.dg-cy.dg-at{color:var(--e26-ink);font-weight:600}
+.dg-cy.dg-at i{background-image:url(assets/ui/pill-purple.webp)}
+.dg-cy.dg-soon{opacity:.5}
+/* The hero. A video with the word baked in, or real text with a glass overlay over it
+   where the day has no art of its own. Either way it is 390x640 at the reference width
+   and scales with the screen. */
+/* SHORTER THAN THE ART. The hero is 390x640 and the reference page puts the two lines
+   at y=604, so the last 36px of the picture is behind them — deliberately, it is where
+   the composition fades out. The spacer reserves less than the art and the picture
+   overhangs behind the text. Same for the rest hero: 520 of art, its line at 496.
+
+   560 rather than the page's own 604, because this app's nav is 19px taller than the
+   reference page's and its brief names real exercises, so the close needs 184px where
+   the page allots 136. Taken off the hero, where it costs nothing — that band of the
+   art is already fading out — rather than off the door, which has to stay on screen. */
+.dg-hero{position:relative;width:100%;aspect-ratio:390/560;margin:0}
+.dg-hero.is-rest{aspect-ratio:390/496}
+.dg-hero > video,.dg-hero > img{position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;display:block;pointer-events:none}
+.dg-hero .hero-word{left:0;right:0;top:46%;transform:translateY(-50%);
+  font-family:var(--e26-font);font-weight:var(--e26-hero-weight);
+  letter-spacing:var(--e26-hero-tracking);line-height:var(--e26-hero-leading);
+  font-size:clamp(84px,30vw,118px);color:var(--e26-ink);padding:0 var(--e26-pad);
+  white-space:normal}
+.dg-hero .glass{z-index:3}
+/* A day with no art of its own: the word is real text in the flow, and the overlay glass
+   lands on top of it from the layer. Centred the same way the baked word is. */
+/* PREFIXED: a bare "is-live" is shared furniture, and cssdupe catches a second
+   section defining one — the same trap as is-now and is-on. */
+.dg-hero.dg-live{display:flex;align-items:center}
+.dg-hero.dg-live .hero-word{position:static;transform:none}
+/* THE CLOSE: TWO COLUMNS, NOT TWO ROWS.
+
+   The reference page draws the read line at y=610 and the start button at 684 on the
+   left, and the brief at 604 with the week at 704 on the right. Read as rows that is a
+   stack, and built as a stack the start button moves down every time the brief runs
+   long — which it does here, because the brief names real exercises and "Incline
+   Dumbbell Bench Press" is not "incline". Built as two columns, the brief grows into its
+   own column and the one control this screen exists for stays where it is. */
+/* THE DOOR SPANS BOTH COLUMNS, which is the one thing a straight two-column reading of
+   the reference page gets wrong. There the button is at left:20 and the brief at
+   right:20, so the button is free to be as wide as its words need — about 190 — while
+   the text above it is in a 150px column. Penned into that column it wraps to two lines
+   and stops looking like a door.
+
+   So: the two paragraphs share a row, and the button and the week have a row of their
+   own underneath, the button at the left and the week at the right exactly as the page
+   has them. The text row holds 80px whether or not it is filled, so the door lands in
+   the same place on a day with nothing to say as on a day with plenty. */
+/* THE TEXT ROW IS A FIXED REGION, so the door's position cannot depend on how long
+   anything is. With minmax() it could still grow: a session of movements with
+   competition-length names made a seven-line brief and put the button 23px into the
+   nav. Both paragraphs are clamped to what the region holds, which is a backstop and
+   not the mechanism — dgBriefFor already counts the lifts it cannot name, so an
+   ordinary day never comes near the clamp. The full list is further down the screen
+   under its real names, which is why clamping a summary costs nothing. */
+.dg-close{display:grid;grid-template-columns:1fr 1fr;column-gap:18px;
+  grid-template-rows:80px auto;padding:0 var(--e26-pad);align-items:start}
+.dg-read{grid-column:1;grid-row:1;display:-webkit-box;-webkit-box-orient:vertical;
+  -webkit-line-clamp:3;overflow:hidden}
+.dg-brief{grid-column:2;grid-row:1;display:-webkit-box;-webkit-box-orient:vertical;
+  -webkit-line-clamp:4;overflow:hidden}
+.dg-door{grid-column:1 / -1;grid-row:2;display:flex;align-items:center;
+  justify-content:space-between;gap:12px;padding-top:20px}
+/* NO flex-basis. These were written when the close was a row, where 150px and 172px
+   were the column widths the reference page gives them. The close is a pair of columns
+   now, so the same shorthand set a 150px MINIMUM HEIGHT on a two-line paragraph and
+   pushed the start button 86px down, under the nav. The widths come from the grid. */
+.dg-read{margin:0;font-size:14px;line-height:1.45;color:var(--e26-ink-2)}
+.dg-brief{margin:0;font-size:12px;line-height:1.5;font-weight:700;
+  text-transform:uppercase;text-align:justify;text-align-last:left}
+/* The door. */
+.dg-start{white-space:nowrap}
+.dg-start{height:56px;padding:0 8px 0 24px;border-radius:var(--e26-radius-pill);
+  background:var(--e26-ink);color:var(--e26-bg);border:0;display:inline-flex;
+  align-items:center;gap:16px;font-family:var(--e26-font);font-size:17px;font-weight:600;
+  cursor:pointer}
+/* The arrow is currentColor, and the button's colour is the dark ground — so inside the
+   dark disc it was drawn dark on dark and vanished. The disc sets its own. */
+.dg-start i{width:40px;height:40px;border-radius:20px;background:var(--e26-bg);
+  color:var(--e26-ink);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.dg-week{font-size:13px;font-weight:700;white-space:nowrap}
+/* Rest day: the lines the app already had, in the package's row. */
+.dg-rows{display:flex;flex-direction:column;gap:10px;padding:22px var(--e26-pad) 0}
+.dg-row{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:16px 18px;border-radius:var(--e26-radius-card);background:var(--e26-card);
+  border:1px solid var(--e26-card-line);color:var(--e26-ink);font-family:var(--e26-font);
+  font-size:16px;text-align:left;width:100%;cursor:pointer}
+.dg-row-k{font-size:13px;color:var(--e26-ink-2);display:block}
+.dg-row-v{font-size:17px;font-weight:600}
+.dg-note{font-size:13px;color:var(--e26-ink-2);padding-left:4px}
+.dg-say{margin:0;padding:0 var(--e26-pad);font-size:17px;line-height:1.45;color:#CFCCC6}
+/* ANYTHING THE DESIGN HAS NO ROOM FOR GOES BELOW THE DOOR, NOT AWAY.
+
+   The reference page is one screenful: header, cycle, hero, two lines, start. Element 26
+   also has notices that only appear when they have something to say — records set aside,
+   a plate list that disagrees with a gym, a weigh-in due, a soreness check. They are
+   features, not decoration, and a design with no slot for them is not a reason to delete
+   them. On an ordinary day none of them renders and the screen is the mockup exactly; on
+   a day one does, it sits under the start button and the screen scrolls. */
+.dg-extra{padding:30px var(--e26-pad) 0;display:flex;flex-direction:column;gap:12px}
+
 </style>
 <!-- ==================================================================
      FRAMING
@@ -7593,7 +7798,30 @@ body.news-open{overscroll-behavior:contain}
     </div>
   </div>
 </div>
-<div id="app"></div>
+<!-- THE STAGE, AND WHY THE GLASS LIVES OUTSIDE #app.
+
+     render() replaces #app.innerHTML, and it runs on almost every interaction: a set
+     logged, a setting tapped, a timer tick. The glass layer must not be inside it. A
+     spin sheet is 25-50 MB decoded, and rebuilding three of them on every keystroke
+     would be the slowest thing in the app by an order of magnitude.
+
+     So #app gets a positioned parent and the glass layer is mounted as its SIBLING,
+     once per screen rather than once per render. That is also exactly the arrangement
+     scene.js documents ("the container must be position:relative"), and it is what makes
+     .glass.back sit under the cards and .glass.front over them: one stacking context,
+     #app at z-index 1 between the two. -->
+<div id="stage">
+  <div id="app"></div>
+</div>
+<!-- The glass layer's own code, in load order: config and layout are data the next three
+     read, so they come first. All five are plain IIFEs that hang one global each
+     (GLASS_CONFIG, GLASS_LAYOUT, GlassMotion, GlassScene, E26Intro) and run no work until
+     something calls them, so they cost a parse and nothing else on a screen with no art. -->
+<script src="glass/glass-config.js"></script>
+<script src="glass/layout.js"></script>
+<script src="glass/glass-motion.js"></script>
+<script src="glass/scene.js"></script>
+<script src="glass/intro.js"></script>
 <!-- The plan importer's file picker. Everything Gemini can read inline, plus .json so an
      Element 26 export restores through the same button. -->
 <input type="file" id="obFile" multiple accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf,text/plain,text/csv,text/markdown,.json,.txt,.md,.csv,.tsv" style="display:none">
@@ -7705,7 +7933,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.17.61";
+const APP_VERSION = "2026.11.17.62";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -35131,6 +35359,84 @@ function renameDay(wid, name){
   toast("Renamed to " + name);
 }
 
+/* =====================================================================
+   THE GLASS LAYER
+
+   The art is pre-rendered (see glass/ and assets/). Nothing here draws glass: it decides
+   WHICH scene is on screen and lets scene.js build it from layout.js.
+
+   MOUNTED PER SCREEN, NOT PER RENDER. render() runs on almost every interaction and a
+   spin sheet is 25-50 MB decoded, so remounting on each one would be the most expensive
+   thing in the app by a wide margin. glassSync() computes a key for the screen you are
+   looking at and returns immediately — one string comparison — when it has not changed.
+   Only a real change of screen tears the layer down and builds the next one.
+
+   THE HERO WORD IS BAKED INTO THE VIDEO, which is the one place this package and this
+   app disagree. The art ships six Today heroes: push a/b, pull a/b, legs a/b. Element 26
+   has seven splits, and four of them have no day by those names — an upper/lower lifter
+   has "Upper A", a bro-split lifter has "Chest day". Showing them a video with the word
+   "push b" burnt into it would be the app lying about what it is asking them to do.
+
+   So a PPL day gets its baked hero and every other day gets the live-text treatment the
+   package already defines for numbers: the real day name as .hero-word, with the today
+   overlay above it. Same look, no false word. GLASS_DAY is the whole of that decision. */
+/* The six, and only the six. The word is not a caption the app writes over the art, it
+   is PAINTED INTO the frame — "push a." in the typeface, as part of the composition — so
+   there is no such thing as borrowing push-a for a day called Push. Checked by looking at
+   the posters rather than inferred from the file names.
+
+   `u5push`, `u5pull` and `u5legs` were here and are not day ids this app has ever used;
+   they mapped nothing. SPLITS defines pushA/pushB/pullA/pullB/legsA/legsB, push/pull/legs,
+   upperA/upperB, lowerA/lowerB, fullA/fullB/fullC and full2A/full2B. */
+const GLASS_DAY = {
+  pushA: "push-a", pushB: "push-b", pullA: "pull-a", pullB: "pull-b",
+  legsA: "legs-a", legsB: "legs-b"
+};
+let GLASS_AT = null;
+/* Which scene in layout.js the screen you are on corresponds to, and the day it needs.
+   Returns "" where there is no art for this screen, which unmounts rather than guessing:
+   a shape placed by coordinates meant for another screen lands on somebody's text. */
+function glassSceneFor(){
+  if(OB || ACCT_UI || PF) return "";                 // onboarding and the account flow
+  if(TAB === "workout") return "workout";
+  if(TAB === "history") return "history";
+  if(TAB === "body")    return "body";
+  if(TAB === "program") return DAY_EDIT ? "" : "program";
+  if(TAB === "research") return RESEARCH_PAPER ? "research-paper" : "research";
+  if(TAB === "sync")    return SET_PAGE ? "" : "settings";
+  if(TAB === "today"){
+    /* isRestToday(), NOT the workout id. todaysWorkoutId() names the day the rotation is
+       on, which it goes on doing all through a rest day — so asking it whether today is
+       a rest returns "push a" and the screen drew the rest-day text under the push-a
+       hero. The screen itself branches on isRestToday(); so does this. */
+    const resting = (()=>{ try{ return isRestToday(); }catch(e){ return false; } })();
+    if(resting) return "rest";
+    const wid = (()=>{ try{ return todaysWorkoutId(); }catch(e){ return null; } })();
+    /* NO DAY IS NOT A REST DAY. These were one branch, so a rotation that could not name
+       today — a pointer past the end of a shorter split, before the startup repair
+       clamps it — got the rest hero and the word "rest" across the screen on a day the
+       app was going to offer a workout on. Nothing known means no art. */
+    if(!wid) return "";
+    if(wid === "rest") return "rest";
+    return "today:" + (GLASS_DAY[wid] || "live");
+  }
+  return "";
+}
+function glassSync(){
+  const key = glassSceneFor();
+  if(key === GLASS_AT) return;                       // the common case, and it is free
+  GLASS_AT = key;
+  const stage = document.getElementById("stage");
+  if(!stage || !window.GlassScene) return;
+  GlassScene.unmount();
+  if(!key) return;
+  const [scene, day] = key.split(":");
+  /* A day with no baked hero of its own takes the live-number path: scene.js is told to
+     skip the hero, and the screen's own markup carries the word as real text with the
+     overlay over it. */
+  GlassScene.mount(stage, scene, {base: "", day: day === "live" ? null : day,
+                                  hero: day !== "live"});
+}
 function render(){
   /* D6b — A SHARE LINK IS NOT THE APP, AND NOTHING MAY REDRAW IT INTO ONE. The viewer
      replaces the page, but the app has timers, visibility handlers and a sync that all
@@ -35219,6 +35525,8 @@ function render(){
      renderTabInto(), which shows what threw and an export button rather than leaving a
      tab bar above nothing. See the RESCUE section. */
   renderTabInto(app);
+  /* THE GLASS LAYER, mounted per SCREEN rather than per render. See glassSync(). */
+  try{ glassSync(); }catch(e){ try{ console.error("Element 26: the glass layer threw", e); }catch(e2){} }
   // the page just changed height, so the tab bar's "am I at the bottom?" test needs
   // the new figure. Read it here, once, rather than inside the scroll handler.
   refreshNavBounds();
@@ -35360,7 +35668,19 @@ function slotIsLocked(i){
   if(pinned != null) return pinned === "rest" ? true : ROTATION[i] !== pinned;
   return i !== S.pointer;
 }
-function plateStrip(){
+/* THE CYCLE AS FACTS, NOT AS MARKUP.
+
+   Everything below used to be computed inside plateStrip, interleaved with the buttons
+   it printed. The dark glass Today draws the same cycle in a different shape, and a
+   second copy of this reasoning is the one thing that must not happen: which plate is
+   current, whether a rest is being spent today or merely owed tomorrow, and which
+   schedule entry a wrapped trailing rest belongs to are each a bug that was found once
+   and fixed once, here, with the comment that explains it still attached. Two
+   renderers, one model.
+
+   Returns the slots in layout order, plus the facts a caller needs about the cycle as a
+   whole. No markup, no escaping, no DOM. */
+function cycleSlots(){
   /* THE RING GOES ON THE DAY YOU ARE DOING, which is not always the one the pointer is
      on: a day picked for today (see pickDayToday) is today's session, and the pointer
      stays behind on the day it stepped over. */
@@ -35417,7 +35737,7 @@ function plateStrip(){
      words "that's the cycle done, take your rest day" put its one marker on Push A. The
      next thing is the rest; the plate that says so should be the one carrying the mark. */
   const restNext = restDueNotToday();
-  let html = '<div class="plates-wrap"><div class="plates">';
+  const out = [];
   let restSeen = 0;
   CYCLE_LAYOUT.forEach((key, slot)=>{
     const wd = slotWeekday(slot);
@@ -35444,6 +35764,59 @@ function plateStrip(){
       const isToday = date === todayStr() || (due && restNow);
       // Where the cycle is, which includes a rest that is owed for tomorrow.
       const isCur = isToday || (due && restNext);
+      out.push({kind:"rest", slot, wd, idx, fixed, date, due, resting, isToday, isCur,
+                sched: fixed ? layoutRestSlot[idx] : -1});
+      return;
+    }
+    const i = ROTATION.indexOf(key);
+    const m = dayMeta(key);
+    const done = S.cycleDone.includes(i);
+    /* The rotation only runs forwards. A slot that is already done, or that the pointer
+       has moved past, is a day the cycle has spent, so it is rendered as a record rather
+       than as something you can jump back onto. See slotIsPast(). */
+    const past = slotIsPast(i);
+    const locked = slotIsLocked(i);
+    out.push({kind:"day", slot, wd, key, i, meta: m, done, past, locked,
+              isCur: i === cur && !restNow && !restNext,
+              picked: !!(picked && i === cur)});
+  });
+  return {slots: out, cur, restNow, restNext, picked};
+}
+
+/* THE LINE UNDER THE CYCLE. Where you are in it, how its rests work, and the two things
+   reachable from nowhere else: the last cycle review and the reset. Shared, because both
+   the plate strip and the dark glass cycle need it and it must not say two things. */
+function cycleFootHTML(C){
+  const left = restCreditsLeft();
+  const restWord = restsFloat()
+    ? (left === REST_CREDITS ? REST_CREDITS+" rest"+(REST_CREDITS===1?"":"s")+" available"
+       : left ? left+" rest left" : "rests all used")
+    /* Scheduled: the count is not a budget you are spending, it is where you are in a
+       rotation that already includes them. */
+    /* G — "3 rests a cycle, scheduled" is a field name with a value after it. The
+       hatched tiles two lines above already say WHERE the rest days are; this says how
+       many, in a sentence. */
+    : (REST_CREDITS
+        ? (C.restNow ? "today is a rest day"
+                   : REST_CREDITS+" rest day"+(REST_CREDITS===1?"":"s")+" in this cycle")
+        : "no rest days in this cycle");
+  return `<div class="cycle-row"><span class="num">${S.cycleDone.length} of ${ROTATION.length} done &middot; ${
+    restWord}</span><span>${
+    S.lastReview?'<button id="lastReviewBtn">last review</button> ':''}<button id="cycleReset">reset cycle</button></span></div>`;
+}
+
+/* The plate strip. Shape only: every decision in it came from cycleSlots(). */
+function plateStrip(){
+  const C = cycleSlots();
+  /* restNow is read by the footer line below, not by any plate — which is why losing it
+     broke every scheduled-rest shape and left the floating one passing. */
+  const cur = C.cur, restNext = C.restNext, restNow = C.restNow;
+  let html = '<div class="plates-wrap"><div class="plates">';
+  C.slots.forEach(sl=>{
+    const wd = sl.wd;
+    if(sl.kind === "rest"){
+      const idx = sl.idx, fixed = sl.fixed, date = sl.date, due = sl.due;
+      const resting = sl.resting, isToday = sl.isToday, isCur = sl.isCur;
       /* DUE IS NOT TODAY. `due` means this is the next rest owed; it says nothing about
          when. Train on the day it falls and it is owed TOMORROW — and the plate still
          printed "today" on it, directly under a card reading "your rest lands tomorrow".
@@ -35452,7 +35825,7 @@ function plateStrip(){
         /* Scheduled rests are placed by the plan, so the plate is a marker. Floating
            ones are spent by tapping, so those stay live. */
         fixed?" inert":""}"
-        data-rest="${idx}" data-restsched="${fixed ? layoutRestSlot[idx] : -1}"
+        data-rest="${idx}" data-restsched="${sl.sched}"
         aria-label="Rest ${idx+1} of ${REST_CREDITS}${
           /* The weekday this plate SITS on is not where it is being spent, and on the
              one plate that says "due tomorrow" printing both was a contradiction read
@@ -35468,16 +35841,9 @@ function plateStrip(){
         resting?'<span class="pcheck">'+ICON.check+'</span>':""}</button>`;
       return;
     }
-    const i = ROTATION.indexOf(key);
-    const m = dayMeta(key);
-    const done = S.cycleDone.includes(i);
-    /* The rotation only runs forwards. A slot that is already done, or that the pointer
-       has moved past, is a day the cycle has spent, so it is rendered as a record rather
-       than as something you can jump back onto. See slotIsPast(). */
-    const past = slotIsPast(i);
-    const locked = slotIsLocked(i);
-    const cls = "plate" + (i===cur && !restNow && !restNext ?" cur":"") + (done?" done":"")
-              + (picked && i === cur ? " pickd" : "")
+    const i = sl.i, m = sl.meta, done = sl.done, past = sl.past, locked = sl.locked;
+    const cls = "plate" + (sl.isCur ?" cur":"") + (done?" done":"")
+              + (sl.picked ? " pickd" : "")
               + (past?" past":"") + (locked?" locked":"") + (past||locked?" inert":"");
     /* aria-disabled, and inert to the touch. The label still carries the reason for a
        screen reader; the thumb just gets no response, because there is nothing here to
@@ -35485,29 +35851,13 @@ function plateStrip(){
     html += `<button class="${cls}" data-slot="${i}" style="--c:${m.color}"${
       past||locked?' aria-disabled="true"':""}
       aria-label="${esc(m.name)}, ${wd}${done?", done":past?", already passed this cycle"
-        :locked?", not yet — the rotation is on "+esc(dayName(ROTATION[cur]))
-        :(picked && i === cur) ? ", the day you picked for today"
+        :locked?", not yet \u2014 the rotation is on "+esc(dayName(ROTATION[cur]))
+        :sl.picked ? ", the day you picked for today"
         :daysFree() ? ", tap to do this one today" : ""}">${esc(m.short)}<small>${wd}</small>${
       done?'<span class="pcheck">'+ICON.check+'</span>':""}</button>`;
   });
   html += "</div>";
-  const left = restCreditsLeft();
-  const restWord = restsFloat()
-    ? (left === REST_CREDITS ? REST_CREDITS+" rest"+(REST_CREDITS===1?"":"s")+" available"
-       : left ? left+" rest left" : "rests all used")
-    /* Scheduled: the count is not a budget you are spending, it is where you are in a
-       rotation that already includes them. */
-    /* G — "3 rests a cycle, scheduled" is a field name with a value after it. The
-       hatched tiles two lines above already say WHERE the rest days are; this says how
-       many, in a sentence. */
-    : (REST_CREDITS
-        ? (restNow ? "today is a rest day"
-                   : REST_CREDITS+" rest day"+(REST_CREDITS===1?"":"s")+" in this cycle")
-        : "no rest days in this cycle");
-  html += `<div class="cycle-row"><span class="num">${S.cycleDone.length} of ${ROTATION.length} done &middot; ${
-    restWord}</span><span>${
-    S.lastReview?'<button id="lastReviewBtn">last review</button> ':''}<button id="cycleReset">reset cycle</button></span></div>`;
-  return html + "</div>";
+  return html + cycleFootHTML(C) + "</div>";
 }
 
 /* ---------- profile switcher ---------- */
@@ -37177,6 +37527,175 @@ function dataIssueCardHTML(){
   </div>`;
 }
 
+/* =====================================================================
+   TODAY, IN DARK GLASS
+
+   The reference page is a fixed 390x844 canvas with every element at an absolute
+   coordinate, which is how a mockup is drawn and not how this screen can be built: it
+   has to hold a readiness note of any length, a day name that is not always two short
+   words, notices that appear only when they have something to say, and a phone that is
+   not 390 wide. So the METRICS are the mockup's and the LAYOUT is flow.
+
+   The hero is not drawn here. GlassScene mounts it into the glass layer beside #app
+   (see glassSync), because render() replaces #app.innerHTML on nearly every interaction
+   and a spin sheet is 25 to 50 MB decoded. What is here is the space it occupies and,
+   where a day has no art of its own, the day's real name as live text for the glass to
+   sit over. ===================================================================== */
+
+/* Whether this day has hero art of its own. GLASS_DAY, up where the scene controller
+   lives, is the single answer: a second copy of that list here would be a second place
+   for it to go stale, and the two would disagree the first time a day gained art. */
+function glassDayArt(wid){ return GLASS_DAY[wid] || null; }
+
+function dgTopHTML(right){
+  return `<div class="dg-top"><h1>today</h1><span class="dg-top-r">${right || ""}<time
+    datetime="${esc(todayStr())}">${esc(fmtDate(todayStr()))}</time></span></div>`;
+}
+
+/* THE CYCLE. One pill per slot in the layout, the current one purple, the ones the
+   rotation has not reached dimmed. Every state in it comes from cycleSlots(), which the
+   plate strip reads too, so the two can never disagree about which day today is.
+
+   The buttons keep data-slot and data-rest, which is what bind() wires them by, so
+   tapping a day to train it today still works exactly as it did. */
+function dgCycleHTML(){
+  let C = null;
+  try{ C = cycleSlots(); }catch(e){ return ""; }
+  if(!C || !C.slots.length) return "";
+  const cells = C.slots.map(sl=>{
+    if(sl.kind === "rest"){
+      /* A rest already spent is not "later", it is done — so it keeps full weight and
+         only an unreached one is dimmed. */
+      const later = !sl.resting && !sl.isCur;
+      return `<button class="dg-cy${sl.isCur ? " dg-at" : ""}${later ? " dg-soon" : ""}"
+        type="button" data-rest="${sl.idx}" data-restsched="${sl.sched}"${
+        sl.fixed ? ' aria-disabled="true"' : ""}
+        aria-label="Rest${sl.isToday ? ", today" : sl.date ? ", taken " + sl.date
+          : sl.due ? (C.restNext ? ", due tomorrow" : ", due next")
+          : sl.fixed ? ", scheduled" : ", available"}"
+        ><i></i><span>rest</span></button>`;
+    }
+    const m = sl.meta;
+    /* "Later" is the rotation's own word for it: a day it has not reached yet. A day
+       already done this cycle is a record, not a thing to come, so it is not dimmed. */
+    const later = !sl.done && !sl.isCur && (sl.locked || sl.i > C.cur);
+    return `<button class="dg-cy${sl.isCur ? " dg-at" : ""}${later ? " dg-soon" : ""}"
+      type="button" data-slot="${sl.i}"${sl.past || sl.locked ? ' aria-disabled="true"' : ""}
+      aria-label="${esc(m.name)}${sl.done ? ", done" : sl.past ? ", already passed this cycle"
+        : sl.locked ? ", not yet — the rotation is on " + esc(dayName(ROTATION[C.cur]))
+        : sl.picked ? ", the day you picked for today"
+        : sl.isCur ? ", today" : daysFree() ? ", tap to do this one today" : ""}"
+      ><i></i><span>${esc(String(m.name).toLowerCase())}</span></button>`;
+  });
+  return `<div class="dg-cycle" aria-label="Your cycle">${cells.join("")}</div>`;
+}
+
+/* The space the hero occupies, and the word when the word is not in the art. */
+function dgHeroHTML(wid, m, opt){
+  const o = opt || {};
+  const word = o.rest ? "rest" : String((m && m.name) || "workout");
+  const art = o.rest ? "rest" : glassDayArt(wid);
+  return `<div class="dg-hero${o.rest ? " is-rest" : ""}${art ? "" : " dg-live"}">${
+    art ? `<h2 class="rs-sr">${esc(word)}</h2>`
+        : `<h2 class="hero-word">${esc(word.toLowerCase())}</h2>`}</div>`;
+}
+
+/* THE CLOSE: the read on the left over the door, the brief on the right over the week.
+   Both halves are drawn from what the app already knows and either can be absent. */
+function dgCloseHTML(wid, m){
+  const read = (()=>{ try{ return readinessLineFor(wid); }catch(e){ return ""; } })();
+  const brief = (()=>{ try{ return dgBriefFor(wid); }catch(e){ return ""; } })();
+  const wk = (()=>{ try{ const n = planWeekNotes(); return n && n.week ? n.week : null; }
+                    catch(e){ return null; } })();
+  const ARROW = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+    ><path d="M5 12h14M13 6l6 6-6 6"/></svg>`;
+  return `<div class="dg-close">
+    ${read ? `<p class="dg-read">${esc(read)}</p>` : ""}
+    ${brief ? `<p class="dg-brief">${esc(brief)}</p>` : ""}
+    <div class="dg-door">
+      <button class="dg-start" id="startBtn">Start workout<i>${ARROW}</i></button>
+      ${wk ? `<span class="dg-week">WEEK ${wk.week}${wk.of ? " / " + wk.of : ""}</span>` : ""}
+    </div>
+  </div>`;
+}
+
+/* ONE SENTENCE OF SHORT-WINDOW READ, for the left line.
+
+   readinessNoteHTML already draws the full card, muscle by muscle, in .dg-extra. This is
+   the headline of the same analysis: the sleep line if there is one, and the single
+   muscle walking in most tired if any is. Nothing here changes the plan. */
+function readinessLineFor(wid){
+  const bits = [];
+  const sl = (()=>{ try{ return sleepLineFor(wid); }catch(e){ return ""; } })();
+  if(sl) bits.push(sl.charAt(0).toUpperCase() + sl.slice(1) + ".");
+  try{
+    const A = bodyAnalysis();
+    if(A){
+      const per = {};
+      (resolvedProgram(wid) || []).forEach(x=>{
+        const e = x && x.chosen; if(!e) return;
+        const mm = musclesFor(e.name) || {};
+        Object.keys(mm).forEach(g=>{ if(mm[g] >= 1) per[g] = (per[g] || 0) + (parseInt(e.sets,10) || 0); });
+      });
+      const worst = Object.keys(per).map(g=> ({g, r: readinessToday(A, g)}))
+        .filter(x=> x.r && x.r.reasons && x.r.reasons.length)
+        .sort((a,b)=> b.r.cut - a.r.cut)[0];
+      if(worst) bits.push(gName(worst.g) + " is going in a bit short.");
+    }
+  }catch(e){}
+  return bits.join(" ");
+}
+
+/* WHAT THE SESSION IS, in the mockup's own register: a count, a duration, the opener,
+   then the rest by name. The opener carries its load only when the plan actually
+   prescribes one — an invented number here would be read as an instruction. */
+function dgBriefFor(wid){
+  const list = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher)
+                                           .map(x=> x.chosen);
+  if(!list.length) return "";
+  const mins = (()=>{ try{ return projectedDuration(wid); }catch(e){ return 0; } })();
+  let out = list.length + (list.length === 1 ? " lift" : " lifts");
+  if(mins) out += ", about " + mins + " minutes";
+  out += ".";
+  const first = list[0];
+  const load = prescribedLoadShown(first);
+  out += " " + first.name + (load != null ? " " + fmtLoad(load) : "")
+       + (first.reps ? " × " + first.reps : "") + " first";
+  /* CAPPED BY LENGTH, NOT BY COUNT, because what overflows is characters.
+
+     The reference line is three lines of large uppercase. It gets there by writing
+     "incline, raises, extensions, pec deck" where the plan says Incline Dumbbell Bench
+     Press, and this app has to print the name the exercise actually has. Capping at a
+     fixed number of names does not bound anything: three names here is longer than six
+     of the mockup's. So names are added while the sentence still fits the space the
+     design gives it, and whatever is left is counted.
+
+     Shortening the names themselves was the other option and was dropped: two movements
+     in one session can shorten to the same words, and a summary that renames your lifts
+     is worse than one that counts them. The full list is further down the screen, under
+     its real names. */
+  /* 110, measured rather than chosen: the brief's column is 172px of 12px uppercase,
+     which is about 28 characters a line, and the close region has four lines of room
+     before the door would have to move down into the nav. */
+  const BRIEF_MAX = 110;
+  const rest = list.slice(1);
+  let shown = 0, line = "";
+  for(let i = 0; i < rest.length; i++){
+    const next = line ? line + ", " + rest[i].name : rest[i].name;
+    /* The tail has to fit too, or trimming to make room writes a longer sentence. */
+    const tail = (i + 1 < rest.length) ? " and " + (rest.length - i - 1) + " more" : "";
+    /* No `&& shown`: when even the first name will not fit, the honest line names none
+       and counts them all, rather than overrunning to guarantee one. */
+    if(out.length + 7 + next.length + tail.length > BRIEF_MAX) break;
+    line = next; shown++;
+  }
+  if(shown) out += ", then " + line
+    + (rest.length > shown ? " and " + (rest.length - shown) + " more" : "");
+  else if(rest.length) out += ", then " + rest.length + " more";
+  return out + ".";
+}
+
 function viewToday(){
   const wid = todaysWorkoutId();
   const m = dayMeta(wid);
@@ -37207,18 +37726,26 @@ function viewToday(){
      target, which the 32px circle does not meet on its own. */
   const setBtn = `<button class="hdr-moon hdr-gear" id="todaySettings"
        aria-label="Settings" title="Settings">${gearGlyph()}</button>`;
-  let h = `<div class="hdr"><h1>${brandMark()}</h1><span class="hdr-r">${moonBtn}${setBtn}<span class="date num">${fmtDate(todayStr())}</span></span></div>`;
-  /* ABOVE EVERYTHING. If a record in your log could not be read, that is the first thing
-     worth knowing about today. */
-  h += plateDeriveCardHTML();
-  h += dataIssueCardHTML();
-  if(skChip) h += `<div style="margin:-4px 2px 12px">${skChip}</div>`;
+  /* THE HEADER IS THE MOCKUP'S, AND IT STILL CARRIES THE TWO CONTROLS THAT LIVE HERE.
+     The wordmark came off: the mockup's header is the word "today" and the date, and the
+     mark was saying the name of the app to somebody already inside it. The moon and the
+     gear stay, because the sleep clock and the whole of Settings are reachable from
+     nowhere else on this screen. */
+  /* THE NOTICES ARE COMMON TO BOTH BRANCHES, and building them here is not tidiness.
+     On the screen this replaces they were emitted before the rest-day check, so a rest
+     day still got the weigh-in prompt, the auto-progression card and the rest. Built
+     inside the training branch instead, they silently disappeared on rest days — an id
+     diff against the old build caught weighDue, autoProgYes/No, cycleReset and
+     lastReviewBtn going missing, which is four features lost to a reordering. */
+  const notices = (()=> plateDeriveCardHTML() + dataIssueCardHTML()
+    + (skChip ? `<div>${skChip}</div>` : "")
+    + weighDueHTML() + soreDueHTML() + planWeekStripHTML() + autoProgCardHTML())();
+  const cycleFoot = `<div class="dg-foot">${(()=>{
+    try{ return cycleFootHTML(cycleSlots()); }catch(e){ return ""; } })()}</div>`;
 
-  h += plateStrip();
-  h += weighDueHTML();
-  h += soreDueHTML();
-  h += planWeekStripHTML();
-  h += autoProgCardHTML();
+  let h = `<div class="dg">`;
+  h += dgTopHTML(moonBtn + setBtn);
+  h += dgCycleHTML();
 
   /* THE SESSION LIVES IN ITS OWN TAB NOW. What Today has to say while one is running is
      one thing — it is over there, carry on — and saying it in one card rather than
@@ -37231,7 +37758,7 @@ function viewToday(){
     const total = a.entries.reduce((n,e)=> n + entrySets(e).length, 0);
     const done  = a.entries.reduce((n,e)=> n + entrySets(e).filter(x=> x && x.done).length, 0);
     const stale = a.date && a.date !== todayStr();
-    return h + `<div class="today-rest"><div class="card live-card">
+    return h + `<div class="dg-extra"><div class="card live-card">
       <div class="lc-k"><i></i>In progress</div>
       <div class="lc-h">${esc(m.name)}</div>
       <div class="sub">${done ? done + " of " + total + " sets logged" : "Nothing logged yet"}
@@ -37249,14 +37776,24 @@ function viewToday(){
   }
 
   if(isRestToday()){
+    h += dgHeroHTML(wid, m, {rest: true});
+    /* The rest day's own sentence, in the mockup's place and voice: what you have just
+       done, and that there is nothing to do today. */
+    /* `sched` is declared by the block below, which is lifted verbatim from the screen
+       this replaces; asked here, the same question is asked directly. */
+    const doneN = (S.cycleDone || []).length;
+    h += `<p class="dg-say">${doneN
+      ? esc(doneN + (doneN === 1 ? " day" : " days") + " done"
+            + (scheduledRestToday() ? " in a row" : "") + ". Nothing to do today.")
+      : "Nothing to do today."}</p>`;
+    h += `<div class="dg-extra">`;
+    h += notices;
     /* A scheduled rest is the plan speaking, a taken one is you. Saying which stops the
        screen reading as the app having decided something on your behalf. */
     const sched = !isRestDay(todayStr()) && scheduledRestToday();
-    /* A rest day has one card on it, and left at the top of a phone screen that is one
-       card and eight hundred pixels of nothing — the page reads as though it failed to
-       load the rest of itself. The block below fills the space that is actually left and
-       centres what little there is in it. */
-    h += `<div class="today-rest">`;
+    /* .today-rest centred one card in an empty screen. The screen is no longer empty —
+       the hero and the sentence above are what fills it — so .dg-extra is the wrapper
+       and the old one is not opened. */
     h += `<div class="card" style="text-align:center;padding:34px 20px">
       <h3 style="font-size:var(--fs-9)">Rest day</h3>
       <div class="sub" style="margin-top:8px">${sched
@@ -37312,10 +37849,25 @@ function viewToday(){
           ? `<div class="rest-tmr-more">and ${tex.length - shown.length} more</div>` : ""}
       </div>`;
     }
-    h += `</div>`;
+    h += cycleFoot;
+    h += `</div></div>`;
     return h;
   }
 
+  h += dgHeroHTML(wid, m);
+  h += dgCloseHTML(wid, m);
+
+  /* EVERYTHING THE DESIGN HAS NO SLOT FOR, BELOW THE DOOR RATHER THAN GONE.
+
+     The reference page is one screenful. Element 26 also has notices that appear only
+     when they have something to say — a record it could not read, a plate list that
+     disagrees with a gym, a weigh-in due, a muscle walking in sore, a load that moved
+     since last time — and the day's own exercise list. They are features, not
+     decoration, and a mockup with no room for them is not a reason to delete them. On an
+     ordinary day none of the notices renders and the screen is the mockup exactly; on a
+     day one does, it sits under the start button and the screen scrolls. */
+  h += `<div class="dg-extra">`;
+  h += notices;
   /* Trained today, with a rest owed. Said before the next workout is offered, because
      the next workout is not what comes next. */
   if(restDueNotToday()){
@@ -37329,7 +37881,6 @@ function viewToday(){
         rest lands tomorrow. After that the rotation picks up with <b>${esc(m.name)}</b>.</div>
     </div>`;
   }
-
   /* THE REST YOU TOOK IS ALREADY ON THE STRIP, WITH A TICK ON IT.
 
      This printed "Rest this cycle: Mon, Sep 21 — 1 still available" under a strip that
@@ -37350,37 +37901,15 @@ function viewToday(){
       restsTaken.map(d=>fmtDate(d)).join("</b>, <b>")}</b> &middot; <button id="clearRestBtn"
       class="linklike">free one up</button></div>`;
   }
-
-  /* THE ACTION COMES FIRST. The button used to sit under the whole exercise preview —
-     2216px down a 2364px page, which is two and a half screens of scrolling to reach the
-     one thing this screen exists for. The preview is worth having and it is not worth
-     putting in front of the door, so the day card carries the start and the list becomes
-     what you scroll TO rather than through. */
-  const exCount = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher).length;
-  const setCount = (resolvedProgram(wid) || []).filter(x=> x && x.chosen && !x.isFinisher)
-    .reduce((n, x)=> n + ((x.chosen.sets) || 0), 0);
-  /* RULE G — BEFORE START, WHERE IT CAN STILL BE ACTED ON. Above the day card rather
-     than inside it: a load that moved is news about the session you are deciding to
-     begin, not a detail of the card describing it. */
+  /* RULE G — BEFORE START, WHERE IT CAN STILL BE ACTED ON. */
   h += changesPanelHTML(wid, {onlyUnseen: true});
-  h += `<div class="card day-open">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-      <span class="dot" style="background:${m.color};width:17px;height:17px"></span>
-      <h3 style="font-size:var(--fs-9)">${esc(m.name)} day</h3>
-    </div>
-    <div class="day-open-n">${exCount} exercise${exCount === 1 ? "" : "s"} \u00b7 ${setCount} sets${
-      (()=>{ const t = sleepLineFor(wid); return t ? " \u00b7 " + esc(t) : ""; })()}</div>
-    <button class="btn day-open-go ants" id="startBtn">
-      <svg class="ants-svg" aria-hidden="true" focusable="false"><rect width="100%" height="100%" rx="7"/></svg>
-      Start ${esc(m.name)} workout</button>
-    ${dayPickedToday()
+  h += dayPickedToday()
       ? `<div class="day-open-sub">You picked this for today. ${esc(dayName(ROTATION[S.pointer]))}
           is still next in your rotation.
           <button class="linklike" id="dayPickClear">back to the rotation</button></div>`
       : explainHTML("rotation", daysFree()
         ? "Next up in your rotation. You have said you choose your own day, so tap any day on the strip above to do that one today \u2014 the one you step over stays next, and a day the cycle has already had stays done."
-        : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them.", "day-open-sub")}
-  </div>`;
+        : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them.", "day-open-sub");
   h += noteStackHTML(todayNotes(wid));
   h += readinessNoteHTML(wid);
   // The one thing worth changing today, taken from the grade of your last session of
@@ -37422,16 +37951,11 @@ function viewToday(){
     else h += `<div style="margin-bottom:12px"></div>`;
   });
   h += `</div>`;
-
-  /* NO SECOND START BUTTON AT THE FOOT. It was put there when the only start was at the
-     very bottom of the page and then kept out of habit once the day card took over the
-     job — leaving two buttons with the same words doing the same thing on one screen,
-     which reads as a choice between them rather than one action offered twice. The card
-     at the top is the door; the list below it is what you scroll to, not through. */
-  /* No "do a different workout" button. The rotation is an order, and an always-there
-     escape hatch turns it into a menu: the day you skip is the day that stops getting
-     trained. If you genuinely need to jump, tapping a plate above still moves the
-     pointer, which takes deliberate intent rather than one tap on the main screen. */
+  /* The cycle's own line — where you are in it, the last review, the reset — at the
+     foot. It belongs to the strip at the top and is not part of that composition, and
+     drawn there it laid a line of monospace across the hero. */
+  h += cycleFoot;
+  h += `</div></div>`;
   return h;
 }
 /* B6 — WHAT TODAY LOOKS LIKE FROM THE BODY'S SIDE.
@@ -49335,7 +49859,12 @@ function bind(){
   if(pb) pb.onclick = openProfilePicker;
   const pm = $("#profMini");
   if(pm) pm.onclick = openProfilePicker;
-  document.querySelectorAll(".plate").forEach(p=>{
+  /* BY data-slot, NOT BY .plate. The dark glass cycle draws the same days as pills
+     rather than as plates, and binding by the old class would have left them dead to the
+     touch. data-slot is what the handler actually reads, and it is strictly narrower:
+     every plate that carries one is a training day, and the rest plates that do not were
+     already being dropped by the isNaN guard two lines down. */
+  document.querySelectorAll("[data-slot]").forEach(p=>{
     p.onclick = ()=>{
       if(S.active){ toast("Finish or discard the current workout first"); return; }
       const slot = parseInt(p.dataset.slot,10);
@@ -64259,8 +64788,23 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.17.61";
+const NEWS_FOR = "2026.11.17.62";
 const NEWS = [
+  {k: "Today has been redesigned",
+   s: ["The first screen is new. The day you are training is a full-bleed hero with its "
+     + "name set across it, the cycle runs along the top as a row of pills, and under "
+     + "the picture there are two lines \u2014 what the app read about you this morning, and "
+     + "what the session is in one sentence \u2014 with the start button under them.",
+     "The art names six days: push, pull and legs, A and B. Element 26 also runs "
+     + "upper/lower, full-body and shorter splits, and the word is painted into the "
+     + "picture rather than written over it, so a day the art does not name gets its own "
+     + "name set in the same face instead of a hero claiming you are doing something "
+     + "else.",
+     "Nothing was removed to make it fit. The plate-derive and data-issue notices, the "
+     + "weigh-in and soreness prompts, the plan-week strip, the auto-progression card, "
+     + "what changed since last time and the day\u2019s full exercise list are all still "
+     + "there, below the start button. On a day none of them has anything to say, the "
+     + "screen is just the day and the door."]},
   {k: "Program is about your training week again",
    s: ["Seven buttons sat above the plan check, and four of them were not about running "
      + "a programme. <b>Normal export</b> called the very same function as "

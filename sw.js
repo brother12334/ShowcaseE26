@@ -32,7 +32,7 @@
    count and had reached 53.6 while the app was on 60.6, so neither number could be read
    against the other. See the note on APP_VERSION in index.html for the scheme. The cache
    names below are compared with !== and swept by prefix, so nothing here parses it. */
-const VERSION = "2026.11.17.61";
+const VERSION = "2026.11.17.62";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -58,7 +58,29 @@ const SHELL_URLS = [
   "./sound/press-program.mp3",
   "./sound/tap.mp3",
   "./sound/pop.mp3",
-  "./sound/notice.mp3"
+  "./sound/notice.mp3",
+  /* THE DARK GLASS DESIGN: its code and its typeface, and deliberately nothing else.
+
+     These nine are 250 KB together and the app cannot draw a screen correctly without
+     them, so they belong in the shell beside index.html: a first launch with no signal
+     has to come up looking like Element 26, not like unstyled HTML in a fallback font.
+
+     THE ART IS NOT HERE, and that is the decision. assets/ is 17 MB — videos, 36-frame
+     spin sheets, heroes. Precaching it would mean an install that fails on a bad
+     connection, and it would put 17 MB into a storage budget this app has a whole
+     screen about. Every same-origin request already falls through to
+     staleWhileRevalidate below, so each piece of art is cached the first time it is
+     actually shown, on the screens that actually show it, and is offline from then on.
+     A screen seen once works in the basement; one never opened costs nothing. */
+  "./glass/tokens.css",
+  "./glass/glass.css",
+  "./glass/intro.css",
+  "./glass/glass-config.js",
+  "./glass/layout.js",
+  "./glass/glass-motion.js",
+  "./glass/scene.js",
+  "./glass/intro.js",
+  "./assets/fonts/InstrumentSans.ttf"
 ];
 
 /* Hosts whose responses must always come from the network. Checked by hostname rather

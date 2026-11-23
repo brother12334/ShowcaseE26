@@ -28,7 +28,11 @@ const REQUIRED = [
   /* The static guards and the load rules. These are listed for the same reason as the rest:
      a spec that silently vanishes from a clone is worse than one that fails, and these
      three are the ones a future change is most likely to want out of the way. */
-  "dupedecl", "cssdupe", "autoload"
+  "dupedecl", "cssdupe", "autoload",
+  /* The dark glass redesign. Listed because its job is to catch features going missing
+     from a screen that was rewritten, which is exactly the kind of spec somebody later
+     deletes to make a change go green. */
+  "dgtoday"
 ];
 
 const onDisk = existsSync(DIR)

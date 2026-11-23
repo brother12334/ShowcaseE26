@@ -59,6 +59,87 @@ the rule was awake.
 
 ---
 
+## 30. The dark glass redesign — TODAY DONE, NINE SCREENS TO GO
+
+The package is in: `glass/` (8 files, 52 KB, kept as files so a designer can still edit
+the numbers the brief says are theirs to edit) and `assets/` (17 MB). The service worker
+precaches the code and the font and deliberately not the art, which falls through to the
+existing same-origin stale-while-revalidate branch.
+
+### What the integration actually had to solve
+
+`render()` replaces `#app.innerHTML` on nearly every interaction and a spin sheet is 25
+to 50 MB decoded, so the glass cannot live inside `#app`. It is a sibling in a `#stage`
+wrapper, mounted per screen by `glassSync()`, which compares a key and returns on a
+string comparison when the screen has not changed. Measured: a re-render does not rebuild
+the layer.
+
+The layer is drawn in the package's own 390-wide coordinate system and scaled as a whole
+(`--dg-k`) to the content column. Nothing in `layout.js` is overridden, so changing a
+coordinate there still moves the shape — which is one of the brief's acceptance criteria.
+
+### Three things found by measuring rather than by reading
+
+- **`glassSceneFor()` asked `todaysWorkoutId()` whether today was a rest day.** It is not
+  that question: the rotation goes on naming the next training day all through a rest, so
+  the rest-day text drew under the push-a hero. It asks `isRestToday()` now, which is what
+  the screen itself branches on.
+- **`.dg-read`/`.dg-brief` carried `flex: 1 1 150px`** from an earlier row layout. In a
+  column that is a 150px minimum HEIGHT, and it put the start button 86px down, under the
+  nav.
+- **`.dg` had an opaque background**, which hid the hero completely — a 640px black
+  rectangle where the art should be. The ground is on `#stage` now, under everything.
+
+### Two content decisions the design forces, both resolved by keeping things
+
+- **The hero word is painted into the frame**, not written over it — checked by looking at
+  the posters. The art names six days (push/pull/legs A and B) and this app ships
+  upper/lower, full-body and three-, two- and one-day splits, so a day with no art of its
+  own gets its real name as live text under the today overlay rather than a video saying
+  "push a." over an Upper A day. `GLASS_DAY` is the whole of that decision, in one place;
+  a second copy of the list was written and deleted the same day.
+- **Eight things the reference page has no slot for** — the plate-derive card, the
+  data-issue card, the weigh-in and soreness prompts, the plan-week strip, the
+  auto-progression card, the changes panel, the note stack and the per-exercise list —
+  are below the door in `.dg-extra`. On an ordinary day none of the notices renders and
+  the screen is the mockup; on a day one does, it sits under the start button and the
+  screen scrolls. Nothing was deleted to make the design fit.
+
+### A refactor, with the control that made it safe
+
+`plateStrip()` was 150 lines of markup with the cycle's reasoning interleaved — which
+plate is current, whether a rest is being spent today or merely owed tomorrow, which
+schedule entry a wrapped trailing rest belongs to. Each of those is a bug that was found
+once and fixed once, with the comment still attached, and the dark glass cycle needs the
+same answers in a different shape. So the reasoning moved to `cycleSlots()` and both draw
+from it.
+
+The control: both builds were driven over five shapes of cycle — floating rests,
+scheduled rests, a rest spent today, a fresh cycle, a day picked for today — and the
+HTML compared byte for byte. It caught a real break on the first run (`restNow` is read
+by the footer line, not by any plate, so only the floating case passed) and has been
+identical since.
+
+### Still to do
+
+1. The remaining nine screens: workout, history, body, program, research, research-paper,
+   settings, settings-rest-timer, and the nav that appears in every mockup.
+2. Motion: `prefers-reduced-motion`, pausing off-screen, the per-screen shape budget.
+3. The intro, on first launch and from a Replay in Settings.
+4. Specs for the glass foundation and each converted screen.
+
+### Two things to raise before they are built
+
+- **`layout.js` ships four spinning shapes on `program` and on `research`**, against the
+  brief's stated limit of three. Not changed: it is the design's own file and the number
+  is the designer's to set.
+- **The nav.** Every mockup draws a glass pill nav, and 10 specs reach into the current
+  one by selector. It is the single change with the widest blast radius in the app — 286
+  of 328 specs touch the DOM by selector — so it is listed as its own piece of work
+  rather than folded into a screen.
+
+---
+
 ## 1-9. Slot-scoping debt  — DONE
 
 `tests/specs/slotall.mjs` fails on any unmarked name-only programme lookup outside a
