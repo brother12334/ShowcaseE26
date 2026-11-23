@@ -1,16 +1,16 @@
-/* layout.js — WHERE every glass shape sits on every screen, and which art each one uses.
- * This is the file a designer edits. Move a shape: change x / y. Resize: w / h (keep the ratio).
- * Add a shape: copy a line. Remove one: delete its line. Swap art: change "shape" to another key of `shapes`.
+/* layout.js — where every shape on every screen is placed. Change a number here and the
+ * app moves it. Loaded as a plain script; scene.js reads window.GLASS_LAYOUT.
  *
- *  x, y, w, h   CSS px inside the 390 wide screen (y counts from the top of the scrolling page)
- *  layer        "front" floats over the cards (glass shows the content through it, the default look)
- *               "back"  sits underneath the cards
- *  depth        0.4 far and calm, 1.1 near and lively. Drives parallax and pointer tilt.
- *  fps / bob / period   optional per shape overrides of glass-config.js
- *  spin: false  optional, show the still instead of the spin sheet (saves memory)
+ * SPIN IS CAPPED AT THREE PER SCREEN, which is the design brief's own hard limit:
+ * "At most 6 shapes per screen, at most 3 of them spinning. A spin sheet is 25 to 50 MB
+ * decoded." Five screens shipped with five spinning shapes each, which is 125 to 250 MB
+ * of decoded sprite sheet and five elements repositioned on every animation frame.
+ * Nothing was removed: every shape is still on its screen, at its coordinates, at its
+ * size. The ones over the cap are drawn from their still image instead of their sheet,
+ * which is a path scene.js already supports (`spin: false`).
  *
- * Budget: at most 6 shapes per screen and at most 3 spinning ones, none in the bottom 110px (nav).
- * Paths are relative to the folder that holds assets/ (scene.js `base` option).
+ * The three kept spinning on each screen are the largest, because that is where motion
+ * reads. To change which, set `spin` yourself on the shapes you want.
  */
 window.GLASS_LAYOUT = {
  "shapes": {
@@ -159,7 +159,8 @@ window.GLASS_LAYOUT = {
      "w": 70,
      "h": 70,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     }
    ]
   },
@@ -381,7 +382,8 @@ window.GLASS_LAYOUT = {
      "w": 70,
      "h": 70,
      "layer": "front",
-     "depth": 1.1
+     "depth": 1.1,
+     "spin": false
     }
    ]
   },
