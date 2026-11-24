@@ -93,16 +93,34 @@ ck("and takes the converted screen's stylesheet", r.screened === true);
 ck("the rest hero is behind it", r.hero === true);
 ck("and the sentence says there is nothing to do", /nothing to do today/i.test(r.say), r.say);
 
-console.log("\n2. TODAY'S OWN BRANCH WAS LEFT ALONE");
+console.log("\n2. BOTH BRANCHES ARE NAMED, AND THEY ARE NAMED DIFFERENTLY");
+/* THIS USED TO REQUIRE TODAY TO STAY A BARE WRAPPER, and it was right to at the time:
+   the rest day needed the redesign's shared rules and Today, hand-laid to its mockup
+   with nothing else on it, did not \u2014 and handing an approved screen a stylesheet it had
+   never been seen under was not a thing to do blind.
+
+   Today has something else on it again. The fold holds the app's ordinary furniture,
+   and against a screen of near-black and cream an accent-orange glyph and an uppercase
+   display button are a different app showing through a door. The owner asked for it to
+   match, so the wrapper is named too \u2014 which is not a new style but the same stylesheet
+   finally reaching it.
+
+   What is asserted now is that the two branches are told apart, because that is what
+   everything scoped to one screen or the other depends on. */
 r = await p.evaluate(()=>{
+  const read = ()=>{ const el = document.querySelector('.dg');
+    return {cls: el.className.trim(), named: el.getAttribute('data-dg-screen')}; };
+  const rest = read();
   boot(S2=>{ S2.restDays = []; S2.override = null; });
-  const el = document.querySelector('.dg');
-  return {rest: isRestToday(), cls: el.className,
-          named: el.getAttribute('data-dg-screen')};
+  const train = read();
+  return {rest, train, trainIsRest: isRestToday()};
 });
-ck("CONTROL: this is the training branch now", r.rest === false);
-ck("it is still the bare wrapper it always was",
-   r.cls.trim() === "dg" && r.named === null, r.cls + " / " + r.named);
+ck("CONTROL: the second state is the training branch", r.trainIsRest === false);
+ck("the rest day calls itself rest", r.rest.named === "rest", String(r.rest.named));
+ck("and the training day calls itself today", r.train.named === "today", String(r.train.named));
+ck("both take the converted screen's stylesheet",
+   /\bdg-screen\b/.test(r.rest.cls) && /\bdg-screen\b/.test(r.train.cls),
+   r.rest.cls + " / " + r.train.cls);
 await p.evaluate(()=> boot());
 await p.waitForTimeout(250);
 

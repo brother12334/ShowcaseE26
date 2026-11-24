@@ -155,9 +155,7 @@ console.log("\n2. A TRAINING DAY IS THE REFERENCE AND NOTHING ELSE; A REST DAY K
   ck("nothing lost on a rest day", lost.length === 0, lost.join(", ") || "none");
 }
 {
-  const old = await oldP.evaluate(()=>{ boot(); return {
-    extra: document.querySelectorAll('#app [data-today-extra]').length,
-    lifts: document.querySelectorAll('#app [data-today-lift]').length}; });
+
   const now = await newP.evaluate(()=>{ boot(); return {
     extra: document.querySelectorAll('#app [data-today-extra]').length,
     lifts: document.querySelectorAll('#app [data-today-lift]').length,
@@ -180,8 +178,16 @@ console.log("\n2. A TRAINING DAY IS THE REFERENCE AND NOTHING ELSE; A REST DAY K
     brief: !!document.querySelector('.dg-brief'),
     start: !!document.getElementById('startBtn'),
     week: !!document.querySelector('.dg-week')}; });
-  ck("CONTROL: the old build really did carry a screenful below the button",
-     old.extra > 0 && old.lifts > 1, JSON.stringify(old));
+  /* THE CONTROL HERE USED TO READ THE PREVIOUS BUILD and require it to carry a
+     screenful below the button, which proved the removal was real rather than a
+     selector that had stopped matching. It compared against a moving target: once the
+     removal itself was a commit, "the previous build" was the stripped one and the
+     control failed on its own history.
+
+     What replaces it does not depend on history at all. The things are still being
+     BUILT \u2014 the fold says how many it is holding and holds them \u2014 so a selector that
+     stopped matching would show as a fold with nothing in it, which the assertions
+     below would catch. */
   ck("the day's exercise list is gone from the screen for good",
      now.lifts === 0, String(now.lifts));
   ck("and everything else that was below the button is behind one closed fold",
