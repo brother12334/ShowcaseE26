@@ -54,7 +54,19 @@ export const shot = name=>{
    build the comparison means anything against. */
 export function oldBuild(ref){
   const dir = path.join(REPO, "tests", ".old");
-  const file = path.join(dir, ref + ".html");
+  /* THE CACHE KEY HAS TO BE THE COMMIT, NOT THE WORD FOR IT. This wrote
+     tests/.old/HEAD~1.html and then reused it whenever a spec asked for "HEAD~1" again
+     — so after the next commit, every spec comparing itself against the build it
+     replaced was comparing itself against whatever HEAD~1 meant the last time anybody
+     ran it. dgtoday's "nothing went missing" guard spent a day reading a file from the
+     day before, which is the quietest way a guard can stop guarding. Resolved to a sha,
+     the name can move and the cache still means what it says. */
+  let key = ref;
+  try{
+    key = execFileSync("git", ["rev-parse", ref], {cwd: REPO, encoding: "utf8"}).trim()
+      || ref;
+  }catch(e){ /* not a resolvable ref; fall back to the literal, as before */ }
+  const file = path.join(dir, key + ".html");
   if(!existsSync(file)){
     mkdirSync(dir, {recursive: true});
     let src;

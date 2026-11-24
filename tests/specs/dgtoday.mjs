@@ -127,17 +127,64 @@ ck("CONTROL: scene.js, layout.js, glass-motion.js and the config all loaded",
 ck("CONTROL: and the layout really describes a today screen", r.today === true);
 ck("CONTROL: Instrument Sans is declared in the page's own stylesheet", r.font === true);
 
-console.log("\n2. NOT ONE THING THE OLD SCREEN COULD DRAW HAS GONE");
-/* THE GUARD THIS SPEC EXISTS FOR. Ids rather than text, because an id is what a handler
-   binds to and a feature whose button is gone is a feature gone. Both days, because the
-   rest branch returns early and is the one that lost four of them. */
-for(const [label, mut] of [["a training day", null], ["a rest day", "REST"]]){
-  const was = await oldP.evaluate(m=>{ boot(m ? window[m] : null); return window.ids(); }, mut);
-  const now = await newP.evaluate(m=>{ boot(m ? window[m] : null); return window.ids(); }, mut);
+console.log("\n2. A TRAINING DAY IS THE REFERENCE AND NOTHING ELSE; A REST DAY KEEPS WHAT IT HAD");
+/* THIS SECTION USED TO ASSERT THE OPPOSITE FOR BOTH DAYS, and the change is an owner's
+   decision rather than a loosening.
+
+   It held the whole id list the old screen produced and required the new one to produce
+   every one of them, on a training day and on a rest day. It earned that twice: once
+   catching four controls vanishing from rest days, once catching this rewrite.
+
+   The owner has since asked for Today to be the one screenful its reference draws, and
+   chose to delete what sat below the start button rather than fold it away, having been
+   told which three prompts exist on no other screen. So on a training day the guard
+   would now be asserting that a deliberate removal did not happen.
+
+   What replaces it is the same guard pointed at the new intent, which is not weaker: the
+   screen must contain the reference's parts and must NOT contain the rest, and the old
+   build is still read to prove the removal is real rather than a selector that stopped
+   matching. The rest branch keeps the original check unchanged \u2014 it has its own
+   reference, its content is what that reference draws, and it is the branch that lost
+   four controls the last time somebody reordered this function. */
+{
+  const was = await oldP.evaluate(()=>{ boot(window.REST); return window.ids(); });
+  const now = await newP.evaluate(()=>{ boot(window.REST); return window.ids(); });
   const lost = was.filter(x=> now.indexOf(x) < 0);
-  ck("CONTROL: the old build drew a Today with controls on it on " + label,
-     was.length > 5, was.length + " ids");
-  ck("nothing lost on " + label, lost.length === 0, lost.join(", ") || "none");
+  ck("CONTROL: the old build drew a rest day with controls on it", was.length > 5,
+     was.length + " ids");
+  ck("nothing lost on a rest day", lost.length === 0, lost.join(", ") || "none");
+}
+{
+  const old = await oldP.evaluate(()=>{ boot(); return {
+    extra: document.querySelectorAll('#app [data-today-extra]').length,
+    lifts: document.querySelectorAll('#app [data-today-lift]').length}; });
+  const now = await newP.evaluate(()=>{ boot(); return {
+    extra: document.querySelectorAll('#app [data-today-extra]').length,
+    lifts: document.querySelectorAll('#app [data-today-lift]').length,
+    /* the reference's own parts, which must all still be here */
+    head: !!document.querySelector('.dg-top h1'),
+    cycle: document.querySelectorAll('.dg-cycle .dg-cy').length,
+    hero: !!document.querySelector('#stage .hero-media, .dg-hero'),
+    read: !!document.querySelector('.dg-read'),
+    brief: !!document.querySelector('.dg-brief'),
+    start: !!document.getElementById('startBtn'),
+    week: !!document.querySelector('.dg-week')}; });
+  ck("CONTROL: the old build really did carry a screenful below the button",
+     old.extra > 0 && old.lifts > 1, JSON.stringify(old));
+  ck("a training day draws nothing below the start button",
+     now.extra === 0 && now.lifts === 0, JSON.stringify(now));
+  /* The week badge is drawn from the plan's own week notes, and a plan that names no
+     weeks has none to draw \u2014 so it is required where there is one and required to be
+     absent where there is not, which is the only version of this that can fail. */
+  const wk = await newP.evaluate(()=>{
+    try{ const n = planWeekNotes(); return !!(n && n.week); }catch(e){ return false; } });
+  ck("and still draws every part the reference has",
+     now.head && now.cycle > 1 && now.hero && now.start,
+     JSON.stringify(now));
+  ck("with the week badge exactly when the plan states a week",
+     now.week === wk, "badge " + now.week + ", plan says " + wk);
+  ck("CONTROL: including the two lines, which are read from the day",
+     now.read || now.brief, "read " + now.read + ", brief " + now.brief);
 }
 
 console.log("\n3. THE SCREEN IS THE NEW ONE");
@@ -149,8 +196,11 @@ r = await newP.evaluate(()=>{
           /* And the old day card is gone, not merely hidden behind the new one. */
           oldCard: q('.day-open'), oldStrip: q('.plates-wrap')};
 });
+/* `extra` has gone from this list rather than being inverted: section 2 is where the
+   absence of everything below the button is asserted, and asserting it twice in two
+   places is two things to update the next time it moves. */
 ck("the dark glass screen is drawn",
-   r.dg && r.top && r.cycle && r.hero && r.close && r.extra, JSON.stringify(r));
+   r.dg && r.top && r.cycle && r.hero && r.close, JSON.stringify(r));
 ck("the start button is the design's own", r.start === true);
 ck("and the screen it replaces is gone, not stacked underneath",
    !r.oldCard && !r.oldStrip, "day-open " + r.oldCard + ", plates " + r.oldStrip);
@@ -351,12 +401,22 @@ r = await newP.evaluate(async ()=>{
   const v = document.querySelector('#stage .glass-layer video.hero-media');
   if(!v) return {none: true};
   const playingAtTop = !v.paused;
+  /* SOMETHING TO SCROLL PAST. Today is one screenful now, so scrollTo(0, 4000) moved
+     the page nowhere and the hero never left the viewport \u2014 the assertion below was
+     about to start failing for a reason that has nothing to do with the hero. The
+     spacer belongs to this test: what is being checked is that the video stops when it
+     is off screen, not how tall the screen is. */
+  const spacer = document.createElement('div');
+  spacer.id = 'heroSpacer';
+  spacer.style.cssText = 'height:3000px;width:1px';
+  document.getElementById('app').append(spacer);
   scrollTo(0, 4000);
   await new Promise(ok=> setTimeout(ok, 500));
   const pausedAway = v.paused;
   scrollTo(0, 0);
   await new Promise(ok=> setTimeout(ok, 500));
   const backOn = !v.paused;
+  spacer.remove();
   return {playingAtTop, pausedAway, backOn,
           /* And it is not under a transform, which is the compositor's slow path for a
              video; the shapes are scaled in a wrapper of their own instead. */
@@ -458,57 +518,42 @@ ck("CONTROL: the header is still lifted above the art", r.topZ > 0 && r.topPos =
    "z " + r.topZ + ", " + r.topPos);
 ck("and so is the cycle", r.cycZ > 0, "z " + r.cycZ);
 
-console.log("\n13. THE CONTENT BELOW START USES THE SAME DESIGN");
+console.log("\n13. THE WORKOUT SCREEN'S LIFTS ARE THE DESIGN'S LIFTS");
+/* THIS SECTION USED TO COMPARE TODAY'S LIFTS WITH WORKOUT'S, and the comparison has
+   lost one of its two subjects: Today draws no lifts any more, by the owner's decision
+   recorded in section 2. What it was really guarding is still worth guarding, so it is
+   pointed at the half that still exists \u2014 a lift on the Workout screen is drawn in the
+   design's surface and its own face, not in the app's old card.
+
+   The control is the one that matters here: the measurements have to come from a lift
+   that actually rendered, or this passes by comparing nothing with nothing. */
 r = await newP.evaluate(()=>{
   boot();
-  const lifts = [...document.querySelectorAll('[data-today-lift]')];
-  const note = document.querySelector('[data-today-extra] .nt-r');
-  const weigh = document.querySelector('[data-today-extra] #weighDue');
-  if(note) {
-    note.open = false;
-    note.querySelector('summary').click();
-  }
-  const font = el=> el && getComputedStyle(el).fontFamily.includes('Instrument Sans');
-  return { lifts:lifts.length, rows:document.querySelectorAll('[data-exrow]').length,
-    liftFont:font(lifts[0]), noteFont:font(note && note.querySelector('.nt-k')),
-    open:note?.open, weighFont:font(weigh && weigh.querySelector('.wd-t')) };
-});
-ck("CONTROL: there are distinct exercise cards and a note", r.lifts > 1 && r.open === true);
-ck("every lift still has a jump target", r.lifts === r.rows);
-ck("exercise and note labels use Instrument Sans", r.liftFont && r.noteFont);
-ck("the weigh-in status uses Instrument Sans", r.weighFont === true);
-r = await newP.evaluate(()=>{
-  const styles = (element, keys)=> element && keys.map(key=> getComputedStyle(element)[key]);
-  const lift = el=> styles(el, ['backgroundColor','borderColor','borderRadius','padding']);
-  const title = el=> styles(el, ['fontFamily','fontSize','fontWeight']);
-  const notice = el=> styles(el, ['backgroundColor','borderColor','borderRadius','padding']);
-  const preview = document.querySelector('[data-today-lift]');
-  const today = {lift:lift(preview), title:title(preview.querySelector('.ex-head b')),
-    notice:notice(document.querySelector('[data-today-extra] [data-glass-notice]'))};
   startWorkout(todaysWorkoutId());
   document.getElementById('preflight')?.remove();
   PF = null;
   TAB = 'workout';
   render();
-  const workoutLift = document.querySelector('[data-workout-lift]');
-  const workout = {lift:lift(workoutLift), title:title(workoutLift?.querySelector('.ex-head b')),
-    notice:notice(document.querySelector('[data-dg-screen="workout"] [data-glass-notice]'))};
+  const lift = document.querySelector('[data-workout-lift]');
+  const head = lift && lift.querySelector('.ex-head b');
+  const notice = document.querySelector('[data-dg-screen="workout"] [data-glass-notice]');
+  const cs = el=> el ? getComputedStyle(el) : null;
+  const out = {
+    lifts: document.querySelectorAll('[data-workout-lift]').length,
+    radius: lift ? cs(lift).borderRadius : "",
+    face: head ? cs(head).fontFamily : "",
+    noticeRadius: notice ? cs(notice).borderRadius : "",
+    noticeFace: notice ? cs(notice).fontFamily : ""};
   boot();
-  return {today, workout};
+  return out;
 });
-ck("CONTROL: both views rendered a lift and an action notice",
-   r.today.lift && r.workout.lift && r.today.notice && r.workout.notice);
-ck("Today and Workout use the same lift surface and heading",
-   JSON.stringify(r.today.lift) === JSON.stringify(r.workout.lift) &&
-   JSON.stringify(r.today.title) === JSON.stringify(r.workout.title));
-ck("Today action notes match the Workout notice surface",
-   JSON.stringify(r.today.notice) === JSON.stringify(r.workout.notice),
-   JSON.stringify([r.today.notice, r.workout.notice]));
-await newP.locator('[data-today-extra]').first().evaluate(el=>{
-  el.querySelectorAll('details').forEach(details=> details.open = false);
-  scrollTo(0, el.getBoundingClientRect().top + scrollY - 110);
-});
-await newP.screenshot({path: shot("dgtoday-extra.png")});
+ck("CONTROL: the Workout screen rendered lifts to measure", r.lifts > 1, String(r.lifts));
+ck("a lift is the design's surface, not a square card",
+   parseFloat(r.radius) >= 16, r.radius);
+ck("and its heading is the design's face",
+   /Instrument Sans/.test(r.face), r.face);
+ck("CONTROL: an action notice rendered beside them", !!r.noticeFace, r.noticeFace);
+ck("and it is the design's face too", /Instrument Sans/.test(r.noticeFace), r.noticeFace);
 
 console.log("\n14. STILL SHAPES USE A PAUSABLE CSS ANIMATION");
 await newP.evaluate(()=>{
@@ -519,6 +564,15 @@ await newP.evaluate(()=>{
   shape.dataset.still = 'assets/shapes/glass-capsule-xs';
   shape.style.cssText = 'position:absolute;top:180px;left:5px;width:60px;height:60px';
   document.getElementById('stage').append(shape);
+  /* SOMETHING TO SCROLL PAST. This used to scroll to the bottom of the document and
+     rely on Today being longer than the window; Today is one screenful now, so the
+     scroll went nowhere and the shape never left the viewport. The spacer belongs to
+     this test rather than to the screen \u2014 what is being tested is that a shape pauses
+     when it is not on screen, not how tall Today happens to be. */
+  const spacer = document.createElement('div');
+  spacer.id = 'testSpacer';
+  spacer.style.cssText = 'height:2400px;width:1px';
+  document.getElementById('app').append(spacer);
   GlassMotion.mount(shape.parentElement);
 });
 const still = newP.locator('#testGlass .glass-img');

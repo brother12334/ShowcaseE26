@@ -7939,7 +7939,13 @@ body.news-open{overscroll-behavior:contain}
 /* The cycle's footer line: where you are in it, and the two controls that live nowhere
    else. Quieter than it was, because the strip above it now says the same thing in
    words rather than in two-letter codes. */
+/* THE LAST LINE ON TODAY, and with everything else below the button gone it is the only
+   thing left that could still look like the old app. Styled by descendant rather than by
+   class because this one line is built by a helper shared with screens that are not in
+   the redesign, and reaching into its classes from here would be this feature styling
+   another one. */
 .dg-foot{padding:10px var(--e26-pad) 0;font-size:12px;color:var(--e26-ink-3)}
+.dg-foot,.dg-foot *{font-family:var(--e26-font);letter-spacing:0;text-transform:none}
 /* THE HEADER AND THE CYCLE SIT ON THE HERO, NOT ABOVE IT.
 
    Both are out of the flow, which is what lets the hero start at the very top of the
@@ -8709,7 +8715,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.24.9";
+const APP_VERSION = "2026.11.24.10";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -39083,104 +39089,34 @@ function viewToday(){
 
   h += dgHeroHTML(wid, m);
   h += dgCloseHTML(wid, m);
+  /* THE SCREEN ENDS AT THE DOOR.
 
-  /* EVERYTHING THE DESIGN HAS NO SLOT FOR, BELOW THE DOOR RATHER THAN GONE.
+     Everything that used to follow the start button is gone from this branch, at the
+     owner's instruction and against my advice, which is recorded here because the
+     advice was specific and the consequence is not visible from the screen.
 
-     The reference page is one screenful. Element 26 also has notices that appear only
-     when they have something to say — a record it could not read, a plate list that
-     disagrees with a gym, a weigh-in due, a muscle walking in sore, a load that moved
-     since last time — and the day's own exercise list. They are features, not
-     decoration, and a mockup with no room for them is not a reason to delete them. On an
-     ordinary day none of the notices renders and the screen is the mockup exactly; on a
-     day one does, it sits under the start button and the screen scrolls. */
-  h += `<div class="dg-extra" data-today-extra>`;
-  h += notices;
-  /* Trained today, with a rest owed. Said before the next workout is offered, because
-     the next workout is not what comes next. */
-  if(restDueNotToday()){
-    const justWrapped = S.lastCycle && (Date.now() - S.lastCycle.end) < DAY_MS;
-    h += `<div class="card rest-next-card">
-      <div class="rs-k">${justWrapped ? "Cycle complete" : "Rest day next"}</div>
-      <h3 style="font-size:var(--fs-7);margin-top:4px">${justWrapped
-        ? "That's the cycle done. Take your rest day."
-        : "Take tomorrow off."}</h3>
-      <div class="sub" style="margin-top:8px">You've trained today, so today isn't it \u2014 your
-        rest lands tomorrow. After that the rotation picks up with <b>${esc(m.name)}</b>.</div>
-    </div>`;
-  }
-  /* THE REST YOU TOOK IS ALREADY ON THE STRIP, WITH A TICK ON IT.
+     WHAT WENT. The notices — a plate list that disagrees with a gym, a data problem
+     worth knowing about, a weigh-in due, a muscle walking in sore, what the plan says
+     about this week, and the offer to write an earned load into the plan. The rest-day
+     notices either side of a session. What changed since the last time this day came
+     round. Why this day is the one open. The readiness card, the day's notes, and the
+     day's own exercise list with its warm-ups, tips, calibration prompts and asymmetry
+     hints.
 
-     This printed "Rest this cycle: Mon, Sep 21 — 1 still available" under a strip that
-     had just drawn that rest as a ticked plate and a line reading "2 rests a cycle,
-     scheduled". Same fact, three times, in the space above the only button on the screen.
+     WHAT THAT COSTS. Most of it is reachable elsewhere: the exercises on Program, the
+     weigh-in on Body, the changes in the plan history. Three are not. The
+     auto-progression offer, the soreness check and the data-issue warning appeared on
+     no other screen, so those prompts no longer reach anybody. The owner was told that
+     in those words and chose this, so it is theirs; it is written down here so that
+     whoever next asks "why did the app stop offering to add the weight" has an answer
+     in the file rather than a mystery.
 
-     Worse under a scheduled rotation, where "1 still available" is not even the right
-     idea: the count is not a budget you are spending, it is where you are in a rotation
-     that already includes its rests — which is what the strip's own caption says.
+     The rest branch above is untouched: it has its own reference, and its own content
+     is what that reference draws.
 
-     So the row survives for exactly one thing it alone can do: FREE ONE UP. With
-     floating rests and no credits left, releasing an older rest day is reachable from
-     nowhere else — the plates answer "both rest days are used this cycle" and stop. Any
-     other time this was a sentence restating the picture above it. */
-  const restsTaken = restDaysThisCycle();
-  if(restsTaken.length && restsFloat() && !restCreditsLeft()){
-    h += `<div class="rest-note">Rest${restsTaken.length>1?"s":""} this cycle: <b>${
-      restsTaken.map(d=>fmtDate(d)).join("</b>, <b>")}</b> &middot; <button id="clearRestBtn"
-      class="linklike">free one up</button></div>`;
-  }
-  /* RULE G — BEFORE START, WHERE IT CAN STILL BE ACTED ON. */
-  h += changesPanelHTML(wid, {onlyUnseen: true});
-  h += dayPickedToday()
-      ? `<div class="day-open-sub">You picked this for today. ${esc(dayName(ROTATION[S.pointer]))}
-          is still next in your rotation.
-          <button class="linklike" id="dayPickClear">back to the rotation</button></div>`
-      : explainHTML("rotation", daysFree()
-        ? "Next up in your rotation. You have said you choose your own day, so tap any day on the strip above to do that one today \u2014 the one you step over stays next, and a day the cycle has already had stays done."
-        : "Next up in your rotation. Your plan sets the order, so this is the day that comes next; the others open as you reach them.", "day-open-sub");
-  h += noteStackHTML(todayNotes(wid));
-  h += readinessNoteHTML(wid);
-  // The one thing worth changing today, taken from the grade of your last session of
-  // THIS day. Sits above the exercise list, while there is still time to act on it.
-
-  let finLabeled = false;
-  const rp = resolvedProgram(wid);
-  const tips = focusTipsFor(wid), tipsSeen = new Set();
-  if(rp.length) h += '<div data-today-lifts>';
-  rp.forEach(({chosen:e, other, isFinisher}, rpi)=>{
-    if(isFinisher && !finLabeled){ h += `<div class="fin-label">Finisher, every workout</div>`; finLabeled = true; }
-    const occ = occIndex(rp, rpi);
-    const ll = lastBox(wid, e.name, isFinisher || sharedAcrossDays(e.name), occ);
-    const ins = insight(e.name, occ);
-    /* Named in the markup so the note at the top of the screen can jump to it. */
-    h += `<section class="card ex" data-glass-lift data-today-lift aria-label="${esc(e.name)}"><div class="ex-head" data-exrow="${esc(nrm(e.name))}"><b>${esc(e.name)}${supersetBadge(supersetInfo(rp.map(x=>x.chosen), rpi))}${techBadges(e)}${other?'<span class="alt-badge">⇄</span>':''}</b><span class="ex-target">${e.sets} × ${esc(e.reps)}${e.rpe?' · <span class="rpe-help" title="Tap for what RPE means">'+esc(rpeTxt(e.rpe))+'</span>':""}</span></div>`;
-    h += supersetNoteHTML(supersetInfo(rp.map(x=>x.chosen), rpi));
-    /* THE CHIP WAS DRAWN ON EXACTLY ONE OF THE THREE SCREENS THAT SHOW A LOAD. It lived
-       on the ordinary exercise card inside a live session and nowhere else — so reading
-       the day before you start it, or meeting the movement inside a superset, the number
-       arrived with no sign that the app had picked it. Same line, same function, all
-       three places. */
-    h += planChangeLineHTML(e);
-    if(warmupKindFor(rp.map(x=>x.chosen), rpi))
-      h += warmupHTML(e, warmupKindFor(rp.map(x=>x.chosen), rpi),
-                      {workoutId: wid, anyDay: isFinisher || sharedAcrossDays(e.name), occ});
-    if(ll) h += exContextHTML(e, rpi, {last:ll});
-    h += overloadTipHTML(wid, e, isFinisher || sharedAcrossDays(e.name), occ);
-    if(needsCalibration(e)) h += calibrateHTML(e);
-    h += inlineTipHTML(tips[nrm(e.name)], tipsSeen);
-    if(ins) h += `<div class="ex-insight"><span class="ins-tag">${esc(ins.tag)}</span><span>${esc(ins.msg)}</span></div>`;
-    if(altStyle(e)) h += altHintHTML(altStyle(e), startSideFor(wid), e.sets, e.name);
-    h += asymHintHTML(e);
-    let subBits = [];
-    if(!ll) subBits.push('no sessions logged yet');
-    if(other) subBits.push('alternates with '+esc(other.name)+' next '+m.name.toLowerCase()+' day');
-    if(e.note) subBits.push(esc(e.note));
-    if(subBits.length) h += `<div class="sub" style="margin:-2px 0 12px">${subBits.join(' · ')}</div>`;
-    h += "</section>";
-  });
-  if(rp.length) h += "</div>";
-  /* The cycle's own line — where you are in it, the last review, the reset — at the
-     foot. It belongs to the strip at the top and is not part of that composition, and
-     drawn there it laid a line of monospace across the hero. */
+     Nothing was deleted from the file. Every function that built this is still here and
+     still tested; what changed is that Today stopped calling them. Putting any of it
+     back is one line. */
   h += cycleFoot;
   h += `</div></div>`;
   return h;
@@ -66276,8 +66212,12 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.24.9";
+const NEWS_FOR = "2026.11.24.10";
 const NEWS = [
+  {k: "Today is one screen",
+   s: ["Today is now what the design draws and nothing else: the day, the cycle, the art, the two lines, and the button. Everything that used to sit below it has gone.",
+     "Most of it is still reachable \u2014 the exercises on Program, the weigh-in on Body, the changes in your plan history. Three are not. The offer to write an earned weight into your plan, the soreness check and the data-problem warning appeared on no other screen, so they no longer reach you anywhere. That is a deliberate trade for the screen, and it can be undone.",
+     "Rest days are untouched: that screen has its own reference and its own content."]},
   {k: "The rest day, and the header",
    s: ["The two controls in the Today header \u2014 the sleep clock and the way into Settings \u2014 no longer sit inside a glass bubble. The glyph is the control; the bubble was a surface put behind it.",
      "The rest day now looks like the rest of the redesign. It had been missed because Today builds its own frame by hand, from before the new screens had a shared one, so none of the new rules reached it \u2014 which is why \u201crest day\u201d and \u201ctomorrow\u201d were still in typewriter capitals.",
