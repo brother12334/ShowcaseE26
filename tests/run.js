@@ -32,7 +32,7 @@ const REQUIRED = [
   /* The dark glass redesign. Listed because its job is to catch features going missing
      from a screen that was rewritten, which is exactly the kind of spec somebody later
      deletes to make a change go green. */
-  "dgtoday", "dgworkout", "dgprogram", "dgresearch", "dgbody", "dgsettings"
+  "dgtoday", "dgworkout", "dgprogram", "dgresearch", "dgbody", "dgsettings", "dgrest"
 ];
 
 const onDisk = existsSync(DIR)
