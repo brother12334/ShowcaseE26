@@ -6412,6 +6412,45 @@ body.news-open{overscroll-behavior:contain}
 .pv-r.is-kept .pv-sq{background:var(--card2);border-color:var(--line);color:var(--dim)}
 .pv-r.is-kept .pv-f{background:var(--dim)}
 .pv-r.is-kept .pv-n{color:var(--dim)}
+/* THE SAME ROWS, IN THE DARK GLASS SCREEN'S VOICE. Scoped by the screen's attribute
+   rather than by a class, because a class named here that is also named in the dark
+   glass section would be two features styling one name \u2014 which is the thing cssdupe
+   exists to stop. The reading moves onto one line with the name, and the bar takes the
+   full width under it, which is what the design draws. */
+[data-dg-screen="program"] .pv-h{margin:0;font:500 13px var(--e26-font);
+  color:var(--e26-ink-2);text-transform:lowercase;letter-spacing:0}
+[data-dg-screen="program"] .pv-lab{margin:2px 0 0;font:500 13px var(--e26-font);
+  color:var(--e26-ink-2)}
+[data-dg-screen="program"] .card.pv-under{
+  background:linear-gradient(160deg, rgba(150,104,38,.26), rgba(32,26,18,.5) 62%)}
+[data-dg-screen="program"] .pv{gap:0;margin:8px 0 0}
+[data-dg-screen="program"] .pv-r{display:grid;grid-template-columns:auto 1fr auto;
+  align-items:baseline;gap:4px 10px;padding:11px 0;background:none;border:0;border-radius:0}
+[data-dg-screen="program"] .pv-r:active{transform:none;background:rgba(255,255,255,.04)}
+/* ONE LABEL, NOT TWO. The heading stays in the card \u2014 a card a screen reader meets
+   without one is a list of numbers with no subject, and it is what identifies this card
+   to its spec \u2014 but when the short list has a label of its own, two lines saying the
+   same thing is one too many, so the heading is left for the reader that needs it. */
+[data-dg-screen="program"] .card.pv-under .pv-h{position:absolute;width:1px;height:1px;
+  overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* The muscle's two letters, kept because the sheet behind a row flies this square into
+   its own heading, and quietened to a glyph because the design draws no tile. The state
+   colours below are as specific as this, so it goes after them on purpose. */
+[data-dg-screen="program"] .pv-r .pv-sq{width:20px;height:22px;border:0;background:none;
+  font:500 11px var(--e26-font);color:var(--e26-ink-2);grid-row:1;align-self:center;
+  justify-content:flex-start}
+[data-dg-screen="program"] .pv-m{display:contents}
+[data-dg-screen="program"] .pv-n{grid-column:2;grid-row:1;
+  font:400 18px var(--e26-font);letter-spacing:0;text-transform:none;color:var(--e26-ink)}
+[data-dg-screen="program"] .pv-v{grid-column:3;grid-row:1;
+  font:400 15px var(--e26-font);color:var(--e26-ink-2)}
+[data-dg-screen="program"] .pv-v b{font-weight:400;color:var(--e26-ink-2)}
+[data-dg-screen="program"] .pv-t{grid-column:1 / -1;grid-row:2;height:5px;margin-top:2px;
+  border-radius:999px;background:rgba(255,255,255,.12)}
+[data-dg-screen="program"] .pv-r.is-under .pv-f,
+[data-dg-screen="program"] .pv-r.is-ok .pv-f{background:var(--e26-ink)}
+[data-dg-screen="program"] .pv-more{margin:6px 0 0}
+[data-dg-screen="program"] .pv-say{margin:14px 0 0;font-size:13px;color:var(--e26-ink-2)}
 /* The line in the sheet that says an acknowledgement is in force, and offers the way out. */
 .vf-kept{
   margin:10px 0 0;padding:10px 12px;border:1px dashed rgba(255,255,255,.12);
@@ -33986,15 +34025,30 @@ function planQualityCardHTML(){
         : nKept
           ? "Every muscle is inside its range, or kept where you put it."
           : "Every muscle is inside its range.";
-  return `<div class="card">
-    <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
-      <span class="dot" style="background:${clean ? "var(--ok)" : "var(--acc)"}"></span><h3>A look at your plan</h3>
-    </div>
-    <div class="sub" style="margin:4px 0 0">${esc(lead)} Each bar is a week's sets; the mark
-      on it is the least that muscle needs. Tap one to see what to do about it.</div>
-    ${planVolHTML(vol)}
+  /* WHAT IS WRONG FIRST, THE REST BEHIND IT.
+
+     Every muscle had a bar, in body order, all twenty of them, and the three or four
+     that were actually short were somewhere in the middle of that. The order was chosen
+     so the list would not reshuffle itself as you fixed it, which is still a good reason
+     \u2014 so the order is kept, and the short ones are lifted out of it into their own
+     short list at the top. The others are one tap below, in the same order they were in.
+
+     Nothing is dropped: every muscle is still a row, still a button, still carries its
+     reading and its floor mark. When nothing is short there is no split to make, and the
+     card is the full list exactly as it was. */
+  const under = live.filter(x=> x.state === "under");
+  const top   = under.length ? under : vol;
+  const back  = under.length ? vol.filter(x=> under.indexOf(x) < 0) : [];
+  return `<div class="card${under.length ? " pv-under" : ""}">
+    <h3 class="pv-h">A look at your plan</h3>
+    ${under.length ? `<div class="pv-lab">under target this week</div>` : ""}
+    ${planVolHTML(top)}
+    ${back.length ? `<details class="adv-fold pv-more"><summary>the other ${
+      back.length} muscle${back.length === 1 ? "" : "s"}</summary>${planVolHTML(back)}</details>` : ""}
     ${rows ? `<div class="st-wrap" style="margin:14px 0 0">${rows}</div>` : ""}
     ${notes}
+    <div class="sub pv-say">${esc(lead)} Each bar is a week's sets; the mark
+      on it is the least that muscle needs. Tap one to see what to do about it.</div>
   </div>`;
 }
 /* THE SHEET BEHIND A ROW.
@@ -34745,9 +34799,13 @@ function planVolHTML(vol){
         <span class="pv-t"><span class="pv-f" style="width:${pct}%"></span>${
           x.mev > 0 ? `<span class="pv-k" style="left:${mark}%"></span>` : ""}</span>
       </span>
-      <span class="pv-v"><b>${r1(x.v)}</b>${x.mev > 0 ? "/" + lm(x.mev) : ""}</span>
+      <span class="pv-v"><b>${r1(x.v)}</b>${x.mev > 0 ? " of " + lm(x.mev) : ""}</span>
     </button>`;
   }).join("");
+  /* The key is about the three colours, so it goes under a list that can show three.
+     Under the short list at the top it would be explaining two colours that are not
+     there. */
+  if(vol.every(x=> x.state === "under")) return `<div class="pv">${rows}</div>`;
   return `<div class="pv">${rows}</div>
     <div class="pv-leg">
       <span><i style="background:var(--bad)"></i>under</span>

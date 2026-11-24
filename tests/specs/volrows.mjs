@@ -50,7 +50,12 @@ console.log("1 - EVERY MUSCLE GETS A ROW, AND THE ROW IS A READING");
   ck("the row carries the two-letter symbol", /^[A-Z][A-Za-z]$/.test(r.first.sym), r.first.sym);
   ck("and the muscle's full name, so nothing needs decoding",
      r.first.name.length > 3, r.first.name);
-  ck("and the reading as sets over the floor", /\d.*\/.*\d/.test(r.first.val), r.first.val);
+  /* THIS USED TO REQUIRE A SLASH IN IT, which was the separator rather than the reading:
+     the row says "6 of 10" now because the design spells the relationship out, and a
+     test that fails on that is testing punctuation. The reading itself is what matters,
+     so it is read as two figures with the floor second. */
+  ck("and the reading as sets of the floor",
+     /^[\d.]+ of [\d.]+$/.test(r.first.val), r.first.val);
   ck("the bar has a width", /%$/.test(r.first.fill), r.first.fill);
   ck("and a mark on it for the floor", r.first.mark === true, String(r.first.mark));
   ck("every row is a button", r.allButtons === true, "");
