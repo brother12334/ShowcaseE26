@@ -481,47 +481,60 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "shapes": [
     {
-     "shape": "links",
-     "x": 228,
-     "y": 628,
-     "w": 262,
-     "h": 219,
-     "layer": "front",
-     "depth": 0.4,
-     "spin": false
+     "still": "assets/body/chrome-crumple",
+     "x": 224,
+     "y": 86,
+     "w": 174,
+     "h": 173,
+     "layer": "back",
+     "bob": 4
     },
     {
-     "shape": "star",
-     "x": -90,
-     "y": 1136,
-     "w": 238,
-     "h": 238,
-     "layer": "front",
-     "depth": 0.4,
-     "spin": false
+     "still": "assets/body/chrome-sphere",
+     "x": 24,
+     "y": 115,
+     "w": 48,
+     "h": 48,
+     "layer": "back",
+     "bob": 4
     },
     {
-     "shape": "sphere-xs",
-     "x": 35,
-     "y": 379,
-     "w": 50,
-     "h": 50,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
+     "still": "assets/body/pearl-crumple",
+     "x": -55,
+     "y": 495,
+     "w": 105,
+     "h": 119,
+     "layer": "back",
+     "bob": 4
     },
     {
-     "shape": "x-s",
-     "x": 285,
-     "y": 1419,
+     "still": "assets/body/pearl-sphere",
+     "x": 314,
+     "y": 755,
      "w": 112,
-     "h": 112,
-     "layer": "front",
-     "depth": 0.7,
-     "spin": false
+     "h": 114,
+     "layer": "back",
+     "bob": 4
+    },
+    {
+     "still": "assets/body/chrome-orchid",
+     "x": 273,
+     "y": 1095,
+     "w": 166,
+     "h": 163,
+     "layer": "back",
+     "bob": 4
+    },
+    {
+     "still": "assets/body/pearl-flower",
+     "x": -40,
+     "y": 1390,
+     "w": 80,
+     "h": 82,
+     "layer": "back",
+     "bob": 4
     }
-   ],
-   "note": "the body page keeps its 6 iridescent Figma shapes (assets/body) as plain images; only these glass shapes are driven from here"
+   ]
   },
   "intro": {
    "height": 844,

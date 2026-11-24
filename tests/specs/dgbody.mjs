@@ -80,6 +80,25 @@ ck("CONTROL: the plan knows which week it is on", r.week > 0, String(r.week));
 ck("and the header states it", r.right === "week " + r.week + (r.of ? " of " + r.of : ""),
    r.right);
 
+console.log("\n1b. THE SUPPLIED IRIDESCENT ART SITS BEHIND BODY");
+r = await p.evaluate(async ()=>{
+  const wrapper = document.querySelector('#stage > .glass-layer > [aria-hidden="true"]');
+  const shapes = [...(wrapper?.querySelectorAll('.glass[data-still^="assets/body/"]') || [])];
+  const art = await Promise.all(shapes.map(async shape=>{
+    const image = new Image();
+    image.src = shape.dataset.still + '.webp';
+    await image.decode();
+    return shape.classList.contains('back') && getComputedStyle(shape).pointerEvents === 'none' &&
+      image.naturalWidth >= 3 * parseFloat(shape.style.width);
+  }));
+  return {art, behind: wrapper && getComputedStyle(wrapper).zIndex === '0',
+          map: !!document.querySelector('.nb-map .bm-fig')};
+});
+ck("CONTROL: the seeded Body still renders its anatomy map", r.map);
+ck("the six shipped assets decode at phone density and cannot intercept taps",
+   r.art.length === 6 && r.art.every(Boolean));
+ck("the art is behind the Body content", r.behind);
+
 console.log("\n2. THE ANATOMICAL FIGURE IS STILL THE ANATOMICAL FIGURE");
 r = await p.evaluate(()=>{
   const figs = [...document.querySelectorAll('.bm-fig svg')];

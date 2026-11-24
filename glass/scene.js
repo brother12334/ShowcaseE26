@@ -63,7 +63,7 @@
     layer.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:visible';
     if (o.hero !== false) hero(layer, S.hero, o);
     (S.shapes || []).forEach((it, i) => {
-      const def = L.shapes[it.shape];
+      const def = it.still ? { still: it.still } : L.shapes[it.shape];
       if (!def) { console.warn('GlassScene: unknown shape', it.shape); return; }
       const d = el('div', 'glass ' + (it.layer || 'front'),
         { left: px(it.x), top: px(it.y), width: px(it.w), height: px(it.h) });
