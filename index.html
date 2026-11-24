@@ -8008,6 +8008,58 @@ body.news-open{overscroll-behavior:contain}
   font-weight:600;letter-spacing:0;text-transform:none}
 .dg-screen .nb-link,.dg-screen .linklike{font-family:var(--e26-font)}
 
+/* ---- DARK GLASS: PROGRAM ----------------------------------------------------------- */
+/* Everything here is this screen's own. The one thing it reaches outside for is the
+   plan-check card, whose bars are restyled where they are defined, not from here. */
+[data-dg-screen="program"] .pg-acts{margin:0 0 12px}
+.pg-say{margin:0 2px 16px;font:400 17px/1.35 var(--e26-font);
+  color:var(--e26-ink);letter-spacing:-.01em}
+.pg-lab{margin:20px 4px 8px;font:500 13px var(--e26-font);color:var(--e26-ink-2);
+  text-transform:lowercase}
+/* The settings fold reads as a row: title, what it is holding, and a plus. */
+.pg-fold{background:var(--e26-card);border:1px solid var(--e26-card-line);
+  border-radius:var(--e26-radius-card);margin:12px 0}
+.pg-fold>summary{list-style:none;cursor:pointer;padding:14px 18px;
+  display:grid;grid-template-columns:1fr auto;align-items:center;row-gap:3px}
+.pg-fold>summary::-webkit-details-marker{display:none}
+.pg-fold>summary::after{content:"+";grid-column:2;grid-row:1 / span 2;
+  font:300 22px/1 var(--e26-font);color:var(--e26-ink-2);padding-left:12px}
+.pg-fold[open]>summary::after{content:"\2212"}
+.pg-fold-t{grid-column:1;grid-row:1;font:600 17px var(--e26-font);color:var(--e26-ink)}
+.pg-fold-s{grid-column:1;grid-row:2;font:400 13px var(--e26-font);color:var(--e26-ink-2)}
+.pg-fold-b{padding:0 12px 10px}
+.pg-fold-b .card{margin:8px 0}
+.pg-det{margin:12px 0}
+/* Four labels, four answers. The label column is fixed so the answers line up. */
+.pg-facts{display:grid;grid-template-columns:92px 1fr;gap:16px 14px;
+  padding:18px;align-items:baseline}
+.pg-f-k{font:400 13px var(--e26-font);color:var(--e26-ink-2)}
+.pg-f-v{font:400 16px/1.35 var(--e26-font);color:var(--e26-ink)}
+/* The rotation. One row a day, and the row is the button. */
+.pg-rot{padding:2px 0;overflow:hidden}
+.pg-day{display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;
+  align-items:center;gap:12px;padding:12px 16px;cursor:pointer;
+  border-top:1px solid var(--e26-card-line);color:inherit}
+.pg-rot>.pg-day:first-child{border-top:0}
+.pg-day.is-today{background:rgba(255,255,255,.055)}
+.pg-day:active{background:rgba(255,255,255,.09)}
+.pg-day:focus-visible{outline:2px solid var(--acc-line);outline-offset:-2px}
+.pg-pill{width:30px;height:15px;border-radius:999px;background:#17171b;
+  border:1px solid var(--e26-card-line);position:relative}
+.pg-pill::after{content:"";position:absolute;top:50%;left:3px;width:7px;height:7px;
+  border-radius:50%;transform:translateY(-50%);
+  background:var(--pg-c, var(--e26-ink-2));opacity:.6}
+.pg-day.is-today .pg-pill{background:var(--pg-c, var(--acc));border-color:transparent}
+.pg-day.is-today .pg-pill::after{background:#fff;opacity:.92}
+.pg-n{font:500 18px var(--e26-font);color:var(--e26-ink);white-space:nowrap;
+  text-transform:lowercase}
+.pg-day.is-today .pg-n{font-weight:600}
+.pg-s{font:400 13px var(--e26-font);color:var(--e26-ink-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pg-go{font-size:17px;line-height:1;color:var(--e26-ink-2)}
+.pg-dim .pg-n{color:var(--e26-ink-2)}
+.pg-dim .pg-pill{opacity:.55}
+
 /* ---- DARK GLASS: WORKOUT ----------------------------------------------------------- */
 [data-dg-screen="workout"]{
   background:
@@ -8475,7 +8527,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.24.4";
+const APP_VERSION = "2026.11.24.5";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -48586,20 +48638,112 @@ function viewProgram(){
   /* Editing a day is its own screen and has no art of its own; it is left alone. */
   if(DAY_EDIT && (S.program[DAY_EDIT] || DAY_EDIT === "finisher")) return viewDayEdit(DAY_EDIT);
   return dgScreenHTML({title: "program", screen: "program",
-    right: `<span>${ROTATION.length} day${ROTATION.length === 1 ? "" : "s"}</span>`,
+    right: `<span>${esc(progTopRight())}</span>`,
     heroH: dgHeroH("program")}, viewProgramBody());
 }
+/* "6 days \u00b7 week 2 of 6". The rotation's length is the one fact this header always
+   has. The week is the one somebody opening the tab in the middle of a block actually
+   wants, and the plan already knows it, so it joins the figure whenever there is one. */
+/* The rotation in a sentence: the days in the order they run, and where the rests fall,
+   which is the question "what am I on?" answered without counting a list. */
+/* The line under "Schedule settings", so the fold can be read without opening it. */
+function schedFoldLine(){
+  const out = [];
+  try{
+    const L = layoutNow();
+    const n = (L.layout || []).filter(k=> k === "rest").length;
+    const train = (L.layout || []).length - n;
+    if(n) out.push("rest after every " + (train && n ? Math.round(train / n) : 1) + " days");
+    else out.push("no rest days booked");
+  }catch(e){}
+  try{
+    const t = testWeeksNow().map(x=> String((x && x.week) || "")).filter(Boolean);
+    if(t.length) out.push("test week " + t.join(", "));
+  }catch(e){}
+  return out.join(" \u00b7 ");
+}
+/* FOUR LABELS AND FOUR ANSWERS. A row is left out when the plan cannot answer it \u2014 an
+   empty value under a label is worse than no row, because it reads as a fact of nothing. */
+function progFactsHTML(){
+  const rows = [];
+  const add = (k, v)=>{ if(v) rows.push([k, v]); };
+  try{
+    const k = planKindNow();
+    add("kind", (k && (k.named || planKindLine(k))) || "");
+  }catch(e){}
+  add("vs today", progVsTodayLine());
+  add("phases", progPhaseLine());
+  try{
+    const m = S.importMeta;
+    if(m && !m.derivedOnly) add("imported", "From an imported plan"
+      + (m.weeks ? ", " + m.weeks + " weeks" : "")
+      + (m.at ? ", " + new Date(m.at).toLocaleDateString(undefined,
+          {day: "numeric", month: "short"}) : ""));
+  }catch(e){}
+  if(!rows.length) return "";
+  return `<div class="card pg-facts">${rows.map(r=>
+    `<span class="pg-f-k">${esc(r[0])}</span><span class="pg-f-v">${esc(r[1])}</span>`).join("")}</div>`;
+}
+/* "On schedule", or what is running lighter than the plan says and why. The full
+   sentence is still in the card behind the fold; this is the verdict. */
+function progVsTodayLine(){
+  const why = [];
+  try{ if(deloadActive()) why.push("a deload"); }catch(e){}
+  try{ if(rampInActive()) why.push("ramping back in"); }catch(e){}
+  try{ if(Object.keys(activeEases() || {}).length) why.push("something sore"); }catch(e){}
+  return why.length ? "Lighter today \u2014 " + joinList(why) : "On schedule";
+}
+/* What the weeks do, in one line: the block's own shape where there is one. */
+function progPhaseLine(){
+  let mz = null;
+  try{ mz = mesoWeekNow(); }catch(e){}
+  if(mz && mz.shape){
+    if(mz.shape.deload > 0)
+      return "Sets build weeks 1 to " + mz.shape.accum + ", lighter week " + mz.of;
+    return "Sets build each week, with no easy week booked";
+  }
+  try{
+    const ph = (S.importMeta || {}).phases || [];
+    if(ph.length) return ph.map(x=> x.name + (x.weeks ? " " + x.weeks : "")).join(" \u00b7 ");
+  }catch(e){}
+  return "";
+}
+function progSayText(){
+  const names = ROTATION.map(w=> dayName(w));
+  let rest = 0;
+  try{ rest = (layoutNow().layout || []).filter(k=> k === "rest").length; }catch(e){}
+  const run = names.join(", ");
+  if(!rest) return run + ", straight through.";
+  const every = names.length && rest ? Math.round(names.length / rest) : 0;
+  const WORD = ["", "one", "two", "three", "four", "five", "six", "seven"];
+  return run + ", with a rest day after each " + (WORD[every] || every) + ".";
+}
+function progTopRight(){
+  const d = ROTATION.length + " day" + (ROTATION.length === 1 ? "" : "s");
+  let w = null;
+  try{ w = planWeekNow(); }catch(e){}
+  if(!w || !w.week) return d;
+  return d + " \u00b7 week " + w.week + (w.of ? " of " + w.of : "");
+}
 function viewProgramBody(){
+  /* THE ORDER THE MOCKUP PUTS THESE IN, and it is the better one: the two ways into the
+     plan, then the sentence saying what you are running, then the two things you do to
+     the plan as a document.
+
+     TWO PARAGRAPHS HAVE COME OFF THIS SCREEN, and neither is lost. The one under Full
+     plan described a Word file, a print-out and a coach \u2014 the overlay that button opens
+     carries "Save as .doc" and "Print / PDF" across the top of it, so it was describing
+     buttons you can see. The other explained the \u21c4 badge and the RPE term, which were
+     written for the exercise lists that used to be printed on this screen; those lists
+     are now in the day each belongs to, and both explanations live where they are shown:
+     \u21c4 in the full plan document, RPE on every card that states one. */
   let h = liveStripHTML() + `
-  <div class="sub" style="margin:-8px 2px 14px">Your rotation: ${esc(ROTATION.map(w=>dayName(w)).join(" → "))}.${
-    hasAltExercises() ? " Exercises marked ⇄ alternate automatically every other session of that day." : ""
-  } Targets show <span class="rpe-help">RPE</span>, tap to see what it means.</div>
-  <div class="btn-row" style="margin-bottom:10px">
+  <div class="btn-row pg-acts">
     <button class="btn ghost small" id="planBtn" style="flex:1">${ICON.doc} Full plan</button>
     <button class="btn ghost small" id="buildPlanBtn" style="flex:1">Build a new plan</button>
   </div>
-  <div class="sub" style="margin:-4px 2px 14px;font-size:var(--fs-3);color:var(--faint)">The whole schedule as a document: every day, every exercise, sets, reps, RPE, loads, the ⇄ pairs, and what each muscle gets per cycle. Print it, save it as a Word file, or hand it to a coach.</div>
-  <div class="btn-row" style="margin-bottom:16px">
+  <p class="pg-say">${esc(progSayText())}</p>
+  <div class="btn-row pg-acts">
     <button class="btn ghost small" id="aiImportBtn" style="flex:1">${ICON.spark} Import a plan</button>
     <button class="btn ghost small" id="planHistBtn" style="flex:1">What changed${
       (()=>{ const n = (S.planLog || []).filter(planChangeBig).length;
@@ -48625,92 +48769,76 @@ function viewProgramBody(){
   h += volMigrationCardHTML();
   h += planQualityCardHTML();
   /* FOLDED, NOT REMOVED. Where the rest days sit and which weeks are tests are things
-     somebody sets once and then leaves alone for months — but they were two full cards
-     near the top of the tab, between the plan check and the plan itself, every single
-     time anybody opened it. Open the fold and both are exactly as they were. */
-  h += `<details class="adv-fold" id="schedFold"${SCHED_FOLD ? " open" : ""}>
-      <summary>Rest days and testing weeks</summary>
-      ${restLayoutCardHTML()}${testWeeksCardHTML()}
+     somebody sets once and then leaves alone for months \u2014 they were two full cards near
+     the top of the tab, every time anybody opened it. The fold now says what it is
+     holding, so it can be read without being opened. */
+  h += `<details class="pg-fold" id="schedFold"${SCHED_FOLD ? " open" : ""}>
+      <summary><span class="pg-fold-t">Schedule settings</span><span class="pg-fold-s">${
+        esc(schedFoldLine())}</span></summary>
+      <div class="pg-fold-b">${restLayoutCardHTML()}${testWeeksCardHTML()}</div>
     </details>`;
-  h += planKindCardHTML();
-  h += planVsTodayCardHTML();
+  /* FIVE CARDS, FOUR FACTS.
+
+     What kind of plan this is, whether today is running as written, what the weeks do,
+     and where the plan came from were a card each: five headings, five paragraphs, and
+     the same four facts somewhere inside them. They are a table now, which is the shape
+     the question has \u2014 four labels and four answers.
+
+     NOTHING IS SUMMARISED AWAY. Each card's full text is still built, unchanged, behind
+     "The plan in detail" below the table: the evidence a kind was read from, the phase
+     list, the deload instruction, the import's own words. The table is the answer; the
+     fold is the working. */
+  h += progFactsHTML();
+  const detail = planKindCardHTML() + planVsTodayCardHTML() + periodCardHTML() + importMetaCardHTML();
+  if(detail) h += `<details class="pg-det adv-fold"><summary>The plan in detail</summary>${detail}</details>`;
+  /* NOT IN THE FOLD: what your plan says about THIS week, because it can carry a button
+     (starting a deload) and a week's instruction is read on the week, not looked up. */
   h += planWeekCardHTML();
-  h += periodCardHTML();
-  h += importMetaCardHTML();
+  /* THE ROTATION, AS THE ROTATION.
+
+     This used to print the whole programme: a card per day, every exercise in it, sets,
+     reps, RPE, percentages, \u21c4 partners and plan marks \u2014 about six thousand pixels of
+     it on a six-day split, which is the entire screen below the plan check. You could
+     not see the shape of your own week without scrolling past it.
+
+     So the week is a list of days again, and each row says the day, the first movements
+     in it, and today. THE EXERCISES ARE NOT GONE: tapping a row opens that day's editor,
+     where every one of them is listed with everything this screen used to print and the
+     controls to change it, and "Full plan" above prints the lot in one document. */
+  h += `<div class="pg-lab">rotation</div><div class="card pg-rot">`;
+  const todayWid = (()=>{ try{ return todaysWorkoutId(); }catch(e){ return null; } })();
   DAYS.forEach(wid=>{
     const m = dayMeta(wid);
-    /* THE CARD IS THE BUTTON. It used to carry two ways into the day editor — a link by
-       the name and a button under the list — for one destination, which is one more than
-       the card needs and reads as clutter on a screen that already repeats per day.
-       Tapping the day opens it instead; rename still has its own link, because it is a
-       different action and must not fire from a stray tap on the card. */
-    h += `<div class="card prog-day" data-dayedit="${wid}" role="button" tabindex="0"
-            aria-label="Edit ${esc(m.name)}">
-      <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px">
-        <span class="dot" style="background:${m.color}"></span><h3>${esc(m.name)}</h3>
-        <button class="linklike" data-renameday="${wid}" style="margin-left:auto;font-size:var(--fs-3)">rename</button>
-        <span class="prog-day-go" aria-hidden="true">edit ›</span>
-      </div>`;
     // `|| []` rather than a bare index: a day key can legitimately be missing for a
     // moment after a sync restores an older plan, and a thrown Program tab is a much
-    // worse failure than an empty card.
-    (S.program[wid] || []).forEach((e,i)=>{
-      const nextUp = e.alt ? (activeVariant(wid,e)===e ? e.name : e.alt.name) : null;
-      const isPick = !!(e.alt && e.altPick);
-      const asty = altStyle(e);
-      let title = esc(e.name)
-        + supersetBadge(supersetInfo(S.program[wid] || [], i))
-        + techBadges(e)
-        + (asty === "side"  ? ' <span class="uni-badge">L / R</span>' : '')
-        + (asty === "cross" ? ' <span class="uni-badge">crossover</span>' : '')
-        + (e.alt ? ' <span class="alt-badge">⇄ '+esc(e.alt.name)+'</span>' : '');
-      const pct = pctLoadFor(e);
-      let meta = `${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${
-        pct ? " · " + esc(Math.round(pct.pct*100)) + "%"
-              + (pct.load != null ? " \u00b7 " + esc(fmtLoad(pct.load)) : " \u00b7 set your max")
-            : e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}`;
-      /* "next Push day: X" is a promise, and for a slot you choose it is one the app
-         cannot keep. It says what it is instead: either, your call. */
-      const mark = planMarkHTML(e) + (e.alt ? planMarkHTML(e.alt) : "");
-      if(mark) meta += "<br>" + mark;
-      if(e.alt) meta += isPick
-        ? `<br>either one \u2014 you pick on the day${nextUp ? ", currently " + esc(nextUp) : ""}`
-        : `<br>next ${m.name.toLowerCase()} day: ${esc(nextUp)}`;
-      /* NO CONTROLS ON THIS ROW, deliberately. Moving and editing an exercise existed in
-         two places — here and in the day editor — which meant two mental models of the
-         same action and an ordering you could change on a screen that shows four days at
-         once, where the day you are reordering scrolls out of view while you do it. One
-         way in: "edit day", above. This list is the plan as written. */
-      h += `<div class="prog-ex">
-        <div><b>${title}</b><div class="meta">${meta}</div></div>
-      </div>`;
-    });
-    h += `</div>`;
-  });
-  /* The finisher, which runs at the end of every workout. It's empty by default,
-     because a plan generally puts core work on specific days rather than taxing every one,
-     so the full card only appears once there's something in it; otherwise it's one
-     quiet line, which keeps the option available without leaving an empty panel. */
-  const fin = S.program.finisher || [];
-  if(fin.length){
-    h += `<div class="card">
-      <div style="display:flex;align-items:center;gap:9px;margin-bottom:2px">
-        <span class="dot" style="background:var(--dim)"></span><h3>Finisher</h3>
-      </div>
-      <div class="sub" style="margin-bottom:6px">Runs at the end of every workout, in this order.</div>`;
-    fin.forEach((e,i)=>{
-      h += `<div class="prog-ex">
-        <div><b>${esc(e.name)}</b><div class="meta">${e.sets}×${esc(e.reps)}${e.rpe?" · "+esc(rpeTxt(e.rpe)):""}${e.weight!=null?" · "+e.weight+" "+unitWord():""}${e.note?" · "+esc(e.note):""}${
-          (()=>{ const m = planMarkHTML(e); return m ? "<br>" + m : ""; })()}</div></div>
-      </div>`;
-    });
-    h += `<button class="btn ghost small" data-dayedit="finisher" style="margin-top:10px">Edit the finisher</button></div>`;
-  } else {
-    h += `<div class="sub" style="text-align:center;margin:4px 2px 8px">
-      No finisher. Core work is placed on specific days in your plan rather than taxing every session.
-      <button class="linklike" data-dayedit="finisher" style="margin-left:4px">Add a finisher</button>
+    // worse failure than an empty row.
+    const list = S.program[wid] || [];
+    const names = list.map(e=> e.name).filter(Boolean);
+    const sum = names.slice(0, 4).join(", ") + (names.length > 4 ? "\u2026" : "");
+    const here = wid === todayWid;
+    h += `<div class="pg-day${here ? " is-today" : ""}" data-dayedit="${esc(wid)}" role="button"
+            tabindex="0" aria-label="Open ${esc(m.name)}${here ? ", today" : ""}">
+      <span class="pg-pill" style="--pg-c:${m.color}"></span>
+      <span class="pg-n">${esc(m.name)}</span>
+      <span class="pg-s">${here ? "today \u00b7 " : ""}${esc(sum || "nothing in this day yet")}</span>
+      <span class="pg-go" aria-hidden="true">\u203a</span>
     </div>`;
-  }
+  });
+  /* The finisher runs at the end of every workout and is empty by default, because a
+     plan generally puts core work on specific days rather than taxing every one. It is
+     the same row as a day, dimmed when there is nothing in it \u2014 which keeps the way in
+     without leaving an empty panel on the screen. */
+  const fin = S.program.finisher || [];
+  const finNames = fin.map(e=> e.name).filter(Boolean);
+  h += `<div class="pg-day${fin.length ? "" : " pg-dim"}" data-dayedit="finisher" role="button"
+          tabindex="0" aria-label="Open the finisher">
+    <span class="pg-pill" style="--pg-c:var(--dim)"></span>
+    <span class="pg-n">finisher</span>
+    <span class="pg-s">${fin.length
+      ? esc(finNames.slice(0, 4).join(", ") + (finNames.length > 4 ? "\u2026" : "")) + " \u00b7 after every session"
+      : "nothing \u2014 tap to add one"}</span>
+    <span class="pg-go" aria-hidden="true">\u203a</span>
+  </div></div>`;
   return h;
 }
 
@@ -56619,7 +56747,15 @@ function viewDayEdit(wid){
   const m = dayMeta(wid);
   const label = wid === "finisher" ? "Finisher" : m.name;
   let h = `<div class="hdr"><h1>${esc(label.toUpperCase())}</h1>${hdrRight()}</div>
-    <button class="btn ghost small" id="deBack" style="margin-bottom:12px">‹ Program</button>
+    <div class="btn-row" style="margin-bottom:12px">
+      <button class="btn ghost small" id="deBack">‹ Program</button>${
+      /* RENAME CAME WITH THE DAY. It used to sit on the day's card in the Program tab,
+         which is now a row with the day, its movements and a chevron and no room for a
+         second action \u2014 and a rename belongs on the thing being renamed anyway. Same
+         attribute, so the same handler still runs it. */
+      wid === "finisher" ? "" :
+      `<button class="btn ghost small" data-renameday="${esc(wid)}">Rename</button>`}
+    </div>
     <div class="sub" style="margin:0 2px 14px;font-size:var(--fs-3);color:var(--faint)">${
       list.length ? list.length + (list.length === 1 ? " exercise" : " exercises")
         + " · " + list.reduce((n,e)=> n + (parseInt(e.sets,10)||0), 0) + " sets."
@@ -65863,8 +65999,21 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.24.4";
+const NEWS_FOR = "2026.11.24.5";
 const NEWS = [
+  {k: "Program, rebuilt",
+   s: ["The tab printed your whole programme \u2014 every day, every exercise, sets, reps, "
+     + "RPE and loads \u2014 which on a six-day split was about six screens of it, and you "
+     + "could not see the shape of your own week without scrolling past the lot. It is a "
+     + "list of days again: the day, the first movements in it, and which one is today. "
+     + "Tap a day to open it and everything that used to be printed here is there, with "
+     + "the controls to change it. Full plan still prints all of it in one document.",
+     "The plan check leads with the muscles that are short this week; the rest are one "
+     + "tap below, in the order they were in. What kind of plan you are running, whether "
+     + "today is running as written, what the weeks do and where the plan came from were "
+     + "five cards saying four things, and are now four lines. Every one of those cards "
+     + "is still built, under \u201cThe plan in detail\u201d.",
+     "Renaming a day has moved onto the day\u2019s own screen, next to Program."]},
   {k: "The dark band across the top is gone",
    s: ["Every redesigned screen had a dark-to-transparent gradient washed across its top "
      + "band. It was there to keep the title and the cycle readable over whatever the art "
