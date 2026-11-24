@@ -691,13 +691,13 @@ await phone.waitForFunction(()=>{
 const trial = await phone.evaluate(()=>{
   const v = document.querySelector('#stage video.hero-media');
   return {day:GLASS_AT, src:v.getAttribute('src'), width:v.videoWidth, height:v.videoHeight,
-    rate:v.playbackRate, muted:v.muted, inline:v.playsInline};
+    rate:v.playbackRate, duration:v.duration, muted:v.muted, inline:v.playsInline};
 });
 ck("CONTROL: the phone is playing the Push B trial asset",
    trial.day === "today:push-b" && /hero-today-push-b\.mp4$/.test(trial.src), JSON.stringify(trial));
 ck("the Push B video decodes at native 3×", trial.width === 1170 && trial.height === 1920);
-ck("the trial uses its own playback rate and remains muted and inline",
-   trial.rate === 0.75 && trial.muted && trial.inline);
+ck("the five-second rotation is baked into a muted inline clip at native playback speed",
+   trial.rate === 1 && Math.abs(trial.duration - 5) < 0.02 && trial.muted && trial.inline);
 
 /* And the other way: turn the flag on, remount, and the same phone takes the still. */
 const r15b = await phone.evaluate(async ()=>{

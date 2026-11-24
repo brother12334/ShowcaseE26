@@ -20,7 +20,7 @@ window.GLASS_CONFIG = {
      pacing the shapes already run at (36 frames at 12fps is a 3-second rotation).
      1 is the clip as authored. */
   heroRate: 0.5,
-  heroRates: {"today:push-b": 0.75}, // native 60fps trial, 45 source frames per second at this rate
+  heroRates: {"today:push-b": 1}, // native 60fps with a five-second rotation baked in
   /* STEP 1 OF FINDING THE REAL COST. This was switched on before the motion rework —
      before still shapes stopped each carrying a backdrop-filter, before the rAF loop
      was limited to visible sprite shapes, and before everything paused during a scroll.
