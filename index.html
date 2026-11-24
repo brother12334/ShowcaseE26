@@ -6991,6 +6991,21 @@ body.news-open{overscroll-behavior:contain}
   font-family:var(--mono);font-size:var(--fs-1);letter-spacing:.08em;
 }
 .nb-w-c{color:var(--faint);font-size:var(--fs-6);flex-shrink:0}
+.nb-w-copy{font-size:13px;color:var(--e26-ink-2);line-height:1.4}
+.nb-facts{
+  border:1px solid var(--e26-card-line);border-radius:26px;background:var(--e26-card);overflow:hidden
+}
+.nb-fact{
+  width:100%;display:grid;grid-template-columns:64px minmax(0,1fr) 10px;align-items:center;
+  gap:10px;min-height:48px;text-align:left;padding:12px 16px;font:400 14px var(--e26-font);
+  background:none;border:0;color:var(--e26-ink-2);cursor:pointer
+}
+.nb-fact + .nb-fact{border-top:1px solid var(--e26-card-line)}
+.nb-fact b{font-weight:600;color:var(--e26-ink)}
+.nb-fact i{font-style:normal}
+.nb-fact:focus-visible{outline-offset:-3px}
+[data-body-target]{scroll-margin-top:16px}
+
 /* PUT DOWN FOR NOW. The same row, deliberately quieter than the live ones: no severity
    dot, dimmed text and a dashed edge, so the list of things you have set aside cannot be
    mistaken at a glance for the list of things to do. */
@@ -7025,6 +7040,8 @@ body.news-open{overscroll-behavior:contain}
 
 /* 7. the map */
 .nb-map-say{font-size:var(--fs-3);color:var(--dim);line-height:1.5;margin:2px 0 4px}
+[data-dg-screen="body"] .nb-map{padding:16px 10px 12px;background:var(--e26-card);
+  border:1px solid var(--e26-card-line);border-radius:28px}
 [data-dg-screen="body"] .nb-map-say{font-family:var(--e26-font);font-size:13px;
   color:var(--e26-ink-2)}
 .nb-rpe{border:1px solid rgba(201,154,52,.32);border-radius:var(--r);padding:11px 13px;
@@ -8758,7 +8775,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.24.11";
+const APP_VERSION = "2026.11.24.13";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -42093,6 +42110,30 @@ function bodyStatusNow(A){
 /* Each tile answers its own number so the reader never has to. `note` is the sentence
    that turns a figure into a fact about them. */
 function bodyTiles(A){
+  const today = dayStr(A.now);
+  const week = weekStartStr(today);
+  const sessions = S.sessions.filter(session=> session.date >= week && session.date <= today);
+  const hardSets = sessions.reduce((sum, session)=> sum + (session.entries || []).reduce((total, entry)=>{
+    const warms = entryWarmups(entry);
+    return total + sideSetsWorking(entry).reduce((sets, side)=>
+      sets + (setEffective(entry, side.si, warms, side.ref).v >= 0.5 ? side.count : 0), 0);
+  }, 0), 0);
+  const first = new Date(today + "T12:00:00");
+  first.setDate(first.getDate() - 6);
+  const since = dayStr(first);
+  const weighIns = bodyLogList().filter(reading=> reading.w > 0 && reading.d >= since && reading.d <= today);
+  const average = weighIns.length ? r1(weighIns.reduce((sum, reading)=> sum + Number(reading.w), 0) / weighIns.length) : null;
+  const bench = Math.max(bestEverFor("Barbell Bench Press").max1RM, bestEverFor("Bench Press").max1RM);
+  // A rolling split has no fixed calendar-week target.
+  const target = weekPinnedDow() != null ? CYCLE_LAYOUT.filter(day=> day && day !== "rest").length : 0;
+  return [
+    {key:"hard", label:"hard sets this week", val:String(hardSets), note:"Working sets with at least half credit. Unrated sets use the app's default effort credit."},
+    {key:"weight", label:unitWord() + ", 7-day average", val:average == null ? "\u2014" : String(average)},
+    {key:"bench", label:"est. bench max, " + unitWord(), val:bench > 0 ? String(Math.round(bench)) : "\u2014"},
+    {key:"sessions", label:"sessions this week", val:sessions.length + (target ? " of " + target : "")}
+  ];
+}
+function bodyRecoveryTiles(A){
   const t = A.totals;
   const out = [];
   out.push({key:"rec", label:"Recovery", val:t.rec+"%", pct:t.rec,
@@ -42343,7 +42384,7 @@ const BODY_SECTIONS = [
   "verdict", "map", "tiles", "weak", "cycle", "trend", "load", "priority",
   "niggles", "you", "flags", "sides", "notes", "patterns"
 ];
-function bodySectionOrder(h){
+function bodySectionOrder(h, facts){
   const at = h.indexOf("<!--SEC:");
   if(at < 0) return h;
   const head = h.slice(0, at);
@@ -42358,7 +42399,20 @@ function bodySectionOrder(h){
   });
   const used = {};
   let out = "";
-  BODY_SECTIONS.forEach(k=>{ if(parts[k] != null){ out += parts[k]; used[k] = 1; } });
+  const rows = facts.filter(fact=> parts[fact.section]?.trim());
+  BODY_SECTIONS.forEach(k=>{
+    if(parts[k] != null){
+      const fact = rows.find(row=> row.section === k);
+      out += fact ? `<div data-body-target="${k}">${parts[k]}</div>` : parts[k];
+      used[k] = 1;
+    }
+    if(k === "weak" && rows.length){
+      out += `<div class="nb-facts" aria-label="Body facts">${rows.map(row=> `
+        <button type="button" class="nb-fact" data-body-fact="${row.section}">
+          <b>${esc(row.label)}</b><span>${esc(row.value)}</span><i aria-hidden="true">›</i>
+        </button>`).join("")}</div>`;
+    }
+  });
   order.forEach(k=>{ if(!used[k]) out += parts[k]; });
   return head + out;
 }
@@ -42468,13 +42522,10 @@ function viewBodyBody(){
 
   /* ---- 2. THE NUMBERS, EACH ANSWERING ITSELF ----------------------------------- */
   h += SECM("tiles");
-  h += `<div class="nb-tiles">${bodyTiles(A).map((x,i)=>`
-    <div class="nb-tile nb-in" style="--d:${60+i*55}ms">
-      <div class="nb-tile-k">${x.term?term(x.term, x.label):esc(x.label)}</div>
-      <div class="nb-tile-v" style="color:${x.color}" data-countup>${esc(x.val)}</div>
-      ${x.sub?`<div class="nb-tile-sub">${esc(x.sub)}</div>`:""}
-      <div class="nb-meter"><i style="--w:${Math.max(0,Math.min(100,x.pct))}%;background:${x.color}"></i></div>
-      <div class="nb-tile-n">${esc(x.note)}</div>
+  h += `<div class="nb-tiles" aria-label="Training numbers">${bodyTiles(A).map(x=>`
+    <div class="nb-tile" data-body-stat="${x.key}"${x.note ? ` title="${esc(x.note)}"` : ""}>
+      <div class="nb-tile-v">${esc(x.val)}</div>
+      <div class="nb-tile-k">${esc(x.label)}</div>
     </div>`).join("")}</div>`;
 
   /* ---- 3. SO WHAT? ------------------------------------------------------------- */
@@ -42513,6 +42564,15 @@ function viewBodyBody(){
             : `<div>Log sleep and energy in your daily check-in and your recovery number gets adjusted for them.</div>`)}
     </div>`:""}
   </div>`;
+
+  h += `<div class="nb-tiles">${bodyRecoveryTiles(A).map((x,i)=>`
+    <div class="nb-tile nb-in" style="--d:${60+i*55}ms">
+      <div class="nb-tile-k">${x.term?term(x.term, x.label):esc(x.label)}</div>
+      <div class="nb-tile-v" style="color:${x.color}" data-countup>${esc(x.val)}</div>
+      ${x.sub?`<div class="nb-tile-sub">${esc(x.sub)}</div>`:""}
+      <div class="nb-meter"><i style="--w:${Math.max(0,Math.min(100,x.pct))}%;background:${x.color}"></i></div>
+      <div class="nb-tile-n">${esc(x.note)}</div>
+    </div>`).join("")}</div>`;
 
   /* ---- 4. ANYTHING TO FIX? ------------------------------------------------------
      Above the charts, deliberately: this is the only part of the screen that asks you to
@@ -42554,7 +42614,7 @@ function viewBodyBody(){
   const spanDays = (Date.now() - S.sessions[0].startedAt)/DAY_MS;
   const enoughWP = S.sessions.length >= 4 && spanDays >= 6;
   h += `<div class="nb-fix nb-in" style="--d:360ms">
-    <div class="nb-sec-k">Worth a look${enoughWP&&A.weak.length?`<span class="nb-count">${A.weak.length}</span>`:""}</div>`;
+    <div class="nb-sec-k">Weak points${enoughWP&&A.weak.length?`<span class="nb-count">${A.weak.length}</span>`:""}</div>`;
   if(!enoughWP){
     h += `<div class="nb-none">Train a few more times and this will start pointing out anything that needs attention. It needs about a week of sessions before it can tell a real gap from a workout that hasn't come round yet.</div>`;
   } else if(!A.weak.length){
@@ -42577,8 +42637,9 @@ function viewBodyBody(){
     h += show.map(w=>`<button class="nb-w sev${w.sev}" data-wp="${A.weak.indexOf(w)}">
       <span class="nb-w-dot"></span>
       <span class="nb-w-b">
-        <span class="nb-w-t">${esc(w.act)}</span>
-        <span class="nb-w-s">${esc(gName(w.muscle))} \u00b7 ${w.sev>=3?"worth doing soon":w.sev===2?"worth doing":"minor"}${
+        <span class="nb-w-t">${esc(gName(w.muscle))}</span>
+        <span class="nb-w-copy">${esc(w.act)}</span>
+        <span class="nb-w-s"> ${w.sev>=3?"worth doing soon":w.sev===2?"worth doing":"minor"}${
           didIt(w) ? `<i class="nb-w-did">${didWord(w)}</i>` : ""}</span>
       </span>
       <span class="nb-w-c">\u203a</span>
@@ -43031,7 +43092,22 @@ function viewBodyBody(){
   h += SECM("patterns");
   h += patternsCardHTML();
 
-  h = bodySectionOrder(h);
+  const weightChange = weightTrend();
+  const week = planWeekNow();
+  const openNiggles = activeHurts().length;
+  const signed = n=> (n > 0 ? "+" : "") + r1(n);
+  h = bodySectionOrder(h, [
+    {label:"cycle", section:"cycle", value:week && week.week
+      ? "Week " + week.week + (week.of ? " of " + week.of : "")
+      : cyc.done + " of " + cyc.total + " workouts"},
+    {label:"trend", section:weightChange ? "you" : "trend", value:weightChange
+      ? signed(weightChange.delta) + " " + unitWord() + " across weekly readings" : "Last 7 days"},
+    {label:"load", section:"load", value:t.setsWk + " working sets " + win.short},
+    {label:"priority", section:"priority", value:"Training focus"},
+    {label:"niggles", section:"niggles", value:openNiggles ? openNiggles + " open" : "None open"},
+    {label:"sides", section:"sides", value:"Side balance"},
+    {label:"patterns", section:"patterns", value:"What moves your numbers"}
+  ]);
   /* THE CREDIT MOVED TO SETTINGS -> LICENSING. It sat at the foot of the Body tab, which
      is where the anatomy it credits is drawn and also the one screen somebody opens to
      read about their own training. A licence is not a caption; it is a term of use, and a
@@ -53736,6 +53812,15 @@ function bind(){
     const g = gOf(r.dataset.mrow);
     BODY_FOCUS = g; BODY_EXPAND = (GROUP_REGIONS[g]||[]).length > 1;
     openMuscleDetail(r.dataset.mrow);
+  });
+  document.querySelectorAll("[data-body-fact]").forEach(button=> button.onclick=()=>{
+    const target = [...document.querySelectorAll("[data-body-target]")]
+      .find(row=> row.dataset.bodyTarget === button.dataset.bodyFact);
+    if(target){
+      target.tabIndex = -1;
+      target.focus({preventScroll:true});
+      target.scrollIntoView({block:"start"});
+    }
   });
   document.querySelectorAll("[data-sec]").forEach(b=> b.onclick=e=>{ e.stopPropagation(); bodyToggle(b.dataset.sec); });
   document.querySelectorAll("[data-askwhy]").forEach(b=> b.onclick=()=>{
@@ -66318,8 +66403,9 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.24.11";
+const NEWS_FOR = "2026.11.24.13";
 const NEWS = [
+  {k: "Your training numbers on Body", s: ["Body now puts this week’s hard sets and sessions, your seven-day weight average, and your estimated bench max beneath the anatomical map. The weak points and facts rows take you to the readings and controls behind them."]},
   {k: "One theme, everywhere",
    s: ["Today was still building its own frame by hand, from before the new screens had a shared one \u2014 so everything folded under it was wearing the old look: copper glyphs, buttons in capitals, a grade in typewriter type. It is a named screen now and the rest of the design reaches it.",
      "An action button is cream across the app, the way Start workout and the selected tab already were. Copper keeps the jobs only it can do \u2014 a verdict, a warning, a term you can tap \u2014 and stops being the colour of buttons. A notice marked new wears the same purple the cycle uses for today."]},
