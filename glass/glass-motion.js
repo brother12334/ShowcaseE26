@@ -70,7 +70,9 @@
 
   function tick(now) {
     raf = 0;
-    if (scrolling || document.hidden || reduce.matches) return;
+    /* `scrolling` is no longer a reason to stop \u2014 see start(). It still drives the
+       parallax below, which is the one thing it was always right about. */
+    if (document.hidden || reduce.matches) return;
     const C = cfg(), t = now / 1000;
     tilt.x += (tilt.tx - tilt.x) * 0.08;
     tilt.y += (tilt.ty - tilt.y) * 0.08;
@@ -84,7 +86,13 @@
     start();
   }
   function start() {
-    if (scrolling || document.hidden || reduce.matches) return;
+    /* SCROLLING NO LONGER STOPS ANYTHING. It used to, on the theory that compositing a
+       moving shape under a moving page is what costs; the owner's answer is that a
+       shape which stops every time the page twitches reads as broken, and on iOS the
+       rubber-band at the top of a screen fires scroll events constantly, so the X
+       appeared to halt at random. Visibility still gates it, which is the rule that
+       was actually buying anything. */
+    if (document.hidden || reduce.matches) return;
     if (!raf && items.some(it => it.frames > 1 && (it.visible || !cfg().pauseOffscreen))) {
       raf = requestAnimationFrame(tick);
     }
@@ -92,7 +100,7 @@
   function syncPlayback() {
     const pauseOffscreen = cfg().pauseOffscreen;
     for (const it of items) {
-      it.el.toggleAttribute('data-glass-paused', scrolling || document.hidden || (pauseOffscreen && !it.visible));
+      it.el.toggleAttribute('data-glass-paused', document.hidden || (pauseOffscreen && !it.visible));
     }
     start();
   }

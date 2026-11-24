@@ -681,7 +681,9 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   font:600 10px var(--mono);letter-spacing:.17em;text-transform:uppercase;color:var(--faint);
   margin:22px 3px 8px;
 }
-.set-sec:first-of-type{margin-top:6px}
+/* No extra lift on the first group now that .dg-body owns the gap; this used to be
+   half of Settings' 22px and would have been added to it. */
+.set-sec:first-of-type{margin-top:0}
 /* AND IN THE DARK GLASS SCREEN'S VOICE. This grid was already the design's grid \u2014 two
    tiles across, a name, a value and the three earned gauges \u2014 so what was left was the
    register: a mono label shouting over each group, an accent-orange glyph on every tile,
@@ -693,6 +695,7 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
    a quiet disc it reads as a tile's own mark instead. */
 [data-dg-screen="settings"] .set-sec{font:500 13px var(--e26-font);letter-spacing:0;
   text-transform:lowercase;color:var(--e26-ink-2);margin:22px 4px 10px}
+[data-dg-screen="settings"] .set-sec:first-of-type{margin-top:0}
 [data-dg-screen="settings"] .set-tile{background:var(--e26-card);
   border:1px solid var(--e26-card-line);border-radius:var(--e26-radius-card);padding:15px 16px}
 [data-dg-screen="settings"] .set-tile-i{width:38px;height:38px;border-radius:50%;
@@ -8158,7 +8161,11 @@ body.news-open{overscroll-behavior:contain}
    there is something behind worth frosting; everything else takes the same colour and
    border with no blur.
    ===================================================================== */
-.dg-screen .dg-body{padding:0 var(--e26-pad) 128px}
+/* ONE GAP UNDER THE HERO, THE SAME ON EVERY SCREEN. It was whatever the first card's
+   own margin happened to be: zero on History and Program, where the content began hard
+   against the art, and 22 on Settings. The owner asked for the spacing to be right
+   across the app, and the first thing wrong with it was that there was no rule. */
+.dg-screen .dg-body{padding:20px var(--e26-pad) 128px}
 /* ITS OWN CLASS, not .dg-hero. Today's hero is a composition with a fixed height; these
    reserve whatever layout.js gives their screen. Two classes rather than one because
    cssdupe requires a class to be defined in one place, and that rule is what keeps
@@ -8172,6 +8179,25 @@ body.news-open{overscroll-behavior:contain}
   color:var(--e26-ink);font-variant-numeric:tabular-nums}
 .dg-num-say{position:absolute;left:var(--e26-pad);bottom:18px;font-size:14px;
   color:var(--e26-ink-2)}
+/* THE NUMBER THE GLASS WAS DRAWN TO SIT ON.
+
+   An overlay hero is a bubble rendered against a numeral that this app supplies: the
+   design's own file sizes that numeral at 300px, 96 down from the top of a 440 band and
+   10px off the left edge, and the bubble's highlights and refraction were composed
+   against it. We were drawing it at 117px, two and a half times too small and 76px too
+   low \u2014 so the bubble sat over black instead of over cream and read as a dark blob
+   with a coloured edge. The owner's words were that the liquid shape does not look
+   great, and it did not: half the composition was missing.
+
+   The size is per digit so a three-figure count cannot run off the side. 1.55 is the
+   measured width-to-size ratio of this face's tabular digits; two digits at 390 wide
+   land at about 287px, which is the design's 300 as near as the gutter allows. */
+[data-dg-screen="history"] .dg-ghero,
+[data-dg-screen="research"] .dg-ghero{align-items:flex-start}
+[data-dg-screen="history"] .dg-num,
+[data-dg-screen="research"] .dg-num{
+  font-size:min(300px, calc((100vw - 20px) / var(--dg-num-len, 2) * 1.55));
+  line-height:.9;letter-spacing:-.03em;padding:0;margin:96px 0 0 -10px}
 .dg-ghero.dg-noart{display:none}
 [data-dg-screen="workout"] .dg-ghero{margin-bottom:clamp(-62px,-10.25vw,-32px)}
 [data-dg-screen="workout"] .dg-num{
@@ -8775,7 +8801,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.24.16";
+const APP_VERSION = "2026.11.24.17";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -38927,7 +38953,8 @@ function dgScreenHTML(o, inner){
   const show = o.heroH && (o.heroWord || !o.live);
   const hero = show
     ? `<div class="dg-ghero" style="--dg-hero-h:${o.heroH}">${o.heroWord
-        ? `<p class="hero-word dg-num"${o.screen === "workout" ? ' id="workoutElapsed"' : ""}>${esc(o.heroWord)}</p>` : ""}${o.heroSays
+        ? `<p class="hero-word dg-num"${o.screen === "workout" ? ' id="workoutElapsed"' : ""
+          } style="--dg-num-len:${String(o.heroWord).length}">${esc(o.heroWord)}</p>` : ""}${o.heroSays
         ? `<span class="dg-num-say">${esc(o.heroSays)}</span>` : ""}</div>`
     : `<div class="dg-ghero dg-noart"></div>`;
   return `<div class="dg dg-screen${show ? "" : " dg-nohero"}" data-dg-screen="${esc(o.screen || "")}">
@@ -39204,14 +39231,14 @@ function viewToday(){
      The plate-step prompt is the one that mattered most here: its detection runs on its
      own and queues what it found, and with no card to show it and no button to dismiss
      it, that queue would have sat unread for ever. */
-  const notesNow = (()=>{ try{ return todayNotes(wid); }catch(e){ return []; } })();
-  const foldN = noticeParts.length + notesNow.length;
-  if(foldN){
-    h += `<details class="dg-more"><summary>${foldN} thing${
-      foldN === 1 ? "" : "s"} to look at</summary>
-      <div class="dg-extra dg-more-b" data-today-extra>${notices}${noteStackHTML(notesNow)}</div>
-    </details>`;
-  }
+  /* THE FOLD HAS GONE TOO, AND WHAT IT HELD HAS MOVED RATHER THAN DIED.
+
+     The owner asked twice for Today to be the hero and nothing else, and the second
+     time it was with the fold already on the screen \u2014 so one quiet line was still one
+     line too many. What was behind it is not dropped: bodyNoticesHTML() draws the same
+     six on the Body tab, which is the screen about how you are doing and already has a
+     section for things worth a look. Nothing here builds them any more; Body asks for
+     them itself. */
   /* ONE LINE CAME BACK, AND IT IS NOT A NOTICE.
 
      The cycle strip stays \u2014 it is part of the reference \u2014 and tapping a day on it
@@ -39227,7 +39254,10 @@ function viewToday(){
       esc(dayName(ROTATION[S.pointer]))} is still next in your rotation.
       <button class="linklike" id="dayPickClear">back to the rotation</button></div>`;
   }
-  h += cycleFoot;
+  /* The cycle footer \u2014 how far through the cycle you are, last review, reset cycle \u2014
+     is not in the reference either. It is drawn on the rest day, which has room for it,
+     and under the rotation on Program, which is the screen about the cycle. Its two
+     controls are reachable from there. */
   h += `</div></div>`;
   return h;
 }
@@ -42412,6 +42442,31 @@ function viewBody(){
       right: w && w.week ? `<span>week ${w.week}${w.of ? " of " + w.of : ""}</span>` : ""},
     viewBodyBody());
 }
+/* THE SIX THAT USED TO LIVE UNDER TODAY.
+
+   Today is the hero and the door, at the owner's instruction, twice. These are the
+   things that were folded under it: a plate list that disagrees with a gym, a data
+   problem worth knowing about, a weigh-in due, a muscle walking in sore, what the plan
+   says about this week, the offer to write an earned load into the plan, and the day's
+   notes \u2014 which carry the focus fix.
+
+   They are drawn here because Body is the screen about how you are doing and already
+   has a section for things worth a look. Two of them are inputs the app uses to adapt
+   training, so they had to keep a way of reaching somebody; the rest are prompts that
+   would otherwise queue up unread. Each draws nothing when it has nothing to say, so on
+   a quiet day this adds nothing to the screen. */
+function bodyNoticesHTML(){
+  const wid = (()=>{ try{ return todaysWorkoutId(); }catch(e){ return null; } })();
+  const parts = [];
+  const add = f=>{ try{ const v = f(); if(v && v.trim()) parts.push(v); }catch(e){} };
+  add(plateDeriveCardHTML); add(dataIssueCardHTML); add(weighDueHTML);
+  add(soreDueHTML); add(planWeekStripHTML); add(autoProgCardHTML);
+  let notes = [];
+  try{ notes = wid ? todayNotes(wid) : []; }catch(e){}
+  const stack = notes.length ? noteStackHTML(notes) : "";
+  if(!parts.length && !stack) return "";
+  return `<div class="dg-extra" data-body-notices>${parts.join("")}${stack}</div>`;
+}
 function viewBodyBody(){
   const LIVE = liveStripHTML();
   const metric = BODY_METRIC;
@@ -42430,6 +42485,7 @@ function viewBodyBody(){
      anything. */
   quietClean();
   const A = bodyAnalysis();
+  h += bodyNoticesHTML();
   const win = A.win;
   const cyc = A.cyc;
   const t = A.totals;
@@ -49220,6 +49276,11 @@ function viewProgramBody(){
       : "nothing \u2014 tap to add one"}</span>
     <span class="pg-go" aria-hidden="true">\u203a</span>
   </div></div>`;
+  /* THE CYCLE FOOTER, which came off Today with everything else below its button. How
+     far through the cycle you are, the last review and resetting the cycle are all
+     about the rotation, and this is the screen the rotation is on. */
+  h += `<div class="dg-foot">${(()=>{
+    try{ return cycleFootHTML(cycleSlots()); }catch(e){ return ""; } })()}</div>`;
   return h;
 }
 
@@ -66390,8 +66451,12 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.24.16";
+const NEWS_FOR = "2026.11.24.17";
 const NEWS = [
+  {k: "Motion that does not stop, and glass that reads as glass",
+   s: ["Shapes and the hero kept halting for a moment whenever the page moved. On a phone the rubber-band at the top of a screen counts as movement, so they stopped for no reason you could see. They run whenever they are on screen now.",
+     "The number behind the glass on History and Research was drawn at less than half the size the art was composed against, so the bubble sat over black and looked like a dark blob. It sits over the figure now, the way it was drawn to.",
+     "Today is the hero and the button, with nothing under it. What was folded there has moved to Body, and the cycle footer to Program. And every screen now leaves the same gap under its hero instead of whatever the first card happened to have."]},
   {k: "Sharper glass and smoother motion across tabs", s: ["All Today heroes, including rest days, plus Program and Settings now use native 3× video at 60 fps. The slower five-second motion is built into the clips. Decorative glass has higher-resolution art, and the History overlay floats smoothly."]},
   {k: "Even pacing for Push B", s: ["The Push B hero now plays its five-second rotation at the video’s native speed to avoid the uneven motion caused by slowing playback."]},
   {k: "Sharper Push B hero", s: ["The Push B hero has a native 3× render and a 60-frame-per-second source. Its rotation runs at three-quarter speed on Today for the phone trial."]},

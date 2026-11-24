@@ -15,6 +15,12 @@ window.GLASS_CONFIG = {
   heroRate: 1,
   // Keep motion on touch screens. Reduced motion still uses the poster.
   stillHeroOnDenseTouch: false,
-  heroPauseOnScroll: true,   // stop the hero while the page is moving. See the note in index.html
+  /* THE HERO KEEPS PLAYING WHILE THE PAGE MOVES. This was true, to avoid compositing a
+     changing frame under moving content. What it actually produced was a hero that
+     stopped whenever the page twitched \u2014 and on iOS the rubber-band at the top of a
+     screen fires scroll events on its own, so it stopped for no reason the owner could
+     see. It still pauses off-screen and when the tab is hidden, which is where the
+     saving was. */
+  heroPauseOnScroll: false,
   reducedMotion: 'freeze'    // 'freeze' shows frame 0, no bob. keep this: it is an accessibility rule
 };
