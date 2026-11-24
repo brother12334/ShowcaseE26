@@ -122,6 +122,10 @@ console.log("5 - THE CARD WAITS FOR THE HOUR, THEN ASKS, THEN LEARNS IT");
       const real = domsCheckMin;
       window.domsCheckMin = ()=> mins;      // as if the hour had arrived
       render();
+      /* OPEN THE FOLD FIRST. Today keeps its notices behind one control now, and a
+         closed <details> is not in innerText \u2014 so reading the page without opening it
+         says the card never came when it is one tap away. */
+      document.querySelectorAll('details').forEach(d=> d.open = true);
       const out = /How did that land/i.test(document.body.innerText);
       window.domsCheckMin = real;
       return out;
