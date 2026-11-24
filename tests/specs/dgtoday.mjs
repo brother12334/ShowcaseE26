@@ -466,11 +466,14 @@ r = await newP.evaluate(async ()=>{
   scrollTo(0, 4000);
   await new Promise(ok=> setTimeout(ok, 500));
   const pausedAway = v.paused;
+  document.dispatchEvent(new Event('visibilitychange'));
+  await new Promise(ok=> setTimeout(ok, 70));
+  const pausedAfterWake = v.paused;
   scrollTo(0, 0);
   await new Promise(ok=> setTimeout(ok, 500));
   const backOn = !v.paused;
   spacer.remove();
-  return {playingAtTop, pausedAway, backOn,
+  return {playingAtTop, pausedAway, pausedAfterWake, backOn,
           /* And it is not under a transform, which is the compositor's slow path for a
              video; the shapes are scaled in a wrapper of their own instead. */
           heroTransform: getComputedStyle(v).transform,
@@ -478,6 +481,7 @@ r = await newP.evaluate(async ()=>{
 });
 ck("CONTROL: it was playing while on screen", r.playingAtTop === true, String(r.playingAtTop));
 ck("scrolled past, it stops", r.pausedAway === true, String(r.pausedAway));
+ck("returning to the tab leaves off-screen video paused", r.pausedAfterWake === true);
 ck("and starts again when it comes back", r.backOn === true, String(r.backOn));
 ck("the hero carries no transform of its own",
    r.heroTransform === "none", r.heroTransform);
@@ -678,26 +682,31 @@ ck("CONTROL: the day has baked art, so there is a hero to argue about", !!r.day,
 ck("the shipped setting leaves the motion on", r.flag === false, String(r.flag));
 ck("the day's hero video is what mounted, with no still in its place",
    r.video === "assets/hero-video/hero-today-" + r.day + ".mp4" && !r.image, r.video);
-await phone.evaluate(()=>{
-  S.restDays = [];
-  S.restDeleted = [...restTombstones(), todayStr()];
-  S.override = {date:todayStr(), workoutId:"pushB", at:Date.now()};
-  render();
-});
-await phone.waitForFunction(()=>{
-  const v = document.querySelector('#stage video.hero-media');
-  return GLASS_AT === 'today:push-b' && v && v.videoWidth > 0 && !v.paused && GLASS_HERO_SEEN;
-});
-const trial = await phone.evaluate(()=>{
-  const v = document.querySelector('#stage video.hero-media');
-  return {day:GLASS_AT, src:v.getAttribute('src'), width:v.videoWidth, height:v.videoHeight,
-    rate:v.playbackRate, duration:v.duration, muted:v.muted, inline:v.playsInline};
-});
-ck("CONTROL: the phone is playing the Push B trial asset",
-   trial.day === "today:push-b" && /hero-today-push-b\.mp4$/.test(trial.src), JSON.stringify(trial));
-ck("the Push B video decodes at native 3×", trial.width === 1170 && trial.height === 1920);
-ck("the five-second rotation is baked into a muted inline clip at native playback speed",
-   trial.rate === 1 && Math.abs(trial.duration - 5) < 0.02 && trial.muted && trial.inline);
+const trainingDays = [["pushA","push-a"], ["pushB","push-b"], ["pullA","pull-a"],
+  ["pullB","pull-b"], ["legsA","legs-a"], ["legsB","legs-b"]];
+for(const [workoutId, day] of trainingDays){
+  await phone.evaluate(wid=>{
+    S.restDays = [];
+    S.restDeleted = [...restTombstones(), todayStr()];
+    S.override = {date:todayStr(), workoutId:wid, at:Date.now()};
+    render();
+  }, workoutId);
+  await phone.waitForFunction(scene=>{
+    const v = document.querySelector('#stage video.hero-media');
+    return GLASS_AT === scene && v && v.videoWidth > 0 && !v.paused && GLASS_HERO_SEEN;
+  }, "today:" + day);
+  const trial = await phone.evaluate(()=>{
+    const v = document.querySelector('#stage video.hero-media');
+    return {day:GLASS_AT, src:v.getAttribute('src'), width:v.videoWidth, height:v.videoHeight,
+      rate:v.playbackRate, duration:v.duration, muted:v.muted, inline:v.playsInline};
+  });
+  ck("CONTROL: the phone is playing the " + day + " asset",
+     trial.day === "today:" + day && trial.src === "assets/hero-video/hero-today-" + day + ".mp4",
+     JSON.stringify(trial));
+  ck("the " + day + " video decodes at native 3×", trial.width === 1170 && trial.height === 1920);
+  ck("the " + day + " five-second rotation plays at native speed, muted and inline",
+     trial.rate === 1 && Math.abs(trial.duration - 5) < 0.02 && trial.muted && trial.inline);
+}
 
 /* And the other way: turn the flag on, remount, and the same phone takes the still. */
 const r15b = await phone.evaluate(async ()=>{
@@ -712,9 +721,67 @@ const r15b = await phone.evaluate(async ()=>{
 ck("with the flag on, the same screen gets the day's still, loaded, and no video",
    r15b.src === "assets/heroes/hero-today-" + r15b.day + ".webp" && r15b.w > 0 && !r15b.video,
    r15b.src + " @" + r15b.w);
+await phone.evaluate(()=>{
+  GLASS_CONFIG.stillHeroOnDenseTouch = false;
+  boot(window.REST);
+});
+for(const [screen, expectedHeight] of [["rest",1560], ["program",1320], ["settings",1260]]){
+  if(screen !== "rest") await phone.evaluate(key=>{
+    boot(S2=>{ S2.splitId = "ppl6"; S2.customSplit = null; });
+    TAB = key === "program" ? "program" : "sync";
+    SET_PAGE = null;
+    render();
+  }, screen);
+  await phone.waitForFunction(key=> GLASS_AT === key &&
+    document.querySelector('#stage video.hero-media')?.videoWidth > 0, screen);
+  const trial = await phone.evaluate(()=>{
+    const v = document.querySelector('#stage video.hero-media');
+    return {width:v.videoWidth, height:v.videoHeight, duration:v.duration, rate:v.playbackRate,
+            source:v.getAttribute('src'), muted:v.muted, inline:v.playsInline};
+  });
+  ck("CONTROL: " + screen + " loads its own native-speed 3× video",
+     trial.source === "assets/hero-video/hero-" + screen + ".mp4" &&
+     trial.width === 1170 && trial.height === expectedHeight &&
+     trial.duration === 5 && trial.rate === 1 && trial.muted && trial.inline, JSON.stringify(trial));
+}
+
 await phone.close();
 
-console.log("\n16. NOTHING FAILED TO LOAD, AND NOTHING THREW");
+console.log("\n16. DECORATIVE ART HAS ENOUGH SOURCE PIXELS FOR ITS 390PX PLACEMENTS");
+r = await newP.evaluate(async ()=>{
+  const layout = window.GLASS_LAYOUT;
+  const results = await Promise.all(Object.entries(layout.shapes).map(async ([key,shape])=>{
+    const image = new Image();
+    image.src = shape.still + ".webp";
+    await image.decode();
+    const slots = Object.values(layout.screens).flatMap(screen=> screen.shapes || [])
+      .filter(item=> item.shape === key);
+    return {key, used:slots.length, sharp:slots.every(item=>
+      image.naturalWidth >= item.w * 3 && image.naturalHeight >= item.h * 3)};
+  }));
+  const overlayScreens = ["history", "research", "workout"];
+  const overlays = await Promise.all(overlayScreens.map(async key=>{
+    const hero = layout.screens[key].hero;
+    const image = new Image();
+    image.src = hero.still + ".webp";
+    await image.decode();
+    return {key, sharp:image.naturalWidth >= 3 * hero.w && image.naturalHeight >= 3 * hero.h};
+  }));
+  boot();
+  TAB = "history"; render();
+  const glass = document.querySelector('#stage .glass[data-still$="overlay-history"]');
+  const history = {hero:!!glass, hasSheet:!!glass?.dataset.sheet, floats:glass?.hasAttribute('data-float')};
+  boot();
+  return {results, overlays, history};
+});
+ck("CONTROL: the twelve decorative stills are mapped to real slots",
+   r.results.length === 12 && r.results.every(item=> item.used > 0));
+ck("each still covers its largest 3× phone slot", r.results.every(item=> item.sharp), JSON.stringify(r.results));
+ck("the three live-number overlays cover their own 3× canvases",
+   r.overlays.length === 3 && r.overlays.every(item=> item.sharp), JSON.stringify(r.overlays));
+ck("CONTROL: History mounts a floating still overlay", r.history.hero && r.history.floats && !r.history.hasSheet);
+
+console.log("\n17. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
 ck("no page errors", pageErr.length === 0, pageErr.join(" | ") || "none");
 

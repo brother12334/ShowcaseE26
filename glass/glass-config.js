@@ -11,24 +11,9 @@ window.GLASS_CONFIG = {
   depth: 0.4,                // default depth: <1 sits far (moves less), >1 sits near (moves more)
   entrance: { stagger: 60 }, // ms between shapes arriving (look is set in tokens.css)
   pauseOffscreen: true,      // stop animating shapes that are scrolled out of view
-  /* THE HERO VIDEOS, which are 30fps clips rather than sprite sheets.
-     Measured on an iPhone: playback is near perfect — a clean 30fps on a 60Hz screen,
-     three held frames in four seconds — but the rotation in the clips covers enough
-     angle per frame that 30fps reads as steppy next to everything else on the panel.
-     Nothing is dropped; the motion is simply faster than the frame rate flatters.
-     Halving it halves the angle per frame and the judder with it, and it matches the
-     pacing the shapes already run at (36 frames at 12fps is a 3-second rotation).
-     1 is the clip as authored. */
-  heroRate: 0.5,
-  heroRates: {"today:push-b": 1}, // native 60fps with a five-second rotation baked in
-  /* STEP 1 OF FINDING THE REAL COST. This was switched on before the motion rework —
-     before still shapes stopped each carrying a backdrop-filter, before the rAF loop
-     was limited to visible sprite shapes, and before everything paused during a scroll.
-     It has never been tried since. The heroes are only about 0.8 MB of H.264 at
-     780x1280, which no iPhone struggles to decode, so the suspect is compositing the
-     video under the frosted masked shapes rather than the video itself.
-     true  = high-density touch screens get the still poster, no hero motion.
-     false = everybody gets the video. */
+  // The nine videos carry a five-second loop at 60 fps. Play at 1× for even refresh timing.
+  heroRate: 1,
+  // Keep motion on touch screens. Reduced motion still uses the poster.
   stillHeroOnDenseTouch: false,
   heroPauseOnScroll: true,   // stop the hero while the page is moving. See the note in index.html
   reducedMotion: 'freeze'    // 'freeze' shows frame 0, no bob. keep this: it is an accessibility rule

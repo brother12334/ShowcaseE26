@@ -8775,7 +8775,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.24.15";
+const APP_VERSION = "2026.11.24.16";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -36432,27 +36432,16 @@ addEventListener("resize", ()=>{
 /* THE HERO VIDEO STOPS WHEN IT IS NOT ON THE SCREEN.
 
    GlassMotion pauses the SHAPES off-screen; the hero is a <video> and is not one of
-   them, so nothing was watching it. Today's hero is 780x1280 at 30fps and it went on
-   decoding every frame while you scrolled down to read the day's exercises — which is
-   what made the screen feel heavy on a phone, and is a rule the design package states
-   outright: pause when off-screen.
+   them. Observe the video separately so it stops decoding frames when you scroll
+   down to the day's exercises or switch away from the tab.
 
    One observer, replaced with the scene, disconnected when the scene is torn down. */
 let GLASS_HERO_IO = null, GLASS_HERO_SEEN = false, GLASS_HERO_T = 0;
 /* THE HERO DOES NOT PLAY WHILE THE PAGE IS MOVING.
 
-   Pausing it off-screen was not enough: the stutter is while you scroll, and the reason
-   is compositing rather than decoding. A phone decodes this clip without noticing, but
-   the frame underneath a 4,500px page with text and a scrim drawn over it has to be
-   composited afresh on every scroll frame, and that is the moment smoothness is the
-   whole point.
-
-   So it plays when the screen is still and stops the instant you move. You cannot watch
-   an animation while scrolling past it, so nothing is lost — and scrolling costs exactly
-   what it cost before the redesign, because during a scroll there is no video at all.
-
-   160ms after the last scroll event, which is long enough not to flicker on a flick and
-   short enough that it feels like it never stopped. */
+   Pause during scrolling to avoid compositing a changing video frame under the
+   moving content and scrim. Resume 160ms after the most recent scroll event, when
+   the video is visible and the page is in the foreground. */
 /* The design's own numbers, with the defaults this app needs if the file is missing. */
 function glassCfg(k, dflt){
   try{ const v = (window.GLASS_CONFIG || {})[k]; return v == null ? dflt : v; }
@@ -36463,9 +36452,9 @@ function glassHeroPlay(){
   if(!v) return;
   /* Set every time rather than once: a video that has been paused and resumed, or
      re-created with the screen, comes back at 1. */
-  const rate = Number(glassCfg("heroRates", {})[GLASS_AT] ?? glassCfg("heroRate", 1)) || 1;
+  const rate = Number(glassCfg("heroRate", 1)) || 1;
   if(v.playbackRate !== rate) v.playbackRate = rate;
-  if(GLASS_HERO_SEEN && !document.hidden) v.play().catch(()=>{});
+  if(GLASS_HERO_SEEN && !GLASS_HERO_T && !document.hidden) v.play().catch(()=>{});
 }
 function glassHeroStill(){
   const v = document.querySelector("#stage .glass-layer video.hero-media");
@@ -36474,7 +36463,7 @@ function glassHeroStill(){
 function glassHeroScroll(){
   glassHeroStill();
   clearTimeout(GLASS_HERO_T);
-  GLASS_HERO_T = setTimeout(glassHeroPlay, 160);
+  GLASS_HERO_T = setTimeout(()=>{ GLASS_HERO_T = 0; glassHeroPlay(); }, 160);
 }
 function glassHeroWatch(stage){
   if(GLASS_HERO_IO){ GLASS_HERO_IO.disconnect(); GLASS_HERO_IO = null; }
@@ -36497,9 +36486,7 @@ function glassHeroWatch(stage){
   if(!glassHeroWatch.wired){
     glassHeroWatch.wired = true;
     document.addEventListener("visibilitychange", ()=>{
-      const cur = document.querySelector("#stage .glass-layer video.hero-media");
-      if(!cur) return;
-      if(document.hidden) cur.pause(); else cur.play().catch(()=>{});
+      if(document.hidden) glassHeroStill(); else glassHeroPlay();
     });
   }
 }
@@ -66403,8 +66390,9 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.24.15";
+const NEWS_FOR = "2026.11.24.16";
 const NEWS = [
+  {k: "Sharper glass and smoother motion across tabs", s: ["All Today heroes, including rest days, plus Program and Settings now use native 3× video at 60 fps. The slower five-second motion is built into the clips. Decorative glass has higher-resolution art, and the History overlay floats smoothly."]},
   {k: "Even pacing for Push B", s: ["The Push B hero now plays its five-second rotation at the video’s native speed to avoid the uneven motion caused by slowing playback."]},
   {k: "Sharper Push B hero", s: ["The Push B hero has a native 3× render and a 60-frame-per-second source. Its rotation runs at three-quarter speed on Today for the phone trial."]},
   {k: "Your training numbers on Body", s: ["Body now puts this week’s hard sets and sessions, your seven-day weight average, and your estimated bench max beneath the anatomical map. The weak points and facts rows take you to the readings and controls behind them."]},
