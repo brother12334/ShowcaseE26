@@ -24,8 +24,14 @@
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const fill = (s) => s.replace('{day}', o.day || 'push-b');
     if (h.video) {
-      // The 780px video is upscaled on 3x phones and competes with scrolling.
-      // Use the less compressed still on those displays.
+      // WHAT THIS ACTUALLY BUYS, because the first comment here overstated it.
+      // The still is 780x1280 — the SAME size as the video, so this does not reduce the
+      // upscale on a 3x phone by a single pixel. What it removes is video compression
+      // (a webp still is cleaner per pixel than an h264 frame) and the cost of
+      // compositing a playing video under a scrolling page, which is the complaint that
+      // prompted it. It also means no hero motion at all on those devices.
+      // Set GLASS_CONFIG.stillHeroOnDenseTouch = false to take the video back.
+      // Only re-rendering the heroes larger fixes the sharpness itself.
       const denseTouch = matchMedia('(pointer: coarse) and (min-resolution: 2.5dppx)').matches;
       const stillOnDenseTouch = (window.GLASS_CONFIG || {}).stillHeroOnDenseTouch !== false;
       if (reduce || (stillOnDenseTouch && denseTouch)) {
