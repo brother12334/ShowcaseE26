@@ -134,7 +134,11 @@ console.log("1 - THE FEED RENDERS FROM WHAT THE WORKER SENT");
     kick: (document.querySelector('.rs-kick')||{}).textContent
   }));
   ck("every fixture paper is on screen", r.cards === 4, String(r.cards));
-  ck("the meta line reads type, topic and date",
+  /* It read type, TOPIC and date until the redesign moved this line under the title and
+     made it a byline: who wrote it, when, and what kind of study. The topic went, because
+     it put most bylines on a second line for a word already in the title and in the chip
+     the reader filtered by. The two things asserted here never changed. */
+  ck("the byline reads the study type and the date",
      /RANDOMIZED TRIAL|META-ANALYSIS|OBSERVATIONAL|CONTROLLED STUDY/.test(r.kick)
      && /2026/.test(r.kick), r.kick);
   /* NO NUMERIC SCIENCE SCORE, ANYWHERE. Checked against the rendered app region rather
