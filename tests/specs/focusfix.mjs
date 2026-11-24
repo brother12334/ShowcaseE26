@@ -31,7 +31,11 @@ const built = await p.evaluate(()=>{
         reps:"10", rpe:"8", done:true, rest: k? 120 : undefined}))}))});
   S.sessions=[mk(9,false), mk(2,true)];
   S.sessions.forEach(s=> s.quality=scoreWorkout(s));
-  save(); TAB="today"; render();
+    /* THE NOTICES LIVE ON BODY NOW. Today is the hero and the door at the owner's
+       instruction; what was folded under it is drawn on the Body tab, which is the
+       screen about how you are doing. This spec is about the notice, not about
+       which tab it is on, so it looks where the notice is. */
+  save(); TAB="body"; render();
   const adv=S.sessions[1].quality.advice||[];
   return {all: adv.map(x=>({label:x.label, lost:x.lost, ex:x.ex, fix:x.fix})),
           top:{label:(adv[0]||{}).label, ex:(adv[0]||{}).ex, fix:(adv[0]||{}).fix}};

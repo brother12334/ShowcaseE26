@@ -170,6 +170,7 @@ console.log("\n2. A TRAINING DAY IS THE REFERENCE AND NOTHING ELSE; A REST DAY K
       return !!d && d.hasAttribute('open'); })(),
     foldHolds: !!document.querySelector('#app details.dg-more [data-today-extra]'),
     foldSays: ((document.querySelector('#app details.dg-more summary') || {}).textContent || "").trim(),
+    foot: !!document.querySelector('#app .dg-foot'),
     /* the reference's own parts, which must all still be here */
     head: !!document.querySelector('.dg-top h1'),
     cycle: document.querySelectorAll('.dg-cycle .dg-cy').length,
@@ -190,42 +191,15 @@ console.log("\n2. A TRAINING DAY IS THE REFERENCE AND NOTHING ELSE; A REST DAY K
      below would catch. */
   ck("the day's exercise list is gone from the screen for good",
      now.lifts === 0, String(now.lifts));
-  ck("and everything else that was below the button is behind one closed fold",
-     now.fold === 1 && now.foldOpen === false && now.foldHolds === true
-     && now.extra === 1, JSON.stringify(now));
-  ck("which says how many things it is holding",
-     /^\d+ things? to look at$/.test(now.foldSays), now.foldSays);
-  /* AND ON A DAY WITH NOTHING TO REPORT THERE IS NO FOLD AT ALL, which is the half that
-     makes the screen the reference: a control that is always there is content.
-
-     The quiet day is made by silencing the builders rather than by hunting for a state
-     that happens to say nothing. Two earlier drafts tried the state route and silenced
-     the wrong things \u2014 which is its own small lesson: what this needs to prove is that
-     the fold follows its contents, and the shortest honest way to say that is to empty
-     the contents and look. */
-  const quiet = await newP.evaluate(()=>{
-    boot();
-    const KEEP = {};
-    const OFF = ["plateDeriveCardHTML", "dataIssueCardHTML", "weighDueHTML",
-                 "soreDueHTML", "planWeekStripHTML", "autoProgCardHTML"];
-    OFF.forEach(k=>{ KEEP[k] = window[k]; window[k] = ()=> ""; });
-    KEEP.todayNotes = window.todayNotes; window.todayNotes = ()=> [];
-    render();
-    const out = {fold: document.querySelectorAll('#app details.dg-more').length,
-                 extra: document.querySelectorAll('#app [data-today-extra]').length,
-                 start: !!document.getElementById('startBtn'),
-                 foot: !!document.querySelector('#app .dg-foot')};
-    Object.keys(KEEP).forEach(k=>{ window[k] = KEEP[k]; });
-    render();
-    out.backAgain = document.querySelectorAll('#app details.dg-more').length;
-    return out;
-  });
-  ck("CONTROL: the quiet state still drew the screen",
-     quiet.start === true && quiet.foot === true, JSON.stringify(quiet));
-  ck("with nothing to report, nothing is below the button but the cycle's own footer",
-     quiet.fold === 0 && quiet.extra === 0, JSON.stringify(quiet));
-  ck("CONTROL: and the fold comes back when there is something to say again",
-     quiet.backAgain === 1, String(quiet.backAgain));
+  /* AND NOW THE FOLD HAS GONE TOO. It held the six notices that had nowhere else to
+     be, and the owner asked a second time for Today to be the hero and the door with
+     nothing under it \u2014 so they are drawn on Body, which is the screen about how you
+     are doing, and this screen builds none of them. dgbody walks that tab for the same
+     six, so nothing is being asserted out of existence here. */
+  ck("and nothing at all is built below the button",
+     now.extra === 0 && now.fold === 0, JSON.stringify(now));
+  ck("not even the cycle's own footer, which is on Program now",
+     now.foot === false, String(now.foot));
   /* The week badge is drawn from the plan's own week notes, and a plan that names no
      weeks has none to draw. */
   const wk = await newP.evaluate(()=>{

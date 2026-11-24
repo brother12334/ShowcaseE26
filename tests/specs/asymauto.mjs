@@ -108,7 +108,11 @@ console.log("\n1b - AND IT RUNS OFF AN ORDINARY ACTION, NOT A CALL TO ITSELF");
 console.log("\n2 - THE NUMBERS STILL WAIT TO BE READ");
 {
   const r = await p.evaluate(()=>{
-    TAB="today"; render();
+    /* THE NOTICES LIVE ON BODY NOW. Today is the hero and the door at the owner's
+       instruction; what was folded under it is drawn on the Body tab, which is the
+       screen about how you are doing. This spec is about the notice, not about
+       which tab it is on, so it looks where the notice is. */
+    TAB="body"; render();
     /* OPEN THE FOLD FIRST. Today draws only its reference on arrival and keeps the
        notices behind one control; a closed <details> is not in innerText, so reading
        the page without opening it would say the card had gone when it is one tap away.

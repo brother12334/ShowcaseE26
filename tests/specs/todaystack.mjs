@@ -27,7 +27,11 @@ await p.evaluate(()=>{
     sweepSessionPRs(s2); s2.quality=scoreWorkout(s2); s2.progression=buildProgression(s2);
     S.sessions.push(s2);
   }
-  save(); TAB="today"; render();
+    /* THE NOTICES LIVE ON BODY NOW. Today is the hero and the door at the owner's
+       instruction; what was folded under it is drawn on the Body tab, which is the
+       screen about how you are doing. This spec is about the notice, not about
+       which tab it is on, so it looks where the notice is. */
+  save(); TAB="body"; render();
 });
 await p.waitForTimeout(600);
 console.log('notes:', await p.evaluate(()=>todayNotes(ROTATION[S.pointer]).map(n=>({k:n.k, act:n.act, label:n.label}))));

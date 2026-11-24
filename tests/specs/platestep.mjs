@@ -166,7 +166,11 @@ console.log("\n5. THE RECONCILIATION SPEAKS ONLY WHEN SOMETHING ACTUALLY CHANGED
 r = await p.evaluate(()=>{
   boot();
   runOneTimeSeeds();
-  TAB='today'; render();
+    /* THE NOTICES LIVE ON BODY NOW. Today is the hero and the door at the owner's
+       instruction; what was folded under it is drawn on the Body tab, which is the
+       screen about how you are doing. This spec is about the notice, not about
+       which tab it is on, so it looks where the notice is. */
+  TAB='body'; render();
   return {rows: (S.plateDeriveAsk||[]).length, scan: plateDeriveScan().length,
           card: /The bar now moves by the plates you own/.test(document.getElementById('app').innerHTML),
           flag: S.plateDeriveV1};
@@ -183,7 +187,7 @@ r = await p.evaluate(()=>{
     S2.gyms[1].plateStep = 25;               // Lotus says 25, its plates say 2.5
   });
   runOneTimeSeeds();
-  TAB='today'; render();
+  TAB='body'; render();
   const html = document.getElementById('app').innerHTML;
   return {rows: (S.plateDeriveAsk||[]).slice(), card: /The bar now moves by the plates you own/.test(html),
           names: /Lotus Gym/.test(html), usual: /Your usual kit/.test(html),
@@ -198,7 +202,7 @@ ck("CONTROL: there is a way to dismiss it", r.seen);
 
 r = await p.evaluate(()=>{
   const btn = document.getElementById('pdSeen'); if(btn) btn.click();
-  TAB='today'; render();
+  TAB='body'; render();
   return {gone: !S.plateDeriveAsk,
           card: /The bar now moves by the plates you own/.test(document.getElementById('app').innerHTML)};
 });
