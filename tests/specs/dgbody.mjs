@@ -148,6 +148,37 @@ ck("the page is not wider than the window", r.wide === false, String(r.vw));
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
 ck("no page errors", pageErr.length === 0, pageErr.join(" | ") || "none");
 
+console.log("\n6. THE BODY SUMMARY SHOWS LIVE MEASUREMENTS AND OPENS ITS DETAILS");
+r = await p.evaluate(()=>{
+  const counts = () => Object.fromEntries([...document.querySelectorAll('[data-body-stat]')]
+    .map(el=> [el.dataset.bodyStat, el.querySelector('.nb-tile-v').textContent.trim()]));
+  const initial = counts();
+  const now = Date.now(), date = dayStr(now);
+  S.sessions.push({id:'body-tile-test', date, workoutId:DAYS[0], startedAt:now - 60000,
+    finishedAt:now, entries:[{name:'Barbell Bench Press',sets:[
+      {weight:'100',reps:'5',rpe:'9',done:true},
+      {weight:'50',reps:'5',rpe:'9',done:true,warmup:true}
+    ]}]});
+  const weights = bodyLog();
+  const today = {...weights[date]};
+  weights[date] = {...today, w:192};
+  render();
+  const changed = counts();
+  const links = [...document.querySelectorAll('[data-body-fact]')];
+  const order = !!(document.querySelector('.nb-tiles').compareDocumentPosition(links[0]) &
+    Node.DOCUMENT_POSITION_FOLLOWING);
+  links[0].click();
+  return {initial, changed, order, links:links.length,
+    focused:document.activeElement.dataset.bodyTarget};
+});
+ck("CONTROL: the tiles and facts exist", Object.keys(r.initial).length === 4 && r.links >= 3);
+ck("a warm-up does not add to the week's hard sets", Number(r.changed.hard) === Number(r.initial.hard) + 1,
+   JSON.stringify([r.initial,r.changed]));
+ck("the seven-day number is drawn when a weigh-in exists", Number(r.changed.weight) > 0);
+ck("the session count advances", parseInt(r.changed.sessions) === parseInt(r.initial.sessions) + 1);
+ck("facts follow the tiles and open their own sections", r.order && r.focused === "cycle");
+
+await p.evaluate(()=> scrollTo(0, 0));
 await p.screenshot({path: shot("dgbody.png"), fullPage: true});
 await b.close();
 srv.close();

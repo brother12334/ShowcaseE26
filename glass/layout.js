@@ -275,10 +275,9 @@ window.GLASS_LAYOUT = {
   "history": {
    "height": 1500,
    "hero": {
-    "overlay": "assets/motion/overlay-history",
+    "overlay": null,
     "still": "assets/hero-overlays/overlay-history",
-    "frames": 36,
-    "cols": 12,
+    "bob": 3,
     "w": 390,
     "h": 440,
     "note": "live text (session count) sits underneath"
