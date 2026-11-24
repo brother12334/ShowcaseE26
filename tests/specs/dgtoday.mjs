@@ -678,6 +678,27 @@ ck("CONTROL: the day has baked art, so there is a hero to argue about", !!r.day,
 ck("the shipped setting leaves the motion on", r.flag === false, String(r.flag));
 ck("the day's hero video is what mounted, with no still in its place",
    r.video === "assets/hero-video/hero-today-" + r.day + ".mp4" && !r.image, r.video);
+await phone.evaluate(()=>{
+  S.restDays = [];
+  S.restDeleted = [...restTombstones(), todayStr()];
+  S.override = {date:todayStr(), workoutId:"pushB", at:Date.now()};
+  render();
+});
+await phone.waitForFunction(()=>{
+  const v = document.querySelector('#stage video.hero-media');
+  return GLASS_AT === 'today:push-b' && v && v.videoWidth > 0 && !v.paused && GLASS_HERO_SEEN;
+});
+const trial = await phone.evaluate(()=>{
+  const v = document.querySelector('#stage video.hero-media');
+  return {day:GLASS_AT, src:v.getAttribute('src'), width:v.videoWidth, height:v.videoHeight,
+    rate:v.playbackRate, muted:v.muted, inline:v.playsInline};
+});
+ck("CONTROL: the phone is playing the Push B trial asset",
+   trial.day === "today:push-b" && /hero-today-push-b\.mp4$/.test(trial.src), JSON.stringify(trial));
+ck("the Push B video decodes at native 3×", trial.width === 1170 && trial.height === 1920);
+ck("the trial uses its own playback rate and remains muted and inline",
+   trial.rate === 0.75 && trial.muted && trial.inline);
+
 /* And the other way: turn the flag on, remount, and the same phone takes the still. */
 const r15b = await phone.evaluate(async ()=>{
   GLASS_CONFIG.stillHeroOnDenseTouch = true;
