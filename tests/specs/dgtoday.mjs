@@ -483,6 +483,27 @@ ck("the hero carries no transform of its own",
    r.heroTransform === "none", r.heroTransform);
 ck("and is not inside the scaled shape wrapper", r.inShapes === false, String(r.inShapes));
 
+console.log("\n11a. AND IT PLAYS AT THE RATE THE CLIP WAS AUTHORED AT");
+/* THE STUTTER THE OWNER REPORTED WAS THIS NUMBER. It was 0.5, on the reasoning that
+   the rotation covers a lot of angle per frame and halving the rate halves the angle.
+   It does, and it also halves how often the picture changes: a screen recording of the
+   phone showed the hero updating once every four captured frames \u2014 about 15 a second \u2014
+   in a cadence so regular that nothing was being dropped. The device was displaying
+   exactly what it was asked to.
+
+   Below 1 is therefore not a performance setting, it is a slower slideshow, and this
+   says so rather than leaving the next person to measure it again. A clip that needs
+   slower motion needs more frames, not fewer. */
+r = await newP.evaluate(async ()=>{
+  boot(); glassSync();
+  await new Promise(ok=> setTimeout(ok, 300));
+  const v = document.querySelector('#stage video.hero-media');
+  return {cfg: glassCfg("heroRate", 1), rate: v ? v.playbackRate : null, has: !!v};
+});
+ck("CONTROL: there is a hero video to ask about", r.has === true);
+ck("the clip is not slowed below the rate it was drawn at", r.cfg >= 1, String(r.cfg));
+ck("and the element is actually set to it", r.rate === r.cfg, r.rate + " vs " + r.cfg);
+
 console.log("\n11b. AND IT DOES NOT PLAY WHILE THE PAGE IS MOVING");
 /* Pausing off-screen was not enough on a real phone. The cost is compositing, not
    decoding: the frame under a 4,500px page with text and a scrim over it is recomposited

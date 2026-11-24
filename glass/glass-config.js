@@ -12,14 +12,25 @@ window.GLASS_CONFIG = {
   entrance: { stagger: 60 }, // ms between shapes arriving (look is set in tokens.css)
   pauseOffscreen: true,      // stop animating shapes that are scrolled out of view
   /* THE HERO VIDEOS, which are 30fps clips rather than sprite sheets.
-     Measured on an iPhone: playback is near perfect — a clean 30fps on a 60Hz screen,
-     three held frames in four seconds — but the rotation in the clips covers enough
-     angle per frame that 30fps reads as steppy next to everything else on the panel.
-     Nothing is dropped; the motion is simply faster than the frame rate flatters.
-     Halving it halves the angle per frame and the judder with it, and it matches the
-     pacing the shapes already run at (36 frames at 12fps is a 3-second rotation).
-     1 is the clip as authored. */
-  heroRate: 0.5,
+
+     THIS WAS 0.5 AND THAT WAS THE STUTTER. The reasoning was that the rotation covers
+     enough angle per frame to read as steppy, so halving the rate halves the angle per
+     frame. It does — and it also halves how often the picture changes, which is the
+     part that matters. A screen recording of the real phone, 1170x2532 at 53fps, shows
+     the hero changing once every four captured frames, in a perfectly regular cadence:
+     about 15 updates a second. Fifteen is below where motion reads as motion. The
+     owner reported it as stuttering and he was reading it correctly.
+
+     THE SAME RECORDING SAYS THE PHONE IS NOT STRUGGLING. The cadence is metronomic —
+     no change, no change, no change, change, over and over, with no irregular gap
+     anywhere in nine seconds. Nothing is being dropped. The device was displaying
+     exactly what it was told to display, and it was told to display half a clip.
+
+     So it is back to the rate the clips were authored at. If the rotation still feels
+     fast at 30fps, the fix is a clip with more frames over the same angle, not fewer
+     frames over the same time: lowering this slows the motion by making it jerkier,
+     which is a trade that only looks like a win on paper. */
+  heroRate: 1,
   /* STEP 1 OF FINDING THE REAL COST. This was switched on before the motion rework —
      before still shapes stopped each carrying a backdrop-filter, before the rAF loop
      was limited to visible sprite shapes, and before everything paused during a scroll.
