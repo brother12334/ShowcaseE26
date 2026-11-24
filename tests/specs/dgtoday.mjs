@@ -423,26 +423,40 @@ ck("it never grows past the window, at any point in its arrival",
 ck("CONTROL: it is animating, so there was something to overshoot",
    r.name && r.name !== "none", r.name);
 
-console.log("\n12. THE TOP BAND IS READABLE OVER WHATEVER THE ART IS DOING");
-/* The brief requires 4.5:1 over glass and says to move a shape that sits on text — but
-   the hero is a baked video, so the only thing that can move is a scrim. */
+console.log("\n12. NOTHING IS LAID OVER THE TOP OF THE SCREEN");
+/* THIS SECTION USED TO ASSERT THE OPPOSITE, and the change is deliberate rather than a
+   loosening. There was a dark-to-transparent scrim across the top of every converted
+   screen, so the header and the cycle would hold 4.5:1 on a frame where the hero comes
+   up bright. It has been taken off on request: it was the one thing on these screens
+   that was neither content nor the design's own art, and it read as a haze over the
+   picture.
+
+   So what is checked now is that it is really gone — nothing between the art and the
+   text — and that the header and cycle still sit ABOVE the art rather than behind it,
+   which is the part that was never about the scrim.
+
+   The contrast this protected is now unprotected on the brightest frames. That is a
+   known cost, written down in the stylesheet where the scrim used to be; if it reads
+   badly on a phone the answer is a backing behind those two elements, not a wash across
+   the band. */
 r = await newP.evaluate(()=>{
   boot();
-  const sc = document.querySelector('#app .dg-scrim');
-  if(!sc) return {none: true};
-  const s2 = sc.getBoundingClientRect(), cy = document.querySelector('.dg-cycle').getBoundingClientRect();
   const z = n2=> parseInt(getComputedStyle(n2).zIndex, 10) || 0;
-  return {covers: s2.bottom >= cy.bottom,
-          overArt: z(sc) > 0,
-          underText: z(sc) < z(document.querySelector('.dg-top')),
-          hidden: sc.getAttribute('aria-hidden') === "true",
-          h: Math.round(s2.height), cyBottom: Math.round(cy.bottom)};
+  const top = document.querySelector('#app .dg-top');
+  const cyc = document.querySelector('#app .dg-cycle');
+  return {scrim: !!document.querySelector('#app .dg-scrim'),
+          gradients: [...document.querySelectorAll('#app .dg > *')]
+            .filter(n2=> /gradient/.test(getComputedStyle(n2).backgroundImage))
+            .map(n2=> n2.className),
+          topZ: z(top), cycZ: z(cyc),
+          topPos: getComputedStyle(top).position};
 });
-ck("there is a scrim", !r.none);
-ck("it reaches past the cycle", r.covers === true, r.h + " vs " + r.cyBottom);
-ck("it sits over the art and under the text",
-   r.overArt && r.underText, "z over art " + r.overArt + ", under text " + r.underText);
-ck("and it is not announced", r.hidden === true);
+ck("the scrim is gone", r.scrim === false, String(r.scrim));
+ck("and nothing else lays a gradient across the top",
+   r.gradients.length === 0, r.gradients.join(", ") || "none");
+ck("CONTROL: the header is still lifted above the art", r.topZ > 0 && r.topPos === "absolute",
+   "z " + r.topZ + ", " + r.topPos);
+ck("and so is the cycle", r.cycZ > 0, "z " + r.cycZ);
 
 console.log("\n13. THE CONTENT BELOW START USES THE SAME DESIGN");
 r = await newP.evaluate(()=>{
@@ -531,20 +545,45 @@ ck("reduced motion removes the bob",
 await newP.emulateMedia({reducedMotion:'no-preference'});
 await newP.evaluate(()=>{ document.getElementById('testGlass').remove(); scrollTo(0, 0); });
 
-console.log("\n15. HIGH-DENSITY TOUCH SCREENS USE THE HERO STILL");
+/* THIS SECTION USED TO ASSERT THE OPPOSITE — that a high-density touch screen is served
+   the hero STILL — and the reversal is deliberate rather than a loosening. The still swap
+   was a guess at why the phone looked laggy, made without re-measuring after the motion
+   rework that had already halved the hero frame rate; the owner's answer was that he wants
+   the heroes moving on his phone and static is not the answer. So the shipped setting is
+   stillHeroOnDenseTouch: false, and a dense touch screen gets the video.
+
+   What is asserted here is therefore the SWITCH, not the setting: with the flag off the
+   video mounts, and with it on the same viewport gets the day's still instead. Asserting
+   both positions is what keeps this honest — a spec that only read the shipped value would
+   pass just as happily if scene.js stopped consulting the flag at all. */
+console.log("\n15. THE HERO MOVES ON A HIGH-DENSITY TOUCH SCREEN, AND THE STILL SWAP STILL WORKS");
 const phone = await openApp(BASE, true, {isMobile:true, hasTouch:true, deviceScaleFactor:3});
 r = await phone.evaluate(async ()=>{
   boot();
+  const vid = document.querySelector('#stage video.hero-media');
+  return {dense:matchMedia('(pointer: coarse) and (min-resolution: 2.5dppx)').matches,
+    flag:GLASS_CONFIG.stillHeroOnDenseTouch,
+    day:GLASS_DAY[todaysWorkoutId()],
+    video:vid?.getAttribute('src'), image:!!document.querySelector('#stage img.hero-media')};
+});
+ck("CONTROL: this viewport is a high-density touch screen", r.dense === true);
+ck("CONTROL: the day has baked art, so there is a hero to argue about", !!r.day, r.day);
+ck("the shipped setting leaves the motion on", r.flag === false, String(r.flag));
+ck("the day's hero video is what mounted, with no still in its place",
+   r.video === "assets/hero-video/hero-today-" + r.day + ".mp4" && !r.image, r.video);
+/* And the other way: turn the flag on, remount, and the same phone takes the still. */
+const r15b = await phone.evaluate(async ()=>{
+  GLASS_CONFIG.stillHeroOnDenseTouch = true;
+  GLASS_AT = null; GlassScene.unmount(); glassSync();
   const image = document.querySelector('#stage img.hero-media');
   if(image) await image.decode();
-  return {dense:matchMedia('(pointer: coarse) and (min-resolution: 2.5dppx)').matches,
-    image:image?.naturalWidth, src:image?.getAttribute('src'),
+  return {src:image?.getAttribute('src'), w:image?.naturalWidth,
     day:GLASS_DAY[todaysWorkoutId()],
     video:!!document.querySelector('#stage video.hero-media')};
 });
-ck("CONTROL: this viewport is a high-density touch screen", r.dense === true);
-ck("the day-specific hero still loaded with no video", r.image > 0 &&
-   !!r.day && r.src === "assets/heroes/hero-today-" + r.day + ".webp" && !r.video, r.src);
+ck("with the flag on, the same screen gets the day's still, loaded, and no video",
+   r15b.src === "assets/heroes/hero-today-" + r15b.day + ".webp" && r15b.w > 0 && !r15b.video,
+   r15b.src + " @" + r15b.w);
 await phone.close();
 
 console.log("\n16. NOTHING FAILED TO LOAD, AND NOTHING THREW");

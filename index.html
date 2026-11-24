@@ -7697,17 +7697,17 @@ body.news-open{overscroll-behavior:contain}
   min-height:100svh;padding:0 0 128px;
   margin:calc(-16px - env(safe-area-inset-top)) -14px -20px}
 .dg-top-r{display:flex;align-items:center;gap:10px}
-/* Tall enough to cover the header and the cycle, and gone by the time the hero word
-   starts. Transparent at the bottom so there is no edge to see. */
-.dg-scrim{position:absolute;left:0;right:0;top:0;z-index:1;pointer-events:none;
-  height:calc(160px + env(safe-area-inset-top));
-  /* LIGHTER THAN THE FIRST ATTEMPT. It only has to rescue the frames where the art
-     comes up bright behind the header; at .92 it was laying a grey haze over the top of
-     every frame and the screen no longer matched the mockup, whose art is simply dark
-     there. Enough to hold the text, not enough to see. */
-  background:linear-gradient(to bottom,
-    rgba(10,10,10,.72) 0%, rgba(10,10,10,.58) 48%, rgba(10,10,10,.26) 78%,
-    rgba(10,10,10,0) 100%)}
+/* NO SCRIM. There was a dark-to-transparent gradient across the top of every
+   converted screen, put there so the header and the cycle would hold 4.5:1 on a frame
+   where the hero comes up bright. It is off on request: it was the one thing on these
+   screens that was neither content nor the design's own art, and it read as a haze.
+
+   WHAT THAT COSTS, so it is not rediscovered as a bug. The brief requires text over
+   glass to keep 4.5:1 and says to move a shape that sits on text — but the hero is a
+   baked video and there is no shape to move. On the frames where the art is brightest
+   behind the header, the date and the dimmed pills now sit on it unprotected. If that
+   turns out to read badly on the phone, the fix is a backing behind those two elements
+   rather than a wash across the whole band. */
 /* The cycle's footer line: where you are in it, and the two controls that live nowhere
    else. Quieter than it was, because the strip above it now says the same thing in
    words rather than in two-letter codes. */
@@ -8422,7 +8422,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.24.3";
+const APP_VERSION = "2026.11.24.4";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -35941,20 +35941,12 @@ let GLASS_AT = null;
 
    It also takes three spinning sheets per screen off a phone, which is the difference
    between a screen that scrolls and one that does not. */
-/* EVERY SCREEN IS "hero" FOR NOW — no decorative shapes behind the content, on request.
-
-   The heroes stay: they are the top of each screen and their motion was only just put
-   back. What is off is the floating glass behind the cards — the spheres, capsules,
-   torus and jack that drift in the margins. Workout was the only screen still showing
-   any (two), and Today and the rest day never had any to begin with, so in practice
-   this is Workout going quiet and the rest staying as they were.
-
-   Nothing is deleted. Every shape is still placed in layout.js at its coordinates, and
-   putting a screen's shapes back is changing its one word here from "hero" to 1 — after
-   checking each shape against that screen's real content, because the positions were
-   drawn against the mockup's. */
-const GLASS_READY = {today: "hero", rest: "hero", history: "hero", body: "hero",
-                     program: "hero", research: "hero", workout: "hero",
+/* Which screens get art, and how much. 1 = hero and shapes, because the screen is laid
+   out to its mockup and the shapes have been checked against its real content.
+   "hero" = the hero only, because layout.js places that screen's shapes against content
+   that is not there yet and they would land on text. */
+const GLASS_READY = {today: 1, rest: 1, history: "hero", body: "hero",
+                     program: "hero", research: "hero", workout: 1,
                      settings: "hero"};
 function glassSceneFor(){
   if(OB || ACCT_UI || PF) return "";                 // onboarding and the account flow
@@ -38564,7 +38556,6 @@ function dgScreenHTML(o, inner){
         ? `<span class="dg-num-say">${esc(o.heroSays)}</span>` : ""}</div>`
     : `<div class="dg-ghero dg-noart"></div>`;
   return `<div class="dg dg-screen${show ? "" : " dg-nohero"}" data-dg-screen="${esc(o.screen || "")}">
-    ${show ? `<div class="dg-scrim" aria-hidden="true"></div>` : ""}
     <div class="dg-top"><h1>${esc(o.title)}</h1>${
       o.right ? `<span class="dg-top-r">${o.right}</span>` : ""}</div>
     ${hero}
@@ -38639,12 +38630,6 @@ function viewToday(){
     try{ return cycleFootHTML(cycleSlots()); }catch(e){ return ""; } })()}</div>`;
 
   let h = `<div class="dg">`;
-  /* THE TOP BAND IS PROTECTED. The brief's own rule is that text over glass keeps
-     4.5:1 and that a shape sitting on text should be moved — but the hero is a baked
-     video, so there is no shape to move. On a frame where the art comes up bright
-     behind the header the date and the far pills were washed out to nothing. A scrim
-     under the text and over the art is the one thing that can be moved. */
-  h += `<div class="dg-scrim" aria-hidden="true"></div>`;
   h += dgTopHTML(moonBtn + setBtn);
   h += dgCycleHTML();
 
@@ -65806,8 +65791,15 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.24.3";
+const NEWS_FOR = "2026.11.24.4";
 const NEWS = [
+  {k: "The dark band across the top is gone",
+   s: ["Every redesigned screen had a dark-to-transparent gradient washed across its top "
+     + "band. It was there to keep the title and the cycle readable over whatever the art "
+     + "was doing, and it did that, but it also sat over the artwork on screens where "
+     + "nothing needed covering. If a title turns out to read badly against the art, the "
+     + "fix will be a backing behind that title rather than a wash over the whole band.",
+     "The glass behind the cards is back on every screen that had it."]},
   {k: "History, rebuilt",
    s: ["Your record is a single row at the top now \u2014 the lift, the record, and the one "
      + "you are closest to beating \u2014 instead of a card repeating what the record book "
@@ -65818,8 +65810,7 @@ const NEWS = [
      + "and the day is named on the row underneath it. A heavier week still looks "
      + "heavier.",
      "The weeks-on-target card has come off this screen. Nothing was lost \u2014 the same "
-     + "figures are still counted and still shown on Today. And the decorative glass "
-     + "behind the cards is off everywhere for now; the heroes stay."]},
+     + "figures are still counted and still shown on Today."]},
   {k: "Hero motion back, and History reads as a list",
    s: ["The heroes animate on every phone again. They were switched to a still picture "
      + "on high-density screens before the motion rework landed, and that was never "
