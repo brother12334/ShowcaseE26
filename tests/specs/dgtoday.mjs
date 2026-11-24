@@ -561,40 +561,46 @@ ck("it never grows past the window, at any point in its arrival",
 ck("CONTROL: it is animating, so there was something to overshoot",
    r.name && r.name !== "none", r.name);
 
-console.log("\n12. NOTHING IS LAID OVER THE TOP OF THE SCREEN");
-/* THIS SECTION USED TO ASSERT THE OPPOSITE, and the change is deliberate rather than a
-   loosening. There was a dark-to-transparent scrim across the top of every converted
-   screen, so the header and the cycle would hold 4.5:1 on a frame where the hero comes
-   up bright. It has been taken off on request: it was the one thing on these screens
-   that was neither content nor the design's own art, and it read as a haze over the
-   picture.
+console.log("\n12. THE TOP BAND IS READABLE OVER WHATEVER THE ART IS DOING");
+/* THIS SECTION HAS NOW ASSERTED BOTH ANSWERS, which is worth stating plainly rather
+   than quietly flipping a third time.
 
-   So what is checked now is that it is really gone — nothing between the art and the
-   text — and that the header and cycle still sit ABOVE the art rather than behind it,
-   which is the part that was never about the scrim.
+   It began by requiring a scrim: a dark-to-transparent gradient across the top of every
+   converted screen, so the header and the cycle hold 4.5:1 on a frame where the hero
+   comes up bright. The owner asked for the gradient to go, and it asserted the
+   opposite. The owner has asked for it back now that the screens around it are
+   finished, so it asserts the original again.
 
-   The contrast this protected is now unprotected on the brightest frames. That is a
-   known cost, written down in the stylesheet where the scrim used to be; if it reads
-   badly on a phone the answer is a backing behind those two elements, not a wash across
-   the band. */
+   Neither flip was a loosening. The spec follows a decision that is the owner's to
+   make, and each time the reason is in the commit that made it. What has never changed,
+   and is checked below either way, is that the header and the cycle sit ABOVE the art
+   rather than behind it. */
 r = await newP.evaluate(()=>{
   boot();
   const z = n2=> parseInt(getComputedStyle(n2).zIndex, 10) || 0;
   const top = document.querySelector('#app .dg-top');
   const cyc = document.querySelector('#app .dg-cycle');
-  return {scrim: !!document.querySelector('#app .dg-scrim'),
-          gradients: [...document.querySelectorAll('#app .dg > *')]
-            .filter(n2=> /gradient/.test(getComputedStyle(n2).backgroundImage))
-            .map(n2=> n2.className),
-          topZ: z(top), cycZ: z(cyc),
-          topPos: getComputedStyle(top).position};
+  const scrim = document.querySelector('#app .dg-scrim');
+  const sc = scrim ? getComputedStyle(scrim) : null;
+  const r2 = scrim ? scrim.getBoundingClientRect() : null;
+  const topBox = top ? top.getBoundingClientRect() : null;
+  const cycBox = cyc ? cyc.getBoundingClientRect() : null;
+  return {scrim: !!scrim,
+          grad: sc ? /gradient/.test(sc.backgroundImage) : false,
+          zs: sc ? (parseInt(sc.zIndex, 10) || 0) : null,
+          through: sc ? sc.pointerEvents : null,
+          coversTop: !!(r2 && topBox && r2.bottom >= topBox.bottom),
+          coversCycle: !!(r2 && cycBox && r2.bottom >= cycBox.bottom),
+          topZ: z(top), cycZ: z(cyc), topPos: getComputedStyle(top).position};
 });
-ck("the scrim is gone", r.scrim === false, String(r.scrim));
-ck("and nothing else lays a gradient across the top",
-   r.gradients.length === 0, r.gradients.join(", ") || "none");
-ck("CONTROL: the header is still lifted above the art", r.topZ > 0 && r.topPos === "absolute",
-   "z " + r.topZ + ", " + r.topPos);
-ck("and so is the cycle", r.cycZ > 0, "z " + r.cycZ);
+ck("the scrim is there", r.scrim === true);
+ck("and it is a gradient, not a slab", r.grad === true);
+ck("it reaches past the header and the cycle",
+   r.coversTop && r.coversCycle, "header " + r.coversTop + ", cycle " + r.coversCycle);
+ck("CONTROL: you can tap straight through it", r.through === "none", String(r.through));
+ck("CONTROL: the header is still lifted above it", r.topZ > r.zs && r.topPos === "absolute",
+   "header z " + r.topZ + " over scrim z " + r.zs);
+ck("and so is the cycle", r.cycZ > r.zs, "cycle z " + r.cycZ + " over scrim z " + r.zs);
 
 console.log("\n13. THE WORKOUT SCREEN'S LIFTS ARE THE DESIGN'S LIFTS");
 /* THIS SECTION USED TO COMPARE TODAY'S LIFTS WITH WORKOUT'S, and the comparison has
