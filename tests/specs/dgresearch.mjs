@@ -169,7 +169,21 @@ ck("the reason is inside the card, not floating above it",
 ck("CONTROL: tapping the card opens that paper", r.onPaper === true, String(r.onPaper));
 ck("and the summary is there, where it was moved to", r.openedSummary === true);
 
-console.log("\n5. NOTHING RUNS OFF THE SIDE, AND NOTHING THREW");
+console.log("\n5. THE PAPER HAS ITS OWN DARK-GLASS LAYOUT");
+r = await full.evaluate(()=>{
+  const screen = document.querySelector('[data-dg-screen="research-paper"]');
+  const title = screen?.querySelector('h1.rs-dt');
+  const summary = screen?.querySelector('.rs-quick');
+  const back = screen?.querySelector('#rsBack');
+  return {title:title?.textContent, size:title && getComputedStyle(title).fontSize,
+    radius:summary && getComputedStyle(summary).borderRadius, save:!!screen?.querySelector('header [data-rssave]'),
+    back:back?.getAttribute('aria-label'), source:!!screen?.querySelector('#rsOrig')};
+});
+ck("CONTROL: the opened paper has its real heading and takeaway", !!r.title && !!r.radius);
+ck("the heading and takeaway use the reference sizes", r.size === "30px" && r.radius === "22px");
+ck("the back, save and original-paper controls are present", r.save && r.source && r.back === "Back to Research");
+
+console.log("\n6. NOTHING RUNS OFF THE SIDE, AND NOTHING THREW");
 r = await full.evaluate(()=>{
   const vw = document.documentElement.clientWidth;
   return {wide: document.documentElement.scrollWidth > vw + 1, vw};
