@@ -109,6 +109,11 @@ console.log("\n2 - THE NUMBERS STILL WAIT TO BE READ");
 {
   const r = await p.evaluate(()=>{
     TAB="today"; render();
+    /* OPEN THE FOLD FIRST. Today draws only its reference on arrival and keeps the
+       notices behind one control; a closed <details> is not in innerText, so reading
+       the page without opening it would say the card had gone when it is one tap away.
+       Opening it is what somebody looking for this would do. */
+    document.querySelectorAll('details').forEach(d=> d.open = true);
     const t=document.body.innerText;
     return {unseen: asymRetestUnseen(),
             card: /asymmetry re-test/i.test(t),
@@ -127,6 +132,7 @@ console.log("\n3 - ACKNOWLEDGING IT PUTS IT AWAY, AND DOES NOT RE-RUN IT");
 {
   const r = await p.evaluate(()=>{
     const at = S.asymRetest.at;
+    document.querySelectorAll('details').forEach(d=> d.open = true);
     document.getElementById("asymRetestBtn").click();
     const t=document.body.innerText;
     return {unseen: asymRetestUnseen(), sameRun: S.asymRetest.at === at,

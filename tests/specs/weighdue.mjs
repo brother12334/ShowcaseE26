@@ -62,13 +62,25 @@ console.log('today line:', await p.evaluate(()=>!!document.getElementById('weigh
             '· due:', await p.evaluate(()=>bodyLogDue("weight")));
 
 console.log('\n=== logging one clears it ===');
-await p.evaluate(()=>{ trainPrefs().trackWeight=true; save(); TAB="today"; render(); });
+/* THROUGH THE BODY TAB, NOT TODAY. The weigh-in line used to sit on Today and this
+   stepped through it from there. Today draws only what its reference draws now, so the
+   line is on the Body tab, which is where this spec already reads the same weigh-in
+   two sections above. What is being tested is that logging one clears the prompt;
+   which screen the prompt was opened from was never the point. */
+await p.evaluate(()=>{ trainPrefs().trackWeight=true; save(); TAB="body"; render(); });
 await p.waitForTimeout(300);
-console.log('line before:', await p.evaluate(()=>!!document.getElementById('weighDue')));
-await p.evaluate(()=>{ document.getElementById('weighDue').onclick(); });
+console.log('due before:', await p.evaluate(()=>{const d=bodyLogDue("weight"); return !!(d&&d.due);}));
+await p.evaluate(()=>{ openBodyLog(); });
 await p.waitForTimeout(350);
+console.log('sheet open:', await p.evaluate(()=> !!document.getElementById('blW')));
 await p.evaluate(()=>{ document.getElementById('blW').value='181.5'; document.getElementById('blSave').onclick(); });
 await p.waitForTimeout(450);
-console.log('line after:', await p.evaluate(()=>!!document.getElementById('weighDue')));
+console.log('due after:', await p.evaluate(()=>{const d=bodyLogDue("weight"); return !!(d&&d.due);}));
+/* AND IT IS NOT ON TODAY ANY MORE, which is the change rather than a side effect: the
+   screen was stripped to its reference by the owner's decision, and this line says so
+   where somebody reading this spec would otherwise wonder where the prompt went. */
+await p.evaluate(()=>{ TAB="today"; render(); });
+await p.waitForTimeout(250);
+console.log('today line:', await p.evaluate(()=>!!document.getElementById('weighDue')));
 console.log('errors:', errs);
 await b.close();

@@ -7944,6 +7944,19 @@ body.news-open{overscroll-behavior:contain}
    class because this one line is built by a helper shared with screens that are not in
    the redesign, and reaching into its classes from here would be this feature styling
    another one. */
+/* THE ONE CONTROL BELOW THE BUTTON. Quiet enough that a day with something to report
+   still reads as the reference, and never drawn at all on a day with nothing. */
+.dg-more{margin:14px var(--e26-pad) 0}
+.dg-more>summary{list-style:none;cursor:pointer;padding:13px 2px;min-height:44px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-top:1px solid var(--e26-card-line);border-bottom:1px solid var(--e26-card-line);
+  font:500 13px var(--e26-font);color:var(--e26-ink-2)}
+.dg-more>summary::-webkit-details-marker{display:none}
+/* Its own class rather than reaching into .dg-extra, which belongs to the screen below
+   it: the gutter is already on the fold. */
+.dg-more-b{padding-left:0;padding-right:0}
+.dg-more>summary::after{content:"+";font:300 20px/1 var(--e26-font)}
+.dg-more[open]>summary::after{content:"\2212"}
 .dg-foot{padding:10px var(--e26-pad) 0;font-size:12px;color:var(--e26-ink-3)}
 .dg-foot,.dg-foot *{font-family:var(--e26-font);letter-spacing:0;text-transform:none}
 /* THE HEADER AND THE CYCLE SIT ON THE HERO, NOT ABOVE IT.
@@ -38955,9 +38968,14 @@ function viewToday(){
      inside the training branch instead, they silently disappeared on rest days — an id
      diff against the old build caught weighDue, autoProgYes/No, cycleReset and
      lastReviewBtn going missing, which is four features lost to a reordering. */
-  const notices = (()=> plateDeriveCardHTML() + dataIssueCardHTML()
-    + (skChip ? `<div>${skChip}</div>` : "")
-    + weighDueHTML() + soreDueHTML() + planWeekStripHTML() + autoProgCardHTML())();
+  /* AS PARTS RATHER THAN ONE STRING, so the fold below can say how many things it is
+     holding. Each of these draws nothing when it has nothing to say, which is what
+     makes the count meaningful and the fold itself conditional. */
+  const noticeParts = [plateDeriveCardHTML(), dataIssueCardHTML(),
+    skChip ? `<div>${skChip}</div>` : "",
+    weighDueHTML(), soreDueHTML(), planWeekStripHTML(), autoProgCardHTML()
+  ].filter(x=> x && x.trim());
+  const notices = noticeParts.join("");
   const cycleFoot = `<div class="dg-foot">${(()=>{
     try{ return cycleFootHTML(cycleSlots()); }catch(e){ return ""; } })()}</div>`;
 
@@ -39117,6 +39135,48 @@ function viewToday(){
      Nothing was deleted from the file. Every function that built this is still here and
      still tested; what changed is that Today stopped calling them. Putting any of it
      back is one line. */
+  /* AND THEN SIX OF THEM CAME BACK, BEHIND ONE LINE.
+
+     Stripping the screen orphaned more than the three the owner was asked about. The
+     weigh-in is still on Body, the asymmetry re-test is still on Body, the exercises
+     are on Program and the plan changes are in the history \u2014 but the soreness check,
+     the auto-progression offer, the data-problem warning, the plate-step prompt, the
+     focus fix and the day's notes reached you nowhere. Two of those are inputs the app
+     uses to adapt your training, so losing the prompt does not just hide something: it
+     stops the app being told.
+
+     Told that, the owner chose to keep them behind one control. So they are built as
+     before and folded, and the fold is drawn only when something inside it has
+     anything to say \u2014 which on an ordinary day is nothing at all, and the screen is
+     the reference exactly. The count is in the summary because "more" is not a reason
+     to open anything.
+
+     The plate-step prompt is the one that mattered most here: its detection runs on its
+     own and queues what it found, and with no card to show it and no button to dismiss
+     it, that queue would have sat unread for ever. */
+  const notesNow = (()=>{ try{ return todayNotes(wid); }catch(e){ return []; } })();
+  const foldN = noticeParts.length + notesNow.length;
+  if(foldN){
+    h += `<details class="dg-more"><summary>${foldN} thing${
+      foldN === 1 ? "" : "s"} to look at</summary>
+      <div class="dg-extra dg-more-b" data-today-extra>${notices}${noteStackHTML(notesNow)}</div>
+    </details>`;
+  }
+  /* ONE LINE CAME BACK, AND IT IS NOT A NOTICE.
+
+     The cycle strip stays \u2014 it is part of the reference \u2014 and tapping a day on it
+     trains that day today. The only way to undo that was in the block above, so for a
+     few minutes the app had an action you could take from the reference screen and no
+     way to take back. An action with no undo is not a tidier screen, it is a trap.
+
+     So this is here, and only when a day has actually been picked: on an ordinary day
+     the screen is the reference exactly, and on a day you have chosen one it says so
+     and offers the way back. If the owner wants it gone too, it is this branch. */
+  if(dayPickedToday()){
+    h += `<div class="day-open-sub">You picked this for today. ${
+      esc(dayName(ROTATION[S.pointer]))} is still next in your rotation.
+      <button class="linklike" id="dayPickClear">back to the rotation</button></div>`;
+  }
   h += cycleFoot;
   h += `</div></div>`;
   return h;
@@ -66215,8 +66275,8 @@ function shareViewHTML(r){
 const NEWS_FOR = "2026.11.24.10";
 const NEWS = [
   {k: "Today is one screen",
-   s: ["Today is now what the design draws and nothing else: the day, the cycle, the art, the two lines, and the button. Everything that used to sit below it has gone.",
-     "Most of it is still reachable \u2014 the exercises on Program, the weigh-in on Body, the changes in your plan history. Three are not. The offer to write an earned weight into your plan, the soreness check and the data-problem warning appeared on no other screen, so they no longer reach you anywhere. That is a deliberate trade for the screen, and it can be undone.",
+   s: ["Today is now what the design draws: the day, the cycle, the art, the two lines and the button. The day\u2019s exercise list has come off it for good \u2014 it is on Program, where the plan lives.",
+     "Everything else that used to sit below the button is still there, behind one line that says how many things are waiting. On a day with nothing to report that line is not drawn at all, so the screen is the reference exactly.",
      "Rest days are untouched: that screen has its own reference and its own content."]},
   {k: "The rest day, and the header",
    s: ["The two controls in the Today header \u2014 the sleep clock and the way into Settings \u2014 no longer sit inside a glass bubble. The glyph is the control; the bubble was a surface put behind it.",
