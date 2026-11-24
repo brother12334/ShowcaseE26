@@ -482,24 +482,29 @@ ck("CONTROL: there is a hero video to ask about", r.has === true);
 ck("the clip is not slowed below the rate it was drawn at", r.cfg >= 1, String(r.cfg));
 ck("and the element is actually set to it", r.rate === r.cfg, r.rate + " vs " + r.cfg);
 
-console.log("\n11b. AND IT DOES NOT PLAY WHILE THE PAGE IS MOVING");
-/* Pausing off-screen was not enough on a real phone. The cost is compositing, not
-   decoding: the frame under a 4,500px page with text and a scrim over it is recomposited
-   on every scroll frame. You cannot watch an animation while scrolling past it, so it
-   stops the instant the page moves and comes back when it settles. */
+console.log("\n11b. AND IT KEEPS PLAYING WHILE THE PAGE MOVES");
+/* THIS USED TO ASSERT THE OPPOSITE, and the reversal is the owner's, after he watched
+   it on the phone. Pausing on scroll was put in because compositing a changing frame
+   under a moving page is what costs. What it produced was a hero that stopped every
+   time the page twitched \u2014 and on iOS the rubber-band at the top of a screen fires
+   scroll events on its own, so it halted for no reason he could see. He reported the X
+   as randomly stopping, and he was describing this.
+
+   What still holds, and is checked below, is the part that was buying the saving: off
+   screen and in a hidden tab it stops. Scrolling is no longer one of the conditions. */
 r = await newP.evaluate(async ()=>{
   boot(); glassSync();
   await new Promise(ok=> setTimeout(ok, 400));
   const v = document.querySelector('#stage .glass-layer video.hero-media');
   if(!v) return {none: true};
   const before = !v.paused;
-  /* A small scroll, so the hero is still well on screen — this must be the scroll
-     stopping it, not the intersection observer. */
+  /* A small scroll, so the hero is still well on screen \u2014 this is the scroll NOT
+     stopping it, rather than the intersection observer leaving it alone. */
   scrollTo(0, 40);
   dispatchEvent(new Event('scroll'));
   await new Promise(ok=> setTimeout(ok, 30));
   const stillVisible = v.getBoundingClientRect().bottom > 100;
-  const duringScroll = v.paused;
+  const duringScroll = !v.paused;
   await new Promise(ok=> setTimeout(ok, 420));
   const afterSettling = !v.paused;
   scrollTo(0, 0);
@@ -508,8 +513,8 @@ r = await newP.evaluate(async ()=>{
 ck("CONTROL: it was playing, and the hero is still on screen throughout",
    r.before === true && r.stillVisible === true,
    "playing " + r.before + ", visible " + r.stillVisible);
-ck("it stops the moment the page moves", r.duringScroll === true, String(r.duringScroll));
-ck("and comes back once the page settles", r.afterSettling === true, String(r.afterSettling));
+ck("a scroll does not stop it", r.duringScroll === true, String(r.duringScroll));
+ck("and it is still playing once the page settles", r.afterSettling === true, String(r.afterSettling));
 
 console.log("\n11c. THE HERO FADES IN; IT DOES NOT SPRING");
 /* glass.css gives everything in the layer the same springy arrival and its easing
@@ -640,11 +645,13 @@ ck("CONTROL: the still artwork is loaded into an animated CSS layer",
      el.style.backgroundImage.includes('glass-capsule-xs.webp')));
 ck("no live backdrop filter is added to a still",
    await newP.locator('#testGlass .glass-blur').count() === 0);
+/* Same reversal as 11b, for the shapes rather than the hero: a scroll no longer stops
+   them. Off screen still does, which the next assertion checks. */
 r = await newP.evaluate(()=>{
   dispatchEvent(new Event('scroll'));
   return getComputedStyle(document.querySelector('#testGlass .glass-img')).animationPlayState;
 });
-ck("still shapes pause during scroll", r === 'paused', r);
+ck("a scroll does not stop a still shape either", r === 'running', r);
 await newP.waitForFunction(()=> !document.querySelector('#testGlass').hasAttribute('data-glass-paused'));
 await newP.evaluate(()=> scrollTo(0, document.documentElement.scrollHeight));
 await newP.waitForFunction(()=> document.querySelector('#testGlass').hasAttribute('data-glass-paused'));

@@ -121,6 +121,9 @@ console.log("5 - THE CARD WAITS FOR THE HOUR, THEN ASKS, THEN LEARNS IT");
     const shown = (()=>{
       const real = domsCheckMin;
       window.domsCheckMin = ()=> mins;      // as if the hour had arrived
+      /* ON BODY, NOT TODAY. The soreness check moved there with the other notices when
+         Today was stripped to the hero and the door. */
+      TAB = "body";
       render();
       /* OPEN THE FOLD FIRST. Today keeps its notices behind one control now, and a
          closed <details> is not in innerText \u2014 so reading the page without opening it
