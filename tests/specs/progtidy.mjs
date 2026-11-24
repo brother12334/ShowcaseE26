@@ -80,7 +80,13 @@ console.log("2 - THE SCHEDULE CONTROLS ARE FOLDED AWAY");
   });
   ck("the fold is on the Program tab", r.there === true, JSON.stringify(r));
   ck("and starts closed", r.open === false, JSON.stringify(r));
-  ck("its summary says what is inside", /rest days/i.test(r.summary) && /testing/i.test(r.summary), r.summary);
+  /* THIS USED TO READ FOR "rest days" AND "testing", which were the words of the fold's
+   old title: the summary WAS "Rest days and testing weeks" and nothing else. It is a row
+   now — "Schedule settings" over a line saying what is actually set, "rest after every 3
+   days \u00b7 no test weeks" — so the old words are gone while the thing they were guarding,
+   that the summary tells you what is folded away without opening it, is more true than
+   it was. The subjects are what this asserts. */
+ck("its summary says what is inside", /rest/i.test(r.summary) && /test/i.test(r.summary), r.summary);
   ck("the rest-day editor is inside it, not removed", r.rest === true, JSON.stringify(r));
   ck("and so are the testing weeks", r.tests === true, JSON.stringify(r));
 }
