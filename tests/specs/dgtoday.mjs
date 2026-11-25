@@ -801,12 +801,14 @@ r = await newP.evaluate(async ()=>{
   }));
   boot();
   TAB = "history"; render();
-  const glass = document.querySelector('#stage [data-glass-hero][data-still$="overlay-history"]');
+  const glass = document.querySelector('#stage [data-glass-hero][data-sheet$="overlay-history"]');
   const img = glass?.querySelector('.glass-img');
-  const before = img && getComputedStyle(img).transform;
-  await new Promise(ok=>setTimeout(ok, 450));
-  const history = {hero:!!glass, moves:!!img && getComputedStyle(img).transform !== before,
-    animation: img && getComputedStyle(img).animationName};
+  const before = img && img.style.backgroundPosition;
+  await new Promise(ok=>setTimeout(ok, 700));
+  const history = {hero:!!glass, frames:+(glass?.dataset.frames || 0),
+    sheet:(glass?.dataset.sheet || "").split("/").pop(),
+    moves:!!img && img.style.backgroundPosition !== before,
+    stepped:!!img && /%/.test(img.style.backgroundPosition || "")};
   boot();
   return {results, overlays, history};
 });
@@ -816,7 +818,16 @@ ck("each still covers its largest 3× phone slot", r.results.every(item=> item.s
 ck("the three live-number overlays cover their own 3× canvases",
    r.overlays.length === 3 && r.overlays.every(item=> item.sharp), JSON.stringify(r.overlays));
 ck("CONTROL: History mounts its rendered capsule", r.history.hero);
-ck("the 3× capsule animates continuously", r.history.moves && r.history.animation === "glass-capsule-sway");
+/* THIS ASKED FOR glass-capsule-sway, AND THAT EXPECTATION WAS WRONG from the day it was
+   written. The sway was a CSS translate-and-rotate on a still: it moved the picture
+   around without ever turning the object, and the owner said so plainly after seeing it
+   next to Today, which is a pre-rendered loop of a real capsule turning in space. The
+   capsule is now the same kind of thing — an 18-frame 2× sheet stepped by
+   glass-motion.js — so what is checked is that the frame actually advances, which a
+   CSS transform on a single image could never pass. */
+ck("the 3× capsule turns, by stepping real rendered frames",
+   r.history.moves && r.history.frames >= 12 && r.history.stepped,
+   JSON.stringify(r.history));
 
 console.log("\n17. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");

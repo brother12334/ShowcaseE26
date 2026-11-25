@@ -51,6 +51,13 @@ SHAPES = {
     'star':          (210, 210, [('star', (105, 105), 180, (-35, 25, 10), dict(thick=0.13))], 1.5),
 }
 # which shapes get a spin sheet: (axis in the shape's own space, degrees for one seamless loop)
+# NO SPHERE IS IN HERE, AND IT IS NOT AN OVERSIGHT. A sheet was rendered for sphere-xs
+# and then measured: across 36 frames of a full 360-degree turn the picture changed by
+# 0.8 of 255, against 37 for capsule-xs and 30 for x-s over the same test. A smooth
+# sphere is symmetric about every axis, and the window bars and rim light come from the
+# environment rather than from its surface, so turning it moves nothing a person could
+# see. It would have been five megabytes a screen of decoded sheet to animate nothing.
+# Anything with a silhouette — a capsule, an x, a blob — reads immediately.
 SPIN = {'x-s': ('z', 90), 'star': ('z', 60), 'jack': ('z', 90), 'rbox-s': ('z', 90),
         'torus-m': ('x', 180), 'capsule-m': ('z', 180), 'capsule-amber': ('z', 180),
         'capsule-xs': ('z', 180), 'blob': ('y', 360)}
@@ -74,9 +81,23 @@ HEROES = {
     # stills only (their number is live text in the app, the glass is an overlay)
     'workout':  dict(canvas=(390, 340), text=dict(lines=['18:42'], px=150, top=110, left=-4), motion='spin',
                      objs=[('torus', (282, 214), 230, (58, 22, 0), dict(thick=0.12))], spin=('x', 180), overlay=True),
-    'history':  dict(canvas=(390, 440), text=dict(lines=['41'], px=300, top=96, left=-10), motion='sway',
-                     objs=[('capsule', (232, 252), 314, (-16, 24, 49), dict(thick=0.235))], overlay=True),
-    'research': dict(canvas=(390, 440), text=dict(lines=['62'], px=300, top=96, left=-10), motion='orbit',
+    # THESE TWO TURN IN SPACE, like Today's. They were 'sway' and 'orbit' — a rock and a
+    # drift, both of which move the object WITHOUT ROTATING IT, so next to the Today hero
+    # (a real 470px x turning about its own axis) they read as a picture being nudged
+    # rather than an object. The owner said so in those words. 'spin' turns the first
+    # object about an axis in its own space, which is the same code path Today uses.
+    'history':  dict(canvas=(390, 440), text=dict(lines=['41'], px=300, top=96, left=-10), motion='spin',
+                     objs=[('capsule', (232, 252), 314, (-16, 24, 49), dict(thick=0.235))],
+                     spin=('z', 180), overlay=True),
+    # AND RESEARCH ORBITS RATHER THAN SPINS, for the reason written above SPIN: its
+    # object is a smooth bubble, and a smooth bubble turning on the spot is a still
+    # frame. 'orbit' is the renderer's own motion for it and it moves the object through
+    # the scene between frames, so the rim light and the refraction are re-rendered each
+    # time rather than one picture being slid about by the browser, which is what was
+    # here before and what the owner objected to. If the bubble should visibly TUMBLE,
+    # the object has to change to one with a silhouette — 'blob' is the liquid one.
+    'research': dict(canvas=(390, 440), text=dict(lines=['62'], px=300, top=96, left=-10),
+                     motion='orbit',
                      objs=[('sphere', (227, 244), 222, (0, 0, 0), {})], overlay=True),
 }
 

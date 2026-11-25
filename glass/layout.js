@@ -1,25 +1,47 @@
 /* layout.js — where every shape on every screen is placed. Change a number here and the
  * app moves it. Loaded as a plain script; scene.js reads window.GLASS_LAYOUT.
  *
- * SPIN IS OFF EVERYWHERE, and it was measured rather than decided.
+ * WHAT TURNS IN 3D, AND WHY IT IS ONLY THE SMALL ONES AND THE TWO OVERLAY HEROES.
  *
- * A spin sheet is 3840x960 holding 36 frames in 12 columns, so ONE FRAME IS 320x320.
- * Program's jack is drawn at 250pt, which on a 3x phone is 750 device pixels asked of a
- * 320 pixel frame — a 2.3x upscale, and that is why the spinning shapes looked soft on
- * the device while the still ones looked sharp. The stills are 500 to 550px square and
- * have pixels to spare at every size used here.
+ * Today spins because its hero is a pre-rendered video of a real object turning. Nothing
+ * else did: the decorative shapes were drawn from their stills and the History and
+ * Research heroes were given a CSS translate-and-rotate, which moves the picture without
+ * rotating the object and next to Today reads as a nudge. Both are rendered loops now.
  *
- * The same sheet is about 15 MB decoded, three of them to a screen, which is the other
- * half of the complaint: the shapes were heavy AND blurry, and both came from the same
- * file. Drawing from the still fixes both at once.
+ * THE SHARPNESS RULE THAT TURNED SPIN OFF IN THE FIRST PLACE still holds and is the
+ * reason the big shapes stay still. A shape sheet is 3840x960 holding 36 frames in 12
+ * columns, so one frame is 320x320. Program's jack is drawn at 250pt, which on a 3x
+ * phone asks 750 device pixels of a 320 pixel frame — a 2.3x upscale, and that is
+ * exactly why the spinning shapes once looked soft while the still ones looked sharp.
  *
- * NOTHING STOPPED MOVING. glass-motion.js animates every shape's float, parallax and
- * tilt whether or not it has frames; `spin` only chooses the sheet over the still. The
- * shapes still drift and bob, they are simply no longer flipping through frames.
+ * The SMALL shapes have the opposite arithmetic. capsule-xs is placed at 68 to 80pt and
+ * x-s at 92 to 112, so the largest on a 3x phone is 336 device pixels against a 320
+ * pixel frame — no meaningful upscale at all. They turn at full sharpness with no
+ * re-render, which is why they are the ones that turn.
  *
- * To put a shape's rotation back, set `spin: true` on it. It will be sharper first if
- * the sheet is re-rendered at 2x (tools/README.md) — at 640px a frame it would be
- * crisp at these sizes.
+ * sphere-xs DOES NOT, and that was measured rather than assumed. A sheet was rendered
+ * for it; across a full turn the picture changed by 0.8 of 255, against 37 for
+ * capsule-xs and 30 for x-s. A smooth sphere is symmetric about every axis and its
+ * highlights come from the environment, not its surface, so turning it is a still
+ * frame that costs five megabytes a screen. The sheet was deleted again.
+ *
+ * RESEARCH'S HERO ORBITS INSTEAD OF SPINNING, for the same reason: it is a bubble. The
+ * renderer moves it through the scene between frames so the rim light and refraction
+ * are re-rendered each time, which is a different thing from the browser sliding one
+ * picture around, and measures at 20 of 255 against the sphere's 0.8.
+ *
+ * THE TWO OVERLAY HEROES ARE RENDERED AT 2x, 18 frames in 6 columns: 780x880 a frame,
+ * a 4680x2640 sheet, about 49 MB decoded. 36 frames at 2x would be 24.7M pixels, over
+ * what iOS Safari will decode, and 36 at 1x is the blur above. Neither screen carries a
+ * video hero, so that sheet is the only large surface on it.
+ *
+ * SPEED IS SET PER PLACEMENT, not in the art. The small shapes run at 6fps over 36
+ * frames, so one turn takes six seconds — the owner asked for subtle. The heroes run at
+ * 5fps over 18, which is 3.6 seconds a loop against Today's 5.
+ *
+ * The budget holds: at most 3 turning per screen, counting a hero that turns as one.
+ * The intro's four shapes are deliberately left still — its three seconds are when the
+ * app is most likely to run out of room, and it plays once.
  */
 window.GLASS_LAYOUT = {
  "shapes": {
@@ -173,7 +195,8 @@ window.GLASS_LAYOUT = {
      "h": 70,
      "layer": "front",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     }
    ]
   },
@@ -234,7 +257,8 @@ window.GLASS_LAYOUT = {
      "h": 92,
      "layer": "front",
      "depth": 0.7,
-     "spin": false
+     "spin": true,
+     "fps": 6
     }
    ]
   },
@@ -258,7 +282,8 @@ window.GLASS_LAYOUT = {
      "h": 70,
      "layer": "front",
      "depth": 1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     },
     {
      "shape": "sphere-xs",
@@ -275,11 +300,14 @@ window.GLASS_LAYOUT = {
   "history": {
    "height": 1500,
    "hero": {
-    "motion": "sway",
     "still": "assets/hero-overlays/overlay-history",
     "w": 390,
     "h": 440,
-    "note": "live text (session count) sits underneath"
+    "note": "live text (session count) sits underneath; the capsule turns about its own axis",
+    "overlay": "assets/motion/overlay-history",
+    "frames": 18,
+    "cols": 6,
+    "fps": 5
    },
    "shapes": [
     {
@@ -320,18 +348,22 @@ window.GLASS_LAYOUT = {
      "h": 80,
      "layer": "front",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     }
    ]
   },
   "research": {
    "height": 1500,
    "hero": {
-    "motion": "orbit",
     "still": "assets/hero-overlays/overlay-research",
     "w": 390,
     "h": 440,
-    "note": "live text (paper count) sits underneath; the sphere moves gently through an orbit"
+    "note": "live text (paper count) sits underneath; the bubble turns about its own axis",
+    "overlay": "assets/motion/overlay-research",
+    "frames": 18,
+    "cols": 6,
+    "fps": 5
    },
    "shapes": [
     {
@@ -382,7 +414,8 @@ window.GLASS_LAYOUT = {
      "h": 70,
      "layer": "front",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     }
    ]
   },
@@ -437,7 +470,8 @@ window.GLASS_LAYOUT = {
      "h": 100,
      "layer": "front",
      "depth": 0.7,
-     "spin": false
+     "spin": true,
+     "fps": 6
     }
    ]
   },
@@ -481,7 +515,8 @@ window.GLASS_LAYOUT = {
      "h": 68,
      "layer": "back",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     }
    ]
   },

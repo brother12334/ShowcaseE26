@@ -126,14 +126,46 @@ console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");
      f.num === String(r.n), f.num + " vs " + r.n);
 }
 
-console.log("\n2b. THE RENDERED BUBBLE MOVES SMOOTHLY");
-const bubble = full.locator('[data-glass-hero][data-still$="overlay-research"] .glass-img');
-ck("CONTROL: the seeded feed mounts its new Research bubble", await bubble.count() === 1);
-const before = await bubble.evaluate(el=>getComputedStyle(el).transform);
-await full.waitForFunction(initial=>getComputedStyle(document.querySelector('[data-glass-hero] .glass-img')).transform !== initial, before);
-await full.emulateMedia({reducedMotion:"reduce"});
-ck("Reduce Motion keeps the Research bubble still", await bubble.evaluate(el=>getComputedStyle(el).animationName) === "none");
-await full.emulateMedia({reducedMotion:"no-preference"});
+/* THIS SECTION ASKED FOR A CSS TRANSFORM, AND THE EXPECTATION WAS WRONG because the
+   thing it was checking was the wrong kind of motion. The bubble was being drifted by a
+   keyframed translate-and-rotate on a single still: it moved the PICTURE around without
+   ever turning the object, and beside Today — a rendered loop of a real object turning
+   in space — the owner read it immediately as a nudge rather than a spin and asked for
+   the real thing. The bubble is an 18-frame 2x sheet now, stepped by glass-motion.js, so
+   there is no transform to read and no animationName to be "none": what moves is the
+   background position, and Reduce Motion stops the stepping instead of cancelling an
+   animation. Both halves of what this section was for are still asserted. */
+console.log("\n2b. THE RENDERED BUBBLE TURNS, AND STOPS WHEN ASKED");
+{
+  const bubble = full.locator('[data-glass-hero][data-sheet$="overlay-research"] .glass-img');
+  ck("CONTROL: the seeded feed mounts its new Research bubble", await bubble.count() === 1);
+  const sheet = await full.evaluate(()=>{
+    const g = document.querySelector('[data-glass-hero][data-sheet$="overlay-research"]');
+    return g ? {frames:+g.dataset.frames, cols:+g.dataset.cols, fps:+(g.dataset.fps||0)} : null;
+  });
+  ck("CONTROL: from a real frame sequence rather than one still",
+     !!sheet && sheet.frames > 1, JSON.stringify(sheet));
+  const seen = await full.evaluate(async ()=>{
+    const img = document.querySelector('[data-glass-hero][data-sheet$="overlay-research"] .glass-img');
+    const out = new Set();
+    for(let i = 0; i < 14; i++){ out.add(img.style.backgroundPosition);
+      await new Promise(ok=> setTimeout(ok, 120)); }
+    return [...out];
+  });
+  ck("it steps through its frames", seen.length > 1, seen.slice(0, 4).join(" | "));
+
+  await full.emulateMedia({reducedMotion:"reduce"});
+  await full.waitForTimeout(400);
+  const frozen = await full.evaluate(async ()=>{
+    const img = document.querySelector('[data-glass-hero][data-sheet$="overlay-research"] .glass-img');
+    const first = img.style.backgroundPosition;
+    await new Promise(ok=> setTimeout(ok, 700));
+    return {first, last: img.style.backgroundPosition};
+  });
+  ck("Reduce Motion keeps the Research bubble still",
+     frozen.first === frozen.last, frozen.first + " -> " + frozen.last);
+  await full.emulateMedia({reducedMotion:"no-preference"});
+}
 
 console.log("\n3. ONE HEADING, AND THE NAME IS STILL ON IT");
 r = await full.evaluate(()=> ({
