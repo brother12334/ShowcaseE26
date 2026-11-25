@@ -21419,7 +21419,14 @@ const EX_MUSCLES_F = (function(){
    for a movement the tables have never heard of — see classifyExercise(). Still nothing
    means nothing: an exercise the app cannot place contributes no volume rather than
    contributing a guess, and shows up as something to confirm. */
+let TAB_ANALYSIS = null;
 function musclesFor(name){
+  const memo = TAB_ANALYSIS?.muscles;
+  if(!memo) return resolveExerciseMuscles(name);
+  if(!memo.has(name)) memo.set(name, resolveExerciseMuscles(name));
+  return memo.get(name);
+}
+function resolveExerciseMuscles(name){
   const rec = exMuscleRec(name);
   if(rec && rec.map && rec.src === "you") return rec.map;
   const k = nrm(name);
@@ -22400,6 +22407,14 @@ function blankMuscleMap(v){ const o = {}; MKEYS.forEach(k=> o[k] = (typeof v==="
    who has just done exactly as they were told gets told they have stalled. Volume,
    landmarks, tonnage and records all still count every set that happened. */
 function windowStats(from, to, opts){
+  const memo = TAB_ANALYSIS?.windows;
+  if(!memo) return computeWindowStats(from, to, opts);
+  const key = from + ":" + to + ":" + !!opts?.skipDeload;
+  if(!memo.has(key)) memo.set(key, computeWindowStats(from, to, opts));
+  return memo.get(key);
+}
+function analysisTime(){ return TAB_ANALYSIS?.now ?? Date.now(); }
+function computeWindowStats(from, to, opts){
   /* `sets` stays what it always was — raw working sets, which is what tonnage, records
      and the grade count. `eff` is the same walk discounted for warm-ups and effort, and
      it is what the volume landmarks are compared against. Both are kept because they
@@ -26848,7 +26863,7 @@ function seedCalibrationFromHistory(){
     const cycles = muscleCycles(g).filter(c=> c.V > 0);
     if(cycles.length < CAL_MIN_CYCLES) return;
     /* Effort coverage, over the whole history rather than the current window. */
-    const all = windowStats(0, Date.now() + 1)[g];
+    const all = windowStats(0, analysisTime() + 1)[g];
     const rated = (all.rpeSets || 0), un = (all.noRpe || 0);
     if(rated + un <= 0 || rated/(rated + un) < SEED_MIN_RPE_SHARE) return;
     const chain = (A.lm && A.lm[g]) ? A.lm[g] : adjustedLandmarks(A, g);
@@ -50384,7 +50399,7 @@ function tgEvidence(A, g){
   if(activeEases()[g]) return null;                      // nor is a week you were told to ease off
   const L = (A.lm && A.lm[g]) || adjustedLandmarks(A, g) || GROUPS[g];
   if(!(L.mev > 0)) return null;
-  const now = Date.now(), W = TGS_WEEKS * 7 * DAY_MS;
+  const now = analysisTime(), W = TGS_WEEKS * 7 * DAY_MS;
   const a = windowStats(now - W, now + 1)[g];
   const b = windowStats(now - 2*W, now - W)[g];
   if(!a || !b) return null;
@@ -50526,7 +50541,7 @@ function floorRetests(){
   const recs = S.lmFloorAt || {};
   const out = [];
   const A = (typeof bodyAnalysis === "function") ? bodyAnalysis() : null;
-  const now = Date.now(), W = TGS_WEEKS * 7 * DAY_MS;
+  const now = analysisTime(), W = TGS_WEEKS * 7 * DAY_MS;
   Object.keys(recs).forEach(g=>{
     const rec = recs[g];
     if(!rec || !rec.at || !GROUPS[g]) return;
@@ -75329,7 +75344,12 @@ function tabViewHTML(){
 function renderTabInto(app){
   TAB_ERR = null;
   try{
-    app.innerHTML = tabViewHTML();
+    // Cache only during this synchronous draw. The next draw sees edits, sync and
+    // exercise remaps, including edits that leave the session count unchanged.
+    const previous = TAB_ANALYSIS;
+    TAB_ANALYSIS = {now: Date.now(), muscles: new Map(), windows: new Map()};
+    try{ app.innerHTML = tabViewHTML(); }
+    finally{ TAB_ANALYSIS = previous; }
   }catch(err){
     TAB_ERR = {tab: TAB, where: "drawing the screen", err: err};
     try{ app.innerHTML = viewTabCrashHTML(err, "drawing the screen"); }
