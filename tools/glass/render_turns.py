@@ -48,15 +48,23 @@ def frame(work, i):
     if path.exists():
         return
     art.G.S = art.C.S = 1
-    art.C.set_style('A-bubble')
+    art.C.set_style(art.STYLE)
     width, height, shapes = objects(name, hero, scale, 2 * math.pi * i / frames)
     art.C.render_clear_sprite(str(path), width, height, shapes, art.GLASS_TINT,
-                              lossless=video, camera_scale=scale if video else 1)
+                              lossless=video, camera_scale=scale)
     path.with_name(f'{i:03}-mask.png').unlink()
 
 
-def encode(directory, target, frame_count, fps):
-    frames = [Image.open(Path(directory) / f'{i:03}.webp').convert('RGBA') for i in range(frame_count)]
+def encode(directory, target, frame_count, fps, *, stride=1, max_width=None):
+    frames = []
+    for i in range(0, frame_count, stride):
+        with Image.open(Path(directory) / f'{i:03}.webp') as image:
+            rgba = image.convert('RGBA')
+            if max_width and rgba.width > max_width:
+                rgba = rgba.resize((max_width, round(rgba.height * max_width / rgba.width)),
+                                   Image.Resampling.LANCZOS)
+            frames.append(rgba)
+    frame_count = len(frames)
     times = [round((i + 1) * 1000 / fps) - round(i * 1000 / fps) for i in range(frame_count)]
     frames[0].save(target, format='AVIF', save_all=True, append_images=frames[1:],
                    duration=times, loop=0, quality=64, speed=8, subsampling='4:2:0',
@@ -70,8 +78,11 @@ def main():
     parser.add_argument('names', nargs='*')
     parser.add_argument('--jobs', type=int, default=2)
     parser.add_argument('--video', action='store_true')
+    parser.add_argument('--bundle', action='store_true', help='include matching stills and AVIF fallbacks with video')
     parser.add_argument('--ffmpeg', default='ffmpeg')
     args = parser.parse_args()
+    if args.bundle and not args.video:
+        parser.error('--bundle requires --video')
     heroes = ('history', 'research', 'workout')
     names = args.names or [*heroes, *(name for name in art.SHAPES if not name.startswith('sphere-'))]
     args.output.mkdir(parents=True, exist_ok=True)
@@ -101,6 +112,11 @@ def main():
 
                     size = objects(name, hero, scale, 0)[:2]
                     encode_video(rendered_frames(), size, args.output / name, fps, args.ffmpeg)
+                    if args.bundle:
+                        with Image.open(Path(directory) / '000.webp') as poster:
+                            poster.save(args.output / f'{name}.webp', quality=94, method=6)
+                        encode(directory, args.output / f'{name}.avif', count, fps // 2,
+                               stride=2, max_width=520 if hero else 420)
                 else:
                     encode(directory, args.output / f'{name}.avif', count, fps)
             print(f'{name}: {count} frames at {fps} fps', flush=True)

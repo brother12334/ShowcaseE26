@@ -118,11 +118,21 @@ def clear_shade(d, n1, tint=(0.94, 0.97, 1.0), caustic=1.0, back=None):
     return col, a, band
 
 
+def trace_glass_interior(scene, position, direction, normal, radius, bias):
+    """Trace the same refracted ray for the baked heroes and transparent glass."""
+    inside = G.refract(direction, normal, 1 / 1.4)
+    distance, _ = G.march(scene, position + inside * bias, inside,
+                          np.zeros(len(position)), np.full(len(position), 8 * radius),
+                          steps=80, inside=True)
+    rear = -scene.normal(position + inside * (distance[:, None] + bias))
+    return inside, rear, distance
+
+
 def render_clear_sprite(out, Wc, Hc, objs, tint=(0.94, 0.97, 1.0), caustic=1.0, *, lossless=False, camera_scale=1):
     W, H = Wc * S, Hc * S
     sc = G.Scene(objs)
     F = 1500.0 * S * camera_scale
-    eye = np.array([W / 2, H / 2, F])
+    eye = np.array([W / 2, H * 0.45, F])
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float64)
     P = np.stack([xx.ravel(), yy.ravel(), np.zeros(W * H)], 1)
     D = P - eye
@@ -147,10 +157,8 @@ def render_clear_sprite(out, Wc, Hc, objs, tint=(0.94, 0.97, 1.0), caustic=1.0, 
     n1 = sc.normal(o_ + d * t[:, None])
     p1 = o_ + d * t[:, None]
     rmax = max(ob.r for ob in objs)
-    t2, _ = G.march(sc, p1 + d * S, d, np.zeros(len(p1)), np.full(len(p1), 8 * rmax), steps=80, inside=True)
-    p2 = p1 + d * (t2[:, None] + S)
-    n2 = -sc.normal(p2)
-    back = back_reflection(d, n2)
+    inside, n2, _ = trace_glass_interior(sc, p1, d, n1, rmax, S * camera_scale)
+    back = back_reflection(inside, n2)
     col, a, _ = clear_shade(d, n1, tint, caustic, back)
     rgba = np.zeros((W * H, 4))
     rgba[hidx, :3] = np.clip(col / np.maximum(a, 1e-3)[:, None], 0, 255)
@@ -206,11 +214,8 @@ def render_clear_hero(out, Wc, Hc, text, objs, text_fn=None, tint=(0.95, 0.97, 1
     cosi = np.clip(-(d * n1).sum(1), 0, 1)
     fres = 0.04 + 0.96 * (1 - cosi) ** 5
     rmax = max(ob.r for ob in objs)
-    d_in = G.refract(d, n1, 1 / 1.4)
-    t2, _ = G.march(sc, p1 + d_in * S, d_in, np.zeros(len(p1)), np.full(len(p1), 8 * rmax), steps=80, inside=True)
-    p2 = p1 + d_in * (t2[:, None] + S)
+    d_in, n2, t2 = trace_glass_interior(sc, p1, d, n1, rmax, S)
     thick = np.clip(t2 / (2 * rmax), 0, 1.6)
-    n2 = -sc.normal(p2)
     trans = np.zeros((len(p1), 3))
     for ci, iorc in enumerate([1.325, 1.35, 1.375]):
         dic = G.refract(d, n1, 1 / iorc)
