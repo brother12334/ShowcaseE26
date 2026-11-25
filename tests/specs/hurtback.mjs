@@ -147,10 +147,9 @@ const kept = await p.evaluate(()=>{
   TAB = "history"; render();
   const t = document.body.innerText;
   const sess = S.sessions.find(s=> s.id === "nov9");
-  /* The exercise names live in a collapsed detail block, so innerText does not carry
-     them; the row itself is what "still in the history" means. The markup is checked for
-     the names so the collapsed content is confirmed present rather than assumed. */
-  const html = document.getElementById("app").innerHTML;
+  const card = document.querySelector('.sess[data-sess="nov9"]');
+  card?.click();
+  const detail = card?.querySelector('.detail')?.innerText || "";
   /* "1 session", not "1 sessions". The header this replaced printed the count and the
      word "sessions" unconditionally, so with one session in the log it read "1
      sessions" — and this assertion was written against that. The dark glass header
@@ -158,14 +157,14 @@ const kept = await p.evaluate(()=>{
      the claim being made here is that the session is listed, not how it is pluralised,
      so it accepts either. */
   return {listed: /\b1 sessions?\b/.test(t) && /Legs B/i.test(t),
-          detail: /Smith Machine Squat/.test(html),
+          detail: card?.classList.contains("open") && /Smith Machine Squat/.test(detail),
           badge: /not learned from/i.test(t),
           sets: (sess.entries || []).reduce((n,e)=> n + e.sets.length, 0),
           note: sess.note, feelKept: sess.entries.length};
 });
 console.log("   ", JSON.stringify(kept));
 ck("the session is still in the history", kept.listed, String(kept.listed));
-ck("with its exercises still on the row", kept.detail, String(kept.detail));
+ck("opening the row still shows its exercises", kept.detail, String(kept.detail));
 ck("marked as not learned from", kept.badge, String(kept.badge));
 ck("with every set still in it", kept.sets === 4, String(kept.sets));
 ck("and its note untouched", /toe/i.test(kept.note || ""), kept.note);
