@@ -796,6 +796,15 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
    =========================================================================== */
 
 /* the hero: one per screen, never two */
+.rt-pref-title{font-size:15px;color:var(--e26-ink-2)}
+.rt-pref-time{display:block;font:650 clamp(60px,26vw,126px)/1 var(--e26-font);
+  letter-spacing:-.065em;margin:4px 0 16px;font-variant-numeric:tabular-nums}
+.rt-pref-step{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.rt-pref-step button{width:48px;height:48px;border-radius:50%;border:1px solid var(--e26-card-line);
+  background:var(--e26-card);color:var(--e26-ink);font-size:25px}
+.rt-pref-step button:disabled{opacity:.4}
+.rt-pref-card{padding:14px 16px;margin:12px 0}
+.rt-pref-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0}
 .sd-hero{padding:22px 2px 20px;text-align:center}
 .sd-hero-k{font-family:var(--disp);font-size:var(--fs-1);letter-spacing:.16em;
   text-transform:uppercase;color:var(--faint);margin:0 0 10px}
@@ -35887,6 +35896,7 @@ function prefsScreenHTML(){
       + " There is a switch for this on the session itself, so you can change your mind "
       + "mid-workout without coming back here.");
 
+  h += `<button type="button" class="btn" data-setopen="rest">Rest timer</button>`;
   h += sdSec("While a set rests");
   h += sdGroup(
       sdItem("The rest clock", "",
@@ -36442,7 +36452,7 @@ let GLASS_AT = null;
    that is not there yet and they would land on text. */
 const GLASS_READY = {today: 1, rest: 1, history: "hero", body: "hero",
                      program: "hero", research: "hero", workout: 1,
-                     settings: "hero"};
+                     settings: "hero", "settings-rest-timer": 1};
 function glassSceneFor(){
   if(OB || ACCT_UI || PF) return "";                 // onboarding and the account flow
   if(TAB === "workout") return GLASS_READY.workout ? "workout" : "";
@@ -36460,7 +36470,10 @@ function glassSceneFor(){
     ? (GLASS_READY["research-paper"] ? "research-paper" : "")
     : (GLASS_READY.research ? "research" : "");
   /* A settings sub-page is its own screen and has no art of its own yet. */
-  if(TAB === "sync")    return (GLASS_READY.settings && !SET_PAGE) ? "settings" : "";
+  if(TAB === "sync"){
+    if(SET_PAGE === "rest") return "settings-rest-timer";
+    return !SET_PAGE && GLASS_READY.settings ? "settings" : "";
+  }
   if(TAB === "today"){
     /* isRestToday(), NOT the workout id. todaysWorkoutId() names the day the rotation is
        on, which it goes on doing all through a rest day — so asking it whether today is
@@ -49621,6 +49634,7 @@ function setGroups(){
     {k:"screen", icon:"bars", title:"The workout screen", sub:"How a session looks while you are in it, and what it asks you.",
      val: (S.viewMode === "focus" ? "focus" : "regular") + " \u00b7 rest counts " + (p.restClock === "down" ? "down" : "up"),
      body: prefsScreenHTML},
+    {k:"rest", icon:"bars", title:"Rest timer", val:p.restDefault ? fmtClock(p.restDefault) : "automatic"},
     {k:"sess", icon:"barbell", title:"How training is run", sub:"Warm-ups, RPE, deloads, one-limb work, and when weights go up.",
      val: p.progression === "auto" ? "weights go up on their own"
         : p.progression === "hold" ? "you manage the weights" : "asks before adding weight",
@@ -49699,7 +49713,7 @@ function setGroupRowHTML(g){
    as a wall and hunted. Three short sections give the hunt a first step: is this about
    training, about the day around it, or about the app itself. */
 const SET_SECTIONS = [
-  {t:"Training",   keys:["sess", "screen", "plan", "targets", "gym", "patch"]},
+  {t:"Training",   keys:["sess", "screen", "rest", "plan", "targets", "gym", "patch"]},
   {t:"Day to day", keys:["day", "remind", "where"]},
   {t:"The app",    keys:["acct", "data", "storage", "help"]}
 ];
@@ -49761,7 +49775,34 @@ function setTileHTML(g, wide){
     </span>
   </button>`;
 }
+function settingsRestTimerHTML(){
+  const pref = trainPrefs().restDefault;
+  const seconds = pref || 150;
+  const range = (entry)=> restTargetFor(entry, null).ideal.map(fmtClock).join("–");
+  return `<div class="rt-pref-title">${pref ? "Rest between sets" : "Rest timer · automatic"}</div>
+    <output class="rt-pref-time" aria-label="${pref ? "Fixed rest" : "Example rest"}">${fmtClock(seconds)}</output>
+    <div class="rt-pref-step">
+      <button type="button" data-rest-step="-15" aria-label="Reduce rest by 15 seconds"${seconds <= 15 ? " disabled" : ""}>−</button>
+      <button type="button" data-rest-step="15" aria-label="Increase rest by 15 seconds"${seconds >= 600 ? " disabled" : ""}>+</button>
+      <span>15 second steps</span>
+    </div>
+    <p class="sub">${pref ? "Applies when your plan leaves rest unspecified." : "Rest adapts to each set. Use the step controls to set a fixed time."}</p>
+    <button type="button" class="btn ghost small" id="restAdaptive"${!pref ? " disabled" : ""}>Use automatic rest</button>
+    <div class="card rt-pref-card">
+      <div class="rt-pref-row"><span>Big lifts</span><b>${range({name:"Barbell Bench Press",reps:"8–12"})}</b></div>
+      <div class="rt-pref-row"><span>Small lifts</span><b>${range({name:"Cable Curl",reps:"8–12"})}</b></div>
+      <div class="rt-pref-row"><span>Superset rounds</span><b>${fmtClock(SUPERSET_ROUND_REST)}</b></div>
+    </div>
+    <div class="card rt-pref-card">${sdTog("Vibrate", "", hapticsOn(), "data-prefhaptics", hapticsOn() ? "off" : "on")}
+      ${sdTog("Sound", "", soundOn(), "data-prefsound", soundOn() ? "off" : "on")}</div>
+    <button class="linklike" data-term="restwindow">Why rest longer on big lifts?</button>`;
+}
 function viewSync(){
+  if(SET_PAGE === "rest"){
+    return dgScreenHTML({title:"rest timer", screen:"settings-rest-timer",
+      left:`<button type="button" class="fx-back hdr-back" id="setBack" aria-label="Back to Settings">‹</button>`},
+      settingsRestTimerHTML());
+  }
   const LIVE = liveStripHTML();
   const groups = setGroups();
   const open = SET_PAGE ? groups.find(g=> g.k === SET_PAGE) : null;
@@ -52009,6 +52050,17 @@ function bind(){
     SET_PAGE = b.dataset.setopen;
     render(); window.scrollTo(0, 0);
   });
+  if(SET_PAGE === "rest"){
+    const setRest = value=>{
+      S.prefs = {...S.prefs, restDefault:value};
+      save(); queueSync(); render();
+    };
+    document.querySelectorAll("[data-rest-step]").forEach(button=> button.onclick = ()=>{
+      setRest(Math.max(15, Math.min(600, (trainPrefs().restDefault || 150) + Number(button.dataset.restStep))));
+    });
+    const adaptive = $("#restAdaptive");
+    if(adaptive) adaptive.onclick = ()=> setRest(null);
+  }
   const setB = $("#setBack");
   if(setB) setB.onclick = ()=>{ SET_PAGE = null; render(); window.scrollTo(0, 0); };
   /* The patch screen's own wiring. Its card is drawn by the settings group's body(), like
