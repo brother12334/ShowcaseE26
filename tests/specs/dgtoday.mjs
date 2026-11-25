@@ -804,16 +804,16 @@ r = await newP.evaluate(async ()=>{
   const glass = document.querySelector('#stage [data-glass-hero][data-still$="overlay-history"]');
   return {results, overlays, history:!!glass && glass.dataset.turn === "assets/glass-turns/history.avif"};
 });
-ck("CONTROL: the twelve decorative stills are mapped to real slots",
-   r.results.length === 12 && r.results.every(item=> item.used > 0));
+ck("CONTROL: the ten decorative stills are mapped to real slots",
+   r.results.length === 10 && r.results.every(item=> item.used > 0));
 ck("each still covers its largest 3× phone slot", r.results.every(item=> item.sharp), JSON.stringify(r.results));
 ck("the three live-number overlays cover their own 3× canvases",
    r.overlays.length === 3 && r.overlays.every(item=> item.sharp), JSON.stringify(r.overlays));
 ck("CONTROL: History mounts its rendered capsule", r.history);
 const animatedCapsule = newP.locator('[data-glass-hero] img.glass-turn');
 await animatedCapsule.waitFor();
-ck("History loads its transparent turn at 2× or higher", await animatedCapsule.evaluate(img=>
-   img.getAttribute("src") === "assets/glass-turns/history.avif" && img.naturalWidth >= 780));
+ck("History loads the lighter 520-pixel transparent turn", await animatedCapsule.evaluate(img=>
+   img.getAttribute("src") === "assets/glass-turns/history.avif" && img.naturalWidth === 520));
 await newP.locator(".glass:not([data-glass-hero]) img.glass-turn").first().waitFor();
 const ornaments = await newP.evaluate(()=>({
   rendered: document.querySelectorAll('.glass:not([data-glass-hero])[data-turn]').length,

@@ -24,17 +24,13 @@ def objects(name, hero, scale, phase):
         width, height = round(width * 1.25), round(height * 1.25)
     shapes = []
     for kind, (x, y), size, tilt, kwargs in source:
-        if kind == 'sphere':
-            # A perfect sphere has no visible orientation in a fixed studio.
-            # Give this bubble a gently oval cross section.
-            kwargs = {**kwargs, 'form': (1.0, .93, .84)}
         obj = art.G.Obj(kind, ((x + margin_x) * scale, (y + margin_y) * scale),
                         size * scale, tilt, **kwargs)
         if not hero:
             obj.c[2] = obj.bound * 1.05
         if hero:
             # These solids have half-turn symmetry on the chosen local axis.
-            axis = {'history': 'y', 'research': 'y', 'workout': 'x'}[name]
+            axis = spec['spin'][0]
             obj.R = obj.R @ art.axis_rot(axis, math.degrees(phase) / 2)
         else:
             yaw = 16 * math.sin(phase)
@@ -73,12 +69,16 @@ def main():
     parser.add_argument('--jobs', type=int, default=2)
     args = parser.parse_args()
     heroes = ('history', 'research', 'workout')
-    names = args.names or [*heroes, *art.SHAPES]
+    names = args.names or [*heroes, *(name for name in art.SHAPES if not name.startswith('sphere-'))]
     args.output.mkdir(parents=True, exist_ok=True)
     with Pool(args.jobs) as pool:
         for name in names:
             hero = name in heroes
-            scale, fps, count = (2, 60, 180) if hero else (1.5, 30, 90)
+            if name in ('history', 'research'):
+                # Keep the three-second depth turn with fewer pixels to decode.
+                scale, fps, count = 4 / 3, 30, 90
+            else:
+                scale, fps, count = (2, 60, 180) if hero else (1.5, 30, 90)
             with TemporaryDirectory(prefix=f'e26-turn-{name}-') as directory:
                 work = (name, hero, scale, count, directory)
                 for _ in pool.imap_unordered(partial(frame, work), range(count)):

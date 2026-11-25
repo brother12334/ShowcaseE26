@@ -8,14 +8,6 @@
  */
 window.GLASS_LAYOUT = {
  "shapes": {
-  "sphere-s": {
-   "still": "assets/shapes/glass-sphere-s",
-   "turn": "assets/glass-turns/sphere-s.avif"
-  },
-  "sphere-xs": {
-   "still": "assets/shapes/glass-sphere-xs",
-   "turn": "assets/glass-turns/sphere-xs.avif"
-  },
   "links": {
    "still": "assets/shapes/glass-links",
    "turn": "assets/glass-turns/links.avif"
@@ -153,7 +145,7 @@ window.GLASS_LAYOUT = {
      "spin": false
     },
     {
-     "shape": "sphere-xs",
+     "shape": "rbox-s",
      "x": 18,
      "y": 466,
      "w": 45,
@@ -214,7 +206,7 @@ window.GLASS_LAYOUT = {
      "spin": false
     },
     {
-     "shape": "sphere-xs",
+     "shape": "capsule-xs",
      "x": 326,
      "y": 466,
      "w": 45,
@@ -259,7 +251,7 @@ window.GLASS_LAYOUT = {
      "spin": false
     },
     {
-     "shape": "sphere-xs",
+     "shape": "rbox-s",
      "x": 344,
      "y": 255,
      "w": 38,
@@ -301,7 +293,7 @@ window.GLASS_LAYOUT = {
      "spin": false
     },
     {
-     "shape": "sphere-xs",
+     "shape": "x-s",
      "x": 328,
      "y": 128,
      "w": 66,
@@ -329,7 +321,7 @@ window.GLASS_LAYOUT = {
     "still": "assets/hero-overlays/overlay-research",
     "w": 390,
     "h": 440,
-    "note": "live text (paper count) sits underneath; the sphere moves gently through an orbit"
+    "note": "live text (paper count) sits underneath; the glass ring turns into depth"
    },
    "shapes": [
     {
@@ -363,7 +355,7 @@ window.GLASS_LAYOUT = {
      "spin": false
     },
     {
-     "shape": "sphere-xs",
+     "shape": "rbox-s",
      "x": 331,
      "y": 381,
      "w": 48,
@@ -388,7 +380,7 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "shapes": [
     {
-     "shape": "sphere-s",
+     "shape": "rbox-s",
      "x": 256,
      "y": 82,
      "w": 138,
@@ -418,7 +410,7 @@ window.GLASS_LAYOUT = {
      "spin": false
     },
     {
-     "shape": "sphere-xs",
+     "shape": "capsule-xs",
      "x": 325,
      "y": 325,
      "w": 50,
@@ -500,7 +492,7 @@ window.GLASS_LAYOUT = {
      "spin": false
     },
     {
-     "shape": "sphere-xs",
+     "shape": "x-s",
      "x": 24,
      "y": 115,
      "w": 48,
@@ -570,7 +562,7 @@ window.GLASS_LAYOUT = {
      "spin": false
     },
     {
-     "shape": "sphere-xs",
+     "shape": "rbox-s",
      "x": 16,
      "y": 470,
      "w": 58,

@@ -65,10 +65,10 @@
       // 1. the old screen tightens
       A(legacy, [{ transform: 'scale(1)', filter: 'none' }, { transform: 'scale(.97)', filter: 'saturate(.8)' }],
         { duration: T.tension, easing: 'ease-out' });
-      // 2. a glass bubble inflates in the middle of it
+      // 2. a rounded glass tile expands in the middle of it
       const bub = make('div', 'intro-bubble');
       bub.style.left = ox + 'px'; bub.style.top = oy + 'px';
-      const im = document.createElement('img'); im.alt = ''; im.src = (o.base || '') + 'assets/shapes/glass-sphere-s.webp'; bub.append(im);
+      const im = document.createElement('img'); im.alt = ''; im.src = (o.base || '') + 'assets/shapes/glass-rbox-s.webp'; bub.append(im);
       A(bub, [{ opacity: 0, transform: 'scale(.05)' }, { opacity: 1, transform: 'scale(1)' }],
         { duration: T.bubbleIn, delay: T.bubbleAt, easing: T.bubbleEase });
       A(bub, [{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.5)' }],

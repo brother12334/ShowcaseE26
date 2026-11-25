@@ -104,17 +104,10 @@ HEROES = {
     # object about an axis in its own space, which is the same code path Today uses.
     'history':  dict(canvas=(390, 440), text=dict(lines=['41'], px=300, top=96, left=-10), motion='spin',
                      objs=[('capsule', (232, 252), 314, (-16, 24, 49), dict(thick=0.235))],
-                     spin=('z', 180), overlay=True),
-    # AND RESEARCH ORBITS RATHER THAN SPINS, for the reason written above SPIN: its
-    # object is a smooth bubble, and a smooth bubble turning on the spot is a still
-    # frame. 'orbit' is the renderer's own motion for it and it moves the object through
-    # the scene between frames, so the rim light and the refraction are re-rendered each
-    # time rather than one picture being slid about by the browser, which is what was
-    # here before and what the owner objected to. If the bubble should visibly TUMBLE,
-    # the object has to change to one with a silhouette — 'blob' is the liquid one.
-    'research': dict(canvas=(390, 440), text=dict(lines=['62'], px=300, top=96, left=-10),
-                     motion='orbit',
-                     objs=[('sphere', (227, 244), 222, (0, 0, 0), {})], overlay=True),
+                     spin=('y', 180), overlay=True),
+    'research': dict(canvas=(390, 440), text=dict(lines=['62'], px=300, top=96, left=-10), motion='spin',
+                     objs=[('torus', (241, 237), 229, (33, 19, -24), dict(thick=0.17))],
+                     spin=('y', 180), overlay=True),
 }
 
 # ------------------------------------------------------------------ helpers

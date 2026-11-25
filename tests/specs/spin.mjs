@@ -98,9 +98,11 @@ console.log("\n1b. ALL LIVE GLASS PLACEMENTS HAVE RENDERED TRANSPARENT TURNS");
     const missing = Object.entries(L.shapes).filter(([, shape])=> !shape.turn?.endsWith(".avif"));
     const places = Object.values(L.screens).flatMap(screen=>screen.shapes || []);
     const unmapped = places.filter(place=> !L.shapes[place.shape]?.turn);
-    return {missing:missing.length, places:places.length, unmapped:unmapped.length};
+    return {missing:missing.length, places:places.length, unmapped:unmapped.length,
+      spheres:places.filter(place=>place.shape.startsWith("sphere")).length};
   });
   ck("CONTROL: the layout has glass placements to verify", r.places >= 20, JSON.stringify(r));
+  ck("none of the active scenes places a sphere", r.spheres === 0, JSON.stringify(r));
   ck("every model and placement has a transparent 3D sequence", r.missing === 0 && r.unmapped === 0, JSON.stringify(r));
 }
 await p.evaluate(()=> boot("history"));
@@ -121,6 +123,7 @@ ck("CONTROL: the History capsule changes with CSS animation disabled",
       blend:getComputedStyle(img.closest(".dg-shapes")).mixBlendMode,
       still:getComputedStyle(img.parentElement.querySelector(".glass-img")).visibility};
   });
+  ck("the History turn stays within its lighter decode dimensions", state.width === 520, JSON.stringify(state));
   ck("the capsule background is transparent without blend modes or a frozen double",
      state.width > 0 && state.alpha === 0 && state.blend === "normal" && state.still === "hidden", JSON.stringify(state));
 }

@@ -110,7 +110,7 @@ console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");
   });
   ck("CONTROL: with no connection this screen really has no papers", e.papers === 0, String(e.papers));
   ck("CONTROL: so it reserves no hero band", e.noart === true);
-  ck("decorations can mount, but there is no hero bubble", e.art > 0 && !e.hero, e.what);
+  ck("decorations can mount, but there is no hero ring", e.art > 0 && !e.hero, e.what);
   ck("so nothing is laid over the first thing you can tap", e.over === 0, e.what);
 
   const f = await full.evaluate(()=>{
@@ -121,23 +121,23 @@ console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");
             num: (document.querySelector('.dg-num') || {}).textContent};
   });
   ck("CONTROL: with papers the screen does reserve its band", f.noart === false);
-  ck("and the bubble comes back with it", f.art > 0, String(f.art));
+  ck("and the ring comes back with it", f.art > 0, String(f.art));
   ck("over the count it is drawn to sit on",
      f.num === String(r.n), f.num + " vs " + r.n);
 }
 
-console.log("\n2b. THE BUBBLE PLAYS ITS RENDERED 3D FRAMES");
-const bubble = full.locator('[data-glass-hero] img.glass-turn');
-await bubble.waitFor();
-const source = await bubble.evaluate(img=>({src:img.getAttribute('src'), width:img.naturalWidth}));
+console.log("\n2b. THE RING PLAYS ITS RENDERED 3D FRAMES");
+const ring = full.locator('[data-glass-hero] img.glass-turn');
+await ring.waitFor();
+const source = await ring.evaluate(img=>({src:img.getAttribute('src'), width:img.naturalWidth}));
 ck("CONTROL: the seeded feed mounts the rendered Research turn",
-   source.src === "assets/glass-turns/research.avif" && source.width >= 780, JSON.stringify(source));
-const firstFrame = await bubble.screenshot({animations:"disabled"});
+   source.src === "assets/glass-turns/research.avif" && source.width === 520, JSON.stringify(source));
+const firstFrame = await ring.screenshot({animations:"disabled"});
 await full.waitForTimeout(320);
-const nextFrame = await bubble.screenshot({animations:"disabled"});
+const nextFrame = await ring.screenshot({animations:"disabled"});
 ck("the baked frames change even with CSS animations disabled", !firstFrame.equals(nextFrame));
 await full.emulateMedia({reducedMotion:"reduce"});
-await bubble.waitFor({state:"detached"});
+await ring.waitFor({state:"detached"});
 ck("Reduce Motion restores the still", await full.locator('[data-glass-hero] .glass-img').evaluate(
    el=>getComputedStyle(el).visibility === "visible"));
 await full.emulateMedia({reducedMotion:"no-preference"});

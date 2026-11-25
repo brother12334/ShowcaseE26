@@ -4,7 +4,7 @@
  *
  *   <div class="glass front" data-sheet="assets/motion/glass-star" data-frames="36" data-cols="12"
  *        data-fps="12" data-depth="0.4" style="left:204px; top:536px; width:238px; height:238px"></div>
- *   <div class="glass front" data-still="assets/shapes/glass-sphere-xs" data-depth="1.1" style="..."></div>
+ *   <div class="glass front" data-still="assets/shapes/glass-rbox-s" data-depth="1.1" style="..."></div>
  *
  * Normally you do not write that markup: scene.js builds it from layout.js.
  * Call GlassMotion.mount(root) after a screen renders and GlassMotion.unmount() before it is replaced.
