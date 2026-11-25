@@ -78,7 +78,8 @@
     tilt.y += (tilt.ty - tilt.y) * 0.08;
     for (const it of items) {
       if (it.frames <= 1 || (!it.visible && C.pauseOffscreen)) continue;
-      if (it.frames > 1) setFrame(it, Math.floor((t + it.phase) * it.fps) % it.frames);
+      setFrame(it, Math.floor((t + it.phase) * it.fps) % it.frames);
+      if (it.el.hasAttribute('data-glass-hero')) continue;
       const bob = Math.sin(((t + it.phase) / it.period) * Math.PI * 2) * it.bob;
       const par = -scrollY * (it.depth - 1) * C.parallax;
       it.el.style.transform = `translate3d(${tilt.x * C.tilt * it.depth}px, ${bob + par + tilt.y * C.tilt * it.depth}px, 0)`;

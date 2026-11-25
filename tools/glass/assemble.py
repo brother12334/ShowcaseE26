@@ -18,7 +18,8 @@ from PIL import Image
 SRC, OUT = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
 COLS = 12
 SHAPE_CAP = 320      # max frame width in a shape sheet (px). Raise for sharper, costs memory.
-OVERLAY_CAP = 390    # hero overlay sheets at 1x
+OVERLAY_CAP = 390    # legacy workout overlay
+HQ_OVERLAYS = {"overlay-history", "overlay-research"}
 FPS_IN, FPS_OUT = 8, 30   # hero loop: rendered at 8 fps, blended up to 30 fps
 
 
@@ -35,19 +36,19 @@ def hero_video(name, dest):
     shutil.rmtree(tmp)
 
 
-def sheet(name, base, cap):
+def sheet(name, base, cap, cols=COLS):
     frames = sorted(glob.glob(f'{SRC}/{name}/[0-9][0-9][0-9].webp'))
     masks = [f.replace('.webp', '-mask.png') for f in frames]
     n = len(frames)
-    rows = -(-n // COLS)
+    rows = -(-n // cols)
     w0, h0 = Image.open(frames[0]).size
     s = min(1.0, cap / w0)
     fw, fh = round(w0 * s), round(h0 * s)
     mw, mh = max(1, fw // 2), max(1, fh // 2)
-    sp = Image.new('RGBA', (fw * COLS, fh * rows), (0, 0, 0, 0))
-    mk = Image.new('LA', (mw * COLS, mh * rows), (0, 0))
+    sp = Image.new('RGBA', (fw * cols, fh * rows), (0, 0, 0, 0))
+    mk = Image.new('LA', (mw * cols, mh * rows), (0, 0))
     for i, (f, m) in enumerate(zip(frames, masks)):
-        c, r = i % COLS, i // COLS
+        c, r = i % cols, i // cols
         sp.paste(Image.open(f).convert('RGBA').resize((fw, fh), Image.LANCZOS), (c * fw, r * fh))
         a = Image.open(m).getchannel('A').resize((mw, mh), Image.LANCZOS)
         mk.paste(Image.merge('LA', (Image.new('L', (mw, mh), 0), a)), (c * mw, r * mh))
@@ -67,8 +68,10 @@ if __name__ == '__main__':
         name = os.path.basename(d.rstrip('/'))
         hero_video(name, f'{OUT}/hero-video/{name}.mp4')
         print('video', name, flush=True)
-    for name in ('overlay-workout', 'overlay-history'):
-        print('sheet', name, sheet(name, f'{OUT}/motion/{name}', OVERLAY_CAP), flush=True)
+    for directory in sorted(glob.glob(f'{SRC}/overlay-*/')):
+        name = os.path.basename(directory.rstrip('/'))
+        cap, cols = (780, 6) if name in HQ_OVERLAYS else (OVERLAY_CAP, COLS)
+        print('sheet', name, sheet(name, f'{OUT}/motion/{name}', cap, cols), flush=True)
     for d in sorted(glob.glob(f'{SRC}/glass-*/')):
         name = os.path.basename(d.rstrip('/'))
         print('sheet', name, sheet(name, f'{OUT}/motion/{name}', SHAPE_CAP), flush=True)

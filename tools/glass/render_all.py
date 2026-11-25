@@ -28,6 +28,7 @@ import clear as C  # noqa: E402
 
 STYLE = 'A-bubble'          # a key of clear.STYLES
 HERO_FRAMES = 30            # frames in a hero loop (played at 8 fps, smoothed to 30 fps)
+OVERLAY_FRAMES = 18
 SHAPE_FRAMES = 36           # frames in a shape's spin sheet
 GLASS_TINT = (0.94, 0.97, 1.0)   # slight cool cast; (1,1,1) is neutral, try (1,0.9,0.95) for warm
 
@@ -73,9 +74,9 @@ HEROES = {
     # stills only (their number is live text in the app, the glass is an overlay)
     'workout':  dict(canvas=(390, 340), text=dict(lines=['18:42'], px=150, top=110, left=-4), motion='spin',
                      objs=[('torus', (282, 214), 230, (58, 22, 0), dict(thick=0.12))], spin=('x', 180), overlay=True),
-    'history':  dict(canvas=(390, 440), text=dict(lines=['41'], px=300, top=96, left=-10), motion='spin',
-                     objs=[('capsule', (220, 250), 300, (-20, 30, 52), dict(thick=0.2))], spin=('z', 180), overlay=True),
-    'research': dict(canvas=(390, 440), text=dict(lines=['62'], px=300, top=96, left=-10), motion='still',
+    'history':  dict(canvas=(390, 440), text=dict(lines=['41'], px=300, top=96, left=-10), motion='sway',
+                     objs=[('capsule', (231, 253), 330, (-12, 20, 52), dict(thick=0.25))], overlay=True),
+    'research': dict(canvas=(390, 440), text=dict(lines=['62'], px=300, top=96, left=-10), motion='orbit',
                      objs=[('sphere', (212, 250), 230, (0, 0, 0), {})], overlay=True),
 }
 
@@ -145,6 +146,9 @@ def job_shape(args):
 def hero_objs(h, i, n):
     objs = []
     for j, (kind, c, sz, tilt, kw) in enumerate(h['objs']):
+        if h['motion'] == 'orbit' and n:
+            phase = 2 * np.pi * i / n
+            c = (c[0] + 12 * np.sin(phase), c[1] - 6 * (1 - np.cos(phase)))
         o = G.Obj(kind, c, sz, tilt, **kw)
         if h['motion'] == 'spin' and j == 0 and n:
             turn(o, h['spin'][0], h['spin'][1] * i / n)
@@ -204,6 +208,12 @@ def build_jobs(OUT, want):
         for key in ('workout', 'history', 'research'):
             jobs.append(('overlay', (key, 0, 0, f'{OUT}/stills/overlay-{key}.webp')))
         jobs.append(('overlay', ('today', 0, 0, f'{OUT}/stills/overlay-today.webp')))
+    for key in ('history', 'research'):
+        if not want or 'loops' in want or f'overlay-{key}' in want:
+            directory = f'{OUT}/overlay-{key}'
+            os.makedirs(directory, exist_ok=True)
+            jobs += [('overlay', (key, i, OVERLAY_FRAMES, f'{directory}/{i:03d}.webp'))
+                     for i in range(OVERLAY_FRAMES)]
     if not want or 'loops' in want:
         for day in CYCLE_DAYS:
             d = f'{OUT}/hero-today-{day}'
@@ -213,7 +223,7 @@ def build_jobs(OUT, want):
             d = f'{OUT}/hero-{key}'
             os.makedirs(d, exist_ok=True)
             jobs += [('hero', (key, i, HERO_FRAMES, f'{d}/{i:03d}.webp')) for i in range(HERO_FRAMES)]
-        for key in ('workout', 'history'):
+        for key in ('workout',):
             d = f'{OUT}/overlay-{key}'
             os.makedirs(d, exist_ok=True)
             jobs += [('overlay', (key, i, SHAPE_FRAMES, f'{d}/{i:03d}.webp')) for i in range(SHAPE_FRAMES)]
@@ -237,7 +247,7 @@ if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     jobs = build_jobs(OUT, want)
     print(len(jobs), 'images', flush=True)
-    with Pool(max(1, os.cpu_count() or 1)) as p:
+    with Pool(min(len(jobs) or 1, int(os.environ.get('E26_RENDER_JOBS', os.cpu_count() or 1)))) as p:
         errs = []
         for n, e in enumerate(p.imap_unordered(run, jobs, chunksize=2), 1):
             if e:

@@ -275,7 +275,10 @@ window.GLASS_LAYOUT = {
   "history": {
    "height": 1500,
    "hero": {
-    "overlay": null,
+    "overlay": "assets/motion/overlay-history",
+    "frames": 18,
+    "cols": 6,
+    "fps": 12,
     "still": "assets/hero-overlays/overlay-history",
     "bob": 3,
     "w": 390,
@@ -328,11 +331,14 @@ window.GLASS_LAYOUT = {
   "research": {
    "height": 1500,
    "hero": {
-    "overlay": null,
+    "overlay": "assets/motion/overlay-research",
+    "frames": 18,
+    "cols": 6,
+    "fps": 12,
     "still": "assets/hero-overlays/overlay-research",
     "w": 390,
     "h": 440,
-    "note": "live text (paper count) sits underneath; the sphere is a still on purpose"
+    "note": "live text (paper count) sits underneath; the sphere moves gently through an orbit"
    },
    "shapes": [
     {

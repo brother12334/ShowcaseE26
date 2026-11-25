@@ -42,7 +42,9 @@
     }
     // live-number hero: a glass overlay, above the text
     const d = el('div', 'glass front', { left: '0', top: '0', width: px(h.w), height: px(h.h) });
-    if (h.overlay) {
+    d.dataset.glassHero = '';
+    if (h.overlay && (!reduce || !h.still)) {
+      if (h.fps) d.dataset.fps = h.fps;
       d.dataset.sheet = o.base + h.overlay; d.dataset.frames = h.frames; d.dataset.cols = h.cols;
     } else d.dataset.still = o.base + h.still;
     d.dataset.depth = '0.2'; d.dataset.bob = String(h.bob ?? 0);
