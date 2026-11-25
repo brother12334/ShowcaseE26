@@ -5137,7 +5137,7 @@ nav .nav-ic.catch{animation:navCatch .52s cubic-bezier(.34,1.32,.5,1) both}
    tells you the content changed on purpose. Content only, never the nav — a nav bar that
    animates with the page reads as the whole app lurching. */
 @keyframes viewIn{
-  from{opacity:0;transform:translate3d(var(--vx,0px),9px,0)}
+  from{opacity:0;transform:translate3d(0px,9px,0)}
   to{opacity:1;transform:none}
 }
 /* The cards arrive in the order you read them rather than all at once, which is what
@@ -8890,7 +8890,7 @@ body[class~="nav-flush"] [data-dg-screen="today"] .dg-hero{flex:1 1 auto;min-hei
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.25.1";
+const APP_VERSION = "2026.11.25.2";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -16860,8 +16860,14 @@ function pruneSleepSkips(){
 function dayStr(ts){ return new Date(ts).toLocaleDateString("en-CA"); }
 /* fmtDate() without the weekday, for the lines that are tight. "Tue, Sep 8" wrapped the
    load-change caption onto a second row for three characters nobody reads there. */
-const fmtDateShort = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
-const fmtDate = d => new Date(d+"T12:00:00").toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+const SHORT_DATE_FORMAT = new Intl.DateTimeFormat(undefined,{month:"short",day:"numeric"});
+const SESSION_DATE_FORMAT = new Intl.DateTimeFormat(undefined,{weekday:"short",month:"short",day:"numeric"});
+function formatLogDate(value, formatter){
+  const date = new Date(value + "T12:00:00");
+  return isNaN(date.getTime()) ? date.toLocaleDateString() : formatter.format(date);
+}
+const fmtDateShort = d => formatLogDate(d, SHORT_DATE_FORMAT);
+const fmtDate = d => formatLogDate(d, SESSION_DATE_FORMAT);
 /* ONE FUNCTION, STILL CALLED THE SAME WAY. Every one of the app's notices goes through
    toast(msg) and none of them had to change: the kind is worked out from the message
    unless the caller says otherwise, so "Couldn't send that" arrives as a warning and
@@ -28512,21 +28518,14 @@ function syncWorkoutTab(){
 // One way in and out of a tab, so the highlight, the scroll position and the nav reveal
 // never disagree about which one you are on.
 function goTab(t){
-  const from = TAB;
+  const changed = TAB !== t;
   TAB = t;
-  syncWorkoutTab();
-  document.querySelectorAll("nav button").forEach(x=> x.classList.toggle("on", x.dataset.tab === t));
-  render(); window.scrollTo(0, 0); showNav();
-  if(from !== t) replayViewIn(from);
+  render(changed);
+  window.scrollTo(0, 0);
+  showNav();
 }
-document.querySelectorAll("nav button").forEach(b=>{
-  b.onclick = ()=>{
-    const from = TAB;
-    TAB=b.dataset.tab;
-    document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("on",x===b));
-    render(); window.scrollTo(0,0); showNav();
-    if(from !== TAB) replayViewIn(from);
-  };
+document.querySelectorAll("nav button").forEach(button=>{
+  button.onclick = ()=> goTab(button.dataset.tab);
 });
 /* ---------- tab bar behaviour ----------
    Retracts as you scroll down and comes back the instant you scroll up, so a long tab
@@ -36824,7 +36823,13 @@ function replayIntro(){
                                 save(); return ok; });
 }
 
-function render(){
+let TAB_DRAW = 0;
+function syncTabGlass(){
+  try{ glassSync(); }catch(err){ console.error("Element 26: the glass layer threw", err); }
+}
+function render(fastTab){
+  const draw = ++TAB_DRAW;
+  const navigating = fastTab === true;
   /* D6b — A SHARE LINK IS NOT THE APP, AND NOTHING MAY REDRAW IT INTO ONE. The viewer
      replaces the page, but the app has timers, visibility handlers and a sync that all
      call render() on their own schedule — any one of them would have replaced a coach's
@@ -36911,17 +36916,23 @@ function render(){
   /* ONE BAD RECORD MUST NOT COST YOU THE SCREEN. Every tab is drawn and wired behind
      renderTabInto(), which shows what threw and an export button rather than leaving a
      tab bar above nothing. See the RESCUE section. */
-  renderTabInto(app);
+  renderTabInto(app, navigating);
   document.body.classList.toggle("nav-flush", TAB === "today" &&
     !!app.querySelector('[data-dg-screen="today"]') && !app.querySelector('[data-today-extra]'));
   /* THE GLASS LAYER, mounted per SCREEN rather than per render. See glassSync(). */
-  try{ glassSync(); }catch(e){ try{ console.error("Element 26: the glass layer threw", e); }catch(e2){} }
+  if(navigating && !introDue() && !INTRO_RUNNING){
+    // Let the new controls paint before loading another scene's decorative media.
+    if(window.GlassScene){ GlassScene.unmount(); GLASS_AT = null; }
+    requestAnimationFrame(()=> requestAnimationFrame(()=>{
+      if(draw === TAB_DRAW) syncTabGlass();
+    }));
+  }else syncTabGlass();
   /* AND THE INTRO, IF IT IS STILL OWED. Guarded entirely inside introDue(); see the
      note there for why one attempt at startup was not enough. */
   if(introDue()) queueMicrotask(introMaybe);
   // the page just changed height, so the tab bar's "am I at the bottom?" test needs
   // the new figure. Read it here, once, rather than inside the scroll handler.
-  refreshNavBounds();
+  if(!navigating) refreshNavBounds();
   /* MIGRATION PROMPT. After the screen is up, never during: a modal thrown mid-render
      fights whatever the render was doing. Once, on an ordinary tab, and only for an
      existing user — somebody still in onboarding is asked as part of it. */
@@ -42035,26 +42046,9 @@ function bodyToggle(k){
    all: the animation is considered already played. Removing the class, forcing a reflow
    by reading offsetWidth, then re-adding it is the standard way to make it fire again,
    and it is why this is a function rather than a classList.add at each call site. */
-/* THE ORDER THE TAB BAR IS IN, which is what tells replayViewIn() which way a screen
-   should arrive from. "sync" is deliberately NOT in it any more: Settings is no longer a
-   neighbour of anything, so there is no left or right to come from, and leaving it in
-   would have the Settings screen slide in from beyond Research as though it were a sixth
-   tab. indexOf returns -1 for it, which replayViewIn already reads as "no direction". */
-const TAB_ORDER = ["today", "workout", "history", "body", "program", "research"];
-function replayViewIn(from){
+function replayViewIn(){
   const el = document.getElementById("app");
   if(!el) return;
-  /* WHICH WAY THE SCREEN CAME FROM. The tab bar is a row, so a move to the right should
-     arrive from the right: the animation carries the same information your thumb just
-     used, and the app stops feeling like a set of unrelated screens sharing a frame.
-     14px, not a full slide — enough to read as direction, short enough that nothing is
-     still travelling when your eye gets there. */
-  let dx = 0;
-  if(from && from !== TAB){
-    const a = TAB_ORDER.indexOf(from), b = TAB_ORDER.indexOf(TAB);
-    if(a > -1 && b > -1) dx = b > a ? 14 : -14;
-  }
-  el.style.setProperty("--vx", dx + "px");
   el.classList.remove("view-in");
   void el.offsetWidth;
   el.classList.add("view-in");
@@ -47756,14 +47750,12 @@ function histContext(){
     const v = sessVolume(s);
     vol.set(s.id, v);
     const k = s.workoutId || "?";
-    const prev = seen[k] || (seen[k] = []);
-    before.set(s.id, {
-      n: prev.length,
-      best: prev.length ? Math.max.apply(null, prev) : 0,
-      avg: prev.length ? prev.reduce((a,b)=>a+b,0)/prev.length : 0,
-      last: prev.length ? prev[prev.length-1] : 0
-    });
-    prev.push(v);
+    const prev = seen[k] || (seen[k] = {n:0, best:0, total:0, last:0});
+    before.set(s.id, {n:prev.n, best:prev.best, avg:prev.n ? prev.total/prev.n : 0, last:prev.last});
+    prev.best = prev.n ? Math.max(prev.best, v) : v;
+    prev.total += v;
+    prev.last = v;
+    prev.n++;
     if(s.startedAt && s.finishedAt) mins.push(Math.round((s.finishedAt - s.startedAt)/60000));
   });
   mins.sort((a,b)=>a-b);
@@ -47856,6 +47848,29 @@ function viewHistory(){
     live: true,
     heroWord: n ? String(n) : "",
     heroSays: n === 1 ? "session logged" : "sessions logged"}, viewHistoryBody());
+}
+function showHistorySession(card){
+  const slot = card.querySelector("[data-history-lifts]");
+  if(slot && !slot.hasChildNodes()){
+    const s = S.sessions.find(session=> session.id === card.dataset.sess);
+    if(s){
+      const ssm = supersetMap(s.entries);
+      slot.innerHTML = s.entries.map((e,i)=>
+        `<div class="exline"><b>${ssm[i]?`<span class="ss-tag">${ssm[i].letter}${ssm[i].pos}</span> `:""}${esc(e.name)}</b>${
+            techTextList(e).map(t=>`<span class="tech-tag">${esc(t)}</span>`).join("")}
+          <span class="icon-btns ex-ctl" style="float:right;margin-top:-4px">
+            <button data-hup="${s.id}:${i}" aria-label="Move earlier">↑</button>
+            <button data-hdown="${s.id}:${i}" aria-label="Move later">↓</button>
+          </span>
+          ${swapNoteHTML(e)}
+          ${ssm[i] && ssm[i].pos === 1 ? `<div class="ss-pair">superset with ${esc(ssm[i].partner)} \u2014 a set of each back to back, rest only after the pair</div>` : ""}
+          <br><span class="num">${setListHTML(e)}</span></div>`
+      ).join("");
+      slot.querySelectorAll("[data-hup]").forEach(b=> b.onclick=()=> moveSessEx(...b.dataset.hup.split(":"), -1));
+      slot.querySelectorAll("[data-hdown]").forEach(b=> b.onclick=()=> moveSessEx(...b.dataset.hdown.split(":"), 1));
+    }
+  }
+  card.classList.add("open");
 }
 function viewHistoryBody(){
   let h = "";
@@ -47977,17 +47992,7 @@ function viewHistoryBody(){
         ? `<div class="sub" style="margin-top:3px;color:var(--faint)">at ${esc(lab)}</div>` : ""
         )(sessionGymLabel(s))}
       ${s.note?`<div class="sub" style="margin-top:4px;font-style:italic">"${esc(s.note)}"</div>`:""}
-      <div class="detail">${((ssm)=> s.entries.map((e,i)=>
-        `<div class="exline"><b>${ssm[i]?`<span class="ss-tag">${ssm[i].letter}${ssm[i].pos}</span> `:""}${esc(e.name)}</b>${
-            techTextList(e).map(t=>`<span class="tech-tag">${esc(t)}</span>`).join("")}
-          <span class="icon-btns ex-ctl" style="float:right;margin-top:-4px">
-            <button data-hup="${s.id}:${i}" aria-label="Move earlier">↑</button>
-            <button data-hdown="${s.id}:${i}" aria-label="Move later">↓</button>
-          </span>
-          ${swapNoteHTML(e)}
-          ${ssm[i] && ssm[i].pos === 1 ? `<div class="ss-pair">superset with ${esc(ssm[i].partner)} \u2014 a set of each back to back, rest only after the pair</div>` : ""}
-          <br><span class="num">${setListHTML(e)}</span></div>`
-      ).join(""))(supersetMap(s.entries))}
+      <div class="detail"><div data-history-lifts></div>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn ghost small" data-scoresess="${s.id}">${q?"Quality "+q.grade:"Grade it"}</button>
         <button class="btn ghost small" data-editsess="${s.id}">Edit session</button>
@@ -53763,7 +53768,8 @@ function bind(){
     const card = document.getElementById("sess-" + c.dataset.heat);
     if(!card) return;
     document.querySelectorAll(".sess.hx-hit").forEach(x=> x.classList.remove("hx-hit"));
-    card.classList.add("open", "hx-hit");
+    showHistorySession(card);
+    card.classList.add("hx-hit");
     card.scrollIntoView({behavior: reducedMotion() ? "auto" : "smooth", block:"center"});
     setTimeout(()=> card.classList.remove("hx-hit"), 1400);
   });
@@ -53772,7 +53778,8 @@ function bind(){
       const d = e.target.dataset || {};
       // any control inside the expanded detail handles its own click
       if(d.delsess || d.editsess || d.resumesess || d.scoresess || d.hup || d.hdown) return;
-      c.classList.toggle("open");
+      if(c.classList.contains("open")) c.classList.remove("open");
+      else showHistorySession(c);
     };
   });
   document.querySelectorAll("[data-editsess]").forEach(b=> b.onclick=()=> openSessionEditor(b.dataset.editsess));
@@ -53789,9 +53796,6 @@ function bind(){
     }
     openScoreCard(s, ()=>render());
   });
-  // reorder exercises inside a finished session, straight from History
-  document.querySelectorAll("[data-hup]").forEach(b=> b.onclick=()=> moveSessEx(...b.dataset.hup.split(":"), -1));
-  document.querySelectorAll("[data-hdown]").forEach(b=> b.onclick=()=> moveSessEx(...b.dataset.hdown.split(":"), 1));
   document.querySelectorAll("[data-resumesess]").forEach(b=> b.onclick=()=> resumeSession(b.dataset.resumesess));
   document.querySelectorAll("[data-delsess]").forEach(b=> b.onclick=()=>{
     if(confirm("Delete this session permanently?")){
@@ -58265,7 +58269,7 @@ function moveSessEx(sessId, idx, dir, silent){
     // keep this card open across the re-render so you can keep nudging
     render();
     const card = document.querySelector(`.sess[data-sess="${sessId}"]`);
-    if(card) card.classList.add("open");
+    if(card) showHistorySession(card);
   }
   return true;
 }
@@ -66656,8 +66660,9 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.25.1";
+const NEWS_FOR = "2026.11.25.2";
 const NEWS = [
+  {k:"Quicker tab switches and sharper glass", s:["Tabs show their content without an entrance fade. Today stays in place when dragged, and the History and Research glass moves using sharp 3× art. The small glass ornaments gently tilt as they float."]},
   {k:"Faster Program and animated glass", s:["Program reuses its training calculations. History and Research have animated glass, Body has its iridescent artwork, and Settings has a Rest timer page. Read release notes from Help whenever you need them."]},
   {k: "The gradient is back, and so is the intro",
    s: ["The soft gradient across the top of each screen is back, so the date and the day pills stay readable on a frame where the art comes up bright.",
@@ -75416,7 +75421,7 @@ function tabViewHTML(){
 
 /* THE BOUNDARY. Draw, then wire, then animate — each a separate failure with its
    own outcome, because they fail differently and leave the screen in different states. */
-function renderTabInto(app){
+function renderTabInto(app, navigating){
   TAB_ERR = null;
   try{
     // Cache only during this synchronous draw. The next draw sees edits, sync and
@@ -75440,7 +75445,7 @@ function renderTabInto(app){
     try{ app.insertAdjacentHTML("afterbegin", rescueBannerHTML(err)); bindRescue(); }catch(e2){}
     try{ console.error("Element 26: " + TAB + " failed to bind", err); }catch(e3){}
   }
-  try{ countUpAll(app); }catch(e){}
+  if(!navigating){ try{ countUpAll(app); }catch(e){} }
   return !TAB_ERR;
 }
 

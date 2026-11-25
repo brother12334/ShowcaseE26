@@ -38,11 +38,13 @@ const moving = ()=> p.evaluate(()=>{
   return n;
 });
 
-console.log("1 - ARRIVING ON A TAB IS ANIMATED");
+console.log("1 - TAB SWITCHES DO NOT HIDE THE DESTINATION");
 {
   for(const t of ["today","history","body","program"]){
     await p.evaluate(tab=>{ goTab("sync"); if(tab==="body") BODY_OPEN.nbadv = true; goTab(tab); }, t);
-    ck(t+": the screen arrives", (await moving()) > 0, String(await moving()));
+    ck("CONTROL: " + t + " has content",
+       await p.locator('[data-dg-screen="' + t + '"] h1').count() === 1);
+    ck(t+": the screen is immediately visible", (await moving()) === 0, String(await moving()));
   }
 }
 
@@ -124,12 +126,12 @@ console.log("4 - THE APP HAS ONE ENTRANCE, NOT TWO");
   /* ON PROGRAM, NOT ON TODAY, and the change of tab is the finding rather than a
      loosening. Today is a dark glass screen now: it is one full-bleed element with the
      screen's sections inside it, so a card is no longer a direct child of #app and this
-     selector matched nothing. What it was asserting — that the app has ONE entrance and
+     selector matched nothing. What it was asserting — that the app launch has one entrance and
      a card uses it — is unchanged and is still asserted, on a tab that still puts cards
      at the top level. That Today's own sections arrive the same way is asserted in
      dgtoday.mjs, where the wrapper that made this necessary is described. */
   const r = await p.evaluate(()=>{
-    goTab("sync"); goTab("program");
+    goTab("sync"); goTab("program"); replayViewIn();
     /* Program is a dark glass screen too now, so its cards are inside the screen's own
        wrapper rather than directly under #app — the same reason this moved off Today in
        the first place. The entrance reaches one level through that wrapper, and these

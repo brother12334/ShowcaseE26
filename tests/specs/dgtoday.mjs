@@ -310,6 +310,27 @@ ck("CONTROL: the tab bar was found, or 'clear of the nav' is a pass for not look
 ck("and clear of the nav", !!r.nav && (r.start.top + r.start.h) <= r.nav.top + 1,
    r.nav ? "button ends " + (r.start.top + r.start.h) + ", nav starts " + r.nav.top : "no nav");
 
+console.log("\n6b. TODAY BLOCKS TOUCH SCROLL WITHOUT LOCKING OTHER TABS");
+{
+  await newP.evaluate(()=>{ boot(); scrollTo(0,0); });
+  const lock = await newP.evaluate(()=>{
+    const stage = document.getElementById("stage");
+    const today = stage.querySelector('[data-dg-screen="today"] #startBtn');
+    const first = {button:!!today, overflow:getComputedStyle(document.documentElement).overflowY,
+      bounce:getComputedStyle(document.documentElement).overscrollBehaviorY,
+      touch:getComputedStyle(stage).touchAction, height:document.scrollingElement.scrollHeight};
+    goTab("history");
+    const history = {heading:!!document.querySelector('[data-dg-screen="history"] h1'),
+      overflow:getComputedStyle(document.documentElement).overflowY};
+    boot();
+    return {first, history, viewport:innerHeight};
+  });
+  ck("CONTROL: both primary screens rendered", lock.first.button && lock.history.heading);
+  ck("Today has no scroll range and consumes vertical pan", lock.first.height <= lock.viewport + 1 &&
+    lock.first.overflow === "hidden" && lock.first.bounce === "none" && lock.first.touch === "pan-x", JSON.stringify(lock));
+  ck("History restores root scrolling", lock.history.overflow !== "hidden");
+}
+
 console.log("\n7. THE BRIEF STAYS WITHIN ITS SPACE WHATEVER THE LIFTS ARE CALLED");
 r = await newP.evaluate(()=>{
   /* EVERY DAY, not today's. The mutator runs before applySplit(), so todaysWorkoutId()
@@ -643,6 +664,9 @@ await newP.waitForFunction(()=> !document.querySelector('#testGlass').hasAttribu
 ck("CONTROL: the still artwork is loaded into an animated CSS layer",
    await still.evaluate(el=> getComputedStyle(el).animationName === 'glass-bob' &&
      el.style.backgroundImage.includes('glass-capsule-xs.webp')));
+ck("the ornament float includes a small perspective tilt",
+   await still.evaluate(el=> el.getAnimations()[0].effect.getKeyframes().every(frame=>
+     frame.transform.includes("rotateY") && frame.transform.includes("perspective"))));
 ck("no live backdrop filter is added to a still",
    await newP.locator('#testGlass .glass-blur').count() === 0);
 /* Same reversal as 11b, for the shapes rather than the hero: a scroll no longer stops
@@ -777,12 +801,12 @@ r = await newP.evaluate(async ()=>{
   }));
   boot();
   TAB = "history"; render();
-  const glass = document.querySelector('#stage .glass[data-sheet$="overlay-history"]');
-  const sheet = new Image();
-  sheet.src = glass.dataset.sheet + ".webp";
-  await sheet.decode();
-  const history = {hero:!!glass, frames:Number(glass.dataset.frames), columns:Number(glass.dataset.cols),
-    width:sheet.naturalWidth, height:sheet.naturalHeight};
+  const glass = document.querySelector('#stage [data-glass-hero][data-still$="overlay-history"]');
+  const img = glass?.querySelector('.glass-img');
+  const before = img && getComputedStyle(img).transform;
+  await new Promise(ok=>setTimeout(ok, 450));
+  const history = {hero:!!glass, moves:!!img && getComputedStyle(img).transform !== before,
+    animation: img && getComputedStyle(img).animationName};
   boot();
   return {results, overlays, history};
 });
@@ -792,8 +816,7 @@ ck("each still covers its largest 3× phone slot", r.results.every(item=> item.s
 ck("the three live-number overlays cover their own 3× canvases",
    r.overlays.length === 3 && r.overlays.every(item=> item.sharp), JSON.stringify(r.overlays));
 ck("CONTROL: History mounts its rendered capsule", r.history.hero);
-ck("the sheet carries 18 true 2× frames within the decode budget",
-   r.history.frames === 18 && r.history.columns === 6 && r.history.width === 4680 && r.history.height === 2640);
+ck("the 3× capsule animates continuously", r.history.moves && r.history.animation === "glass-capsule-sway");
 
 console.log("\n17. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");

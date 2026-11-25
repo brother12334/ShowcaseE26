@@ -62,50 +62,20 @@ console.log("3 - THE CACHE CANNOT GROW WITHOUT BOUND");
      await p.evaluate(()=> canonEx("DB Bench Press") === canonExRaw("DB Bench Press")), "");
 }
 
-console.log("4 - THE SCREEN ARRIVES FROM THE SIDE YOUR THUMB CAME FROM");
+console.log("4 - TAB CONTENT IS VISIBLE WITHOUT AN ENTRANCE ANIMATION");
 {
-  const vx = ()=> p.evaluate(()=> document.getElementById("app").style.getPropertyValue("--vx").trim());
-  await p.evaluate(()=> goTab("today"));
-  await p.evaluate(()=> goTab("program"));
-  ck("moving right arrives from the right", (await vx()) === "14px", await vx());
-  await p.evaluate(()=> goTab("history"));
-  ck("and moving left from the left", (await vx()) === "-14px", await vx());
-  /* Re-pressing the tab you are on redraws it, but it is not a journey, so the offset
-     stays where it was rather than being re-run from a direction. */
-  await p.evaluate(()=>{ document.getElementById("app").classList.remove("view-in"); goTab("history"); });
-  ck("re-pressing the tab you are on does not re-animate it",
-     await p.evaluate(()=> !document.getElementById("app").classList.contains("view-in")), "still animating");
-  const st = await p.evaluate(()=>{
+  const state = await p.evaluate(()=>{
+    goTab("history");
     goTab("body");
-    /* A DARK GLASS SCREEN IS ONE ELEMENT, and its sections are inside it. Body is one
-       now, so "the direct children of #app" is a list of one and there is nothing to
-       stagger. The entrance reaches one level through the wrapper (see the note beside
-       .dg in the stylesheet) and these are the things it staggers. The claim is
-       unchanged: the parts of the screen arrive one after another. */
     const app = document.getElementById("app");
-    const wrap = app.querySelector(":scope > .dg");
-    const kids = [...(wrap || app).children].slice(0, 6);
-    return kids.map(k=> getComputedStyle(k).animationDelay);
+    const heading = app.querySelector('[data-dg-screen="body"] h1');
+    return {selected: document.querySelector("nav button.on")?.dataset.tab,
+      heading: heading?.textContent, animation: getComputedStyle(heading.parentElement).animationName,
+      opacity: getComputedStyle(heading.parentElement).opacity};
   });
-  ck("the cards come in one after another", st.length > 1 && st[0] !== st[1], st.join(","));
-  ck("and the run is over inside a fifth of a second",
-     st.every(d=> parseFloat(d) <= 0.11), st.join(","));
-}
-
-console.log("4b - AND ONLY THE ARRIVAL IS ANIMATED");
-{
-  /* The animation is carried by the cards, and every render builds new ones, so a class
-     left behind would replay the whole screen every time a set is ticked. */
-  const r = await p.evaluate(()=>{
-    goTab("today");
-    goTab("body");                              // an actual change of tab
-    const during = document.getElementById("app").classList.contains("view-in");
-    render();                                   // an ordinary redraw, nothing navigated
-    const after = document.getElementById("app").classList.contains("view-in");
-    return {during, after};
-  });
-  ck("the tab change animates", r.during, String(r.during));
-  ck("an ordinary redraw does not", !r.after, String(r.after));
+  ck("CONTROL: the active Body tab and its heading are present",
+     state.selected === "body" && state.heading === "body", JSON.stringify(state));
+  ck("the destination is visible immediately", state.opacity === "1" && state.animation === "none", JSON.stringify(state));
 }
 
 console.log("5 - AND A TAB CHANGE IS STILL FAST WITH A YEAR BEHIND IT");
@@ -135,6 +105,24 @@ console.log("5 - AND A TAB CHANGE IS STILL FAST WITH A YEAR BEHIND IT");
   ck("Today draws in a frame or two", t.today < 40, Math.round(t.today)+"ms");
   ck("Body too", t.body < 90, Math.round(t.body)+"ms");
   ck("and History, which draws the most", t.history < 140, Math.round(t.history)+"ms");
+}
+
+console.log("6 - HISTORY BUILDS WORKOUT DETAILS WHEN A SESSION OPENS");
+{
+  const result = await p.evaluate(()=>{
+    goTab("history");
+    const card = document.querySelector("#app [data-sess]");
+    const slot = card?.querySelector("[data-history-lifts]");
+    if(!slot) return {};
+    const count = S.sessions.find(session=> session.id === card.dataset.sess).entries.length;
+    const initiallyEmpty = slot.children.length === 0;
+    card.click();
+    return {count, initiallyEmpty, actual:slot.children.length, open:card.classList.contains("open"),
+      wired:typeof slot.querySelector("[data-hdown]")?.onclick === "function"};
+  });
+  ck("CONTROL: this History card represents a workout with lifts", result.count > 0, JSON.stringify(result));
+  ck("opening it builds its lift rows and wires the reorder controls",
+    result.initiallyEmpty && result.open && result.actual === result.count && result.wired, JSON.stringify(result));
 }
 
 console.log(errs.length?("PAGE ERRORS: "+errs.join(" | ")):"no page errors");
