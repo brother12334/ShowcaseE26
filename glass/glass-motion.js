@@ -100,6 +100,8 @@
   function stopTurn(item) {
     if (!item.turn) return;
     clearTimeout(item.turnTimeout);
+    item.stopRefraction?.();
+    item.stopRefraction = null;
     item.turn.onerror = item.turn.onload = null;
     if (item.turn.tagName === 'VIDEO') {
       item.turn.pause();
@@ -158,6 +160,9 @@
       turn.className = 'glass-turn';
       if (!turn.isConnected) item.el.append(turn);
       item.still.style.visibility = 'hidden';
+      if (turn.tagName === 'VIDEO' && item.el.dataset.refraction) {
+        item.stopRefraction = window.GlassRefraction?.start(item.el, turn, item.el.dataset.refraction);
+      }
       if (!sample && qualityLimit > 2) sample = requestAnimationFrame(watchTurns);
     }
     function attempt(index) {

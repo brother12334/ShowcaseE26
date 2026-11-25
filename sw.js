@@ -32,7 +32,7 @@
    count and had reached 53.6 while the app was on 60.6, so neither number could be read
    against the other. See the note on APP_VERSION in index.html for the scheme. The cache
    names below are compared with !== and swept by prefix, so nothing here parses it. */
-const VERSION = "2026.11.25.14";
+const VERSION = "2026.11.25.15";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -77,6 +77,7 @@ const SHELL_URLS = [
   "./glass/intro.css",
   "./glass/glass-config.js",
   "./glass/layout.js",
+  "./glass/refraction.js",
   "./glass/glass-motion.js",
   "./glass/scene.js",
   "./glass/intro.js",

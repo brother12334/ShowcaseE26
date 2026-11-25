@@ -136,10 +136,15 @@ const firstFrame = await ring.screenshot({animations:"disabled"});
 await full.waitForTimeout(320);
 const nextFrame = await ring.screenshot({animations:"disabled"});
 ck("the baked frames change even with CSS animations disabled", !firstFrame.equals(nextFrame));
+await full.locator('.glass-refraction').waitFor();
+ck("CONTROL: the live paper count passes through the lens",
+   (await full.locator('.dg-num[data-glass-lensed]').textContent()) === String(r.n));
 await full.emulateMedia({reducedMotion:"reduce"});
 await ring.waitFor({state:"detached"});
 ck("Reduce Motion restores the still", await full.locator('[data-glass-hero] .glass-img').evaluate(
    el=>getComputedStyle(el).visibility === "visible"));
+ck("Reduce Motion puts the live number back in its original layer",
+   await full.locator('.glass-refraction, .dg-num[data-glass-lensed]').count() === 0);
 await full.emulateMedia({reducedMotion:"no-preference"});
 
 console.log("\n3. ONE HEADING, AND THE NAME IS STILL ON IT");

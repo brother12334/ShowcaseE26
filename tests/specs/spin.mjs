@@ -139,6 +139,24 @@ ck("CONTROL: the History decoder produces different rendered frames",
   ck("the capsule background is transparent without blend modes or a frozen double",
      state.width > 0 && state.alpha === 0 && state.blend === "normal" && state.still === "hidden", JSON.stringify(state));
 }
+const lens = p.locator('.glass-refraction');
+await lens.waitFor();
+const readout = p.locator('.dg-num[data-glass-lensed]');
+ck("CONTROL: the lens is drawing the real session count",
+   (await readout.textContent()) === await p.evaluate(()=> String(S.sessions.length)));
+await p.evaluate(()=> document.querySelectorAll('video.glass-turn').forEach(video=> video.pause()));
+const refracted = await capsule.screenshot({animations:"disabled"});
+await p.evaluate(()=>{
+  document.querySelector('.glass-refraction').style.visibility = "hidden";
+  document.querySelector('.dg-num').removeAttribute("data-glass-lensed");
+});
+const plain = await capsule.screenshot({animations:"disabled"});
+ck("the same paused glass pose visually changes when refraction is removed", !refracted.equals(plain));
+await p.evaluate(()=>{
+  document.querySelector('.glass-refraction').style.visibility = "";
+  document.querySelector('.dg-num').setAttribute("data-glass-lensed", "");
+  document.querySelectorAll('video.glass-turn').forEach(video=> video.play().catch(()=>{}));
+});
 await p.setViewportSize({width:1024, height:844});
 await p.waitForFunction(()=> Number(document.getElementById("stage").style.getPropertyValue("--dg-k")) > 1);
 const centered = await capsule.evaluate(video=>{
@@ -218,6 +236,8 @@ ck("CONTROL: the History scene mounted its transparent image fallback", await fa
   img=>img.naturalWidth > 0 && img.getAttribute("src") === "assets/glass-turns/history.avif"));
 ck("the opaque video is never left in the scene",
    await p.locator('[data-glass-hero] video').count() === 0);
+ck("the fallback restores the original readable number",
+   await p.locator('.glass-refraction, .dg-num[data-glass-lensed]').count() === 0);
 
 console.log("\n6. NOTHING RAN OFF THE SIDE, AND NOTHING THREW");
 r = await p.evaluate(()=> document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);

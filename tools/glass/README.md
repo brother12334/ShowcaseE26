@@ -38,3 +38,12 @@ Keep these rules or the glass stops looking like glass: render small shapes larg
 # Changing the motion (no re-render needed)
 Open `demo/motion-lab.html` over http (`python3 -m http.server` in this folder, then visit /demo/motion-lab.html). Drag the sliders, copy the result box into `code/glass-config.js`.
 Placement lives in `code/layout.js`. The old to new transition lives in `code/intro.js` (`E26Intro.timing`).
+
+### Live-text transmission
+
+Run `python3 render_refraction.py ../../assets/glass-refraction` from this
+directory after changing an overlay hero's geometry, camera, or loop. The maps
+contain the renderer's separate red, green, and blue landing coordinates, plus
+transmission and silhouette coverage. The browser applies them to the live
+number in sync with the transparent video. Keep the maps and the native videos
+on the same pose sequence.

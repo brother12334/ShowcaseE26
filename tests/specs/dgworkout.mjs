@@ -5,7 +5,7 @@ import { extname } from 'node:path';
 import { appFile, chromium, shot } from './_e26.mjs';
 
 const types = {'.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.webp':'image/webp', '.png':'image/png', '.ttf':'font/ttf'};
+  '.webp':'image/webp', '.webm':'video/webm', '.mp4':'video/mp4', '.png':'image/png', '.ttf':'font/ttf'};
 const srv = createServer(async (req, res)=>{
   const path = new URL(req.url, 'http://localhost').pathname;
   const file = path === '/' ? '/index.html' : path;
@@ -110,6 +110,16 @@ try{
   await page.evaluate(()=> document.fonts.ready);
   assert.equal(await page.locator('body').evaluate(body=> body.classList.contains('modal-live')), false);
   await page.screenshot({path:shot('dgworkout.png'),fullPage:true});
+
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await page.locator('.glass-refraction').waitFor();
+  const runningClock = await clock.textContent();
+  await page.waitForFunction(previous=>{
+    const clock = document.getElementById('workoutElapsed');
+    return clock.hasAttribute('data-glass-lensed') && clock.textContent !== previous;
+  }, runningClock);
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await page.locator('.glass-refraction').waitFor({state:'detached'});
 
   const pecDeck = page.locator('details[data-workout-preview]').filter({hasText:'Pec Deck'});
   const remaining = page.locator('details[data-workout-rounds]');

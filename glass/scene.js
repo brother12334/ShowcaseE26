@@ -44,6 +44,7 @@
     const d = el('div', 'glass front', { left: '0', top: '0', width: px(h.w), height: px(h.h) });
     d.dataset.glassHero = '';
     if (h.turn) d.dataset.turn = o.base + h.turn;
+    if (h.refraction) d.dataset.refraction = o.base + h.refraction;
     if (h.overlay && (!reduce || !h.still)) {
       if (h.fps) d.dataset.fps = h.fps;
       d.dataset.sheet = o.base + h.overlay; d.dataset.frames = h.frames; d.dataset.cols = h.cols;

@@ -181,6 +181,17 @@ def render_clear_sprite(out, Wc, Hc, objs, tint=(0.94, 0.97, 1.0), caustic=1.0, 
     Image.fromarray(img.astype(np.uint8), 'RGBA').save(out, 'WEBP', quality=92, method=4 if lossless else 6, lossless=lossless)
 
 
+def transmission_points(direction, front, rear, origin, distance, bias):
+    """RGB landing points on the background plane after crossing the glass."""
+    for index in (1.325, 1.35, 1.375):
+        inside = G.refract(direction, front, 1 / index)
+        exit_point = origin + inside * (distance[:, None] + bias)
+        outgoing = G.refract(inside, rear, index)
+        reach = np.where(outgoing[:, 2] < -1e-3,
+                         -exit_point[:, 2] / np.minimum(outgoing[:, 2], -1e-3), 0)
+        yield exit_point + outgoing * reach[:, None]
+
+
 def render_clear_hero(out, Wc, Hc, text, objs, text_fn=None, tint=(0.95, 0.97, 1.0), bgcol=G.BG):
     W, H = Wc * S, Hc * S
     bg = text_fn() if text_fn else G.text_layer(W, H, bg=bgcol, **text)
@@ -217,12 +228,7 @@ def render_clear_hero(out, Wc, Hc, text, objs, text_fn=None, tint=(0.95, 0.97, 1
     d_in, n2, t2 = trace_glass_interior(sc, p1, d, n1, rmax, S)
     thick = np.clip(t2 / (2 * rmax), 0, 1.6)
     trans = np.zeros((len(p1), 3))
-    for ci, iorc in enumerate([1.325, 1.35, 1.375]):
-        dic = G.refract(d, n1, 1 / iorc)
-        pe = p1 + dic * (t2[:, None] + S)
-        dout = G.refract(dic, n2, iorc)
-        s = np.where(dout[:, 2] < -1e-3, -pe[:, 2] / np.minimum(dout[:, 2], -1e-3), 0)
-        ph = pe + dout * s[:, None]
+    for ci, ph in enumerate(transmission_points(d, n1, n2, p1, t2, S)):
         trans[:, ci] = ndimage.map_coordinates(bgb[..., ci], [np.clip(ph[:, 1], 0, H - 1), np.clip(ph[:, 0], 0, W - 1)], order=1)
     trans = trans * np.exp(-ST['absorb'] * thick)[:, None] * np.array(tint)
     # reflections + caustic from the shared shader (colour only; alpha unused over text)
