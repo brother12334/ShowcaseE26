@@ -25,6 +25,7 @@ HQ_OVERLAYS = {"overlay-history", "overlay-research"}
 # a 5280x1320 sheet, about 28 MB decoded, on the one screen that uses it.
 HQ_SHAPES = {"glass-sphere-s": 440, "glass-rbox-s": 380}
 FPS_IN, FPS_OUT = 8, 30   # hero loop: rendered at 8 fps, blended up to 30 fps
+VID_IN, VID_OUT = 10, 30  # a shape's loop: 20 rendered frames become a 6-second turn
 
 
 def hero_video(name, dest):
@@ -38,6 +39,37 @@ def hero_video(name, dest):
                     '-frames:v', str(n * FPS_OUT // FPS_IN), '-c:v', 'libx264', '-preset', 'veryfast',
                     '-crf', '20', '-profile:v', 'high', '-movflags', '+faststart', '-an', dest], check=True)
     shutil.rmtree(tmp)
+
+
+def shape_video(name, dest):
+    """A decorative shape as a seamless MP4, rendered on black.
+
+    THE SAME THING TODAY'S HERO IS, and for the same reason. MP4 is decoded in hardware,
+    so a turning object costs almost nothing to play; a sprite atlas is tens of megabytes
+    of decoded image and drags a masked backdrop-filter layer along behind it, which is
+    what made the app crawl. MP4 has no alpha, so the frames are flattened onto black and
+    the page composites them with mix-blend-mode: screen, under which black contributes
+    nothing. Measured against proper alpha compositing on this app's own background the
+    difference is under one value in 255 on the page itself and under thirty at its worst
+    over the brightest part of the colour wash."""
+    frames = sorted(glob.glob(f'{SRC}/vid-{name}/[0-9][0-9][0-9].webp'))
+    if not frames:
+        return None
+    n = len(frames)
+    tmp = tempfile.mkdtemp()
+    for i, f in enumerate(frames + frames[:3]):      # extra frames so the seam blends
+        im = Image.open(f).convert('RGBA')
+        bg = Image.new('RGB', im.size, (0, 0, 0))
+        bg.paste(im, (0, 0), im)
+        bg.save(f'{tmp}/{i:03d}.png')
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-framerate', str(VID_IN),
+                    '-i', f'{tmp}/%03d.png',
+                    '-vf', f'minterpolate=fps={VID_OUT}:mi_mode=blend,format=yuv420p',
+                    '-frames:v', str(n * VID_OUT // VID_IN),
+                    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21',
+                    '-profile:v', 'high', '-movflags', '+faststart', '-an', dest], check=True)
+    shutil.rmtree(tmp)
+    return Image.open(frames[0]).size, os.path.getsize(dest)
 
 
 def sheet(name, base, cap, cols=COLS):
@@ -62,6 +94,12 @@ def sheet(name, base, cap, cols=COLS):
 
 
 if __name__ == '__main__':
+    if 'shapevid' in sys.argv[3:]:
+        os.makedirs(f'{OUT}/shape-video', exist_ok=True)
+        for d_ in sorted(glob.glob(f'{SRC}/vid-*')):
+            nm = os.path.basename(d_.rstrip('/'))[4:]
+            print('video', nm, shape_video(nm, f'{OUT}/shape-video/{nm}.mp4'), flush=True)
+        sys.exit(0)
     for d in ('heroes', 'shapes', 'hero-overlays', 'hero-video', 'motion'):
         os.makedirs(f'{OUT}/{d}', exist_ok=True)
     for f in glob.glob(f'{SRC}/stills/*'):

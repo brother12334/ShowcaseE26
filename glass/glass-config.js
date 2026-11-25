@@ -22,5 +22,10 @@ window.GLASS_CONFIG = {
      see. It still pauses off-screen and when the tab is hidden, which is where the
      saving was. */
   heroPauseOnScroll: false,
+  /* How many decorative films may play at once. glass-motion.js lowers this by itself
+     if the frames say the device cannot keep up, and never raises it again inside a
+     session. Set it to 1 to be certain, or 0 to turn the films off and leave every
+     shape on the transform, which costs nothing. */
+  filmBudget: 2,
   reducedMotion: 'freeze'    // 'freeze' shows frame 0, no bob. keep this: it is an accessibility rule
 };

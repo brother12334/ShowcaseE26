@@ -122,12 +122,15 @@ STYLES = {
                    warm=(0.90, 0.30, 1.00), warm_k=0.55,
                    spec=1.45, rim=0.95, rim_pow=2.2, rimcol=(0.70, 0.45, 1.00),
                    glint=1.5, gain=1.00, tone=1.15),
-    'pearl':  dict(film_a=(1.00, 0.88, 0.74), film_b=(1.00, 0.62, 0.86),
-                   film_c=(0.64, 0.94, 1.00),
-                   lo=0.30, hi=0.95, pw=1.15, film_f=0.60, film_d=0.90, film_p=0.05,
-                   warm=(1.00, 0.66, 0.86), warm_k=0.45,
-                   spec=1.20, rim=0.70, rim_pow=1.9, rimcol=(1.00, 0.88, 0.96),
-                   glint=1.3, gain=1.05, tone=1.30),
+    # Pearl kept blowing out to plain white: three near-white stops, plus a warm
+    # bounce, plus a rim, plus a glint, all adding into a tone curve that then clipped.
+    # The stops carry real colour now and the exposure is pulled back to suit.
+    'pearl':  dict(film_a=(1.00, 0.76, 0.52), film_b=(1.00, 0.46, 0.78),
+                   film_c=(0.42, 0.86, 1.00),
+                   lo=0.22, hi=0.80, pw=1.20, film_f=0.60, film_d=0.95, film_p=0.05,
+                   warm=(1.00, 0.52, 0.80), warm_k=0.40,
+                   spec=0.95, rim=0.55, rim_pow=2.1, rimcol=(1.00, 0.80, 0.92),
+                   glint=1.0, gain=0.92, tone=1.05),
 }
 
 KEY = (-0.45, -0.65, 0.62)      # the window, same one the glass is lit by
@@ -228,41 +231,51 @@ def render(out, Wc, Hc, objs, style):
 
 
 # ---------------------------------------------------------------- the set
-# name: (frame box, kind, size, tilt, style, spin axis, spins?, extra)
+# THE BODY SHAPES ARE VIDEO, FOR THE SAME REASON TODAY'S X IS.
 #
-# THE BOX IS THE FRAME THE ART IS WRITTEN AT, and it is set from the slot each shape
-# occupies on the Body screen multiplied by three, because that is what a 3x phone asks
-# for. chrome-crumple sits at 174pt, so 540 covers it with room; chrome-sphere sits at
-# 48 and does not need more than 160.
+# Three ways to turn a baked object were tried on this app and only one of them is
+# usable on the owner's phone. A sprite atlas is honest and costs tens of megabytes a
+# screen plus a masked backdrop-filter layer per shape, and it made the app crawl. A CSS
+# transform on a still costs nothing and is not a rotation - it slides and tips the
+# picture, which beside Today reads as a nudge. An MP4 is what Today's x and Program's
+# pills already are: a real render of a real object turning, decoded in hardware, which
+# is why those two have never been the slow part of any screen.
 #
-# ONLY THREE TURN. The design brief allows three moving pieces to a screen and Body has
-# six shapes, so the three that turn are the large ones spread down the page — the
-# crumple at the top, the pearl ball in the middle, the orchid near the bottom — and
-# they cover both materials. The other three are stills from the same renders.
+# THE BACKGROUND IS BLACK AND THE PAGE BLENDS IT AWAY. MP4 has no alpha channel. These
+# shapes are bright objects on a near-black screen, so the video is rendered on black
+# and composited with mix-blend-mode: screen, under which black contributes nothing at
+# all. It is a GPU composite, so it is free, and it is why these can be video when the
+# clear-glass ornaments - which are dark and must show the page through them - cannot.
+#
+# SIMPLE SHAPES, DELIBERATELY. The sculpted crumples and flowers that were here are not
+# recoverable from the flat pictures the package ships, and my attempts at them were not
+# good enough to stand in. These are the design's own primitives in the iridescent
+# material instead: a ring, a cross, a cube, a star, a capsule, a bar. Every one has a
+# silhouette that changes as it turns, which is the whole point - a sphere does not and
+# is not here.
+#
+# name: (frame px, kind, size, tilt, style, spin axis, extra)
 BODY = {
-    'chrome-crumple': (540, 'crumple', 352, (-24, 18, 22),  'chrome', 'y', True,
-                       dict(amp=0.19, freq=3.2)),
-    'chrome-sphere':  (160, 'ridge',   104, (-14, 22, 8),   'chrome', 'y', False,
-                       dict(amp=0.105, freq=7.6)),
-    'pearl-crumple':  (380, 'crumple', 248, (18, -14, -28), 'pearl',  'y', False,
-                       dict(amp=0.19, freq=3.2)),
-    'pearl-sphere':   (360, 'ridge',   234, (10, -26, -6),  'pearl',  'y', True,
-                       dict(amp=0.105, freq=7.6)),
-    'chrome-orchid':  (520, 'petal',   330, (-52, 8, 14),   'chrome', 'z', True,
-                       dict(petals=4, lift=0.22)),
-    'pearl-flower':   (260, 'petal',   165, (-48, -6, -20), 'pearl',  'z', False,
-                       dict(petals=5, pr=0.34, lift=0.20)),
+    # Sizes are about 55% of the frame so a rotation never clips a corner, and rbox gets
+    # less again because a cube turned onto its diagonal is 1.7 times as wide as its side.
+    'chrome-ring':    (540, 'torus',   400, (62, 16, 0),   'chrome', 'x', dict(thick=0.15)),
+    'pearl-cross':    (360, 'jack',    250, (-20, 28, 12), 'pearl',  'y', dict(thick=0.13)),
+    'chrome-cube':    (380, 'rbox',    190, (-26, 34, 18), 'chrome', 'y', {}),
+    'pearl-star':     (520, 'star',    360, (-30, 22, 8),  'pearl',  'z', dict(thick=0.12)),
+    'chrome-capsule': (260, 'capsule', 190, (-18, 34, -24),'chrome', 'z', dict(thick=0.22)),
+    'pearl-bar':      (160, 'x',       108, (-22, 38, 10), 'pearl',  'z', dict(thick=0.15)),
 }
-FRAMES = 18
-COLS = 6
+FRAMES = 20          # rendered; ffmpeg interpolates these up to a smooth loop
+FPS_IN, FPS_OUT = 10, 30
 
 
 def job(args):
     name, i, n, out = args
     if os.path.exists(out):
         return
-    box, kind, size, tilt, style, axis, _spin, kw = BODY[name]
-    o = Shape(kind, (box / 2, box / 2), size, tilt, **kw)
+    box, kind, size, tilt, style, axis, kw = BODY[name]
+    o = G.Obj(kind, (box / 2, box / 2), size, tilt, **kw)
+    o.c[2] = o.bound * 1.05
     if n:
         th = np.radians(360.0 * i / n)
         c, s_ = np.cos(th), np.sin(th)
@@ -274,54 +287,54 @@ def job(args):
     render(out, box, box, [o], style)
 
 
-def sheet(src, name, dest):
-    """Lay a shape's frames out in a grid, with the half-size mask glass-motion wants."""
+def mp4(src, name, dest):
+    """One seamless loop, on black, hardware-decodable. Same recipe as the heroes."""
     import glob
+    import shutil
+    import subprocess
+    import tempfile
     fs = sorted(glob.glob(f'{src}/{name}/[0-9][0-9][0-9].webp'))
     if not fs:
         return None
-    n = len(fs)
-    rows = -(-n // COLS)
-    fw, fh = Image.open(fs[0]).size
-    mw, mh = max(1, fw // 2), max(1, fh // 2)
-    sp = Image.new('RGBA', (fw * COLS, fh * rows), (0, 0, 0, 0))
-    mk = Image.new('LA', (mw * COLS, mh * rows), (0, 0))
-    for i, f in enumerate(fs):
-        c, r = i % COLS, i // COLS
-        sp.paste(Image.open(f), (c * fw, r * fh))
-        m = Image.open(f.replace('.webp', '-mask.png')).getchannel('A').resize((mw, mh), Image.LANCZOS)
-        mk.paste(Image.merge('LA', [Image.new('L', (mw, mh), 0), m]), (c * mw, r * mh))
-    sp.save(f'{dest}/{name}.webp', 'WEBP', quality=90, method=6)
-    mk.save(f'{dest}/{name}-mask.png', optimize=True)
-    return n, (fw, fh), sp.size
+    tmp = tempfile.mkdtemp()
+    for i, f in enumerate(fs + fs[:3]):          # extra frames so the seam blends
+        im = Image.open(f).convert('RGBA')
+        bg = Image.new('RGB', im.size, (0, 0, 0))
+        bg.paste(im, (0, 0), im)
+        bg.save(f'{tmp}/{i:03d}.png')
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-framerate', str(FPS_IN),
+                    '-i', f'{tmp}/%03d.png',
+                    '-vf', f'minterpolate=fps={FPS_OUT}:mi_mode=blend,format=yuv420p',
+                    '-frames:v', str(len(fs) * FPS_OUT // FPS_IN),
+                    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21',
+                    '-profile:v', 'high', '-movflags', '+faststart', '-an', dest], check=True)
+    shutil.rmtree(tmp)
+    return os.path.getsize(dest)
 
 
 if __name__ == '__main__':
     OUT = os.path.abspath(sys.argv[1])
     args = sys.argv[2:]
-    mode = 'stills' if 'stills' in args else ('sheets' if 'sheets' in args else 'loops')
-    picked = [a for a in args if a in BODY] or list(BODY)
-
-    if mode == 'sheets':
-        dest = os.path.abspath(args[args.index('sheets') + 1])
+    if 'mp4' in args:
+        dest = os.path.abspath(args[args.index('mp4') + 1])
         os.makedirs(dest, exist_ok=True)
-        for name in picked:
-            if BODY[name][6]:
-                print('sheet', name, sheet(OUT, name, dest), flush=True)
+        for name in BODY:
+            print('mp4', name, mp4(OUT, name, f'{dest}/{name}.mp4'), flush=True)
         sys.exit(0)
-
+    picked = [a for a in args if a in BODY] or list(BODY)
+    still = 'stills' in args
     jobs = []
     for name in picked:
-        if mode == 'stills':
+        if still:
             os.makedirs(f'{OUT}/stills', exist_ok=True)
             jobs.append((name, 0, 0, f'{OUT}/stills/{name}.webp'))
-        elif BODY[name][6]:
+        else:
             d = f'{OUT}/{name}'
             os.makedirs(d, exist_ok=True)
             jobs += [(name, i, FRAMES, f'{d}/{i:03d}.webp') for i in range(FRAMES)]
     print(len(jobs), 'images', flush=True)
     with Pool(min(max(len(jobs), 1), int(os.environ.get('E26_RENDER_JOBS', os.cpu_count() or 1)))) as p:
         for n, _ in enumerate(p.imap_unordered(job, jobs, chunksize=1), 1):
-            if n % 6 == 0:
+            if n % 10 == 0:
                 print(n, '/', len(jobs), flush=True)
     print('done', flush=True)

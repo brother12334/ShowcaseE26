@@ -24,67 +24,79 @@
 window.GLASS_LAYOUT = {
  "shapes": {
   "sphere-s": {
-   "still": "assets/shapes/glass-sphere-s"
+   "still": "assets/shapes/glass-sphere-s",
+   "video": "assets/shape-video/sphere-s.mp4"
   },
   "sphere-xs": {
-   "still": "assets/shapes/glass-sphere-xs"
+   "still": "assets/shapes/glass-sphere-xs",
+   "video": "assets/shape-video/sphere-xs.mp4"
   },
   "links": {
-   "still": "assets/shapes/glass-links"
+   "still": "assets/shapes/glass-links",
+   "video": "assets/shape-video/links.mp4"
   },
   "x-s": {
    "still": "assets/shapes/glass-x-s",
    "sheet": "assets/motion/glass-x-s",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/x-s.mp4"
   },
   "star": {
    "still": "assets/shapes/glass-star",
    "sheet": "assets/motion/glass-star",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/star.mp4"
   },
   "jack": {
    "still": "assets/shapes/glass-jack",
    "sheet": "assets/motion/glass-jack",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/jack.mp4"
   },
   "rbox-s": {
    "still": "assets/shapes/glass-rbox-s",
    "sheet": "assets/motion/glass-rbox-s",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/rbox-s.mp4"
   },
   "torus-m": {
    "still": "assets/shapes/glass-torus-m",
    "sheet": "assets/motion/glass-torus-m",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/torus-m.mp4"
   },
   "capsule-m": {
    "still": "assets/shapes/glass-capsule-m",
    "sheet": "assets/motion/glass-capsule-m",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/capsule-m.mp4"
   },
   "capsule-amber": {
    "still": "assets/shapes/glass-capsule-amber",
    "sheet": "assets/motion/glass-capsule-amber",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/capsule-amber.mp4"
   },
   "capsule-xs": {
    "still": "assets/shapes/glass-capsule-xs",
    "sheet": "assets/motion/glass-capsule-xs",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/capsule-xs.mp4"
   },
   "blob": {
    "still": "assets/shapes/glass-blob",
    "sheet": "assets/motion/glass-blob",
    "frames": 36,
-   "cols": 12
+   "cols": 12,
+   "video": "assets/shape-video/blob.mp4"
   }
  },
  "screens": {
@@ -445,13 +457,14 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "shapes": [
     {
-     "still": "assets/body/pearl-sphere",
+     "still": "assets/body/chrome-cube",
      "x": 252,
      "y": 120,
      "w": 150,
      "h": 153,
      "layer": "back",
-     "bob": 4
+     "bob": 4,
+     "video": "assets/shape-video/chrome-cube.mp4"
     },
     {
      "shape": "torus-m",
@@ -489,58 +502,64 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "shapes": [
     {
-     "still": "assets/body/chrome-crumple",
+     "still": "assets/body/chrome-ring",
      "x": 224,
      "y": 86,
      "w": 174,
      "h": 173,
      "layer": "back",
-     "bob": 4
+     "bob": 4,
+     "video": "assets/shape-video/chrome-ring.mp4"
     },
     {
-     "still": "assets/body/chrome-sphere",
+     "still": "assets/body/pearl-bar",
      "x": 24,
      "y": 115,
      "w": 48,
      "h": 48,
      "layer": "back",
-     "bob": 4
+     "bob": 4,
+     "video": "assets/shape-video/pearl-bar.mp4"
     },
     {
-     "still": "assets/body/pearl-crumple",
+     "still": "assets/body/pearl-cross",
      "x": -55,
      "y": 495,
      "w": 105,
      "h": 119,
      "layer": "back",
-     "bob": 4
+     "bob": 4,
+     "video": "assets/shape-video/pearl-cross.mp4"
     },
     {
-     "still": "assets/body/pearl-sphere",
+     "still": "assets/body/chrome-cube",
      "x": 314,
      "y": 755,
      "w": 112,
      "h": 114,
      "layer": "back",
-     "bob": 4
+     "bob": 4,
+     "video": "assets/shape-video/chrome-cube.mp4"
     },
     {
-     "still": "assets/body/chrome-orchid",
+     "still": "assets/body/pearl-star",
      "x": 273,
      "y": 1095,
      "w": 166,
      "h": 163,
      "layer": "back",
-     "bob": 4
+     "bob": 4,
+     "video": "assets/shape-video/pearl-star.mp4"
     },
     {
-     "still": "assets/body/pearl-flower",
+     "still": "assets/body/chrome-capsule",
      "x": -40,
      "y": 1390,
      "w": 80,
      "h": 82,
      "layer": "back",
-     "bob": 4
+     "bob": 4,
+     "video": "assets/shape-video/chrome-capsule.mp4"
     }
    ]
   },

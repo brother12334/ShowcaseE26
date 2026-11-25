@@ -19,6 +19,22 @@
   let scrolling = false;
   const tilt = { x: 0, y: 0, tx: 0, ty: 0 };
 
+  /* THE FILM, IF THE SHAPE HAS ONE. Created empty and left that way until the shape is
+     actually on screen: a page with six <video> elements all holding a decoder open is
+     a different kind of expensive from one that plays two. syncPlayback attaches the
+     src on first sight and pauses it when it leaves. */
+  function filmFor(el) {
+    const src = el.dataset.video;
+    if (!src) return null;
+    const v = document.createElement('video');
+    v.className = 'glass-film';
+    v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none';
+    v.setAttribute('aria-hidden', 'true');
+    v.dataset.src = src;
+    el.append(v);
+    return v;
+  }
+
   function build(el) {
     if (el.dataset.ready) return null;
     el.dataset.ready = '1';
@@ -26,6 +42,7 @@
     const img = document.createElement('div');
     img.className = 'glass-img';
     el.append(img);
+    const film = filmFor(el);
     const base = el.dataset.sheet || el.dataset.still;
     img.style.backgroundImage = `url(${base}.webp)`;
     const bob = el.dataset.bob ? +el.dataset.bob : rnd(C.float.amplitude);
@@ -49,7 +66,7 @@
         img.style.setProperty('--glass-persp', Math.round(380 + 2.2 * w) + 'px');
         img.style.animationDelay = (-Math.random() * period).toFixed(2) + 's';
       }
-      return { el, frames: 1, visible: false };
+      return { el, film, frames: 1, visible: false };
     }
 
     const blur = document.createElement('div');
@@ -61,7 +78,7 @@
     img.style.backgroundSize = size;
     blur.style.webkitMaskSize = blur.style.maskSize = size;
     return {
-      el, img, blur, frames, cols, rows,
+      el, img, blur, film, frames, cols, rows,
       fps: +el.dataset.fps || C.fps,
       depth: el.dataset.depth ? +el.dataset.depth : C.depth,
       phase: Math.random() * 1000,
@@ -111,11 +128,59 @@
       raf = requestAnimationFrame(tick);
     }
   }
+  /* HOW MANY FILMS MAY RUN AT ONCE, and why it is a budget rather than a constant.
+     Measured in a headless browser with no GPU, at a quarter speed: one playing film
+     costs nothing at all (17ms frames, no long frames in 89) and two doubles the frame
+     time, whatever size the video is. That is software decode, which is the worst case
+     and not what a phone does - an iPhone decodes these in hardware, which is the whole
+     reason Today's hero has never been the slow part of any screen. So guessing a
+     number for every device would be guessing twice.
+     The budget starts at three and comes down on its own if the frames say it should.
+     It never goes back up inside a session, because a budget that oscillates is worse
+     than one that is simply too low. */
+  let filmBudget = Math.max(0, cfg().filmBudget == null ? 2 : cfg().filmBudget);
+  let probe = 0, slowRun = 0, lastTs = 0;
+
+  function filmWatch(ts) {
+    probe = 0;
+    if (lastTs) {
+      const dt = ts - lastTs;
+      if (dt > 26) slowRun++; else slowRun = Math.max(0, slowRun - 1);
+      if (slowRun > 6 && filmBudget > 1) { filmBudget--; slowRun = 0; syncPlayback(); }
+    }
+    lastTs = ts;
+    if (items.some((it) => it.film && it.film.src && !it.film.paused)) {
+      probe = requestAnimationFrame(filmWatch);
+    } else { lastTs = 0; }
+  }
+
   function syncPlayback() {
     const pauseOffscreen = cfg().pauseOffscreen;
+    const off = reduce.matches || document.hidden;
+    /* Nearest the middle of the screen wins the budget: the shape you are looking at is
+       the one that actually turns, and the rest keep the transform, which is free. */
+    const mid = innerHeight / 2;
+    const live = items.filter((it) => it.film && it.visible && !off)
+      .sort((a, b) => {
+        const ra = a.el.getBoundingClientRect(), rb = b.el.getBoundingClientRect();
+        return Math.abs(ra.top + ra.height / 2 - mid) - Math.abs(rb.top + rb.height / 2 - mid);
+      });
+    const playing = new Set(live.slice(0, filmBudget));
     for (const it of items) {
-      it.el.toggleAttribute('data-glass-paused', document.hidden || (pauseOffscreen && !it.visible));
+      const idle = document.hidden || (pauseOffscreen && !it.visible);
+      it.el.toggleAttribute('data-glass-paused', idle);
+      const v = it.film;
+      if (!v) continue;
+      if (!playing.has(it)) {
+        try { v.pause(); } catch (e) {}
+        it.el.removeAttribute('data-film');
+        continue;
+      }
+      if (!v.src) v.src = v.dataset.src;
+      it.el.setAttribute('data-film', '');
+      v.play().catch(() => {});
     }
+    if (!probe && playing.size) probe = requestAnimationFrame(filmWatch);
     start();
   }
 
@@ -134,6 +199,8 @@
   function unmount() {
     for (const it of items) io && io.unobserve(it.el);
     items = [];
+    if (probe) cancelAnimationFrame(probe);
+    probe = 0; lastTs = 0; slowRun = 0;
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
   }

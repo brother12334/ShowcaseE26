@@ -82,9 +82,10 @@ await p.evaluate(fx=>{
 await p.waitForTimeout(700);
 
 console.log("\n1. NOT ONE SPRITE ATLAS, AND NOT ONE BACKDROP FILTER");
-/* Both halves of the cost, on the three screens that carry the most art. A single
-   backdrop-filter is the most expensive thing on an iOS page and glass-motion.js builds
-   one for every shape that has an atlas, so the two are really one assertion. */
+/* Both halves of the cost that made the app crawl, on the screens carrying the most
+   art. A single backdrop-filter is the most expensive thing on an iOS page and
+   glass-motion.js builds one for every shape drawn from an atlas, so the two are
+   really one assertion. */
 for(const tab of ["history", "research", "sync", "body"]){
   const r = await p.evaluate(t=>{
     boot(t);
@@ -97,26 +98,81 @@ for(const tab of ["history", "research", "sync", "body"]){
   ck(tab + " mounts no sprite atlas", r.atlas.length === 0, r.atlas.join(",") || "none");
   ck("and builds no backdrop-filter layer", r.blur === 0, String(r.blur));
 }
-/* AND NOTHING IS ARMED TO START USING ONE. The shape definitions still name an atlas
-   each, which is fine and deliberate - the files exist, the renderer still makes them,
-   and a future screen with one large slow ornament could reasonably want one. What
-   must not happen quietly is a placement turning it on across a screenful of shapes,
-   which is the change that cost the frame rate. So the check is on the placements. */
 {
   const layout = await p.evaluate(()=> window.GLASS_LAYOUT);
-  const placements = Object.entries(layout.screens).flatMap(([k, sc])=>
-    (sc.shapes || []).map(it=> ({screen:k, shape:it.shape, spin:it.spin === true})));
-  const armed = placements.filter(x=> x.spin);
-  ck("CONTROL: there are placements to check", placements.length >= 20,
-     String(placements.length));
-  ck("and not one of them asks for an atlas", armed.length === 0,
-     armed.map(x=> x.screen + "/" + x.shape).join(",") || "none");
-  const heroes = Object.entries(layout.screens)
-    .filter(([k, sc])=> sc.hero && sc.hero.overlay).map(([k])=> k);
-  ck("nor does any overlay hero", heroes.length === 0, heroes.join(",") || "none");
+  const armed = Object.entries(layout.screens).flatMap(([k, sc])=>
+    (sc.shapes || []).filter(it=> it.spin === true).map(it=> k + "/" + it.shape));
+  ck("and not one placement asks for one", armed.length === 0, armed.join(",") || "none");
 }
 
-console.log("\n2. AND THE TURN IS BIG ENOUGH TO SEE");
+console.log("\n1b. THE SHAPES TURN FROM A FILM, THE WAY TODAY'S HERO DOES");
+/* MP4 is decoded in hardware, which is why Today's x has never been the slow part of
+   any screen, and it is a real render of a real object turning rather than a transform
+   on a picture. Every shape in the vocabulary has one and every placement reaches it. */
+{
+  const r = await p.evaluate(()=>{
+    const L = window.GLASS_LAYOUT;
+    const noFilm = Object.entries(L.shapes).filter(([k, v])=> !v.video).map(([k])=> k);
+    const places = Object.entries(L.screens).flatMap(([k, sc])=> (sc.shapes || []).map(it=> ({
+      screen: k, name: it.shape || (it.still || "").split("/").pop(),
+      film: !!(it.video || (it.shape && L.shapes[it.shape] && L.shapes[it.shape].video))})));
+    return {noFilm, places, without: places.filter(x=> !x.film)};
+  });
+  ck("CONTROL: there are placements to check", r.places.length >= 20, String(r.places.length));
+  ck("every shape in the vocabulary has a film", r.noFilm.length === 0, r.noFilm.join(","));
+  ck("and every placement on every screen reaches one", r.without.length === 0,
+     r.without.map(x=> x.screen + "/" + x.name).join(",") || "none");
+}
+{
+  /* It plays, it is lazy, and the still is underneath it the whole time. */
+  const r = await p.evaluate(async ()=>{
+    boot("history");
+    await new Promise(ok=> setTimeout(ok, 2200));
+    const films = [...document.querySelectorAll('#stage .glass-film')];
+    return {n: films.length,
+            playing: films.filter(v=> v.src && !v.paused).length,
+            lazy: films.filter(v=> !v.src).length,
+            blend: films.length ? getComputedStyle(films[0]).mixBlendMode : "-",
+            posters: [...document.querySelectorAll('#stage .glass .glass-img')]
+              .filter(i=> /url\(/.test(getComputedStyle(i).backgroundImage)).length};
+  });
+  ck("CONTROL: the screen builds its films", r.n >= 3, String(r.n));
+  ck("at least one of them is actually playing", r.playing >= 1, JSON.stringify(r));
+  ck("they are composited with screen, which is what drops the black",
+     r.blend === "screen", r.blend);
+  ck("and every shape still has its still underneath, so nothing pops in",
+     r.posters >= r.n, r.posters + " stills for " + r.n + " films");
+}
+
+console.log("\n1c. AND NO MORE OF THEM RUN AT ONCE THAN THE DEVICE CAN TAKE");
+/* The measurement that set this: in a headless browser with no GPU, at quarter speed,
+   one playing film is free - 17ms frames, no long frames in 89 - and two doubles the
+   frame time whatever resolution the video is. That is software decode and a phone
+   does better, so the budget is a starting guess that lowers itself rather than a
+   constant somebody has to be right about. What must hold is that there IS a cap. */
+{
+  const r = await p.evaluate(async ()=>{
+    boot("history");
+    await new Promise(ok=> setTimeout(ok, 2500));
+    const films = [...document.querySelectorAll('#stage .glass-film')];
+    const fr = []; let last = performance.now();
+    await new Promise(ok=>{ let n = 0;
+      const t = x=>{ fr.push(x - last); last = x; if(++n < 80) requestAnimationFrame(t); else ok(); };
+      requestAnimationFrame(t); });
+    fr.shift();
+    const sorted = fr.slice().sort((a, b)=> a - b);
+    return {playing: films.filter(v=> v.src && !v.paused).length, all: films.length,
+            budget: (window.GLASS_CONFIG || {}).filmBudget,
+            med: Math.round(sorted[Math.floor(sorted.length / 2)]),
+            long: fr.filter(x=> x > 24).length, n: fr.length};
+  });
+  ck("CONTROL: the screen has more films than the budget allows", r.all > r.playing,
+     JSON.stringify(r));
+  ck("so only a few play at once", r.playing <= Math.max(1, r.budget), JSON.stringify(r));
+  ck("and the frames are not long ones", r.long <= 4 && r.med <= 20, JSON.stringify(r));
+}
+
+console.log("\n2. AND THE ONES NOT PLAYING STILL TURN BIG ENOUGH TO SEE");
 await p.evaluate(()=> boot("history"));
 await p.waitForTimeout(500);
 let r = await p.evaluate(async ()=>{

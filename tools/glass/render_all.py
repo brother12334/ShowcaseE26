@@ -30,6 +30,7 @@ STYLE = 'A-bubble'          # a key of clear.STYLES
 HERO_FRAMES = 30            # frames in a hero loop (played at 8 fps, smoothed to 30 fps)
 OVERLAY_FRAMES = 18
 SHAPE_FRAMES = 36           # frames in a shape's spin sheet
+VID_FRAMES = 20             # frames rendered for a shape's MP4 loop; ffmpeg smooths them
 GLASS_TINT = (0.94, 0.97, 1.0)   # slight cool cast; (1,1,1) is neutral, try (1,0.9,0.95) for warm
 
 # name: (box_w, box_h, [(kind, center_xy, size, tilt_xyz_deg, extra)], crispness k)
@@ -40,22 +41,22 @@ SHAPES = {
     # resolution changes: job_shape writes a frame at twice the padded box whatever k
     # is, and sphere-s is placed at 138pt, which is 414 device pixels on a 3x phone.
     # At the old 110 box its frames came out 276 and the sheet was visibly soft.
-    'sphere-s':      (220, 220, [('sphere', (110, 110), 192, (0, 0, 0), {})], 2.5),
+    'sphere-s':      (170, 170, [('sphere', (85, 85), 148, (0, 0, 0), {})], 2.5),
     # Box and ball scaled together, so the composition is identical and only the frame
     # resolution changes — job_shape always writes a frame at twice the padded box, and
     # these two are placed larger than a 320px frame covers on a 3x phone.
-    'sphere-xs':     (110, 110, [('sphere', (55, 55), 95, (0, 0, 0), {})], 4),
-    'capsule-m':     (200, 200, [('capsule', (100, 100), 180, (-20, 35, -35), dict(thick=0.22))], 1.5),
-    'capsule-amber': (150, 150, [('capsule', (75, 75), 130, (15, -30, 40), dict(thick=0.24))], 2),
+    'sphere-xs':     (125, 125, [('sphere', (62, 62), 108, (0, 0, 0), {})], 4),
+    'capsule-m':     (290, 290, [('capsule', (145, 145), 261, (-20, 35, -35), dict(thick=0.22))], 1.5),
+    'capsule-amber': (230, 230, [('capsule', (115, 115), 199, (15, -30, 40), dict(thick=0.24))], 2),
     'capsule-xs':    (104, 104, [('capsule', (52, 52), 88, (10, 30, 60), dict(thick=0.24))], 3),
-    'torus-m':       (200, 200, [('torus', (100, 100), 170, (55, 25, 10), dict(thick=0.17))], 1.5),
-    'rbox-s':        (160, 160, [('rbox', (80, 80), 93, (-25, 35, 20), {})], 2.5),
-    'jack':          (220, 220, [('jack', (110, 110), 190, (-25, 35, 15), dict(thick=0.14))], 1.5),
-    'links':         (240, 200, [('torus', (95, 100), 140, (10, 0, 0), dict(thick=0.15)),
-                                 ('torus', (150, 100), 140, (80, 30, 0), dict(thick=0.15))], 1.5),
-    'blob':          (200, 200, [('blob', (100, 100), 160, (0, 20, 0), {})], 1.5),
-    'x-s':           (130, 130, [('x', (65, 65), 110, (-22, 38, 10), dict(thick=0.17))], 2),
-    'star':          (210, 210, [('star', (105, 105), 180, (-35, 25, 10), dict(thick=0.13))], 1.5),
+    'torus-m':       (210, 210, [('torus', (105, 105), 178, (55, 25, 10), dict(thick=0.17))], 1.5),
+    'rbox-s':        (187, 187, [('rbox', (93, 93), 108, (-25, 35, 20), {})], 2.5),
+    'jack':          (300, 300, [('jack', (150, 150), 259, (-25, 35, 15), dict(thick=0.14))], 1.5),
+    'links':         (350, 292, [('torus', (139, 146), 204, (10, 0, 0), dict(thick=0.15)),
+                                 ('torus', (219, 146), 204, (80, 30, 0), dict(thick=0.15))], 1.5),
+    'blob':          (260, 260, [('blob', (130, 130), 208, (0, 20, 0), {})], 1.5),
+    'x-s':           (140, 140, [('x', (70, 70), 118, (-22, 38, 10), dict(thick=0.17))], 2),
+    'star':          (290, 290, [('star', (145, 145), 249, (-35, 25, 10), dict(thick=0.13))], 1.5),
 }
 # which shapes get a spin sheet: (axis in the shape's own space, degrees for one seamless loop)
 # NO SPHERE IS IN HERE, AND IT IS NOT AN OVERSIGHT. A sheet was rendered for sphere-xs
@@ -67,7 +68,7 @@ SHAPES = {
 # Anything with a silhouette — a capsule, an x, a blob — reads immediately.
 SPIN = {'x-s': ('z', 90), 'star': ('z', 60), 'jack': ('z', 90), 'rbox-s': ('z', 90),
         'torus-m': ('x', 180), 'capsule-m': ('z', 180), 'capsule-amber': ('z', 180),
-        'capsule-xs': ('z', 180), 'blob': ('y', 360)}
+        'capsule-xs': ('z', 180), 'blob': ('y', 360), 'links': ('y', 360)}
 
 # THE SPHERES TURN THE STUDIO INSTEAD. A ball is symmetric about every axis, so turning
 # the object itself renders the same frame every time; the first attempt at a sphere
@@ -280,6 +281,17 @@ def build_jobs(OUT, want):
             os.makedirs(d, exist_ok=True)
             jobs += [('shape', (s, i, SHAPE_FRAMES, f'{d}/{i:03d}.webp')) for i in range(SHAPE_FRAMES)]
     for tag in want:
+        if tag == 'vid':
+            for name in list(SPIN) + list(ENVSPIN):
+                d = f'{OUT}/vid-{name}'
+                os.makedirs(d, exist_ok=True)
+                jobs += [('shape', (name, i, VID_FRAMES, f'{d}/{i:03d}.webp'))
+                         for i in range(VID_FRAMES)]
+        if tag.startswith('vid-') and tag[4:] in (set(SPIN) | set(ENVSPIN)):
+            d = f'{OUT}/{tag}'
+            os.makedirs(d, exist_ok=True)
+            jobs += [('shape', (tag[4:], i, VID_FRAMES, f'{d}/{i:03d}.webp'))
+                     for i in range(VID_FRAMES)]
         if tag.startswith('hero-') and not os.path.isdir(f'{OUT}/{tag}'):
             os.makedirs(f'{OUT}/{tag}', exist_ok=True)
             jobs += [('hero', (tag[5:], i, HERO_FRAMES, f'{OUT}/{tag}/{i:03d}.webp')) for i in range(HERO_FRAMES)]

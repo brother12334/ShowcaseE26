@@ -10,6 +10,7 @@
  */
 (function () {
   let root = null;
+  const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function el(tag, cls, style) {
     const e = document.createElement(tag);
@@ -70,9 +71,16 @@
       if (!def) { console.warn('GlassScene: unknown shape', it.shape); return; }
       const d = el('div', 'glass ' + (it.layer || 'front'),
         { left: px(it.x), top: px(it.y), width: px(it.w), height: px(it.h) });
-      const spin = def.sheet && it.spin !== false;
+      /* A SHAPE THAT HAS A FILM PLAYS IT, the same way Today's hero does. The still is
+         kept as the poster, so the shape is on screen the moment the layer mounts and
+         before a byte of video has arrived, and glass-motion.js only attaches the src
+         once it scrolls into view. Video is decoded in hardware; a sprite atlas is not,
+         which is the whole reason this path exists. */
+      const spin = def.sheet && it.spin === true;
       d.dataset[spin ? 'sheet' : 'still'] = o.base + (spin ? def.sheet : def.still);
       if (spin) { d.dataset.frames = def.frames; d.dataset.cols = def.cols; }
+      const film = it.video || def.video;
+      if (film && it.video !== false && !reduceMotion()) d.dataset.video = o.base + film;
       for (const k of ['depth', 'fps', 'bob', 'period']) if (it[k] != null) d.dataset[k] = it[k];
       d.style.setProperty('--glass-delay', (o.delay || 0) + i * stagger + 'ms');
       layer.append(d);
