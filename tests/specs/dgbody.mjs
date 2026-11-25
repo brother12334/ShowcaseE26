@@ -99,7 +99,7 @@ r = await p.evaluate(async ()=>{
     return {src: shape.dataset.still.split('/').pop(),
             back: shape.classList.contains('back'),
             quiet: getComputedStyle(shape).pointerEvents === 'none',
-            sharp: image.naturalWidth >= 3 * parseFloat(shape.style.width)};
+            sharp: image.naturalWidth >= 3 * parseFloat(shape.style.getPropertyValue("--glass-width"))};
   }));
   return {art, behind: wrapper && getComputedStyle(wrapper).zIndex === '0',
           map: !!document.querySelector('.nb-map .bm-fig')};

@@ -99,7 +99,13 @@
   }
   function stopTurn(item) {
     if (!item.turn) return;
+    clearTimeout(item.turnTimeout);
+    item.turn.onerror = item.turn.onload = null;
+    if (item.turn.tagName === 'VIDEO') {
+      item.turn.pause();
+    }
     item.turn.removeAttribute('src');
+    if (item.turn.tagName === 'VIDEO') item.turn.load();
     item.turn.remove();
     item.turn = null;
     item.still.style.visibility = '';
@@ -107,7 +113,7 @@
 
   function watchTurns(now) {
     sample = 0;
-    const active = items.filter(item => item.turn?.isConnected).length + Number(bakedHero);
+    const active = items.filter(item => item.turn?.classList.contains('glass-turn')).length + Number(bakedHero);
     if (document.hidden || active < 3) { lastFrame = frameCount = slowFrames = 0; return; }
     if (lastFrame) {
       frameCount++;
@@ -124,6 +130,79 @@
     if (!sample && qualityLimit > 2) sample = requestAnimationFrame(watchTurns);
   }
 
+  // A platform can report support for the color codec and drop the alpha layer.
+  // Verify the clear corner of the first decoded frame before swapping the still.
+  function hasVideoAlpha(video) {
+    const probe = document.createElement('canvas');
+    probe.width = probe.height = 1;
+    const g = probe.getContext('2d', { willReadFrequently: true });
+    if (!g) return false;
+    try {
+      g.drawImage(video, 0, 0, 4, 4, 0, 0, 1, 1);
+      return g.getImageData(0, 0, 1, 1).data[3] < 64;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function playTurn(item) {
+    const source = item.el.dataset.turn;
+    const base = source.replace(/\.avif$/, '');
+    const formats = [
+      { extension: '.mp4', type: 'video/mp4; codecs="hvc1"' },
+      { extension: '.webm', type: 'video/webm; codecs="vp9"' }
+    ];
+    function reveal(turn) {
+      if (item.turn !== turn || !item.el.isConnected) return;
+      clearTimeout(item.turnTimeout);
+      turn.className = 'glass-turn';
+      if (!turn.isConnected) item.el.append(turn);
+      item.still.style.visibility = 'hidden';
+      if (!sample && qualityLimit > 2) sample = requestAnimationFrame(watchTurns);
+    }
+    function attempt(index) {
+      const format = formats[index];
+      if (!format) {
+        const turn = document.createElement('img');
+        turn.alt = '';
+        turn.decoding = 'async';
+        item.turn = turn;
+        turn.onload = () => reveal(turn);
+        turn.onerror = () => { if (item.turn === turn) stopTurn(item); };
+        turn.src = source;
+        return;
+      }
+      const video = document.createElement('video');
+      if (!video.canPlayType(format.type)) {
+        attempt(index + 1);
+        return;
+      }
+      const next = () => {
+        if (item.turn !== video) return;
+        stopTurn(item);
+        attempt(index + 1);
+      };
+      video.className = 'glass-turn-loading';
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+      video.loop = true;
+      video.disablePictureInPicture = true;
+      video.setAttribute('aria-hidden', 'true');
+      item.turn = video;
+      video.onerror = next;
+      item.turnTimeout = setTimeout(next, 2500);
+      item.el.append(video);
+      video.src = base + format.extension;
+      video.play().then(() => {
+        if (item.turn !== video) return;
+        if (hasVideoAlpha(video)) reveal(video);
+        else next();
+      }, next);
+    }
+    attempt(0);
+  }
+
   function syncTurns() {
     clearTimeout(turnTimer);
     const eligible = document.hidden || reduce.matches ? [] : items.filter(item =>
@@ -137,19 +216,7 @@
     for (const item of items) {
       if (!selected.has(item)) { stopTurn(item); continue; }
       if (item.turn) continue;
-      const turn = document.createElement('img');
-      turn.className = 'glass-turn';
-      turn.alt = '';
-      turn.decoding = 'async';
-      item.turn = turn;
-      turn.onload = () => {
-        if (item.turn !== turn || !item.el.isConnected) return;
-        item.el.append(turn);
-        item.still.style.visibility = 'hidden';
-        if (!sample && qualityLimit > 2) sample = requestAnimationFrame(watchTurns);
-      };
-      turn.onerror = () => { if (item.turn === turn) stopTurn(item); };
-      turn.src = item.el.dataset.turn;
+      playTurn(item);
     }
     if (ornaments.length > slots) {
       turnTimer = setTimeout(() => { turnOffset += slots; syncTurns(); }, 3600);

@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
-/* The tab scenes play transparent images rendered in different 3D poses.
+/* The tab scenes play transparent video rendered in different 3D poses.
    The spec verifies the actual moving pixels, the alpha channel, the loaded sources
    and the maximum number of simultaneous turns. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const FEED = JSON.parse(readFileSync(appFile('tests/fixtures/research-feed.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4',
+  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4', '.webm':'video/webm',
   '.ttf':'font/ttf', '.svg':'image/svg+xml', '.mp3':'audio/mpeg',
   '.webmanifest':'application/manifest+json' };
 const srv = createServer(async (q, r)=>{
@@ -32,7 +32,7 @@ const NOW = Date.now();
 const SEED = {at: NOW, papers: FEED.papers.map((x, i)=>
   Object.assign({}, x, {authors:["Pelland","Remmert"], addedAt: NOW - i * 3600000}))};
 
-const p = await b.newPage({viewport:{width:390,height:844}, deviceScaleFactor:3});
+const p = await b.newPage({viewport:{width:390,height:844}, deviceScaleFactor:3, serviceWorkers:"block"});
 p.on('dialog', d=> d.accept());
 p.on('pageerror', e=> pageErr.push(e.message));
 p.on('response', rs=>{ if(rs.status() >= 400) httpErr.push(rs.status()+' '+rs.url().replace(BASE,'')); });
@@ -106,34 +106,56 @@ console.log("\n1b. ALL LIVE GLASS PLACEMENTS HAVE RENDERED TRANSPARENT TURNS");
   ck("every model and placement has a transparent 3D sequence", r.missing === 0 && r.unmapped === 0, JSON.stringify(r));
 }
 await p.evaluate(()=> boot("history"));
-const capsule = p.locator('[data-glass-hero] img.glass-turn');
+const capsule = p.locator('[data-glass-hero] video.glass-turn');
 await capsule.waitFor();
-const first = await capsule.screenshot({animations:"disabled"});
+const frame = video=>{
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 64;
+  canvas.getContext("2d").drawImage(video, 0, 0, 64, 64);
+  return canvas.toDataURL();
+};
+const first = await capsule.evaluate(frame);
 await p.waitForTimeout(320);
-ck("CONTROL: the History capsule changes with CSS animation disabled",
-   !first.equals(await capsule.screenshot({animations:"disabled"})));
+ck("CONTROL: the History decoder produces different rendered frames",
+   first !== await capsule.evaluate(frame));
 {
   const state = await capsule.evaluate(img=>{
     const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    canvas.width = img.videoWidth; canvas.height = img.naturalHeight;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(img,0,0);
     const alpha = ctx.getImageData(0,0,1,1).data[3];
-    return {alpha, width:img.naturalWidth,
+    return {alpha, width:img.videoWidth, muted:img.muted, inline:img.playsInline,
+      paused:img.paused,
       blend:getComputedStyle(img.closest(".dg-shapes")).mixBlendMode,
+      transform:getComputedStyle(img.closest(".dg-shapes")).transform,
       still:getComputedStyle(img.parentElement.querySelector(".glass-img")).visibility};
   });
-  ck("the History turn stays within its lighter decode dimensions", state.width === 520, JSON.stringify(state));
+  ck("the History turn fills the hero at 3× density", state.width === 1170, JSON.stringify(state));
+  ck("the capsule plays inline and muted", state.muted && state.inline && !state.paused, JSON.stringify(state));
+  ck("the video layer has no scale transform", state.transform === "none", JSON.stringify(state));
   ck("the capsule background is transparent without blend modes or a frozen double",
      state.width > 0 && state.alpha === 0 && state.blend === "normal" && state.still === "hidden", JSON.stringify(state));
 }
+await p.setViewportSize({width:1024, height:844});
+await p.waitForFunction(()=> Number(document.getElementById("stage").style.getPropertyValue("--dg-k")) > 1);
+const centered = await capsule.evaluate(video=>{
+  const art = video.getBoundingClientRect();
+  const app = document.getElementById("app").getBoundingClientRect();
+  return {left: Math.abs(art.left - app.left), width: Math.abs(art.width - app.width),
+    app: app.width, viewport: innerWidth};
+});
+ck("CONTROL: the desktop app column is narrower than the viewport", centered.app < centered.viewport);
+ck("the untransformed glass stays aligned to the desktop app column",
+   centered.left < 1 && centered.width < 1, JSON.stringify(centered));
+await p.setViewportSize({width:390, height:844});
 
 console.log("\n2. ORNAMENTS TAKE TURNS WITHIN THE PLAYBACK BUDGET");
 const rotation = await p.evaluate(async ()=>{
   const active = new Set();
   let max = 0;
   for(let n=0; n<25; n++){
-    const playing = [...document.querySelectorAll('#stage img.glass-turn')];
+    const playing = [...document.querySelectorAll('#stage video.glass-turn')];
     max = Math.max(max,playing.length);
     playing.filter(img=>!img.parentElement.hasAttribute('data-glass-hero')).forEach(img=>active.add(img.src));
     await new Promise(ok=>setTimeout(ok,400));
@@ -181,6 +203,19 @@ r = await p.evaluate(()=> [...document.querySelectorAll('#stage .glass .glass-im
 ck("CONTROL: there are ornaments to stop", r.length >= 3, String(r.length));
 ck("every one of them is still", r.every(x=> x === "none"), r.join(","));
 await p.emulateMedia({reducedMotion:"no-preference"});
+
+console.log("\n5a. A DECODER THAT DROPS THE ALPHA CHANNEL GETS THE TRANSPARENT FALLBACK");
+await p.emulateMedia({reducedMotion:"reduce"});
+await p.route(/\/assets\/glass-turns\/history\.(mp4|webm)$/, route=>route.fulfill({
+  path: appFile("assets/hero-video/hero-today-push-b.mp4"), contentType: "video/mp4"
+}));
+await p.emulateMedia({reducedMotion:"no-preference"});
+const fallback = p.locator('[data-glass-hero] img.glass-turn');
+await fallback.waitFor();
+ck("CONTROL: the History scene mounted its transparent image fallback", await fallback.evaluate(
+  img=>img.naturalWidth > 0 && img.getAttribute("src") === "assets/glass-turns/history.avif"));
+ck("the opaque video is never left in the scene",
+   await p.locator('[data-glass-hero] video').count() === 0);
 
 console.log("\n6. NOTHING RAN OFF THE SIDE, AND NOTHING THREW");
 r = await p.evaluate(()=> document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);

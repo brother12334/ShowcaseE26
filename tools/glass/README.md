@@ -13,7 +13,9 @@ Everything in `assets/` was made by the scripts in this folder. You can change a
     python3 render_all.py /tmp/render hero-today-push-b   # just one hero loop
     python3 assemble.py /tmp/render ../assets      # turn frames into MP4s and sheets, copy stills in
 
-To render the transparent in-app turns, run `python3 render_turns.py /tmp/turns` and copy the AVIF files to `assets/glass-turns/`. Add a model name after the output directory to render just that asset. Workout turns at 60 fps. History and Research use 520-pixel-wide, 30 fps turns to cut decode work. Ornaments use a gentler 30 fps turn. The AVIF path retains real transparency and the live counts remain text.
+For the native transparent clips, run `python3 render_turns.py --video /tmp/turns` with FFmpeg 8+ built with an alpha-capable libx265 and libvpx. The renderer produces both HEVC MP4 (for Safari) and VP9 WebM. Copy both formats to `assets/glass-turns/`. Use the optional model names to do one at a time. The video files use native-size 3× frames at 60 fps. The app verifies transparency before displaying the video.
+
+To regenerate the animated-image fallbacks, run `python3 render_turns.py /tmp/turns` and copy the AVIF files to `assets/glass-turns/`. Add a model name after the output directory to render just that asset. Workout turns at 60 fps. History and Research use 520-pixel-wide, 30 fps turns to cut decode work. Ornaments use a gentler 30 fps turn. The AVIF path retains real transparency and the live counts remain text.
 
 Re-running skips frames that already exist. Delete a frame folder to force a redo.
 

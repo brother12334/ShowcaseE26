@@ -118,10 +118,10 @@ def clear_shade(d, n1, tint=(0.94, 0.97, 1.0), caustic=1.0, back=None):
     return col, a, band
 
 
-def render_clear_sprite(out, Wc, Hc, objs, tint=(0.94, 0.97, 1.0), caustic=1.0):
+def render_clear_sprite(out, Wc, Hc, objs, tint=(0.94, 0.97, 1.0), caustic=1.0, *, lossless=False, camera_scale=1):
     W, H = Wc * S, Hc * S
     sc = G.Scene(objs)
-    F = 1500.0 * S
+    F = 1500.0 * S * camera_scale
     eye = np.array([W / 2, H / 2, F])
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float64)
     P = np.stack([xx.ravel(), yy.ravel(), np.zeros(W * H)], 1)
@@ -170,7 +170,7 @@ def render_clear_sprite(out, Wc, Hc, objs, tint=(0.94, 0.97, 1.0), caustic=1.0):
     img = np.dstack([rgb, outa * 255])
     mk = (np.clip(soft * 1.4, 0, 1) * 255).astype(np.uint8)
     Image.fromarray(np.dstack([np.zeros_like(mk)] * 3 + [mk]), 'RGBA').save(out.replace('.webp', '-mask.png'), optimize=True)
-    Image.fromarray(img.astype(np.uint8), 'RGBA').save(out, 'WEBP', quality=92, method=6)
+    Image.fromarray(img.astype(np.uint8), 'RGBA').save(out, 'WEBP', quality=92, method=4 if lossless else 6, lossless=lossless)
 
 
 def render_clear_hero(out, Wc, Hc, text, objs, text_fn=None, tint=(0.95, 0.97, 1.0), bgcol=G.BG):

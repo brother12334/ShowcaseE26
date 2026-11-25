@@ -23,7 +23,7 @@ import { extname, join, normalize } from 'node:path';
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const FEED = JSON.parse(readFileSync(appFile('tests/fixtures/research-feed.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4',
+  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4', '.webm':'video/webm',
   '.ttf':'font/ttf', '.svg':'image/svg+xml', '.mp3':'audio/mpeg',
   '.webmanifest':'application/manifest+json' };
 const srv = createServer(async (q, r)=>{
@@ -127,11 +127,11 @@ console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");
 }
 
 console.log("\n2b. THE RING PLAYS ITS RENDERED 3D FRAMES");
-const ring = full.locator('[data-glass-hero] img.glass-turn');
+const ring = full.locator('[data-glass-hero] video.glass-turn');
 await ring.waitFor();
-const source = await ring.evaluate(img=>({src:img.getAttribute('src'), width:img.naturalWidth}));
+const source = await ring.evaluate(img=>({src:img.getAttribute('src'), width:img.videoWidth}));
 ck("CONTROL: the seeded feed mounts the rendered Research turn",
-   source.src === "assets/glass-turns/research.avif" && source.width === 520, JSON.stringify(source));
+   /^assets\/glass-turns\/research\.(mp4|webm)$/.test(source.src) && source.width === 1170, JSON.stringify(source));
 const firstFrame = await ring.screenshot({animations:"disabled"});
 await full.waitForTimeout(320);
 const nextFrame = await ring.screenshot({animations:"disabled"});

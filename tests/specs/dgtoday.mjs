@@ -29,7 +29,7 @@ import { extname, join, normalize } from 'node:path';
    spec's own, started and closed in the same run. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4',
+  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4', '.webm':'video/webm',
   '.ttf':'font/ttf', '.svg':'image/svg+xml', '.mp3':'audio/mpeg',
   '.webmanifest':'application/manifest+json' };
 const srv = createServer(async (q, r)=>{
@@ -810,14 +810,14 @@ ck("each still covers its largest 3× phone slot", r.results.every(item=> item.s
 ck("the three live-number overlays cover their own 3× canvases",
    r.overlays.length === 3 && r.overlays.every(item=> item.sharp), JSON.stringify(r.overlays));
 ck("CONTROL: History mounts its rendered capsule", r.history);
-const animatedCapsule = newP.locator('[data-glass-hero] img.glass-turn');
+const animatedCapsule = newP.locator('[data-glass-hero] video.glass-turn');
 await animatedCapsule.waitFor();
-ck("History loads the lighter 520-pixel transparent turn", await animatedCapsule.evaluate(img=>
-   img.getAttribute("src") === "assets/glass-turns/history.avif" && img.naturalWidth === 520));
-await newP.locator(".glass:not([data-glass-hero]) img.glass-turn").first().waitFor();
+ck("History loads a sharp 3× transparent video", await animatedCapsule.evaluate(img=>
+   /^assets\/glass-turns\/history\.(mp4|webm)$/.test(img.getAttribute("src")) && img.videoWidth === 1170));
+await newP.locator(".glass:not([data-glass-hero]) video.glass-turn").first().waitFor();
 const ornaments = await newP.evaluate(()=>({
   rendered: document.querySelectorAll('.glass:not([data-glass-hero])[data-turn]').length,
-  playing: document.querySelectorAll('img.glass-turn').length,
+  playing: document.querySelectorAll('video.glass-turn').length,
   allMapped: [...document.querySelectorAll('.glass:not([data-glass-hero])')].every(el=>!!el.dataset.turn)
 }));
 ck("CONTROL: History has small glass ornaments", ornaments.rendered > 0);

@@ -7928,17 +7928,8 @@ body.news-open{overscroll-behavior:contain}
    y coordinates mean ("from the top of the scrolling page"). */
 #stage{position:relative;z-index:0}
 #app{position:relative;z-index:1}
-/* THE LAYER IS DRAWN IN THE PACKAGE'S OWN COORDINATE SYSTEM AND SCALED TO FIT.
-
-   layout.js places every shape at an absolute x/y on a 390-wide canvas, and scene.js
-   writes those straight onto the elements. Overriding each one here would make this file
-   the authority on where the art sits, which is exactly the thing the brief says must
-   stay in layout.js. So nothing is overridden: the layer is 390 wide and the whole of it
-   is scaled by however much wider the content column is. Every coordinate in layout.js
-   then means what it says at any screen width, and changing one still moves the shape.
-
-   The column, not the viewport: #app is max-width 600 and centred, so the art has to be
-   centred on the same column or it drifts off the text on a tablet. */
+/* Each screen uses the design's 390-wide layout. Resolve it against the app
+   column, which is centered and limited to 600px on wider screens. */
 #stage{--dg-k:1}
 /* THE HERO IS SIZED, NOT SCALED. Everything in the layer used to sit under one
    transform, the video included — and a <video> inside a scaled, clipped ancestor is
@@ -7965,20 +7956,11 @@ body.nav-flush #stage{overflow:clip;touch-action:pan-x}
 body.nav-flush #stage > .glass-layer > .hero-media{
   max-height:clamp(220px,calc(100dvh - 200px),680px);object-fit:contain;object-position:center top
 }
-/* THE SHAPES ARE SCALED; THE HERO IS NOT.
-
-   layout.js writes every shape's x, y, width and height onto the element as inline px
-   on a 390-wide canvas, so a stylesheet cannot reposition them one by one — and should
-   not try, because those coordinates are the design and belong in that file. They are
-   moved into this wrapper instead, which is 390 wide and scaled as a whole: every
-   coordinate still means what it says, at any screen width.
-
-   The hero stays outside it. It is a video, and a video under a scale transform inside
-   a clipped ancestor is the compositor's slow path for no benefit — a single full-width
-   picture only needs a width. */
-#stage > .glass-layer > .dg-shapes{position:absolute;left:50%;top:0;width:390px;height:0;
-  transform:translateX(-50%) scale(var(--dg-k));transform-origin:top center;z-index:2;
-  overflow:visible;pointer-events:none}
+/* Center the layers on the app column and size each shape from its original coordinates.
+   This avoids putting the transparent videos under a scale transform on Safari. */
+#stage > .glass-layer > .dg-shapes{position:absolute;left:0;right:0;top:0;
+  width:calc(390px * var(--dg-k));height:0;margin-inline:auto;
+  z-index:2;overflow:visible;pointer-events:none}
 
 /* ---- DARK GLASS: TODAY -------------------------------------------------------------
    Values come from tokens.css; nothing here invents a colour or a size the package did
@@ -8890,7 +8872,7 @@ body[class~="nav-flush"] [data-dg-screen="today"] .dg-hero{flex:1 1 auto;min-hei
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.25.11";
+const APP_VERSION = "2026.11.25.12";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -36585,14 +36567,12 @@ function glassAvoidContent(stage, layer){
       }
       back.append(shape);
     }
-    shape.style.left = parseFloat(shape.style.left) + best.dx + "px";
-    shape.style.top = parseFloat(shape.style.top) + best.dy + "px";
+    shape.style.setProperty("--glass-left", parseFloat(shape.style.getPropertyValue("--glass-left")) + best.dx + "px");
+    shape.style.setProperty("--glass-top", parseFloat(shape.style.getPropertyValue("--glass-top")) + best.dy + "px");
   }
 }
-/* Move the shapes into the scaled wrapper, leaving the hero where it is. Done here
-   rather than in scene.js because scene.js is the design package's own file and this is
-   this app's layout problem: the package's pages are a fixed 390 canvas and this one
-   has to be any width. */
+/* Preserve the fixed 390-wide design coordinates and resolve them to the app's
+   actual width without transforming the video layer. */
 function glassShapeScale(stage){
   stage.classList.remove("dg-clip");
   const layer = stage.querySelector(".glass-layer");
@@ -36609,7 +36589,13 @@ function glassShapeScale(stage){
     if(back) box.style.zIndex = "0";
     box.setAttribute("aria-hidden", "true");
     layer.append(box);
-    members.forEach(n=> box.append(n));
+    for(const shape of members){
+      for(const property of ["left","top","width","height"]){
+        shape.style.setProperty("--glass-" + property, shape.style[property]);
+        shape.style[property] = `calc(var(--dg-k) * var(--glass-${property}))`;
+      }
+      box.append(shape);
+    }
   }
 }
 
@@ -66661,8 +66647,9 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.25.11";
+const NEWS_FOR = "2026.11.25.12";
 const NEWS = [
+  {k:"Sharper glass in motion", s:["The glass turns use sharper renders and 60 fps transparent video where the browser supports it. The same artwork appears as a still first, and motion continues as you scroll while a shape is visible."]},
   {k:"Lighter glass motion", s:["The History capsule keeps its 3D turn with less decoding work. Glass tiles, crosses and capsules replace the small spheres, and a turning glass ring replaces the large Research sphere."]},
   {k:"Transparent 3D glass", s:["History, Research, Workout and the small glass shapes use rendered 3D frames with transparent backgrounds. Ornaments turn gently and share a small playback budget. Still artwork loads during startup so tabs can show it right away."]},
   {k: "No shape sits still any more",

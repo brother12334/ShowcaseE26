@@ -32,7 +32,7 @@
    count and had reached 53.6 while the app was on 60.6, so neither number could be read
    against the other. See the note on APP_VERSION in index.html for the scheme. The cache
    names below are compared with !== and swept by prefix, so nothing here parses it. */
-const VERSION = "2026.11.25.11";
+const VERSION = "2026.11.25.12";
 const SHELL = "e26-shell-v" + VERSION;
 const RUNTIME = "e26-runtime-v" + VERSION;
 
@@ -307,6 +307,10 @@ self.addEventListener("fetch", event=>{
 
   // the plan reader and the account service are never intercepted
   if(NEVER_CACHE.indexOf(url.hostname) > -1) return;
+  // Let the browser stream glass turns directly. Cache Storage cannot save a
+  // partial response, and waiting for cache.put on a whole clip delays playback.
+  const video = /\.(mp4|webm)$/.test(url.pathname);
+  if(video && (req.headers.has("range") || url.pathname.includes("/assets/glass-turns/"))) return;
 
   /* A navigation is the one request that MUST resolve to something, or the person gets
      the browser's offline page instead of their training log. Cache-first against the

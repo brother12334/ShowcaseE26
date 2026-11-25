@@ -1,4 +1,4 @@
-"""Render transparent geometry turns as independently decoded animated AVIF files."""
+"""Render transparent geometry turns as AVIF or native HEVC and VP9 video."""
 import argparse
 import math
 from functools import partial
@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 
 import render_all as art
+from encode_turn_video import encode as encode_video
 
 
 def objects(name, hero, scale, phase):
@@ -42,14 +43,15 @@ def objects(name, hero, scale, phase):
 
 
 def frame(work, i):
-    name, hero, scale, frames, directory = work
+    name, hero, scale, frames, directory, video = work
     path = Path(directory) / f'{i:03}.webp'
     if path.exists():
         return
     art.G.S = art.C.S = 1
     art.C.set_style('A-bubble')
     width, height, shapes = objects(name, hero, scale, 2 * math.pi * i / frames)
-    art.C.render_clear_sprite(str(path), width, height, shapes, art.GLASS_TINT)
+    art.C.render_clear_sprite(str(path), width, height, shapes, art.GLASS_TINT,
+                              lossless=video, camera_scale=scale if video else 1)
     path.with_name(f'{i:03}-mask.png').unlink()
 
 
@@ -67,6 +69,8 @@ def main():
     parser.add_argument('output', type=Path)
     parser.add_argument('names', nargs='*')
     parser.add_argument('--jobs', type=int, default=2)
+    parser.add_argument('--video', action='store_true')
+    parser.add_argument('--ffmpeg', default='ffmpeg')
     args = parser.parse_args()
     heroes = ('history', 'research', 'workout')
     names = args.names or [*heroes, *(name for name in art.SHAPES if not name.startswith('sphere-'))]
@@ -74,16 +78,31 @@ def main():
     with Pool(args.jobs) as pool:
         for name in names:
             hero = name in heroes
-            if name in ('history', 'research'):
-                # Keep the three-second depth turn with fewer pixels to decode.
+            if args.video:
+                # Match each asset's largest placement at 3x device density.
+                max_width = {'links': 288, 'x-s': 112, 'star': 238, 'jack': 250,
+                             'rbox-s': 138, 'torus-m': 250, 'capsule-m': 238,
+                             'capsule-amber': 188, 'capsule-xs': 84, 'blob': 212}
+                scale = 3 if hero else 3 * max_width[name] / round(art.SHAPES[name][0] * 1.25)
+                fps, count = 60, 180
+            elif name in ('history', 'research'):
                 scale, fps, count = 4 / 3, 30, 90
             else:
                 scale, fps, count = (2, 60, 180) if hero else (1.5, 30, 90)
             with TemporaryDirectory(prefix=f'e26-turn-{name}-') as directory:
-                work = (name, hero, scale, count, directory)
+                work = (name, hero, scale, count, directory, args.video)
                 for _ in pool.imap_unordered(partial(frame, work), range(count)):
                     pass
-                encode(directory, args.output / f'{name}.avif', count, fps)
+                if args.video:
+                    def rendered_frames():
+                        for index in range(count):
+                            with Image.open(Path(directory) / f'{index:03}.webp') as image:
+                                yield image
+
+                    size = objects(name, hero, scale, 0)[:2]
+                    encode_video(rendered_frames(), size, args.output / name, fps, args.ffmpeg)
+                else:
+                    encode(directory, args.output / f'{name}.avif', count, fps)
             print(f'{name}: {count} frames at {fps} fps', flush=True)
 
 
