@@ -172,7 +172,7 @@ window.GLASS_LAYOUT = {
     "overlay": null,
     "still": "assets/hero-overlays/overlay-workout",
     "turn": "assets/glass-turns/workout.avif",
-    "refraction": "assets/glass-refraction/workout.rays",
+    "refraction": "assets/glass-refraction/workout.rays?v=2",
     "frames": 36,
     "cols": 12,
     "w": 390,
@@ -185,7 +185,7 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "hero": {
     "turn": "assets/glass-turns/history.avif",
-    "refraction": "assets/glass-refraction/history.rays",
+    "refraction": "assets/glass-refraction/history.rays?v=2",
     "still": "assets/hero-overlays/overlay-history",
     "w": 390,
     "h": 440,
@@ -218,7 +218,7 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "hero": {
     "turn": "assets/glass-turns/research.avif",
-    "refraction": "assets/glass-refraction/research.rays",
+    "refraction": "assets/glass-refraction/research.rays?v=2",
     "still": "assets/hero-overlays/overlay-research",
     "w": 390,
     "h": 440,

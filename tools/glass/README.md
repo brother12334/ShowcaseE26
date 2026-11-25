@@ -44,6 +44,7 @@ Placement lives in `code/layout.js`. The old to new transition lives in `code/in
 Run `python3 render_refraction.py ../../assets/glass-refraction` from this
 directory after changing an overlay hero's geometry, camera, or loop. The maps
 contain the renderer's separate red, green, and blue landing coordinates, plus
-transmission and silhouette coverage. The browser applies them to the live
-number in sync with the transparent video. Keep the maps and the native videos
+transmission and silhouette coverage. The row-delta-coded half-float maps
+keep subpixel precision. The browser blends neighboring poses in sync with the
+transparent video, and grazing rays fade before they can leave hard contours. Keep the maps and the native videos
 on the same pose sequence.

@@ -1,37 +1,72 @@
 /* Apply baked RGB ray coordinates to the live hero number. The native video
  * still supplies the glass surface, highlights and shadows. */
 (function () {
-  const vertex = `
-    attribute vec2 point;
-    varying vec2 uv;
+  const vertex = `#version 300 es
+    in vec2 point;
+    out vec2 uv;
     void main() {
       gl_Position = vec4(point, 0., 1.);
       uv = vec2(point.x + 1., 1. - point.y) * .5;
     }`;
-  const fragment = `
+  const fragment = `#version 300 es
     precision highp float;
-    varying vec2 uv;
+    in vec2 uv;
+    out vec4 color;
     uniform sampler2D redGreen;
     uniform sampler2D blueLight;
     uniform sampler2D glyph;
     uniform sampler2D softGlyph;
-    uniform vec2 offset;
+    uniform vec2 offsets[2];
     uniform vec2 extent;
     uniform vec2 halfTexel;
+    uniform float phase;
     uniform vec3 ink;
+
+    float transmitted(vec2 target) {
+      // An outward ray can miss the number canvas. Fade at its edge instead
+      // of repeating the last column of a glyph across the glass.
+      vec2 edge = min(target, 1. - target);
+      return texture(softGlyph, target).a * smoothstep(0., .006, min(edge.x, edge.y));
+    }
+
     void main() {
-      vec2 pos = offset + clamp(uv * extent, halfTexel, extent - halfTexel);
-      vec4 rg = texture2D(redGreen, pos);
-      vec4 bl = texture2D(blueLight, pos);
-      float original = texture2D(glyph, uv).a;
-      vec3 rays = vec3(texture2D(softGlyph, rg.rg).a,
-                       texture2D(softGlyph, rg.ba).a,
-                       texture2D(softGlyph, bl.rg).a);
-      rays *= bl.b;
+      vec2 pos = clamp(uv * extent, halfTexel, extent - halfTexel);
+      vec2 a = offsets[0] + pos;
+      vec2 b = offsets[1] + pos;
+      vec4 lightA = texture(blueLight, a);
+      vec4 lightB = texture(blueLight, b);
+      vec4 light = mix(lightA, lightB, phase);
+      // Interpolate coordinates only where both poses transmit light. A blank
+      // texel from a moving edge must not steer a ray through the glyph.
+      float weight = light.b > .001 ? phase * lightB.b / light.b : phase;
+      vec4 rg = mix(texture(redGreen, a), texture(redGreen, b), weight);
+      vec2 blue = mix(lightA.rg, lightB.rg, weight);
+      float original = texture(glyph, uv).a;
+      vec3 rays = vec3(transmitted(rg.rg), transmitted(rg.ba), transmitted(blue)) * light.b;
       float opacity = max(rays.r, max(rays.g, rays.b));
-      gl_FragColor = mix(vec4(ink * original, original),
-                         vec4(ink * rays, opacity), bl.a);
+      color = mix(vec4(ink * original, original),
+                  vec4(ink * rays, opacity), light.a);
     }`;
+
+  function unpackPlane(data, start, width, height) {
+    const pixels = width * height, size = pixels * 4;
+    const lo = new Uint8Array(data, start, size);
+    const hi = new Uint8Array(data, start + size, size);
+    const output = new Uint16Array(size);
+    // Reassemble the planar, row-delta-coded half-float channels for WebGL.
+    for (let channel = 0; channel < 4; channel++) {
+      const base = channel * pixels;
+      for (let row = 0; row < height; row++) {
+        let value = 0;
+        const rowStart = row * width;
+        for (let x = rowStart; x < rowStart + width; x++) {
+          value += lo[base + x] | (hi[base + x] << 8);
+          output[x * 4 + channel] = value;
+        }
+      }
+    }
+    return output;
+  }
 
   async function loadRays(url, signal) {
     const response = await fetch(url, { signal });
@@ -39,18 +74,22 @@
     const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
     const data = await new Response(stream).arrayBuffer();
     const header = new DataView(data);
-    const [width, height, frames, columns] = [0, 2, 4, 6].map(i => header.getUint16(i, true));
+    if (data.byteLength < 12 || header.getUint32(0) !== 0x45323650) {
+      throw new Error('Unsupported refraction map');
+    }
+    const [width, height, frames, columns] = [4, 6, 8, 10].map(i => header.getUint16(i, true));
     const atlasWidth = width * columns, atlasHeight = height * Math.ceil(frames / columns);
     const size = atlasWidth * atlasHeight * 4;
-    if (!width || !height || !frames || !columns || data.byteLength !== 8 + 2 * size) {
+    if (!width || !height || !frames || !columns || data.byteLength !== 12 + 4 * size) {
       throw new Error('Invalid refraction map');
     }
     return { width, height, frames, columns, atlasWidth, atlasHeight,
-      planes: [new Uint8Array(data, 8, size), new Uint8Array(data, 8 + size, size)] };
+      planes: [unpackPlane(data, 12, atlasWidth, atlasHeight),
+        unpackPlane(data, 12 + 2 * size, atlasWidth, atlasHeight)] };
   }
 
   function createLens(canvas, rays) {
-    const gl = canvas.getContext('webgl', { alpha: true, antialias: false,
+    const gl = canvas.getContext('webgl2', { alpha: true, antialias: false,
       premultipliedAlpha: true, depth: false, stencil: false, powerPreference: 'low-power' });
     if (!gl) throw new Error('Refraction compositor unavailable');
     const program = gl.createProgram();
@@ -83,8 +122,8 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.uniform1i(gl.getUniformLocation(program, name), unit);
-      if (unit < 2) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, rays.atlasWidth,
-        rays.atlasHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, rays.planes[unit]);
+      if (unit < 2) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, rays.atlasWidth,
+        rays.atlasHeight, 0, gl.RGBA, gl.HALF_FLOAT, rays.planes[unit]);
       return texture;
     });
     if (gl.getError() !== gl.NO_ERROR) {
@@ -93,7 +132,8 @@
       gl.deleteProgram(program);
       throw new Error('Refraction textures not supported');
     }
-    const offset = gl.getUniformLocation(program, 'offset');
+    const offsets = gl.getUniformLocation(program, 'offsets[0]');
+    const phase = gl.getUniformLocation(program, 'phase');
     const ink = gl.getUniformLocation(program, 'ink');
     gl.uniform2f(gl.getUniformLocation(program, 'extent'),
       rays.width / rays.atlasWidth, rays.height / rays.atlasHeight);
@@ -113,9 +153,13 @@
         gl.activeTexture(gl.TEXTURE3);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, soft);
       },
-      draw(frame) {
-        gl.uniform2f(offset, (frame % rays.columns) * rays.width / rays.atlasWidth,
-          Math.floor(frame / rays.columns) * rays.height / rays.atlasHeight);
+      draw(position) {
+        const frame = Math.floor(position);
+        const next = (frame + 1) % rays.frames;
+        gl.uniform2fv(offsets, [
+          (frame % rays.columns) / rays.columns, Math.floor(frame / rays.columns) * rays.height / rays.atlasHeight,
+          (next % rays.columns) / rays.columns, Math.floor(next / rays.columns) * rays.height / rays.atlasHeight]);
+        gl.uniform1f(phase, position - frame);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       },
       dispose() {
@@ -171,7 +215,7 @@
     const bitmap = document.createElement('canvas');
     const soft = document.createElement('canvas');
     let lens, observer, number, request = 0, seen = '', dirty = true, previous = -1;
-    let density = Math.min(devicePixelRatio || 1, 1.5);
+    let density = Math.min(devicePixelRatio || 1, 1.25);
     let quality = video.getVideoPlaybackQuality?.();
     let qualityAt = performance.now();
     function stop() {
@@ -225,7 +269,7 @@
           ctx.drawImage(bitmap, 0, 0);
           lens.glyph(bitmap, soft, color);
         }
-        const frame = Math.round(metadata.mediaTime / video.duration * rays.frames) % rays.frames;
+        const frame = (metadata.mediaTime / video.duration * rays.frames) % rays.frames;
         if (Number.isFinite(frame) && (frame !== previous || needsGlyph)) {
           lens.draw(frame);
           previous = frame;
