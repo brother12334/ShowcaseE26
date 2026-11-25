@@ -34,7 +34,7 @@ def objects(name, hero, scale, phase):
             obj.c[2] = obj.bound * 1.05
         if hero:
             # These solids have half-turn symmetry on the chosen local axis.
-            axis = {'history': 'z', 'research': 'y', 'workout': 'x'}[name]
+            axis = {'history': 'y', 'research': 'y', 'workout': 'x'}[name]
             obj.R = obj.R @ art.axis_rot(axis, math.degrees(phase) / 2)
         else:
             yaw = 16 * math.sin(phase)
