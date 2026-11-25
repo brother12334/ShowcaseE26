@@ -12,7 +12,7 @@
  */
 (function () {
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const D = { fps: 12, float: { amplitude: [4, 8], period: [4, 7] }, parallax: 0.15, tilt: 10, depth: 0.4, pauseOffscreen: true };
+  const D = { fps: 12, float: { amplitude: [4, 8], period: [3.2, 4.8] }, parallax: 0.15, tilt: 10, depth: 0.4, pauseOffscreen: true };
   const cfg = () => Object.assign({}, D, window.GLASS_CONFIG || {});
   const rnd = (r) => r[0] + Math.random() * (r[1] - r[0]);
   let items = [], raf = 0, io = null, scrollY = 0, scrollTimer = 0;
@@ -72,9 +72,13 @@
           img.style.setProperty('--gy', '0deg');
           img.style.setProperty('--gz', (sx * 4).toFixed(1) + 'deg');
         } else {
-          img.style.setProperty('--gx', (sx * (5 + 3.5 * k)).toFixed(1) + 'deg');
-          img.style.setProperty('--gy', (sy * (9 + 9 * k)).toFixed(1) + 'deg');
-          img.style.setProperty('--gz', (sx * (1.5 + 2 * k)).toFixed(1) + 'deg');
+          /* The floor matters as much as the scaling. k is clamped at 0.75 for the
+             largest shapes, which left them swinging about 16 degrees over a five
+             second cycle - a true statement about the transform and an invisible one
+             on screen. */
+          img.style.setProperty('--gx', (sx * Math.max(7, 5 + 3.5 * k)).toFixed(1) + 'deg');
+          img.style.setProperty('--gy', (sy * Math.max(19, 9 + 9 * k)).toFixed(1) + 'deg');
+          img.style.setProperty('--gz', (sx * Math.max(3, 1.5 + 2 * k)).toFixed(1) + 'deg');
         }
         img.style.setProperty('--glass-persp', Math.round(380 + 2.2 * w) + 'px');
         img.style.animationDelay = (-Math.random() * period).toFixed(2) + 's';

@@ -211,8 +211,21 @@ ck("CONTROL: the screen's ornaments are all animating", orn.length >= 3 && orn.e
 /* Five degrees is what "not animating" looked like. Fifteen is the floor, and the
    smallest shapes - which have the least silhouette to show a turn with - must swing
    furthest rather than the same as everything else. */
-ck("none of them turns by less than fifteen degrees", orn.every(x=> x.gy >= 15),
+ck("none of them turns by less than nineteen degrees", orn.every(x=> x.gy >= 19),
    JSON.stringify(orn.map(x=> x.n + " " + x.w + "px " + x.gy + "deg")));
+/* AND IT TRAVELS THE WHOLE TIME. This is the one that caught the shapes the owner kept
+   reporting as still. Every transform WAS changing, continuously, and could be measured
+   doing so - but the animation alternates with an ease at both ends, so each shape spent
+   a large part of its cycle parked at a turnaround while the pixels did not move. A
+   true assertion about the transform would have passed happily over a screen that looks
+   frozen; what has to hold is that there is no dwell, which is the timing function. */
+{
+  const ease = await p.evaluate(()=> [...document.querySelectorAll('#stage .glass[data-float] > .glass-img')]
+    .map(i=> getComputedStyle(i).animationTimingFunction));
+  ck("CONTROL: the ornaments carry a timing function", ease.length >= 3, ease.join(","));
+  ck("and it is a constant speed, so none of them dwells",
+     ease.every(x=> x === "linear"), ease.join(","));
+}
 ck("and the small ones turn furthest", (()=>{
     const small = orn.filter(x=> x.w <= 90), big = orn.filter(x=> x.w >= 150);
     return !small.length || !big.length

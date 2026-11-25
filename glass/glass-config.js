@@ -4,7 +4,7 @@ window.GLASS_CONFIG = {
   fps: 12,                   // frames per second for spinning shapes (36 frames, so 12 = a 3 second loop)
   float: {                   // the gentle bob every shape does
     amplitude: [4, 8],       // px, random per shape within this range
-    period: [4, 7]           // seconds for one bob
+    period: [3.2, 4.8]           // seconds for one bob
   },
   parallax: 0.15,            // how much sprite shapes drift against the scroll
   tilt: 10,                  // px a sprite shape shifts toward the pointer
