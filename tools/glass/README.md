@@ -3,7 +3,7 @@
 Everything in `assets/` was made by the scripts in this folder. You can change any of it and regenerate.
 
 ## Setup (once)
-    pip install numpy scipy pillow        # ffmpeg must be on PATH for assemble.py
+    pip install numpy scipy "pillow>=11.3"        # ffmpeg must be on PATH for assemble.py
 
 ## Regenerate
     python3 render_all.py /tmp/render stills       # every still, about 1 minute
@@ -12,6 +12,8 @@ Everything in `assets/` was made by the scripts in this folder. You can change a
     python3 render_all.py /tmp/render sp-star      # just one shape's spin sheet
     python3 render_all.py /tmp/render hero-today-push-b   # just one hero loop
     python3 assemble.py /tmp/render ../assets      # turn frames into MP4s and sheets, copy stills in
+
+To render the transparent in-app turns, run `python3 render_turns.py /tmp/turns` and copy the AVIF files to `assets/glass-turns/`. Add a model name after the output directory to render just that asset. The hero overlays turn at 60 fps and the ornaments use a gentler 30 fps turn. The AVIF path retains real transparency and the live counts remain text.
 
 Re-running skips frames that already exist. Delete a frame folder to force a redo.
 

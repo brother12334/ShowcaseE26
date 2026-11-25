@@ -29,7 +29,7 @@ import { extname, join, normalize } from 'node:path';
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const FEED = JSON.parse(readFileSync(appFile('tests/fixtures/research-feed.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.webp':'image/webp', '.png':'image/png', '.mp4':'video/mp4',
+  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4',
   '.ttf':'font/ttf', '.svg':'image/svg+xml', '.mp3':'audio/mpeg',
   '.webmanifest':'application/manifest+json' };
 const srv = createServer(async (q, r)=>{
@@ -105,135 +105,63 @@ for(const tab of ["history", "research", "sync", "body"]){
   ck("and not one placement asks for one", armed.length === 0, armed.join(",") || "none");
 }
 
-console.log("\n1b. THE SHAPES TURN FROM A FILM, THE WAY TODAY'S HERO DOES");
-/* MP4 is decoded in hardware, which is why Today's x has never been the slow part of
-   any screen, and it is a real render of a real object turning rather than a transform
-   on a picture. Every shape in the vocabulary has one and every placement reaches it. */
+console.log("\n1a. STARTUP WARMS THE STILL ARTWORK USED ON LATER TABS");
+await p.waitForFunction(()=> performance.getEntriesByType("resource").some(entry=>
+   entry.name.endsWith("/assets/hero-overlays/overlay-workout.webp") && entry.responseEnd > 0));
+ck("CONTROL: a later tab's still was fetched without opening Workout",
+   await p.evaluate(()=> TAB !== "workout" &&
+     !document.querySelector('[data-dg-screen="workout"]')));
+console.log("\n1b. ALL LIVE GLASS PLACEMENTS HAVE RENDERED TRANSPARENT TURNS");
 {
   const r = await p.evaluate(()=>{
     const L = window.GLASS_LAYOUT;
-    const noFilm = Object.entries(L.shapes).filter(([k, v])=> !v.video).map(([k])=> k);
-    const places = Object.entries(L.screens).flatMap(([k, sc])=> (sc.shapes || []).map(it=> ({
-      screen: k, name: it.shape || (it.still || "").split("/").pop(),
-      film: !!(it.video || (it.shape && L.shapes[it.shape] && L.shapes[it.shape].video))})));
-    return {noFilm, places, without: places.filter(x=> !x.film)};
+    const missing = Object.entries(L.shapes).filter(([, shape])=> !shape.turn?.endsWith(".avif"));
+    const places = Object.values(L.screens).flatMap(screen=>screen.shapes || []);
+    const unmapped = places.filter(place=> !L.shapes[place.shape]?.turn);
+    return {missing:missing.length, places:places.length, unmapped:unmapped.length};
   });
-  ck("CONTROL: there are placements to check", r.places.length >= 20, String(r.places.length));
-  ck("every shape in the vocabulary has a film", r.noFilm.length === 0, r.noFilm.join(","));
-  ck("and every placement on every screen reaches one", r.without.length === 0,
-     r.without.map(x=> x.screen + "/" + x.name).join(",") || "none");
+  ck("CONTROL: the layout has glass placements to verify", r.places >= 20, JSON.stringify(r));
+  ck("every model and placement has a transparent 3D sequence", r.missing === 0 && r.unmapped === 0, JSON.stringify(r));
 }
-{
-  /* It plays, it is lazy, and the still is underneath it the whole time. */
-  const r = await p.evaluate(async ()=>{
-    boot("history");
-    await new Promise(ok=> setTimeout(ok, 2200));
-    const films = [...document.querySelectorAll('#stage .glass-film')];
-    return {n: films.length,
-            playing: films.filter(v=> v.src && !v.paused).length,
-            lazy: films.filter(v=> !v.src).length,
-            blend: (()=>{ const w = document.querySelector('.dg-shapes');
-              return w ? getComputedStyle(w).mixBlendMode : "-"; })(),
-            onFilm: films.length ? getComputedStyle(films[0]).mixBlendMode : "-",
-            ghosts: [...document.querySelectorAll('#stage .glass[data-film] > .glass-img')]
-              .filter(i=> +getComputedStyle(i).opacity > 0.01).length,
-            posters: [...document.querySelectorAll('#stage .glass .glass-img')]
-              .filter(i=> /url\(/.test(getComputedStyle(i).backgroundImage)).length};
-  });
-  ck("CONTROL: the screen builds its films", r.n >= 3, String(r.n));
-  ck("at least one of them is actually playing", r.playing >= 1, JSON.stringify(r));
-  /* THE BLEND IS ON THE WRAPPER AND NOT ON THE FILM, and the difference is the whole
-     bug the owner photographed. mix-blend-mode composites against the nearest ancestor
-     that forms a stacking context; .dg-shapes is one, because it carries a transform
-     and a z-index. On the <video> the blend therefore reached an empty box instead of
-     the page, every black pixel stayed black, and the torus arrived on the phone inside
-     a solid black rectangle. Chromium had been lenient about it, which is why this had
-     to be asserted on the element that actually does the blending. */
-  ck("the shapes layer is what carries the screen blend", r.blend === "screen", r.blend);
-  ck("and the film itself does not, or it would blend against nothing",
-     r.onFilm === "normal", r.onFilm);
-  /* And the still has to get out of the way underneath, because screen ADDS the film
-     rather than painting over it: the two together were a frozen copy of every shape. */
-  ck("no shape wears a still behind its running film", r.ghosts === 0, String(r.ghosts));
-  ck("and every shape still has its still underneath, so nothing pops in",
-     r.posters >= r.n, r.posters + " stills for " + r.n + " films");
-}
-
-console.log("\n1c. AND NO MORE OF THEM RUN AT ONCE THAN THE DEVICE CAN TAKE");
-/* The measurement that set this: in a headless browser with no GPU, at quarter speed,
-   one playing film is free - 17ms frames, no long frames in 89 - and two doubles the
-   frame time whatever resolution the video is. That is software decode and a phone
-   does better, so the budget is a starting guess that lowers itself rather than a
-   constant somebody has to be right about. What must hold is that there IS a cap. */
-{
-  const r = await p.evaluate(async ()=>{
-    boot("history");
-    await new Promise(ok=> setTimeout(ok, 2500));
-    const films = [...document.querySelectorAll('#stage .glass-film')];
-    const fr = []; let last = performance.now();
-    await new Promise(ok=>{ let n = 0;
-      const t = x=>{ fr.push(x - last); last = x; if(++n < 80) requestAnimationFrame(t); else ok(); };
-      requestAnimationFrame(t); });
-    fr.shift();
-    const sorted = fr.slice().sort((a, b)=> a - b);
-    return {playing: films.filter(v=> v.src && !v.paused).length, all: films.length,
-            budget: (window.GLASS_CONFIG || {}).filmBudget,
-            med: Math.round(sorted[Math.floor(sorted.length / 2)]),
-            long: fr.filter(x=> x > 24).length, n: fr.length};
-  });
-  ck("CONTROL: the screen has more films than the budget allows", r.all > r.playing,
-     JSON.stringify(r));
-  ck("so only a few play at once", r.playing <= Math.max(1, r.budget), JSON.stringify(r));
-  ck("and the frames are not long ones", r.long <= 4 && r.med <= 20, JSON.stringify(r));
-}
-
-console.log("\n2. AND THE ONES NOT PLAYING STILL TURN BIG ENOUGH TO SEE");
 await p.evaluate(()=> boot("history"));
-await p.waitForTimeout(500);
-let r = await p.evaluate(async ()=>{
-  const read = ()=> [...document.querySelectorAll('#stage .glass')].map(g=>{
-    const i = g.querySelector('.glass-img');
-    const cs = i ? getComputedStyle(i) : null;
-    return {n: (g.dataset.still || '').split('/').pop(),
-            w: Math.round(g.getBoundingClientRect().width),
-            on: !!cs && cs.animationName !== "none",
-            gy: Math.abs(parseFloat(cs ? cs.getPropertyValue('--gy') : "0") || 0),
-            t: cs ? cs.transform : ""};
-  });
-  const a = read();
-  await new Promise(ok=> setTimeout(ok, 1500));
-  const b = read();
-  return a.map((x, i)=> Object.assign(x, {moved: b[i] && b[i].t !== x.t}));
-});
-const orn = r.filter(x=> x.gy > 0);
-ck("CONTROL: the screen's ornaments are all animating", orn.length >= 3 && orn.every(x=> x.on),
-   JSON.stringify(orn.map(x=> x.n + ":" + x.on)));
-/* Five degrees is what "not animating" looked like. Fifteen is the floor, and the
-   smallest shapes - which have the least silhouette to show a turn with - must swing
-   furthest rather than the same as everything else. */
-ck("none of them turns by less than nineteen degrees", orn.every(x=> x.gy >= 19),
-   JSON.stringify(orn.map(x=> x.n + " " + x.w + "px " + x.gy + "deg")));
-/* AND IT TRAVELS THE WHOLE TIME. This is the one that caught the shapes the owner kept
-   reporting as still. Every transform WAS changing, continuously, and could be measured
-   doing so - but the animation alternates with an ease at both ends, so each shape spent
-   a large part of its cycle parked at a turnaround while the pixels did not move. A
-   true assertion about the transform would have passed happily over a screen that looks
-   frozen; what has to hold is that there is no dwell, which is the timing function. */
+const capsule = p.locator('[data-glass-hero] img.glass-turn');
+await capsule.waitFor();
+const first = await capsule.screenshot({animations:"disabled"});
+await p.waitForTimeout(320);
+ck("CONTROL: the History capsule changes with CSS animation disabled",
+   !first.equals(await capsule.screenshot({animations:"disabled"})));
 {
-  const ease = await p.evaluate(()=> [...document.querySelectorAll('#stage .glass[data-float] > .glass-img')]
-    .map(i=> getComputedStyle(i).animationTimingFunction));
-  ck("CONTROL: the ornaments carry a timing function", ease.length >= 3, ease.join(","));
-  ck("and it is a constant speed, so none of them dwells",
-     ease.every(x=> x === "linear"), ease.join(","));
+  const state = await capsule.evaluate(img=>{
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img,0,0);
+    const alpha = ctx.getImageData(0,0,1,1).data[3];
+    return {alpha, width:img.naturalWidth,
+      blend:getComputedStyle(img.closest(".dg-shapes")).mixBlendMode,
+      still:getComputedStyle(img.parentElement.querySelector(".glass-img")).visibility};
+  });
+  ck("the capsule background is transparent without blend modes or a frozen double",
+     state.width > 0 && state.alpha === 0 && state.blend === "normal" && state.still === "hidden", JSON.stringify(state));
 }
-ck("and the small ones turn furthest", (()=>{
-    const small = orn.filter(x=> x.w <= 90), big = orn.filter(x=> x.w >= 150);
-    return !small.length || !big.length
-      || Math.min(...small.map(x=> x.gy)) > Math.max(...big.map(x=> x.gy)) - 1;
-  })(), JSON.stringify(orn.map(x=> x.w + "px:" + x.gy)));
-ck("the ones on screen are moving right now", r.filter(x=> x.moved).length >= 2,
-   JSON.stringify(r.map(x=> x.n + ":" + x.moved)));
 
+console.log("\n2. ORNAMENTS TAKE TURNS WITHIN THE PLAYBACK BUDGET");
+const rotation = await p.evaluate(async ()=>{
+  const active = new Set();
+  let max = 0;
+  for(let n=0; n<25; n++){
+    const playing = [...document.querySelectorAll('#stage img.glass-turn')];
+    max = Math.max(max,playing.length);
+    playing.filter(img=>!img.parentElement.hasAttribute('data-glass-hero')).forEach(img=>active.add(img.src));
+    await new Promise(ok=>setTimeout(ok,400));
+  }
+  return {max, selected:active.size, ornaments:document.querySelectorAll('#stage .glass[data-turn]:not([data-glass-hero])').length};
+});
+ck("CONTROL: History has several ornaments and plays some of them", rotation.ornaments >= 3 && rotation.selected > 0, JSON.stringify(rotation));
+ck("multiple ornaments get their turn without exceeding three active images",
+   rotation.selected >= 2 && rotation.max <= 3, JSON.stringify(rotation));
+
+let r;
 console.log("\n3. THE DESIGN BRIEF'S SHAPE BUDGET");
 r = await p.evaluate(()=>{
   const L = window.GLASS_LAYOUT;

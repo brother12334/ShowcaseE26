@@ -10,7 +10,6 @@
  */
 (function () {
   let root = null;
-  const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function el(tag, cls, style) {
     const e = document.createElement(tag);
@@ -44,7 +43,7 @@
     // live-number hero: a glass overlay, above the text
     const d = el('div', 'glass front', { left: '0', top: '0', width: px(h.w), height: px(h.h) });
     d.dataset.glassHero = '';
-    if (h.motion) d.dataset.heroMotion = h.motion;
+    if (h.turn) d.dataset.turn = o.base + h.turn;
     if (h.overlay && (!reduce || !h.still)) {
       if (h.fps) d.dataset.fps = h.fps;
       d.dataset.sheet = o.base + h.overlay; d.dataset.frames = h.frames; d.dataset.cols = h.cols;
@@ -71,18 +70,11 @@
       if (!def) { console.warn('GlassScene: unknown shape', it.shape); return; }
       const d = el('div', 'glass ' + (it.layer || 'front'),
         { left: px(it.x), top: px(it.y), width: px(it.w), height: px(it.h) });
-      /* A SHAPE THAT HAS A FILM PLAYS IT, the same way Today's hero does. The still is
-         kept as the poster, so the shape is on screen the moment the layer mounts and
-         before a byte of video has arrived, and glass-motion.js only attaches the src
-         once it scrolls into view. Video is decoded in hardware; a sprite atlas is not,
-         which is the whole reason this path exists. */
       const spin = def.sheet && it.spin === true;
       d.dataset[spin ? 'sheet' : 'still'] = o.base + (spin ? def.sheet : def.still);
       if (spin) { d.dataset.frames = def.frames; d.dataset.cols = def.cols; }
-      const film = it.video || def.video;
-      if (film && it.video !== false && !reduceMotion()) d.dataset.video = o.base + film;
+      else if (screen !== 'intro' && def.turn) d.dataset.turn = o.base + def.turn;
       for (const k of ['depth', 'fps', 'bob', 'period']) if (it[k] != null) d.dataset[k] = it[k];
-      if (def.drift) d.dataset.drift = '';
       d.style.setProperty('--glass-delay', (o.delay || 0) + i * stagger + 'ms');
       layer.append(d);
     });
@@ -97,5 +89,28 @@
     root.querySelectorAll('.glass-layer').forEach((n) => n.remove());
     root = null;
   }
+  // The stills are shared across tabs. Load two at a time during startup so the
+  // next screen has artwork before its independently loaded turn is ready.
+  addEventListener('load', () => {
+    const layout = window.GLASS_LAYOUT;
+    if (!layout) return;
+    const posters = new Set(Object.values(layout.shapes).map(shape => shape.still + '.webp'));
+    for (const screen of Object.values(layout.screens)) {
+      if (screen.hero?.still) posters.add(screen.hero.still + '.webp');
+      if (screen.hero?.poster && !screen.hero.poster.includes('{day}')) posters.add(screen.hero.poster);
+    }
+    const queue = posters.values();
+    async function warmNext() {
+      for (const src of queue) {
+        const image = new Image();
+        image.fetchPriority = 'low';
+        image.src = src;
+        try { await image.decode(); } catch (err) { /* the visible scene can retry */ }
+      }
+    }
+    warmNext();
+    warmNext();
+  }, { once: true });
+
   window.GlassScene = { mount, unmount };
 })();

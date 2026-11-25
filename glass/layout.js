@@ -25,80 +25,78 @@ window.GLASS_LAYOUT = {
  "shapes": {
   "sphere-s": {
    "still": "assets/shapes/glass-sphere-s",
-   "video": "assets/shape-video/sphere-s.mp4",
-   "drift": true
+   "turn": "assets/glass-turns/sphere-s.avif"
   },
   "sphere-xs": {
    "still": "assets/shapes/glass-sphere-xs",
-   "video": "assets/shape-video/sphere-xs.mp4",
-   "drift": true
+   "turn": "assets/glass-turns/sphere-xs.avif"
   },
   "links": {
    "still": "assets/shapes/glass-links",
-   "video": "assets/shape-video/links.mp4"
+   "turn": "assets/glass-turns/links.avif"
   },
   "x-s": {
    "still": "assets/shapes/glass-x-s",
    "sheet": "assets/motion/glass-x-s",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/x-s.mp4"
+   "turn": "assets/glass-turns/x-s.avif"
   },
   "star": {
    "still": "assets/shapes/glass-star",
    "sheet": "assets/motion/glass-star",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/star.mp4"
+   "turn": "assets/glass-turns/star.avif"
   },
   "jack": {
    "still": "assets/shapes/glass-jack",
    "sheet": "assets/motion/glass-jack",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/jack.mp4"
+   "turn": "assets/glass-turns/jack.avif"
   },
   "rbox-s": {
    "still": "assets/shapes/glass-rbox-s",
    "sheet": "assets/motion/glass-rbox-s",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/rbox-s.mp4"
+   "turn": "assets/glass-turns/rbox-s.avif"
   },
   "torus-m": {
    "still": "assets/shapes/glass-torus-m",
    "sheet": "assets/motion/glass-torus-m",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/torus-m.mp4"
+   "turn": "assets/glass-turns/torus-m.avif"
   },
   "capsule-m": {
    "still": "assets/shapes/glass-capsule-m",
    "sheet": "assets/motion/glass-capsule-m",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/capsule-m.mp4"
+   "turn": "assets/glass-turns/capsule-m.avif"
   },
   "capsule-amber": {
    "still": "assets/shapes/glass-capsule-amber",
    "sheet": "assets/motion/glass-capsule-amber",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/capsule-amber.mp4"
+   "turn": "assets/glass-turns/capsule-amber.avif"
   },
   "capsule-xs": {
    "still": "assets/shapes/glass-capsule-xs",
    "sheet": "assets/motion/glass-capsule-xs",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/capsule-xs.mp4"
+   "turn": "assets/glass-turns/capsule-xs.avif"
   },
   "blob": {
    "still": "assets/shapes/glass-blob",
    "sheet": "assets/motion/glass-blob",
    "frames": 36,
    "cols": 12,
-   "video": "assets/shape-video/blob.mp4"
+   "turn": "assets/glass-turns/blob.avif"
   }
  },
  "screens": {
@@ -257,6 +255,7 @@ window.GLASS_LAYOUT = {
    "hero": {
     "overlay": null,
     "still": "assets/hero-overlays/overlay-workout",
+    "turn": "assets/glass-turns/workout.avif",
     "frames": 36,
     "cols": 12,
     "w": 390,
@@ -289,7 +288,7 @@ window.GLASS_LAYOUT = {
   "history": {
    "height": 1500,
    "hero": {
-    "motion": "sway",
+    "turn": "assets/glass-turns/history.avif",
     "still": "assets/hero-overlays/overlay-history",
     "w": 390,
     "h": 440,
@@ -341,7 +340,7 @@ window.GLASS_LAYOUT = {
   "research": {
    "height": 1500,
    "hero": {
-    "motion": "orbit",
+    "turn": "assets/glass-turns/research.avif",
     "still": "assets/hero-overlays/overlay-research",
     "w": 390,
     "h": 440,

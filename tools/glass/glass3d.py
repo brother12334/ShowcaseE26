@@ -61,6 +61,7 @@ class Obj:
             self.r = s * kw.get('thick', 0.11); self.Rt = s * 0.5 - self.r; self.bound = s * 0.5 + 4 * S
         elif kind == 'sphere':
             self.r = s * 0.5; self.bound = self.r + 4 * S
+            self.form = np.array(kw.get('form', (1.0, 1.0, 1.0)))
         elif kind in ('jack', 'star'):
             self.r = s * kw.get('thick', 0.11); self.L = s * 0.5 - self.r; self.bound = s * 0.5 + 4 * S
         elif kind == 'blob':
@@ -101,7 +102,7 @@ class Obj:
             qx = np.sqrt(q[:, 0] ** 2 + q[:, 1] ** 2) - self.Rt
             return np.sqrt(qx ** 2 + q[:, 2] ** 2) - self.r
         if k == 'sphere':
-            return np.linalg.norm(q, axis=1) - self.r
+            return (np.linalg.norm(q / self.form, axis=1) - self.r) * self.form.min()
         if k == 'rbox':
             dq = np.abs(q) - self.b
             return np.linalg.norm(np.maximum(dq, 0), axis=1) + np.minimum(dq.max(1), 0) - self.rr

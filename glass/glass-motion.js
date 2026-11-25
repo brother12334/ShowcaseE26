@@ -12,28 +12,13 @@
  */
 (function () {
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const D = { fps: 12, float: { amplitude: [4, 8], period: [3.2, 4.8] }, parallax: 0.15, tilt: 10, depth: 0.4, pauseOffscreen: true };
+  const D = { fps: 12, float: { amplitude: [4, 8], period: [4, 7] }, parallax: 0.15, tilt: 10, depth: 0.4, pauseOffscreen: true };
   const cfg = () => Object.assign({}, D, window.GLASS_CONFIG || {});
   const rnd = (r) => r[0] + Math.random() * (r[1] - r[0]);
-  let items = [], raf = 0, io = null, scrollY = 0, scrollTimer = 0;
-  let scrolling = false;
+  let items = [], raf = 0, io = null, scrollY = 0;
+  let turnTimer = 0, turnOffset = 0, turnLimit = 3;
+  let qualityLimit = 3, sample = 0, lastFrame = 0, slowFrames = 0;
   const tilt = { x: 0, y: 0, tx: 0, ty: 0 };
-
-  /* THE FILM, IF THE SHAPE HAS ONE. Created empty and left that way until the shape is
-     actually on screen: a page with six <video> elements all holding a decoder open is
-     a different kind of expensive from one that plays two. syncPlayback attaches the
-     src on first sight and pauses it when it leaves. */
-  function filmFor(el) {
-    const src = el.dataset.video;
-    if (!src) return null;
-    const v = document.createElement('video');
-    v.className = 'glass-film';
-    v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none';
-    v.setAttribute('aria-hidden', 'true');
-    v.dataset.src = src;
-    el.append(v);
-    return v;
-  }
 
   function build(el) {
     if (el.dataset.ready) return null;
@@ -42,7 +27,6 @@
     const img = document.createElement('div');
     img.className = 'glass-img';
     el.append(img);
-    const film = filmFor(el);
     const base = el.dataset.sheet || el.dataset.still;
     img.style.backgroundImage = `url(${base}.webp)`;
     const bob = el.dataset.bob ? +el.dataset.bob : rnd(C.float.amplitude);
@@ -52,38 +36,8 @@
         el.setAttribute('data-float', '');
         img.style.setProperty('--glass-bob', bob + 'px');
         img.style.setProperty('--glass-period', period + 's');
-        /* HOW FAR IT TURNS, by how big it is drawn. A 45px sphere and a 250px jack
-           given the same five degrees do not read the same: the small one shows almost
-           no change in silhouette, which is why the little ornaments looked frozen. So
-           the swing scales inversely with the drawn size, within limits, and the signs
-           and phase are jittered so a screenful of them does not rock in unison. */
-        const w = parseFloat(el.style.width) || 120;
-        const k = Math.max(0.75, Math.min(2.3, 150 / w));
-        const sx = Math.random() < 0.5 ? -1 : 1, sy = Math.random() < 0.5 ? -1 : 1;
-        if (el.dataset.drift != null) {
-          /* A BALL CANNOT SHOW A TURN. It is the same shape from every angle, so the
-             angles below do nothing to it — measured on the device at 0.19 of 255 over
-             three seconds, against about 2 for the shapes beside it. It drifts and
-             breathes instead, which is motion a round silhouette can actually show. */
-          img.style.setProperty('--glass-bob', (bob * 2.6).toFixed(1) + 'px');
-          img.style.setProperty('--gs0', '0.94');
-          img.style.setProperty('--gs1', '1.06');
-          img.style.setProperty('--gx', '0deg');
-          img.style.setProperty('--gy', '0deg');
-          img.style.setProperty('--gz', (sx * 4).toFixed(1) + 'deg');
-        } else {
-          /* The floor matters as much as the scaling. k is clamped at 0.75 for the
-             largest shapes, which left them swinging about 16 degrees over a five
-             second cycle - a true statement about the transform and an invisible one
-             on screen. */
-          img.style.setProperty('--gx', (sx * Math.max(7, 5 + 3.5 * k)).toFixed(1) + 'deg');
-          img.style.setProperty('--gy', (sy * Math.max(19, 9 + 9 * k)).toFixed(1) + 'deg');
-          img.style.setProperty('--gz', (sx * Math.max(3, 1.5 + 2 * k)).toFixed(1) + 'deg');
-        }
-        img.style.setProperty('--glass-persp', Math.round(380 + 2.2 * w) + 'px');
-        img.style.animationDelay = (-Math.random() * period).toFixed(2) + 's';
       }
-      return { el, film, frames: 1, visible: false };
+      return { el, frames: 1, visible: false, still: img };
     }
 
     const blur = document.createElement('div');
@@ -95,7 +49,7 @@
     img.style.backgroundSize = size;
     blur.style.webkitMaskSize = blur.style.maskSize = size;
     return {
-      el, img, blur, film, frames, cols, rows,
+      el, img, blur, frames, cols, rows,
       fps: +el.dataset.fps || C.fps,
       depth: el.dataset.depth ? +el.dataset.depth : C.depth,
       phase: Math.random() * 1000,
@@ -117,8 +71,6 @@
 
   function tick(now) {
     raf = 0;
-    /* `scrolling` is no longer a reason to stop \u2014 see start(). It still drives the
-       parallax below, which is the one thing it was always right about. */
     if (document.hidden || reduce.matches) return;
     const C = cfg(), t = now / 1000;
     tilt.x += (tilt.tx - tilt.x) * 0.08;
@@ -145,63 +97,71 @@
       raf = requestAnimationFrame(tick);
     }
   }
-  /* HOW MANY FILMS MAY RUN AT ONCE, and why it is a budget rather than a constant.
-     Measured in a headless browser with no GPU, at a quarter speed: one playing film
-     costs nothing at all (17ms frames, no long frames in 89) and two doubles the frame
-     time, whatever size the video is. That is software decode, which is the worst case
-     and not what a phone does - an iPhone decodes these in hardware, which is the whole
-     reason Today's hero has never been the slow part of any screen. So guessing a
-     number for every device would be guessing twice.
-     The budget starts at three and comes down on its own if the frames say it should.
-     It never goes back up inside a session, because a budget that oscillates is worse
-     than one that is simply too low. */
-  let filmBudget = Math.max(0, cfg().filmBudget == null ? 2 : cfg().filmBudget);
-  let probe = 0, slowRun = 0, lastTs = 0;
+  function stopTurn(item) {
+    if (!item.turn) return;
+    item.turn.removeAttribute('src');
+    item.turn.remove();
+    item.turn = null;
+    item.still.style.visibility = '';
+  }
 
-  function filmWatch(ts) {
-    probe = 0;
-    if (lastTs) {
-      const dt = ts - lastTs;
-      if (dt > 26) slowRun++; else slowRun = Math.max(0, slowRun - 1);
-      if (slowRun > 6 && filmBudget > 1) { filmBudget--; slowRun = 0; syncPlayback(); }
+  function watchTurns(now) {
+    sample = 0;
+    const active = items.filter(item => item.turn?.isConnected).length;
+    if (document.hidden || active < 3) { lastFrame = slowFrames = 0; return; }
+    if (lastFrame) slowFrames = now - lastFrame > 27 ? slowFrames + 1 : Math.max(0, slowFrames - 1);
+    lastFrame = now;
+    if (slowFrames >= 8 && qualityLimit > 2) {
+      qualityLimit = 2;
+      slowFrames = 0;
+      syncTurns();
     }
-    lastTs = ts;
-    if (items.some((it) => it.film && it.film.src && !it.film.paused)) {
-      probe = requestAnimationFrame(filmWatch);
-    } else { lastTs = 0; }
+    if (!sample && qualityLimit > 2) sample = requestAnimationFrame(watchTurns);
+  }
+
+  function syncTurns() {
+    clearTimeout(turnTimer);
+    const eligible = document.hidden || reduce.matches ? [] : items.filter(item =>
+      item.visible && item.el.dataset.turn && getComputedStyle(item.el).visibility !== 'hidden');
+    const hero = eligible.find(item => item.el.hasAttribute('data-glass-hero'));
+    const ornaments = eligible.filter(item => item !== hero);
+    const slots = Math.min(turnLimit, qualityLimit) - Number(!!hero);
+    const offset = turnOffset % Math.max(ornaments.length, 1);
+    const selected = new Set(ornaments.concat(ornaments).slice(offset, offset + Math.min(slots, ornaments.length)));
+    if (hero) selected.add(hero);
+    for (const item of items) {
+      if (!selected.has(item)) { stopTurn(item); continue; }
+      if (item.turn) continue;
+      const turn = document.createElement('img');
+      turn.className = 'glass-turn';
+      turn.alt = '';
+      turn.decoding = 'async';
+      item.turn = turn;
+      turn.onload = () => {
+        if (item.turn !== turn || !item.el.isConnected) return;
+        item.el.append(turn);
+        item.still.style.visibility = 'hidden';
+        if (!sample && qualityLimit > 2) sample = requestAnimationFrame(watchTurns);
+      };
+      turn.onerror = () => { if (item.turn === turn) stopTurn(item); };
+      turn.src = item.el.dataset.turn;
+    }
+    if (ornaments.length > slots) {
+      turnTimer = setTimeout(() => { turnOffset += slots; syncTurns(); }, 3600);
+    }
   }
 
   function syncPlayback() {
     const pauseOffscreen = cfg().pauseOffscreen;
-    const off = reduce.matches || document.hidden;
-    /* Nearest the middle of the screen wins the budget: the shape you are looking at is
-       the one that actually turns, and the rest keep the transform, which is free. */
-    const mid = innerHeight / 2;
-    const live = items.filter((it) => it.film && it.visible && !off)
-      .sort((a, b) => {
-        const ra = a.el.getBoundingClientRect(), rb = b.el.getBoundingClientRect();
-        return Math.abs(ra.top + ra.height / 2 - mid) - Math.abs(rb.top + rb.height / 2 - mid);
-      });
-    const playing = new Set(live.slice(0, filmBudget));
     for (const it of items) {
-      const idle = document.hidden || (pauseOffscreen && !it.visible);
-      it.el.toggleAttribute('data-glass-paused', idle);
-      const v = it.film;
-      if (!v) continue;
-      if (!playing.has(it)) {
-        try { v.pause(); } catch (e) {}
-        it.el.removeAttribute('data-film');
-        continue;
-      }
-      if (!v.src) v.src = v.dataset.src;
-      it.el.setAttribute('data-film', '');
-      v.play().catch(() => {});
+      it.el.toggleAttribute('data-glass-paused', document.hidden || (pauseOffscreen && !it.visible));
     }
-    if (!probe && playing.size) probe = requestAnimationFrame(filmWatch);
+    syncTurns();
     start();
   }
 
   function mount(root) {
+    turnLimit = (root || document).querySelector("video.hero-media") ? 2 : 3;
     const fresh = [...(root || document).querySelectorAll('.glass')].map(build).filter(Boolean);
     if (!io) {
       io = new IntersectionObserver((entries) => {
@@ -214,10 +174,15 @@
     syncPlayback();
   }
   function unmount() {
-    for (const it of items) io && io.unobserve(it.el);
+    clearTimeout(turnTimer);
+    if (sample) cancelAnimationFrame(sample);
+    sample = 0; lastFrame = slowFrames = 0;
+    turnOffset = 0;
+    for (const it of items) {
+      if (io) io.unobserve(it.el);
+      stopTurn(it);
+    }
     items = [];
-    if (probe) cancelAnimationFrame(probe);
-    probe = 0; lastTs = 0; slowRun = 0;
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
   }
@@ -227,18 +192,7 @@
     el.addEventListener('animationend', () => el.classList.remove('pulse'), { once: true });
   }
 
-  addEventListener('scroll', () => {
-    scrollY = window.scrollY;
-    if (!scrolling) {
-      scrolling = true;
-      syncPlayback();
-    }
-    clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(() => {
-      scrolling = false;
-      syncPlayback();
-    }, 160);
-  }, { passive: true });
+  addEventListener('scroll', () => { scrollY = window.scrollY; }, { passive: true });
   addEventListener('pointermove', (e) => {
     tilt.tx = (e.clientX / innerWidth - 0.5) * 2;
     tilt.ty = (e.clientY / innerHeight - 0.5) * 2;
@@ -246,7 +200,7 @@
   document.addEventListener('visibilitychange', syncPlayback);
   reduce.addEventListener('change', () => {
     if (reduce.matches) items.forEach((it) => { setFrame(it, 0); it.el.style.transform = ''; });
-    start();
+    syncPlayback();
   });
   window.GlassMotion = { mount, unmount, pulse };
 })();

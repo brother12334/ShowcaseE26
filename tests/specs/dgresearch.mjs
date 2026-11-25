@@ -23,7 +23,7 @@ import { extname, join, normalize } from 'node:path';
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const FEED = JSON.parse(readFileSync(appFile('tests/fixtures/research-feed.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.webp':'image/webp', '.png':'image/png', '.mp4':'video/mp4',
+  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4',
   '.ttf':'font/ttf', '.svg':'image/svg+xml', '.mp3':'audio/mpeg',
   '.webmanifest':'application/manifest+json' };
 const srv = createServer(async (q, r)=>{
@@ -126,13 +126,20 @@ console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");
      f.num === String(r.n), f.num + " vs " + r.n);
 }
 
-console.log("\n2b. THE RENDERED BUBBLE MOVES SMOOTHLY");
-const bubble = full.locator('[data-glass-hero][data-still$="overlay-research"] .glass-img');
-ck("CONTROL: the seeded feed mounts its new Research bubble", await bubble.count() === 1);
-const before = await bubble.evaluate(el=>getComputedStyle(el).transform);
-await full.waitForFunction(initial=>getComputedStyle(document.querySelector('[data-glass-hero] .glass-img')).transform !== initial, before);
+console.log("\n2b. THE BUBBLE PLAYS ITS RENDERED 3D FRAMES");
+const bubble = full.locator('[data-glass-hero] img.glass-turn');
+await bubble.waitFor();
+const source = await bubble.evaluate(img=>({src:img.getAttribute('src'), width:img.naturalWidth}));
+ck("CONTROL: the seeded feed mounts the rendered Research turn",
+   source.src === "assets/glass-turns/research.avif" && source.width >= 780, JSON.stringify(source));
+const firstFrame = await bubble.screenshot({animations:"disabled"});
+await full.waitForTimeout(320);
+const nextFrame = await bubble.screenshot({animations:"disabled"});
+ck("the baked frames change even with CSS animations disabled", !firstFrame.equals(nextFrame));
 await full.emulateMedia({reducedMotion:"reduce"});
-ck("Reduce Motion keeps the Research bubble still", await bubble.evaluate(el=>getComputedStyle(el).animationName) === "none");
+await bubble.waitFor({state:"detached"});
+ck("Reduce Motion restores the still", await full.locator('[data-glass-hero] .glass-img').evaluate(
+   el=>getComputedStyle(el).visibility === "visible"));
 await full.emulateMedia({reducedMotion:"no-preference"});
 
 console.log("\n3. ONE HEADING, AND THE NAME IS STILL ON IT");

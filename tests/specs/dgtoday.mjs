@@ -29,7 +29,7 @@ import { extname, join, normalize } from 'node:path';
    spec's own, started and closed in the same run. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.webp':'image/webp', '.png':'image/png', '.mp4':'video/mp4',
+  '.json':'application/json', '.webp':'image/webp', '.avif':'image/avif', '.png':'image/png', '.mp4':'video/mp4',
   '.ttf':'font/ttf', '.svg':'image/svg+xml', '.mp3':'audio/mpeg',
   '.webmanifest':'application/manifest+json' };
 const srv = createServer(async (q, r)=>{
@@ -802,21 +802,32 @@ r = await newP.evaluate(async ()=>{
   boot();
   TAB = "history"; render();
   const glass = document.querySelector('#stage [data-glass-hero][data-still$="overlay-history"]');
-  const img = glass?.querySelector('.glass-img');
-  const before = img && getComputedStyle(img).transform;
-  await new Promise(ok=>setTimeout(ok, 450));
-  const history = {hero:!!glass, moves:!!img && getComputedStyle(img).transform !== before,
-    animation: img && getComputedStyle(img).animationName};
-  boot();
-  return {results, overlays, history};
+  return {results, overlays, history:!!glass && glass.dataset.turn === "assets/glass-turns/history.avif"};
 });
 ck("CONTROL: the twelve decorative stills are mapped to real slots",
    r.results.length === 12 && r.results.every(item=> item.used > 0));
 ck("each still covers its largest 3× phone slot", r.results.every(item=> item.sharp), JSON.stringify(r.results));
 ck("the three live-number overlays cover their own 3× canvases",
    r.overlays.length === 3 && r.overlays.every(item=> item.sharp), JSON.stringify(r.overlays));
-ck("CONTROL: History mounts its rendered capsule", r.history.hero);
-ck("the 3× capsule animates continuously", r.history.moves && r.history.animation === "glass-capsule-sway");
+ck("CONTROL: History mounts its rendered capsule", r.history);
+const animatedCapsule = newP.locator('[data-glass-hero] img.glass-turn');
+await animatedCapsule.waitFor();
+ck("History loads its transparent turn at 2× or higher", await animatedCapsule.evaluate(img=>
+   img.getAttribute("src") === "assets/glass-turns/history.avif" && img.naturalWidth >= 780));
+await newP.locator(".glass:not([data-glass-hero]) img.glass-turn").first().waitFor();
+const ornaments = await newP.evaluate(()=>({
+  rendered: document.querySelectorAll('.glass:not([data-glass-hero])[data-turn]').length,
+  playing: document.querySelectorAll('img.glass-turn').length,
+  allMapped: [...document.querySelectorAll('.glass:not([data-glass-hero])')].every(el=>!!el.dataset.turn)
+}));
+ck("CONTROL: History has small glass ornaments", ornaments.rendered > 0);
+ck("all ornaments have real 3D motion and at most three assets play together",
+   ornaments.allMapped && ornaments.playing > 1 && ornaments.playing <= 3, JSON.stringify(ornaments));
+await newP.evaluate(()=>scrollTo(0, 1600));
+await animatedCapsule.waitFor({state:"detached"});
+ck("offscreen History releases the animated capsule and restores its still",
+   await newP.locator('[data-glass-hero] .glass-img').evaluate(el=> getComputedStyle(el).visibility === "visible"));
+await newP.evaluate(()=>boot());
 
 console.log("\n17. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
