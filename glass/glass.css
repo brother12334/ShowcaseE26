@@ -97,16 +97,55 @@
   .glass[data-float] > .glass-img {
     animation: glass-bob var(--glass-period) ease-in-out infinite alternate;
   }
+  .glass[data-hero-motion="sway"] > .glass-img {
+    transform-origin: 59.5% 57%;
+    animation: glass-capsule-sway 6s ease-in-out infinite;
+  }
+  .glass[data-hero-motion="orbit"] > .glass-img {
+    transform-origin: 58% 55%;
+    animation: glass-bubble-drift 7s ease-in-out infinite;
+  }
   .glass[data-glass-paused] > .glass-img { animation-play-state: paused; }
 }
+/* THE SHAPES TURN WITH A TRANSFORM, NOT A SPRITE SHEET, and the angles here are the
+   whole reason this reads as motion at all.
+
+   A sprite atlas of rendered frames is the honest way to turn an object and it is also
+   what made the app crawl: three of them to a screen is 70MB of decoded image, every
+   shape that has one gets a masked backdrop-filter layer behind it, and stepping a
+   background-position repaints that layer on every frame. Measured on a throttled
+   phone profile it was the difference between a 17ms frame and a stuttering one.
+
+   So the baked art is one sharp still and the browser turns it on the GPU. It was
+   already doing this at rotateX 3deg / rotateY 5deg, which is a sixteenth of a turn and
+   invisible on a 45px sphere - the owner reported these as "not animating" and was
+   right to. The angles are per-shape custom properties now, set in glass-motion.js from
+   how big the shape is drawn: the small ornaments swing furthest, because they have the
+   least silhouette to show it with. */
 @keyframes glass-bob {
-  from { transform: perspective(650px) rotateX(3deg) rotateY(-5deg); }
-  to { transform: perspective(650px) translateY(calc(-1 * var(--glass-bob))) rotateX(-3deg) rotateY(5deg); }
+  from {
+    transform: perspective(var(--glass-persp, 620px))
+               rotateX(var(--gx, 6deg)) rotateY(var(--gy, -15deg)) rotateZ(var(--gz, -2deg));
+  }
+  to {
+    transform: perspective(var(--glass-persp, 620px))
+               translateY(calc(-1 * var(--glass-bob)))
+               rotateX(calc(-1 * var(--gx, 6deg))) rotateY(calc(-1 * var(--gy, -15deg)))
+               rotateZ(calc(-1 * var(--gz, -2deg)));
+  }
 }
-/* glass-capsule-sway and glass-bubble-drift lived here: a translate-and-rotate on the
-   History capsule and the Research bubble. They moved the picture without turning the
-   object, which beside Today's rendered loop reads as a nudge rather than a spin. Both
-   heroes draw from a real 18-frame 2x sheet now; see layout.js. */
+@keyframes glass-capsule-sway {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(3px, -7px) rotate(6deg); }
+  50% { transform: translate(0, -11px) rotate(0deg); }
+  75% { transform: translate(-3px, -7px) rotate(-6deg); }
+}
+@keyframes glass-bubble-drift {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(9px, -8px) rotate(5deg); }
+  50% { transform: translate(0, -15px) rotate(0deg); }
+  75% { transform: translate(-9px, -8px) rotate(-5deg); }
+}
 @media (prefers-reduced-motion: reduce) {
   .glass[data-still]:not(.pulse) { animation: none; }
 }

@@ -35,6 +35,19 @@
         el.setAttribute('data-float', '');
         img.style.setProperty('--glass-bob', bob + 'px');
         img.style.setProperty('--glass-period', period + 's');
+        /* HOW FAR IT TURNS, by how big it is drawn. A 45px sphere and a 250px jack
+           given the same five degrees do not read the same: the small one shows almost
+           no change in silhouette, which is why the little ornaments looked frozen. So
+           the swing scales inversely with the drawn size, within limits, and the signs
+           and phase are jittered so a screenful of them does not rock in unison. */
+        const w = parseFloat(el.style.width) || 120;
+        const k = Math.max(0.75, Math.min(2.3, 150 / w));
+        const sx = Math.random() < 0.5 ? -1 : 1, sy = Math.random() < 0.5 ? -1 : 1;
+        img.style.setProperty('--gx', (sx * (5 + 3.5 * k)).toFixed(1) + 'deg');
+        img.style.setProperty('--gy', (sy * (9 + 9 * k)).toFixed(1) + 'deg');
+        img.style.setProperty('--gz', (sx * (1.5 + 2 * k)).toFixed(1) + 'deg');
+        img.style.setProperty('--glass-persp', Math.round(380 + 2.2 * w) + 'px');
+        img.style.animationDelay = (-Math.random() * period).toFixed(2) + 's';
       }
       return { el, frames: 1, visible: false };
     }

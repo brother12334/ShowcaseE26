@@ -3,26 +3,29 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
-/* THE GLASS TURNS IN SPACE.
+/* THE GLASS TURNS, AND NOTHING DECODES A SPRITE ATLAS TO DO IT.
 
-   Today's hero is a pre-rendered loop of a real object rotating, and for a long time it
-   was the only thing in the app that was. The History capsule and the Research bubble
-   were given a CSS translate-and-rotate instead, which slides and tips the PICTURE
-   without ever turning the object; the decorative shapes were drawn from a single still
-   and bobbed. Beside Today, both read as a nudge rather than a spin, and the owner said
-   so. Both are rendered frame sequences now.
+   This spec is the record of a wrong turn, because the wrong turn is the thing that
+   will be taken again. Today's hero is a rendered loop of a real object rotating, so
+   the obvious way to make the other shapes turn was to give each of them the same:
+   a sprite atlas of rendered frames, stepped by changing a background-position.
 
-   THE REASON SPIN WAS SWITCHED OFF IN THE FIRST PLACE IS STILL TRUE, which is why this
-   spec is mostly about restraint rather than about motion. A shape sheet holds 36 frames
-   in 12 columns, so a frame is 320px; Program's jack is drawn at 250pt, which on a 3x
-   phone asks 750 device pixels of it. That is the blur somebody turned every sheet off
-   for. The SMALL shapes have the opposite arithmetic and are the only ones turning here,
-   so section 2 checks the arithmetic rather than trusting the list: every shape that
-   spins must have a frame big enough for the largest slot it is placed in.
+   It was correct and it was unusable. An atlas is 10 to 50MB decoded and a screen
+   carries three; every shape that has one gets a masked backdrop-filter layer built
+   behind it by glass-motion.js; and stepping the background-position repaints that
+   layer every frame. The owner's phone went from smooth to crawling, and the small
+   ornaments - which had been floating and tilting - stopped doing even that, because
+   a shape with an atlas does not get the float.
 
-   And section 3 holds the design brief's hard limit, which is the thing a future "make
-   it livelier" would quietly break: at most three moving pieces on a screen, counting a
-   hero that moves as one of them. */
+   What replaced it costs nothing: the baked art stays one sharp still and the browser
+   turns it on the GPU. Section 1 holds the rule that makes it fast, section 2 that the
+   motion is actually big enough to see, and section 3 the design brief's shape budget.
+
+   SECTION 2 IS THE ONE THAT MATTERS. The transform was already there before any of
+   this, at rotateX 3deg and rotateY 5deg, and the owner reported the small shapes as
+   not animating. They were animating, by a sixteenth of a turn, on a 45 pixel sphere.
+   "There is an animation attached" is exactly the sort of thing a spec will happily
+   confirm while the screen looks frozen, so what is asserted is the ANGLE. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const FEED = JSON.parse(readFileSync(appFile('tests/fixtures/research-feed.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
@@ -78,161 +81,115 @@ await p.evaluate(fx=>{
 }, FX);
 await p.waitForTimeout(700);
 
-console.log("\n1. THE TWO OVERLAY HEROES STEP THROUGH RENDERED FRAMES");
-/* A CSS transform on one image could pass "it moved". Stepping a background POSITION
-   across a sprite sheet is something only a real frame sequence does, so that is what is
-   read — and the frame count is read off the element, so an art change that silently
-   drops back to a still fails here rather than looking fine. */
-for(const [tab, name] of [["history", "overlay-history"], ["research", "overlay-research"]]){
-  const r = await p.evaluate(async n=>{
-    const g = document.querySelector('#stage .glass-layer [data-glass-hero][data-sheet$="' + n + '"]');
-    const img = g && g.querySelector('.glass-img');
-    const seen = new Set();
-    for(let i = 0; i < 14; i++){
-      if(img) seen.add(img.style.backgroundPosition);
-      await new Promise(ok=> setTimeout(ok, 120));
-    }
-    return {there: !!g, frames: +((g || {dataset:{}}).dataset.frames || 0),
-            cols: +((g || {dataset:{}}).dataset.cols || 0),
-            fps: +((g || {dataset:{}}).dataset.fps || 0),
-            distinct: seen.size, sample: [...seen].slice(0, 3).join(" | ")};
-  }, name);
-  ck("CONTROL: " + tab + " mounts its overlay hero from a sheet", r.there && r.frames > 1,
-     JSON.stringify(r));
-  ck(tab + "'s glass steps through more than one rendered frame", r.distinct > 1,
-     r.distinct + " positions in 1.7s: " + r.sample);
-  ck("and it is slow enough to be a turn rather than a flicker", r.fps > 0 && r.fps <= 8,
-     "fps " + r.fps);
-  if(tab === "history") await p.evaluate(()=> boot("research"));
-  await p.waitForTimeout(700);
+console.log("\n1. NOT ONE SPRITE ATLAS, AND NOT ONE BACKDROP FILTER");
+/* Both halves of the cost, on the three screens that carry the most art. A single
+   backdrop-filter is the most expensive thing on an iOS page and glass-motion.js builds
+   one for every shape that has an atlas, so the two are really one assertion. */
+for(const tab of ["history", "research", "sync", "body"]){
+  const r = await p.evaluate(t=>{
+    boot(t);
+    const g = [...document.querySelectorAll('#stage .glass')];
+    return {n: g.length,
+            atlas: g.filter(x=> x.dataset.sheet).map(x=> x.dataset.sheet.split('/').pop()),
+            blur: document.querySelectorAll('#stage .glass-blur').length};
+  }, tab);
+  ck("CONTROL: " + tab + " really has art on it", r.n > 0, String(r.n));
+  ck(tab + " mounts no sprite atlas", r.atlas.length === 0, r.atlas.join(",") || "none");
+  ck("and builds no backdrop-filter layer", r.blur === 0, String(r.blur));
+}
+/* AND NOTHING IS ARMED TO START USING ONE. The shape definitions still name an atlas
+   each, which is fine and deliberate - the files exist, the renderer still makes them,
+   and a future screen with one large slow ornament could reasonably want one. What
+   must not happen quietly is a placement turning it on across a screenful of shapes,
+   which is the change that cost the frame rate. So the check is on the placements. */
+{
+  const layout = await p.evaluate(()=> window.GLASS_LAYOUT);
+  const placements = Object.entries(layout.screens).flatMap(([k, sc])=>
+    (sc.shapes || []).map(it=> ({screen:k, shape:it.shape, spin:it.spin === true})));
+  const armed = placements.filter(x=> x.spin);
+  ck("CONTROL: there are placements to check", placements.length >= 20,
+     String(placements.length));
+  ck("and not one of them asks for an atlas", armed.length === 0,
+     armed.map(x=> x.screen + "/" + x.shape).join(",") || "none");
+  const heroes = Object.entries(layout.screens)
+    .filter(([k, sc])=> sc.hero && sc.hero.overlay).map(([k])=> k);
+  ck("nor does any overlay hero", heroes.length === 0, heroes.join(",") || "none");
 }
 
-console.log("\n2. ONLY SHAPES WITH THE PIXELS FOR IT TURN");
+console.log("\n2. AND THE TURN IS BIG ENOUGH TO SEE");
+await p.evaluate(()=> boot("history"));
+await p.waitForTimeout(500);
 let r = await p.evaluate(async ()=>{
-  const L = window.GLASS_LAYOUT;
-  const spun = {};
-  Object.entries(L.screens).forEach(([screen, sc])=>{
-    (sc.shapes || []).forEach(it=>{
-      if(it.spin !== true) return;
-      const o = spun[it.shape] || (spun[it.shape] = {w:0, screens:[]});
-      o.w = Math.max(o.w, it.w, it.h);
-      o.screens.push(screen);
-    });
+  const read = ()=> [...document.querySelectorAll('#stage .glass')].map(g=>{
+    const i = g.querySelector('.glass-img');
+    const cs = i ? getComputedStyle(i) : null;
+    return {n: (g.dataset.still || '').split('/').pop(),
+            w: Math.round(g.getBoundingClientRect().width),
+            on: !!cs && cs.animationName !== "none",
+            gy: Math.abs(parseFloat(cs ? cs.getPropertyValue('--gy') : "0") || 0),
+            t: cs ? cs.transform : ""};
   });
-  /* The real frame size, measured off the sheet rather than assumed from the config. */
-  const out = [];
-  for(const [key, o] of Object.entries(spun)){
-    const def = L.shapes[key];
-    if(!def || !def.sheet){ out.push({key, sheet:false}); continue; }
-    const im = new Image(); im.src = def.sheet + ".webp";
-    await im.decode();
-    const rows = Math.ceil(def.frames / def.cols);
-    const fw = im.naturalWidth / def.cols, fh = im.naturalHeight / rows;
-    out.push({key, sheet:true, frame: Math.round(fw) + "x" + Math.round(fh),
-              biggest: o.w, needs: o.w * 3, ok: fw >= o.w * 3 && fh >= o.w * 3,
-              screens: o.screens.length});
-  }
-  /* and the ones deliberately left alone */
-  const still = new Set();
-  Object.values(L.screens).forEach(sc=> (sc.shapes || []).forEach(it=>{
-    if(it.spin !== true && it.shape) still.add(it.shape); }));
-  return {out, stillKeys: [...still].sort().join(",")};
+  const a = read();
+  await new Promise(ok=> setTimeout(ok, 1500));
+  const b = read();
+  return a.map((x, i)=> Object.assign(x, {moved: b[i] && b[i].t !== x.t}));
 });
-ck("CONTROL: every small shape in the vocabulary is set to turn", r.out.length >= 5,
-   r.out.map(x=> x.key).join(","));
-ck("every one of them has a sheet", r.out.every(x=> x.sheet), JSON.stringify(r.out));
-ck("and a frame big enough for its largest slot on a 3× phone",
-   r.out.every(x=> x.ok), JSON.stringify(r.out));
-/* The other half of the rule, and the half a future change would break: the big shapes
-   are still drawn from their stills, because their sheets cannot be sharp at those
-   sizes without more memory than a phone will give. */
-ck("CONTROL: the big shapes are still left still",
-   /jack/.test(r.stillKeys) && /blob/.test(r.stillKeys) && /star/.test(r.stillKeys),
-   r.stillKeys);
-/* THE SPHERES TURN TOO, and getting there took a wrong answer first. Rotating a ball
-   renders the same frame every time: the first sphere sheet changed by 0.8 of 255 over
-   a full revolution against 37 for a capsule, because a sphere is symmetric about every
-   axis and its window bars come from the environment rather than its own surface. The
-   renderer turns the studio for these instead (clear.ENV_ROT), which is what a turning
-   ball looks like and is still rendered rather than faked. Both spheres carry a sheet
-   now, and section 4 proves one of them is stepping on a real screen. */
-const spheres = await p.evaluate(()=> Object.entries(window.GLASS_LAYOUT.shapes)
-  .filter(([k, v])=> /sphere/.test(k)).map(([k, v])=> k + (v.sheet ? ":sheet" : ":STILL")));
-ck("CONTROL: there are spheres in the vocabulary", spheres.length >= 2, spheres.join(","));
-ck("and both of them have frames of their own", spheres.every(x=> /:sheet$/.test(x)),
-   spheres.join(","));
+const orn = r.filter(x=> x.gy > 0);
+ck("CONTROL: the screen's ornaments are all animating", orn.length >= 3 && orn.every(x=> x.on),
+   JSON.stringify(orn.map(x=> x.n + ":" + x.on)));
+/* Five degrees is what "not animating" looked like. Fifteen is the floor, and the
+   smallest shapes - which have the least silhouette to show a turn with - must swing
+   furthest rather than the same as everything else. */
+ck("none of them turns by less than fifteen degrees", orn.every(x=> x.gy >= 15),
+   JSON.stringify(orn.map(x=> x.n + " " + x.w + "px " + x.gy + "deg")));
+ck("and the small ones turn furthest", (()=>{
+    const small = orn.filter(x=> x.w <= 90), big = orn.filter(x=> x.w >= 150);
+    return !small.length || !big.length
+      || Math.min(...small.map(x=> x.gy)) > Math.max(...big.map(x=> x.gy)) - 1;
+  })(), JSON.stringify(orn.map(x=> x.w + "px:" + x.gy)));
+ck("the ones on screen are moving right now", r.filter(x=> x.moved).length >= 2,
+   JSON.stringify(r.map(x=> x.n + ":" + x.moved)));
 
-console.log("\n3. THE DESIGN BRIEF'S LIMIT OF THREE MOVING PIECES A SCREEN");
+console.log("\n3. THE DESIGN BRIEF'S SHAPE BUDGET");
 r = await p.evaluate(()=>{
   const L = window.GLASS_LAYOUT;
-  return Object.entries(L.screens).map(([k, sc])=>{
-    const h = sc.hero;
-    const heroMoves = !!(h && (h.video || h.overlay)) ? 1 : 0;
-    const spin = (sc.shapes || []).filter(x=> x.spin === true).length;
-    return {screen:k, hero:heroMoves, spin, total: heroMoves + spin,
-            shapes: (sc.shapes || []).length};
-  });
+  return Object.entries(L.screens).map(([k, sc])=> ({screen:k, shapes:(sc.shapes || []).length}));
 });
-ck("CONTROL: the layout really does describe every screen", r.length >= 10, String(r.length));
-ck("CONTROL: and more than one screen moves more than one piece at once",
-   r.filter(x=> x.total > 1).length > 1, JSON.stringify(r.map(x=> x.screen + ":" + x.total)));
-ck("no screen moves more than three pieces at once",
-   r.every(x=> x.total <= 3), JSON.stringify(r.filter(x=> x.total > 3)));
-ck("and none carries more than six shapes",
-   r.every(x=> x.shapes <= 6), JSON.stringify(r.filter(x=> x.shapes > 6)));
-/* THE INTRO IS DELIBERATELY STILL. Its three seconds are when the app is most likely to
-   run out of room — it is the moment the owner's phone kept dying on — and it plays
-   once in a lifetime, so it does not get sheets to decode as well. */
-ck("the intro's own shapes do not spin",
-   r.find(x=> x.screen === "intro").spin === 0,
-   JSON.stringify(r.find(x=> x.screen === "intro")));
+ck("CONTROL: the layout describes every screen", r.length >= 10, String(r.length));
+ck("no screen carries more than six shapes", r.every(x=> x.shapes <= 6),
+   JSON.stringify(r.filter(x=> x.shapes > 6)));
 
-console.log("\n4. A SMALL SHAPE ON AN ORDINARY SCREEN REALLY IS TURNING");
-await p.evaluate(()=> boot("history"));
-await p.waitForTimeout(600);
+console.log("\n4. IT STILL STOPS WHEN IT SHOULD");
+await p.evaluate(()=> boot("sync"));
+await p.waitForTimeout(500);
 r = await p.evaluate(async ()=>{
-  const g = [...document.querySelectorAll('#stage .glass-layer .glass[data-sheet]')]
-    .filter(n=> n.dataset.glassHero === undefined)
-    .find(n=> n.getBoundingClientRect().top < innerHeight && n.getBoundingClientRect().bottom > 0);
-  if(!g) return {there:false};
-  const img = g.querySelector('.glass-img');
-  const seen = new Set();
-  for(let i = 0; i < 16; i++){
-    seen.add(img.style.backgroundPosition);
-    await new Promise(ok=> setTimeout(ok, 130));
-  }
-  return {there:true, name:(g.dataset.sheet || "").split("/").pop(),
-          fps:+(g.dataset.fps || 0), distinct: seen.size,
-          w: Math.round(g.getBoundingClientRect().width)};
-});
-ck("CONTROL: a small shape is on screen and drawing from a sheet", r.there === true,
-   JSON.stringify(r));
-ck("it steps through frames of its own", r.distinct > 1, JSON.stringify(r));
-ck("slowly — the owner asked for subtle", r.fps > 0 && r.fps <= 8, "fps " + r.fps);
-
-console.log("\n5. IT STOPS WHEN IT SHOULD, AND NOTHING THREW");
-/* Scrolled to, rather than hoping a particular screen happens to place one below the
-   fold: the rule is that a sheet off the screen stops stepping, so the test scrolls the
-   shapes out of sight and reads the flag glass-motion.js sets. */
-r = await p.evaluate(async ()=>{
-  const sheets = ()=> [...document.querySelectorAll('#stage .glass[data-sheet]')];
-  const all = sheets().length;
-  const atTop = sheets().filter(n=> n.hasAttribute('data-glass-paused')).length;
+  const all = ()=> [...document.querySelectorAll('#stage .glass')];
+  const paused = ()=> all().filter(n=> n.hasAttribute('data-glass-paused')).length;
+  const atTop = paused();
   scrollTo(0, document.documentElement.scrollHeight);
-  await new Promise(ok=> setTimeout(ok, 600));
-  const atBottom = sheets().filter(n=> n.hasAttribute('data-glass-paused')).length;
+  await new Promise(ok=> setTimeout(ok, 700));
+  const atBottom = paused();
   scrollTo(0, 0);
-  await new Promise(ok=> setTimeout(ok, 500));
-  const back = sheets().filter(n=> n.hasAttribute('data-glass-paused')).length;
-  return {all, atTop, atBottom, back,
-    wide: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1};
+  await new Promise(ok=> setTimeout(ok, 600));
+  return {n: all().length, atTop, atBottom, back: paused()};
 });
-ck("CONTROL: the screen has sheets on it, and they are running", r.all > 0 && r.atTop === 0,
-   JSON.stringify(r));
-ck("scrolled off the screen, every one of them stops", r.atBottom === r.all,
-   JSON.stringify(r));
-ck("and starts again when it comes back", r.back === 0, JSON.stringify(r));
-ck("the page is not wider than the window", r.wide === false);
+ck("CONTROL: there is art to pause", r.n > 0, JSON.stringify(r));
+ck("scrolled away, the ones off the screen stop", r.atBottom > 0, JSON.stringify(r));
+ck("and they are running again when they come back", r.back < r.atBottom, JSON.stringify(r));
+
+console.log("\n5. REDUCED MOTION STOPS ALL OF IT");
+await p.emulateMedia({reducedMotion:"reduce"});
+await p.evaluate(()=> boot("history"));
+await p.waitForTimeout(400);
+r = await p.evaluate(()=> [...document.querySelectorAll('#stage .glass .glass-img')]
+  .map(i=> getComputedStyle(i).animationName));
+ck("CONTROL: there are ornaments to stop", r.length >= 3, String(r.length));
+ck("every one of them is still", r.every(x=> x === "none"), r.join(","));
+await p.emulateMedia({reducedMotion:"no-preference"});
+
+console.log("\n6. NOTHING RAN OFF THE SIDE, AND NOTHING THREW");
+r = await p.evaluate(()=> document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
+ck("the page is not wider than the window", r === false);
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
 ck("no page errors", pageErr.length === 0, pageErr.join(" | ") || "none");
 
