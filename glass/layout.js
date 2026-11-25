@@ -25,11 +25,13 @@ window.GLASS_LAYOUT = {
  "shapes": {
   "sphere-s": {
    "still": "assets/shapes/glass-sphere-s",
-   "video": "assets/shape-video/sphere-s.mp4"
+   "video": "assets/shape-video/sphere-s.mp4",
+   "drift": true
   },
   "sphere-xs": {
    "still": "assets/shapes/glass-sphere-xs",
-   "video": "assets/shape-video/sphere-xs.mp4"
+   "video": "assets/shape-video/sphere-xs.mp4",
+   "drift": true
   },
   "links": {
    "still": "assets/shapes/glass-links",

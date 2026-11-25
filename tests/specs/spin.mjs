@@ -132,14 +132,29 @@ console.log("\n1b. THE SHAPES TURN FROM A FILM, THE WAY TODAY'S HERO DOES");
     return {n: films.length,
             playing: films.filter(v=> v.src && !v.paused).length,
             lazy: films.filter(v=> !v.src).length,
-            blend: films.length ? getComputedStyle(films[0]).mixBlendMode : "-",
+            blend: (()=>{ const w = document.querySelector('.dg-shapes');
+              return w ? getComputedStyle(w).mixBlendMode : "-"; })(),
+            onFilm: films.length ? getComputedStyle(films[0]).mixBlendMode : "-",
+            ghosts: [...document.querySelectorAll('#stage .glass[data-film] > .glass-img')]
+              .filter(i=> +getComputedStyle(i).opacity > 0.01).length,
             posters: [...document.querySelectorAll('#stage .glass .glass-img')]
               .filter(i=> /url\(/.test(getComputedStyle(i).backgroundImage)).length};
   });
   ck("CONTROL: the screen builds its films", r.n >= 3, String(r.n));
   ck("at least one of them is actually playing", r.playing >= 1, JSON.stringify(r));
-  ck("they are composited with screen, which is what drops the black",
-     r.blend === "screen", r.blend);
+  /* THE BLEND IS ON THE WRAPPER AND NOT ON THE FILM, and the difference is the whole
+     bug the owner photographed. mix-blend-mode composites against the nearest ancestor
+     that forms a stacking context; .dg-shapes is one, because it carries a transform
+     and a z-index. On the <video> the blend therefore reached an empty box instead of
+     the page, every black pixel stayed black, and the torus arrived on the phone inside
+     a solid black rectangle. Chromium had been lenient about it, which is why this had
+     to be asserted on the element that actually does the blending. */
+  ck("the shapes layer is what carries the screen blend", r.blend === "screen", r.blend);
+  ck("and the film itself does not, or it would blend against nothing",
+     r.onFilm === "normal", r.onFilm);
+  /* And the still has to get out of the way underneath, because screen ADDS the film
+     rather than painting over it: the two together were a frozen copy of every shape. */
+  ck("no shape wears a still behind its running film", r.ghosts === 0, String(r.ghosts));
   ck("and every shape still has its still underneath, so nothing pops in",
      r.posters >= r.n, r.posters + " stills for " + r.n + " films");
 }

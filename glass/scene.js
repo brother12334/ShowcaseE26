@@ -82,6 +82,7 @@
       const film = it.video || def.video;
       if (film && it.video !== false && !reduceMotion()) d.dataset.video = o.base + film;
       for (const k of ['depth', 'fps', 'bob', 'period']) if (it[k] != null) d.dataset[k] = it[k];
+      if (def.drift) d.dataset.drift = '';
       d.style.setProperty('--glass-delay', (o.delay || 0) + i * stagger + 'ms');
       layer.append(d);
     });

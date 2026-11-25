@@ -60,9 +60,22 @@
         const w = parseFloat(el.style.width) || 120;
         const k = Math.max(0.75, Math.min(2.3, 150 / w));
         const sx = Math.random() < 0.5 ? -1 : 1, sy = Math.random() < 0.5 ? -1 : 1;
-        img.style.setProperty('--gx', (sx * (5 + 3.5 * k)).toFixed(1) + 'deg');
-        img.style.setProperty('--gy', (sy * (9 + 9 * k)).toFixed(1) + 'deg');
-        img.style.setProperty('--gz', (sx * (1.5 + 2 * k)).toFixed(1) + 'deg');
+        if (el.dataset.drift != null) {
+          /* A BALL CANNOT SHOW A TURN. It is the same shape from every angle, so the
+             angles below do nothing to it — measured on the device at 0.19 of 255 over
+             three seconds, against about 2 for the shapes beside it. It drifts and
+             breathes instead, which is motion a round silhouette can actually show. */
+          img.style.setProperty('--glass-bob', (bob * 2.6).toFixed(1) + 'px');
+          img.style.setProperty('--gs0', '0.94');
+          img.style.setProperty('--gs1', '1.06');
+          img.style.setProperty('--gx', '0deg');
+          img.style.setProperty('--gy', '0deg');
+          img.style.setProperty('--gz', (sx * 4).toFixed(1) + 'deg');
+        } else {
+          img.style.setProperty('--gx', (sx * (5 + 3.5 * k)).toFixed(1) + 'deg');
+          img.style.setProperty('--gy', (sy * (9 + 9 * k)).toFixed(1) + 'deg');
+          img.style.setProperty('--gz', (sx * (1.5 + 2 * k)).toFixed(1) + 'deg');
+        }
         img.style.setProperty('--glass-persp', Math.round(380 + 2.2 * w) + 'px');
         img.style.animationDelay = (-Math.random() * period).toFixed(2) + 's';
       }
