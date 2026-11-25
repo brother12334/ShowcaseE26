@@ -8,6 +8,7 @@ Everything in `assets/` was made by the scripts in this folder. You can change a
 ## Regenerate
     python3 render_all.py /tmp/render stills       # every still, about 1 minute
     python3 render_all.py /tmp/render loops        # every spin and hero loop, about 25 minutes on 2 cores
+    python3 render_all.py /tmp/overlays overlay-still-history overlay-still-research  # native 3x transparent art
     python3 render_all.py /tmp/render sp-star      # just one shape's spin sheet
     python3 render_all.py /tmp/render hero-today-push-b   # just one hero loop
     python3 assemble.py /tmp/render ../assets      # turn frames into MP4s and sheets, copy stills in

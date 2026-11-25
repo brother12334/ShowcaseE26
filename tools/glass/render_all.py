@@ -75,9 +75,9 @@ HEROES = {
     'workout':  dict(canvas=(390, 340), text=dict(lines=['18:42'], px=150, top=110, left=-4), motion='spin',
                      objs=[('torus', (282, 214), 230, (58, 22, 0), dict(thick=0.12))], spin=('x', 180), overlay=True),
     'history':  dict(canvas=(390, 440), text=dict(lines=['41'], px=300, top=96, left=-10), motion='sway',
-                     objs=[('capsule', (231, 253), 330, (-12, 20, 52), dict(thick=0.25))], overlay=True),
+                     objs=[('capsule', (232, 252), 314, (-16, 24, 49), dict(thick=0.235))], overlay=True),
     'research': dict(canvas=(390, 440), text=dict(lines=['62'], px=300, top=96, left=-10), motion='orbit',
-                     objs=[('sphere', (212, 250), 230, (0, 0, 0), {})], overlay=True),
+                     objs=[('sphere', (227, 244), 222, (0, 0, 0), {})], overlay=True),
 }
 
 # ------------------------------------------------------------------ helpers
@@ -209,6 +209,10 @@ def build_jobs(OUT, want):
             jobs.append(('overlay', (key, 0, 0, f'{OUT}/stills/overlay-{key}.webp')))
         jobs.append(('overlay', ('today', 0, 0, f'{OUT}/stills/overlay-today.webp')))
     for key in ('history', 'research'):
+        if f'overlay-still-{key}' in want:
+            os.makedirs(f'{OUT}/stills', exist_ok=True)
+            jobs.append(('overlay', (key, 0, 0, f'{OUT}/stills/overlay-{key}.webp')))
+    for key in ('history', 'research'):
         if not want or 'loops' in want or f'overlay-{key}' in want:
             directory = f'{OUT}/overlay-{key}'
             os.makedirs(directory, exist_ok=True)
@@ -245,6 +249,8 @@ if __name__ == '__main__':
     OUT = os.path.abspath(sys.argv[1])
     want = set(sys.argv[2:])
     os.makedirs(OUT, exist_ok=True)
+    if any(tag.startswith('overlay-still-') for tag in want):
+        G.S = C.S = 3
     jobs = build_jobs(OUT, want)
     print(len(jobs), 'images', flush=True)
     with Pool(min(len(jobs) or 1, int(os.environ.get('E26_RENDER_JOBS', os.cpu_count() or 1)))) as p:

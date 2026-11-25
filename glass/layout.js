@@ -275,12 +275,8 @@ window.GLASS_LAYOUT = {
   "history": {
    "height": 1500,
    "hero": {
-    "overlay": "assets/motion/overlay-history",
-    "frames": 18,
-    "cols": 6,
-    "fps": 12,
+    "motion": "sway",
     "still": "assets/hero-overlays/overlay-history",
-    "bob": 3,
     "w": 390,
     "h": 440,
     "note": "live text (session count) sits underneath"
@@ -331,10 +327,7 @@ window.GLASS_LAYOUT = {
   "research": {
    "height": 1500,
    "hero": {
-    "overlay": "assets/motion/overlay-research",
-    "frames": 18,
-    "cols": 6,
-    "fps": 12,
+    "motion": "orbit",
     "still": "assets/hero-overlays/overlay-research",
     "w": 390,
     "h": 440,

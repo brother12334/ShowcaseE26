@@ -43,6 +43,7 @@
     // live-number hero: a glass overlay, above the text
     const d = el('div', 'glass front', { left: '0', top: '0', width: px(h.w), height: px(h.h) });
     d.dataset.glassHero = '';
+    if (h.motion) d.dataset.heroMotion = h.motion;
     if (h.overlay && (!reduce || !h.still)) {
       if (h.fps) d.dataset.fps = h.fps;
       d.dataset.sheet = o.base + h.overlay; d.dataset.frames = h.frames; d.dataset.cols = h.cols;

@@ -126,11 +126,14 @@ console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");
      f.num === String(r.n), f.num + " vs " + r.n);
 }
 
-console.log("\n2b. THE BUBBLE ADVANCES THROUGH ITS RENDERED FRAMES");
-const bubble = full.locator('[data-glass-hero][data-sheet$="overlay-research"] .glass-img');
-ck("CONTROL: the seeded feed mounts its animated Research bubble", await bubble.count() === 1);
-const offset = await bubble.evaluate(el=> el.style.backgroundPosition);
-await full.waitForFunction(before=>document.querySelector('[data-glass-hero] .glass-img')?.style.backgroundPosition !== before, offset);
+console.log("\n2b. THE RENDERED BUBBLE MOVES SMOOTHLY");
+const bubble = full.locator('[data-glass-hero][data-still$="overlay-research"] .glass-img');
+ck("CONTROL: the seeded feed mounts its new Research bubble", await bubble.count() === 1);
+const before = await bubble.evaluate(el=>getComputedStyle(el).transform);
+await full.waitForFunction(initial=>getComputedStyle(document.querySelector('[data-glass-hero] .glass-img')).transform !== initial, before);
+await full.emulateMedia({reducedMotion:"reduce"});
+ck("Reduce Motion keeps the Research bubble still", await bubble.evaluate(el=>getComputedStyle(el).animationName) === "none");
+await full.emulateMedia({reducedMotion:"no-preference"});
 
 console.log("\n3. ONE HEADING, AND THE NAME IS STILL ON IT");
 r = await full.evaluate(()=> ({
