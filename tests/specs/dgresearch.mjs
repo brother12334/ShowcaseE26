@@ -97,20 +97,20 @@ console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");
 {
   const e = await empty.evaluate(()=>{
     const band = document.querySelector('.dg-ghero');
-    const first = document.querySelector('#app .rs-search input, #app .rs-chip, #app h1');
+    const first = document.querySelector('#app .rs-search input, #app .rs-chip');
     const fb = first ? first.getBoundingClientRect() : null;
     const over = [...document.querySelectorAll('#stage .glass-layer .glass, #stage .hero-media')]
       .map(g=>{ const b = g.getBoundingClientRect();
         return {cls: g.className, h: Math.round(b.height),
-                hits: !!fb && b.bottom > fb.top && b.top < fb.bottom}; });
+                hits: g.classList.contains("front") && getComputedStyle(g).visibility !== "hidden" && !!fb && b.bottom > fb.top && b.top < fb.bottom && b.right > fb.left && b.left < fb.right}; });
     return {papers: (researchCacheRead() || {papers:[]}).papers.length,
             noart: !!band && band.classList.contains('dg-noart'),
-            art: over.length, over: over.filter(x=> x.hits).length,
+            hero: !!document.querySelector("[data-glass-hero]"), art: over.length, over: over.filter(x=> x.hits).length,
             what: JSON.stringify(over)};
   });
   ck("CONTROL: with no connection this screen really has no papers", e.papers === 0, String(e.papers));
   ck("CONTROL: so it reserves no hero band", e.noart === true);
-  ck("and mounts no art at all", e.art === 0, e.what);
+  ck("decorations can mount, but there is no hero bubble", e.art > 0 && !e.hero, e.what);
   ck("so nothing is laid over the first thing you can tap", e.over === 0, e.what);
 
   const f = await full.evaluate(()=>{
@@ -125,6 +125,12 @@ console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");
   ck("over the count it is drawn to sit on",
      f.num === String(r.n), f.num + " vs " + r.n);
 }
+
+console.log("\n2b. THE BUBBLE ADVANCES THROUGH ITS RENDERED FRAMES");
+const bubble = full.locator('[data-glass-hero][data-sheet$="overlay-research"] .glass-img');
+ck("CONTROL: the seeded feed mounts its animated Research bubble", await bubble.count() === 1);
+const offset = await bubble.evaluate(el=> el.style.backgroundPosition);
+await full.waitForFunction(before=>document.querySelector('[data-glass-hero] .glass-img')?.style.backgroundPosition !== before, offset);
 
 console.log("\n3. ONE HEADING, AND THE NAME IS STILL ON IT");
 r = await full.evaluate(()=> ({

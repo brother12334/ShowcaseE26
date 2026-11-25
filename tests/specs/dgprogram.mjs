@@ -261,7 +261,7 @@ ck("a reading is sets of the floor, in words", /^[\d.]+ of [\d.]+$/.test(r.val),
 console.log("\n9. NOTHING RUNS OFF THE SIDE OF THE SCREEN");
 r = await newP.evaluate(()=>{
   const vw = document.documentElement.clientWidth, out = [];
-  document.querySelectorAll('#stage *').forEach(n=>{
+  document.querySelectorAll('#app *').forEach(n=>{
     const b = n.getBoundingClientRect();
     if(b.right > vw + 0.5 || b.left < -0.5)
       out.push((n.tagName + '.' + (n.className || '')).slice(0, 40));
@@ -271,6 +271,36 @@ r = await newP.evaluate(()=>{
 ck("the page is not wider than the window", r.wide === false, String(r.vw));
 ck("and nothing in it sticks out", r.out.length === 0, r.out.join(", ") || "none");
 
+console.log("\n9b. PROGRAM DRAWS A FULL LOG WITHIN ITS PERFORMANCE BUDGET");
+const cdp = await newP.context().newCDPSession(newP);
+await cdp.send("Emulation.setCPUThrottlingRate", {rate:4});
+const speed = await newP.evaluate(()=>{
+  const sessions = S.sessions.length;
+  const original = computeWindowStats;
+  const resolve = resolveExerciseMuscles;
+  const times = [];
+  let windows = 0, exercises = 0;
+  computeWindowStats = (...args)=>{ windows++; return original(...args); };
+  resolveExerciseMuscles = (...args)=>{ exercises++; return resolve(...args); };
+  try{
+    for(let i=0;i<3;i++){
+      TAB = "program";
+      const before = performance.now();
+      render();
+      times.push(performance.now()-before);
+    }
+  }finally{
+    computeWindowStats = original;
+    resolveExerciseMuscles = resolve;
+  }
+  return {sessions, windows, exercises, times, program:!!document.querySelector('[data-dg-screen="program"]')};
+});
+await cdp.send("Emulation.setCPUThrottlingRate", {rate:1});
+ck("CONTROL: full seeded training log reached Program", speed.sessions >= 70 && speed.program);
+ck("three Program draws reuse window and exercise calculations", speed.windows > 0 && speed.windows < 100 &&
+   speed.exercises > 0 && speed.exercises < 250, JSON.stringify(speed));
+ck("median Program draw at 4× CPU throttling stays under 750 ms",
+   speed.times.sort((a,b)=>a-b)[1] < 750, JSON.stringify(speed.times));
 console.log("\n10. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
 ck("no page errors", pageErr.length === 0, pageErr.join(" | ") || "none");

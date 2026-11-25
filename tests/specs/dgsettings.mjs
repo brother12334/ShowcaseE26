@@ -144,6 +144,23 @@ ck("the page is not wider than the window", r.wide === false, String(r.vw));
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");
 ck("no page errors", pageErr.length === 0, pageErr.join(" | ") || "none");
 
+console.log("\nREST TIMER. THE STEPPERS UPDATE THE REAL DEFAULT");
+const timer = await p.evaluate(()=>{
+  boot("sync");
+  const tile = document.querySelector('[data-setopen="rest"]');
+  tile?.click();
+  const screen = !!document.querySelector('[data-dg-screen="settings-rest-timer"]');
+  document.querySelector('[data-rest-step="15"]')?.click();
+  const value = trainPrefs().restDefault;
+  const fallback = restTargetFor({name:"Bench Press",reps:"8-12"},null).ideal[0];
+  document.querySelector('#restAdaptive')?.click();
+  const automatic = trainPrefs().restDefault === null;
+  document.querySelector('#setBack')?.click();
+  return {tile:!!tile,screen,value,fallback,automatic,back:SET_PAGE === null};
+});
+ck("CONTROL: the Settings tile opens the themed timer", timer.tile && timer.screen);
+ck("a step moves the rest engine's fallback and can return to automatic",
+   timer.value === 165 && timer.fallback === 165 && timer.automatic && timer.back, JSON.stringify(timer));
 await p.screenshot({path: shot("dgsettings.png"), fullPage: true});
 await b.close();
 srv.close();

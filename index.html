@@ -7959,6 +7959,11 @@ body.news-open{overscroll-behavior:contain}
 @keyframes dgHeroIn{from{opacity:0}to{opacity:1}}
 #stage > .glass-layer{position:absolute;left:0;top:0;right:0;height:0;
   overflow:visible;pointer-events:none}
+body.nav-flush{padding-bottom:0}
+body.nav-flush #stage{overflow:clip}
+body.nav-flush #stage > .glass-layer > .hero-media{
+  max-height:clamp(220px,calc(100dvh - 200px),680px);object-fit:contain;object-position:center top
+}
 /* THE SHAPES ARE SCALED; THE HERO IS NOT.
 
    layout.js writes every shape's x, y, width and height onto the element as inline px
@@ -8030,8 +8035,17 @@ body.news-open{overscroll-behavior:contain}
 #app.view-in > .dg > *:nth-child(5){animation-delay:calc(var(--stagger) * 4)}
 #app.view-in > .dg > *:nth-child(n+6){animation-delay:calc(var(--stagger) * 5)}
 .dg{position:relative;font-family:var(--e26-font);background:transparent;color:var(--e26-ink);
-  min-height:100svh;padding:0 0 128px;
+  min-height:calc(100svh - 104px - env(safe-area-inset-bottom));padding:0;
   margin:calc(-16px - env(safe-area-inset-top)) -14px -20px}
+body[class~="nav-flush"] [data-dg-screen="today"]{
+  height:100dvh;min-height:0;display:flex;flex-direction:column;
+  padding-bottom:calc(104px + env(safe-area-inset-bottom))
+}
+[data-dg-screen]:not([data-dg-screen="today"]):not([data-dg-screen="rest"]){
+  background:radial-gradient(ellipse 190px 230px at 14% 360px,#3358bf28,transparent),
+    radial-gradient(ellipse 200px 230px at 86% 660px,#744abf25,transparent),
+    radial-gradient(ellipse 200px 190px at 44% 950px,#38898622,transparent)
+}
 .dg-top-r{display:flex;align-items:center;gap:10px}
 /* THE SCRIM IS BACK, ON REQUEST, AND IT IS WHAT IT WAS.
 
@@ -8124,6 +8138,11 @@ body.news-open{overscroll-behavior:contain}
    caught it against another section, exactly as it caught is-on and is-under. */
 .dg-cy.dg-at{color:var(--e26-ink);font-weight:600}
 .dg-cy.dg-at i{background-image:url(assets/ui/pill-purple.webp)}
+[data-dg-screen="today"] .dg-cy{min-height:44px;justify-content:center}
+[data-dg-screen="today"] .dg-cy i{max-width:32px;height:11px}
+[data-dg-screen="today"] .dg-cy:not(.dg-at):not(.dg-pickd) span{
+  position:absolute;width:1px;height:1px;clip-path:inset(50%)
+}
 .dg-cy.dg-soon{opacity:.5}
 /* The day you chose, rather than the one the rotation was on: the same pill, ringed. */
 .dg-cy.dg-pickd i{box-shadow:0 0 0 1.5px var(--e26-ink)}
@@ -8146,6 +8165,7 @@ body.news-open{overscroll-behavior:contain}
    the page allots 136. Taken off the hero, where it costs nothing — that band of the
    art is already fading out — rather than off the door, which has to stay on screen. */
 .dg-hero{position:relative;width:100%;aspect-ratio:390/560;margin:0}
+body[class~="nav-flush"] [data-dg-screen="today"] .dg-hero{flex:1 1 auto;min-height:0;aspect-ratio:auto}
 .dg-hero.is-rest{aspect-ratio:390/496}
 .dg-hero > video,.dg-hero > img{position:absolute;inset:0;width:100%;height:100%;
   object-fit:cover;display:block;pointer-events:none}
@@ -8249,7 +8269,7 @@ body.news-open{overscroll-behavior:contain}
    own margin happened to be: zero on History and Program, where the content began hard
    against the art, and 22 on Settings. The owner asked for the spacing to be right
    across the app, and the first thing wrong with it was that there was no rule. */
-.dg-screen .dg-body{padding:20px var(--e26-pad) 128px}
+.dg-screen .dg-body{padding:16px var(--e26-pad) 20px}
 /* ITS OWN CLASS, not .dg-hero. Today's hero is a composition with a fixed height; these
    reserve whatever layout.js gives their screen. Two classes rather than one because
    cssdupe requires a class to be defined in one place, and that rule is what keeps
@@ -8869,7 +8889,7 @@ body.news-open{overscroll-behavior:contain}
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.24.18";
+const APP_VERSION = "2026.11.25.1";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -27949,7 +27969,7 @@ function dayList(names){
 }
 /* One call, everything the Body tab needs. */
 function bodyAnalysis(){
-  const now = Date.now();
+  const now = analysisTime();
   const win    = volWindowInfo(now);
   const wk     = windowStats(win.from, win.to);
   const prevWk = windowStats(win.prevFrom, win.prevTo);
@@ -36451,9 +36471,9 @@ let GLASS_AT = null;
    out to its mockup and the shapes have been checked against its real content.
    "hero" = the hero only, because layout.js places that screen's shapes against content
    that is not there yet and they would land on text. */
-const GLASS_READY = {today: 1, rest: 1, history: "hero", body: 1,
-                     program: "hero", research: "hero", workout: 1,
-                     settings: "hero", "settings-rest-timer": 1};
+const GLASS_READY = {today: 1, rest: 1, history: 1, body: 1, program: 1,
+                     research: 1, "research-paper": 1, workout: 1,
+                     settings: 1, "settings-rest-timer": 1};
 function glassSceneFor(){
   if(OB || ACCT_UI || PF) return "";                 // onboarding and the account flow
   if(TAB === "workout") return GLASS_READY.workout ? "workout" : "";
@@ -36516,29 +36536,57 @@ function glassSync(){
   GlassScene.unmount();
   if(!key) return;
   const [scene, day] = scene0.split(":");
-  /* "hero" screens take the hero and nothing else — see GLASS_READY. */
-  const heroOnly = GLASS_READY[scene] === "hero";
-  /* A day with no baked hero of its own takes the live-number path: scene.js is told to
-     skip the hero, and the screen's own markup carries the word as real text with the
-     overlay over it. */
-  GlassScene.mount(stage, scene, {base: "", day: day === "live" ? null : day,
-                                  hero: day !== "live" && !bandOff});
-  /* THE HERO IS SOMETIMES A SHAPE ITSELF. A video hero is a <video>; an OVERLAY hero is
-     a .glass element, and it is the first one scene.js appends. Removing every .glass
-     took the hero with it and left History and Research with an empty band where their
-     number should be. Keep the first when the hero is one of them. */
-  if(heroOnly){
-    const glass = [...stage.querySelectorAll(".glass-layer > .glass")];
-    const heroIsGlass = !bandOff && (()=>{ try{
-      const hh = (window.GLASS_LAYOUT.screens[scene] || {}).hero;
-      return !!hh && !hh.video;
-    }catch(e){ return false; } })();
-    glass.slice(heroIsGlass ? 1 : 0).forEach(n=> n.remove());
-  }
+  const layer = GlassScene.mount(stage, scene, {base: "", day: day === "live" ? null : day,
+    hero: day !== "live" && !bandOff});
   glassShapeScale(stage);
+  requestAnimationFrame(()=>{ if(layer.isConnected) glassAvoidContent(stage, layer); });
   glassHeroWatch(stage);
 }
 
+/* Place front ornaments clear of live controls and paragraphs. Keep the layout's
+   original coordinates when they fit, and keep art out of the final nav clearance. */
+function glassAvoidContent(stage, layer){
+  const shapes = [...layer.querySelectorAll(".glass.front:not([data-glass-hero])")];
+  if(!shapes.length) return;
+  const stageBox = stage.getBoundingClientRect();
+  const scale = document.getElementById("app").clientWidth / 390;
+  const artBottom = stageBox.bottom - 110;
+  const content = [...stage.querySelectorAll("#app :is(button,input,select,textarea,a,summary,p,h1,h2,h3)")]
+    .map(node=> ({rect:node.getBoundingClientRect(), weight:node.matches("button,input,select,textarea,a,summary") ? 8 : 1}))
+    .filter(item=> item.rect.width && item.rect.height);
+  for(const shape of shapes){
+    const box = shape.getBoundingClientRect();
+    const offsets = [0, -36, 36, -72, 72, -108, 108];
+    let best = null;
+    for(const dx of offsets) for(const dy of offsets){
+      const left = box.left + dx * scale, right = box.right + dx * scale;
+      const top = box.top + dy * scale, bottom = box.bottom + dy * scale;
+      if(bottom > artBottom || top < stageBox.top || right < stageBox.left + 24 || left > stageBox.right - 24) continue;
+      let cost = 0;
+      for(const {rect,weight} of content){
+        const x = Math.max(0, Math.min(right, rect.right) - Math.max(left, rect.left));
+        const y = Math.max(0, Math.min(bottom, rect.bottom) - Math.max(top, rect.top));
+        cost += x * y * weight;
+      }
+      if(!best || cost < best.cost || (cost === best.cost && Math.abs(dx)+Math.abs(dy) < Math.abs(best.dx)+Math.abs(best.dy)))
+        best = {dx,dy,cost};
+    }
+    if(!best){ shape.style.visibility = "hidden"; continue; }
+    if(best.cost > 9000){
+      shape.classList.replace("front", "back");
+      let back = layer.querySelector('[data-glass-back]');
+      if(!back){
+        back = shape.parentElement.cloneNode(false);
+        back.dataset.glassBack = "";
+        back.style.zIndex = "0";
+        layer.prepend(back);
+      }
+      back.append(shape);
+    }
+    shape.style.left = parseFloat(shape.style.left) + best.dx + "px";
+    shape.style.top = parseFloat(shape.style.top) + best.dy + "px";
+  }
+}
 /* Move the shapes into the scaled wrapper, leaving the hero where it is. Done here
    rather than in scene.js because scene.js is the design package's own file and this is
    this app's layout problem: the package's pages are a fixed 390 canvas and this one
@@ -36551,12 +36599,16 @@ function glassShapeScale(stage){
   if(!shapes.length) return;
   stage.classList.add("dg-clip");
   stage.style.setProperty("--dg-k", document.getElementById("app").clientWidth / 390);
-  const box = document.createElement("div");
-  box.className = "dg-shapes";
-  if(shapes.every(n=> n.classList.contains("back"))) box.style.zIndex = "0";
-  box.setAttribute("aria-hidden", "true");
-  layer.append(box);
-  shapes.forEach(n=> box.append(n));
+  for(const back of [true,false]){
+    const members = shapes.filter(n=> n.classList.contains("back") === back);
+    if(!members.length) continue;
+    const box = document.createElement("div");
+    box.className = "dg-shapes";
+    if(back) box.style.zIndex = "0";
+    box.setAttribute("aria-hidden", "true");
+    layer.append(box);
+    members.forEach(n=> box.append(n));
+  }
 }
 
 addEventListener("resize", ()=>{
@@ -36857,6 +36909,8 @@ function render(){
      renderTabInto(), which shows what threw and an export button rather than leaving a
      tab bar above nothing. See the RESCUE section. */
   renderTabInto(app);
+  document.body.classList.toggle("nav-flush", TAB === "today" &&
+    !!app.querySelector('[data-dg-screen="today"]') && !app.querySelector('[data-today-extra]'));
   /* THE GLASS LAYER, mounted per SCREEN rather than per render. See glassSync(). */
   try{ glassSync(); }catch(e){ try{ console.error("Element 26: the glass layer threw", e); }catch(e2){} }
   /* AND THE INTRO, IF IT IS STILL OWED. Guarded entirely inside introDue(); see the
@@ -66599,8 +66653,9 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.24.18";
+const NEWS_FOR = "2026.11.25.1";
 const NEWS = [
+  {k:"Faster Program and animated glass", s:["Program reuses its training calculations. History and Research have animated glass, Body has its iridescent artwork, and Settings has a Rest timer page. Read release notes from Help whenever you need them."]},
   {k: "The gradient is back, and so is the intro",
    s: ["The soft gradient across the top of each screen is back, so the date and the day pills stay readable on a frame where the art comes up bright.",
      "The intro plays once more for everybody, and this time it hands straight over to the tour \u2014 which has been rewritten. Every step but the three that demonstrate logging pointed at something the redesign had removed, so the tour was captions over an empty screen. It walks the screens as they are now, in the same theme as the rest of the app."]},

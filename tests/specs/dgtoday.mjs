@@ -777,8 +777,12 @@ r = await newP.evaluate(async ()=>{
   }));
   boot();
   TAB = "history"; render();
-  const glass = document.querySelector('#stage .glass[data-still$="overlay-history"]');
-  const history = {hero:!!glass, hasSheet:!!glass?.dataset.sheet, floats:glass?.hasAttribute('data-float')};
+  const glass = document.querySelector('#stage .glass[data-sheet$="overlay-history"]');
+  const sheet = new Image();
+  sheet.src = glass.dataset.sheet + ".webp";
+  await sheet.decode();
+  const history = {hero:!!glass, frames:Number(glass.dataset.frames), columns:Number(glass.dataset.cols),
+    width:sheet.naturalWidth, height:sheet.naturalHeight};
   boot();
   return {results, overlays, history};
 });
@@ -787,7 +791,9 @@ ck("CONTROL: the twelve decorative stills are mapped to real slots",
 ck("each still covers its largest 3× phone slot", r.results.every(item=> item.sharp), JSON.stringify(r.results));
 ck("the three live-number overlays cover their own 3× canvases",
    r.overlays.length === 3 && r.overlays.every(item=> item.sharp), JSON.stringify(r.overlays));
-ck("CONTROL: History mounts a floating still overlay", r.history.hero && r.history.floats && !r.history.hasSheet);
+ck("CONTROL: History mounts its rendered capsule", r.history.hero);
+ck("the sheet carries 18 true 2× frames within the decode budget",
+   r.history.frames === 18 && r.history.columns === 6 && r.history.width === 4680 && r.history.height === 2640);
 
 console.log("\n17. NOTHING FAILED TO LOAD, AND NOTHING THREW");
 ck("no HTTP errors", httpErr.length === 0, httpErr.join(" | ") || "none");

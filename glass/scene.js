@@ -29,11 +29,11 @@
       const denseTouch = matchMedia('(pointer: coarse) and (min-resolution: 2.5dppx)').matches;
       const stillOnDenseTouch = (window.GLASS_CONFIG || {}).stillHeroOnDenseTouch !== false;
       if (reduce || (stillOnDenseTouch && denseTouch)) {
-        const im = el('img', 'hero-media', { height: px(h.h) });
+        const im = el('img', 'hero-media');
         im.alt = ''; im.src = o.base + fill(h.poster);
         container.append(im); return im;
       }
-      const v = el('video', 'hero-media', { height: px(h.h) });
+      const v = el('video', 'hero-media');
       v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true; v.setAttribute('aria-hidden', 'true');
       v.poster = o.base + fill(h.poster);
       v.src = o.base + fill(h.video);
