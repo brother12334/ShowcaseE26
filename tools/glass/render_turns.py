@@ -81,7 +81,7 @@ def main():
             if args.video:
                 # Match each asset's largest placement at 3x device density.
                 max_width = {'links': 288, 'x-s': 112, 'star': 238, 'jack': 250,
-                             'rbox-s': 138, 'torus-m': 250, 'capsule-m': 238,
+                             'rbox-s': 138, 'torus-m': 280, 'capsule-m': 238,
                              'capsule-amber': 188, 'capsule-xs': 84, 'blob': 212}
                 scale = 3 if hero else 3 * max_width[name] / round(art.SHAPES[name][0] * 1.25)
                 fps, count = 60, 180

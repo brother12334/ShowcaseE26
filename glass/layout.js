@@ -12,13 +12,6 @@ window.GLASS_LAYOUT = {
    "still": "assets/shapes/glass-links",
    "turn": "assets/glass-turns/links.avif"
   },
-  "x-s": {
-   "still": "assets/shapes/glass-x-s",
-   "sheet": "assets/motion/glass-x-s",
-   "frames": 36,
-   "cols": 12,
-   "turn": "assets/glass-turns/x-s.avif"
-  },
   "star": {
    "still": "assets/shapes/glass-star",
    "sheet": "assets/motion/glass-star",
@@ -32,13 +25,6 @@ window.GLASS_LAYOUT = {
    "frames": 36,
    "cols": 12,
    "turn": "assets/glass-turns/jack.avif"
-  },
-  "rbox-s": {
-   "still": "assets/shapes/glass-rbox-s",
-   "sheet": "assets/motion/glass-rbox-s",
-   "frames": 36,
-   "cols": 12,
-   "turn": "assets/glass-turns/rbox-s.avif"
   },
   "torus-m": {
    "still": "assets/shapes/glass-torus-m",
@@ -60,13 +46,6 @@ window.GLASS_LAYOUT = {
    "frames": 36,
    "cols": 12,
    "turn": "assets/glass-turns/capsule-amber.avif"
-  },
-  "capsule-xs": {
-   "still": "assets/shapes/glass-capsule-xs",
-   "sheet": "assets/motion/glass-capsule-xs",
-   "frames": 36,
-   "cols": 12,
-   "turn": "assets/glass-turns/capsule-xs.avif"
   },
   "blob": {
    "still": "assets/shapes/glass-blob",
@@ -143,26 +122,6 @@ window.GLASS_LAYOUT = {
      "layer": "front",
      "depth": 0.4,
      "spin": false
-    },
-    {
-     "shape": "rbox-s",
-     "x": 18,
-     "y": 466,
-     "w": 45,
-     "h": 45,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
-    },
-    {
-     "shape": "capsule-xs",
-     "x": 323,
-     "y": 1103,
-     "w": 70,
-     "h": 70,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
     }
    ]
   },
@@ -204,26 +163,6 @@ window.GLASS_LAYOUT = {
      "layer": "front",
      "depth": 0.4,
      "spin": false
-    },
-    {
-     "shape": "capsule-xs",
-     "x": 326,
-     "y": 466,
-     "w": 45,
-     "h": 45,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
-    },
-    {
-     "shape": "x-s",
-     "x": -3,
-     "y": 1111,
-     "w": 92,
-     "h": 92,
-     "layer": "front",
-     "depth": 0.7,
-     "spin": false
     }
    ]
   },
@@ -239,28 +178,7 @@ window.GLASS_LAYOUT = {
     "h": 340,
     "note": "live elapsed time sits underneath"
    },
-   "shapes": [
-    {
-     "shape": "capsule-xs",
-     "x": 8,
-     "y": 228,
-     "w": 70,
-     "h": 70,
-     "layer": "front",
-     "depth": 1,
-     "spin": false
-    },
-    {
-     "shape": "rbox-s",
-     "x": 344,
-     "y": 255,
-     "w": 38,
-     "h": 38,
-     "layer": "front",
-     "depth": 1,
-     "spin": false
-    }
-   ]
+   "shapes": []
   },
   "history": {
    "height": 1500,
@@ -290,26 +208,6 @@ window.GLASS_LAYOUT = {
      "h": 170,
      "layer": "front",
      "depth": 0.4,
-     "spin": false
-    },
-    {
-     "shape": "x-s",
-     "x": 328,
-     "y": 128,
-     "w": 66,
-     "h": 66,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
-    },
-    {
-     "shape": "capsule-xs",
-     "x": 318,
-     "y": 356,
-     "w": 80,
-     "h": 80,
-     "layer": "front",
-     "depth": 1.1,
      "spin": false
     }
    ]
@@ -353,42 +251,12 @@ window.GLASS_LAYOUT = {
      "layer": "front",
      "depth": 0.4,
      "spin": false
-    },
-    {
-     "shape": "rbox-s",
-     "x": 331,
-     "y": 381,
-     "w": 48,
-     "h": 48,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
-    },
-    {
-     "shape": "capsule-xs",
-     "x": 1,
-     "y": 1203,
-     "w": 70,
-     "h": 70,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
     }
    ]
   },
   "research-paper": {
    "height": 1500,
    "shapes": [
-    {
-     "shape": "rbox-s",
-     "x": 256,
-     "y": 82,
-     "w": 138,
-     "h": 138,
-     "layer": "front",
-     "depth": 0.7,
-     "spin": false
-    },
     {
      "shape": "torus-m",
      "x": 235,
@@ -407,26 +275,6 @@ window.GLASS_LAYOUT = {
      "h": 250,
      "layer": "front",
      "depth": 0.4,
-     "spin": false
-    },
-    {
-     "shape": "capsule-xs",
-     "x": 325,
-     "y": 325,
-     "w": 50,
-     "h": 50,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
-    },
-    {
-     "shape": "x-s",
-     "x": 290,
-     "y": 1050,
-     "w": 100,
-     "h": 100,
-     "layer": "front",
-     "depth": 0.7,
      "spin": false
     }
    ]
@@ -454,26 +302,6 @@ window.GLASS_LAYOUT = {
      "layer": "back",
      "depth": 0.4,
      "spin": false
-    },
-    {
-     "shape": "rbox-s",
-     "x": -35,
-     "y": 689,
-     "w": 112,
-     "h": 112,
-     "layer": "back",
-     "depth": 0.7,
-     "spin": false
-    },
-    {
-     "shape": "capsule-xs",
-     "x": 23,
-     "y": 365,
-     "w": 68,
-     "h": 68,
-     "layer": "back",
-     "depth": 1.1,
-     "spin": false
     }
    ]
   },
@@ -482,45 +310,12 @@ window.GLASS_LAYOUT = {
    "shapes": [
     {
      "shape": "torus-m",
-     "x": 224,
-     "y": 86,
-     "w": 174,
-     "h": 173,
+     "x": 147,
+     "y": 62,
+     "w": 280,
+     "h": 280,
      "layer": "back",
      "depth": 0.4,
-     "bob": 4,
-     "spin": false
-    },
-    {
-     "shape": "x-s",
-     "x": 24,
-     "y": 115,
-     "w": 48,
-     "h": 48,
-     "layer": "back",
-     "depth": 1.1,
-     "bob": 4,
-     "spin": false
-    },
-    {
-     "shape": "blob",
-     "x": -55,
-     "y": 495,
-     "w": 105,
-     "h": 119,
-     "layer": "back",
-     "depth": 0.7,
-     "bob": 4,
-     "spin": false
-    },
-    {
-     "shape": "rbox-s",
-     "x": 314,
-     "y": 755,
-     "w": 112,
-     "h": 114,
-     "layer": "back",
-     "depth": 0.7,
      "bob": 4,
      "spin": false
     },
@@ -534,53 +329,12 @@ window.GLASS_LAYOUT = {
      "depth": 0.4,
      "bob": 4,
      "spin": false
-    },
-    {
-     "shape": "capsule-xs",
-     "x": -40,
-     "y": 1390,
-     "w": 80,
-     "h": 82,
-     "layer": "back",
-     "depth": 1.1,
-     "bob": 4,
-     "spin": false
     }
    ]
   },
   "intro": {
    "height": 844,
    "shapes": [
-    {
-     "shape": "capsule-xs",
-     "x": 306,
-     "y": 150,
-     "w": 84,
-     "h": 84,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
-    },
-    {
-     "shape": "rbox-s",
-     "x": 16,
-     "y": 470,
-     "w": 58,
-     "h": 58,
-     "layer": "front",
-     "depth": 1.1,
-     "spin": false
-    },
-    {
-     "shape": "x-s",
-     "x": 286,
-     "y": 500,
-     "w": 112,
-     "h": 112,
-     "layer": "front",
-     "depth": 0.7,
-     "spin": false
-    },
     {
      "shape": "star",
      "x": -100,

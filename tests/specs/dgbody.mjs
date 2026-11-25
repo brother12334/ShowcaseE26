@@ -21,7 +21,7 @@ import { extname, join, normalize } from 'node:path';
    labels over a screen set in Instrument Sans. Section 4 walks every label on it. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.webp':'image/webp', '.png':'image/png', '.mp4':'video/mp4',
+  '.json':'application/json', '.webp':'image/webp', '.png':'image/png', '.mp4':'video/mp4', '.webm':'video/webm',
   '.ttf':'font/ttf', '.svg':'image/svg+xml', '.mp3':'audio/mpeg',
   '.webmanifest':'application/manifest+json' };
 const srv = createServer(async (q, r)=>{
@@ -96,7 +96,8 @@ r = await p.evaluate(async ()=>{
     const image = new Image();
     image.src = shape.dataset.still + '.webp';
     await image.decode();
-    return {src: shape.dataset.still.split('/').pop(),
+    return {width: shape.getBoundingClientRect().width,
+            src: shape.dataset.still.split('/').pop(),
             back: shape.classList.contains('back'),
             quiet: getComputedStyle(shape).pointerEvents === 'none',
             sharp: image.naturalWidth >= 3 * parseFloat(shape.style.getPropertyValue("--glass-width"))};
@@ -105,8 +106,14 @@ r = await p.evaluate(async ()=>{
           map: !!document.querySelector('.nb-map .bm-fig')};
 });
 ck("CONTROL: the seeded Body still renders its anatomy map", r.map);
-ck("CONTROL: and it really does mount its six shapes", r.art.length === 6,
+ck("CONTROL: Body mounts the ring and star", r.art.length === 2 && r.art.some(x=> x.src === "glass-star"),
    r.art.map(x=> x.src).join(","));
+const ring = r.art.find(x=> x.src === "glass-torus-m");
+ck("Body's torus fills most of the 390px canvas", ring?.width >= 279 && ring.width <= 281, JSON.stringify(ring));
+const ringVideo = p.locator('[data-still$="glass-torus-m"] video.glass-turn');
+await ringVideo.waitFor();
+ck("the larger ring still plays at 3× resolution",
+   await ringVideo.evaluate(video=> video.videoWidth === 840 && !video.paused));
 ck("none of them can intercept a tap", r.art.every(x=> x.quiet),
    JSON.stringify(r.art.filter(x=> !x.quiet)));
 ck("each one has the pixels for a 3\u00d7 phone", r.art.every(x=> x.sharp),

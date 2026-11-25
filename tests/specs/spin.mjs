@@ -99,9 +99,11 @@ console.log("\n1b. ALL LIVE GLASS PLACEMENTS HAVE RENDERED TRANSPARENT TURNS");
     const places = Object.values(L.screens).flatMap(screen=>screen.shapes || []);
     const unmapped = places.filter(place=> !L.shapes[place.shape]?.turn);
     return {missing:missing.length, places:places.length, unmapped:unmapped.length,
+      small:places.filter(place=> Math.min(place.w, place.h) < 150).length,
       spheres:places.filter(place=>place.shape.startsWith("sphere")).length};
   });
-  ck("CONTROL: the layout has glass placements to verify", r.places >= 20, JSON.stringify(r));
+  ck("CONTROL: the layout has glass placements to verify", r.places >= 15, JSON.stringify(r));
+  ck("no scene places a small glass accent", r.small === 0, JSON.stringify(r));
   ck("none of the active scenes places a sphere", r.spheres === 0, JSON.stringify(r));
   ck("every model and placement has a transparent 3D sequence", r.missing === 0 && r.unmapped === 0, JSON.stringify(r));
 }
@@ -162,7 +164,7 @@ const rotation = await p.evaluate(async ()=>{
   }
   return {max, selected:active.size, ornaments:document.querySelectorAll('#stage .glass[data-turn]:not([data-glass-hero])').length};
 });
-ck("CONTROL: History has several ornaments and plays some of them", rotation.ornaments >= 3 && rotation.selected > 0, JSON.stringify(rotation));
+ck("CONTROL: History keeps its two large ornaments and plays some of them", rotation.ornaments === 2 && rotation.selected > 0, JSON.stringify(rotation));
 ck("multiple ornaments get their turn without exceeding three active images",
    rotation.selected >= 2 && rotation.max <= 3, JSON.stringify(rotation));
 
@@ -181,18 +183,18 @@ await p.evaluate(()=> boot("sync"));
 await p.waitForTimeout(500);
 r = await p.evaluate(async ()=>{
   const all = ()=> [...document.querySelectorAll('#stage .glass')];
-  const paused = ()=> all().filter(n=> n.hasAttribute('data-glass-paused')).length;
-  const atTop = paused();
+  const paused = n=> n.hasAttribute('data-glass-paused');
+  const top = all().filter(n=> !paused(n));
   scrollTo(0, document.documentElement.scrollHeight);
   await new Promise(ok=> setTimeout(ok, 700));
-  const atBottom = paused();
+  const left = top.filter(paused);
   scrollTo(0, 0);
   await new Promise(ok=> setTimeout(ok, 600));
-  return {n: all().length, atTop, atBottom, back: paused()};
+  return {top:top.length, left:left.length, back:left.filter(n=> !paused(n)).length};
 });
-ck("CONTROL: there is art to pause", r.n > 0, JSON.stringify(r));
-ck("scrolled away, the ones off the screen stop", r.atBottom > 0, JSON.stringify(r));
-ck("and they are running again when they come back", r.back < r.atBottom, JSON.stringify(r));
+ck("CONTROL: there is visible art to pause", r.top > 0, JSON.stringify(r));
+ck("scrolled away, the ones off the screen stop", r.left > 0, JSON.stringify(r));
+ck("and those same shapes resume when they come back", r.back === r.left, JSON.stringify(r));
 
 console.log("\n5. REDUCED MOTION STOPS ALL OF IT");
 await p.emulateMedia({reducedMotion:"reduce"});

@@ -100,15 +100,12 @@ try{
   }));
   assert.equal(art.hidden, 'true');
   assert.equal(art.hit, 'none');
-  assert.equal(art.pieces.length, 3, 'CONTROL: one overlay and two floating shapes mounted');
+  assert.equal(art.pieces.length, 1, 'CONTROL: the workout overlay mounts without small accents');
   assert.match(art.pieces[0].still, /overlay-workout$/);
   assert.equal(Math.round(art.pieces[0].box.x), 0, 'overlay aligns with the 390px canvas');
   for(const piece of art.pieces){
     assert.equal(piece.animation, 'none');
     assert.equal(piece.transform, 'none');
-  }
-  for(const piece of art.pieces.slice(1)){
-    assert.ok(piece.box.bottom < 300, 'floating shapes stay above the progress chips');
   }
   await page.evaluate(()=> document.fonts.ready);
   assert.equal(await page.locator('body').evaluate(body=> body.classList.contains('modal-live')), false);

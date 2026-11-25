@@ -804,8 +804,8 @@ r = await newP.evaluate(async ()=>{
   const glass = document.querySelector('#stage [data-glass-hero][data-still$="overlay-history"]');
   return {results, overlays, history:!!glass && glass.dataset.turn === "assets/glass-turns/history.avif"};
 });
-ck("CONTROL: the ten decorative stills are mapped to real slots",
-   r.results.length === 10 && r.results.every(item=> item.used > 0));
+ck("CONTROL: the seven decorative stills are mapped to real slots",
+   r.results.length === 7 && r.results.every(item=> item.used > 0));
 ck("each still covers its largest 3× phone slot", r.results.every(item=> item.sharp), JSON.stringify(r.results));
 ck("the three live-number overlays cover their own 3× canvases",
    r.overlays.length === 3 && r.overlays.every(item=> item.sharp), JSON.stringify(r.overlays));
@@ -820,7 +820,7 @@ const ornaments = await newP.evaluate(()=>({
   playing: document.querySelectorAll('video.glass-turn').length,
   allMapped: [...document.querySelectorAll('.glass:not([data-glass-hero])')].every(el=>!!el.dataset.turn)
 }));
-ck("CONTROL: History has small glass ornaments", ornaments.rendered > 0);
+ck("CONTROL: History keeps its two large ornaments", ornaments.rendered === 2);
 ck("all ornaments have real 3D motion and at most three assets play together",
    ornaments.allMapped && ornaments.playing > 1 && ornaments.playing <= 3, JSON.stringify(ornaments));
 await newP.evaluate(()=>scrollTo(0, 1600));
