@@ -8466,23 +8466,7 @@ body.news-open{overscroll-behavior:contain}
 /* THE DAY BEFORE. A reconstruction, not a screenshot: the old design is not in this
    file any more. On screen for just over a second, behind a bubble, never interactive —
    so it is written at the size it needs to read at a glance and no larger. */
-.intro-old{position:absolute;inset:0;background:#0e0e10;color:#e8e6e1;
-  font-family:var(--sans);padding:calc(18px + env(safe-area-inset-top)) 14px 0}
-.io-hdr{display:flex;justify-content:space-between;align-items:baseline;
-  font-size:12.5px;color:#9b9892;margin-bottom:14px}
-.io-mark{font-family:var(--disp);font-weight:700;font-size:15px;color:#e8e6e1;
-  letter-spacing:.02em}
-.io-card{background:#17171a;border:1px solid #28282f;border-radius:10px;padding:14px;
-  margin-bottom:12px}
-.io-k{font-family:var(--disp);font-size:9.5px;letter-spacing:.16em;color:#83817c;
-  text-transform:uppercase;margin-bottom:7px}
-.io-h{font-family:var(--disp);font-size:22px;font-weight:700;margin-bottom:3px}
-.io-s{font-size:12.5px;color:#9b9892;margin-bottom:12px}
-.io-go{background:#c98a4b;color:#0e0e10;border-radius:7px;text-align:center;
-  padding:11px;font-weight:700;font-size:14px}
-.io-row{display:flex;justify-content:space-between;font-size:13.5px;padding:7px 0;
-  border-top:1px solid #28282f;color:#e8e6e1}
-.io-row span:last-child{color:#83817c}
+
 
 /* A row, a label and a chip: the three shapes the package's pages are built from. */
 .dg-ss{display:flex;justify-content:space-between;align-items:center;min-height:62px;
@@ -36573,7 +36557,7 @@ addEventListener("resize", ()=>{
    down to the day's exercises or switch away from the tab.
 
    One observer, replaced with the scene, disconnected when the scene is torn down. */
-let GLASS_HERO_IO = null, GLASS_HERO_SEEN = false, GLASS_HERO_T = 0;
+let GLASS_HERO_IO = null, GLASS_HERO_SEEN = false;
 /* THE HERO DOES NOT PLAY WHILE THE PAGE IS MOVING.
 
    Pause during scrolling to avoid compositing a changing video frame under the
@@ -36585,22 +36569,16 @@ function glassCfg(k, dflt){
   catch(e){ return dflt; }
 }
 function glassHeroPlay(){
+  if(INTRO_RUNNING || !GLASS_HERO_SEEN || document.hidden) return;
   const v = document.querySelector("#stage .glass-layer video.hero-media");
   if(!v) return;
-  /* Set every time rather than once: a video that has been paused and resumed, or
-     re-created with the screen, comes back at 1. */
   const rate = Number(glassCfg("heroRate", 1)) || 1;
   if(v.playbackRate !== rate) v.playbackRate = rate;
-  if(GLASS_HERO_SEEN && !GLASS_HERO_T && !document.hidden) v.play().catch(()=>{});
+  if(v.paused) v.play().catch(()=>{});
 }
 function glassHeroStill(){
   const v = document.querySelector("#stage .glass-layer video.hero-media");
   if(v) v.pause();
-}
-function glassHeroScroll(){
-  glassHeroStill();
-  clearTimeout(GLASS_HERO_T);
-  GLASS_HERO_T = setTimeout(()=>{ GLASS_HERO_T = 0; glassHeroPlay(); }, 160);
 }
 function glassHeroWatch(stage){
   if(GLASS_HERO_IO){ GLASS_HERO_IO.disconnect(); GLASS_HERO_IO = null; }
@@ -36615,10 +36593,6 @@ function glassHeroWatch(stage){
     });
   }, {rootMargin: "64px"});
   GLASS_HERO_IO.observe(v);
-  if(!glassHeroWatch.scrollWired && glassCfg("heroPauseOnScroll", true)){
-    glassHeroWatch.scrollWired = true;
-    addEventListener("scroll", glassHeroScroll, {passive: true});
-  }
   /* And with the tab in the background, where no observer fires. */
   if(!glassHeroWatch.wired){
     glassHeroWatch.wired = true;
@@ -36675,33 +36649,13 @@ function introDue(){
   if(document.body.classList.contains("share-view")) return false;
   return (S.introSeen || 0) < INTRO_GEN;
 }
-/* The day before. Deliberately plain: it is on screen for just over a second, behind a
-   bubble, and anything more detailed would be a second design to maintain. */
-function introLegacyHTML(){
-  const m = (()=>{ try{ return dayMeta(todaysWorkoutId()); }catch(e){ return {name:"Push A"}; } })();
-  const rows = (()=>{ try{ return ROTATION.slice(0, 4).map(w=> dayName(w)); }
-                      catch(e){ return ["Push A","Pull A","Legs A","Rest"]; } })();
-  return `<div class="intro-old">
-    <div class="io-hdr"><span class="io-mark">Element 26</span><span>${esc(fmtDate(todayStr()))}</span></div>
-    <div class="io-card">
-      <div class="io-k">TODAY'S WORKOUT</div>
-      <div class="io-h">${esc(m.name)}</div>
-      <div class="io-s">${rows.length} exercises &middot; ~50 min</div>
-      <div class="io-go">Start Workout</div>
-    </div>
-    <div class="io-card">
-      <div class="io-k">THIS WEEK</div>
-      ${rows.map((r,i)=> `<div class="io-row"><span>${esc(r)}</span><span>${
-        i < 3 ? "Done" : "Rest"}</span></div>`).join("")}
-    </div>
-  </div>`;
-}
-
 function playIntro(){
   if(!introSupported() || INTRO_RUNNING) return Promise.resolve(false);
   const stage = document.getElementById("stage");
   const body = document.body;
   INTRO_RUNNING = true;
+  if((S.introSeen || 0) < INTRO_GEN){ S.introSeen = INTRO_GEN; save(); }
+  glassHeroStill();
 
   const wrap = document.createElement("div");
   wrap.className = "intro-stage";
@@ -36709,7 +36663,6 @@ function playIntro(){
   wrap.setAttribute("aria-hidden", "true");
   const legacy = document.createElement("div");
   legacy.className = "intro-legacy";
-  legacy.innerHTML = introLegacyHTML();
   wrap.append(legacy);
 
   /* Where #stage was, so it can go back exactly there. */
@@ -36735,9 +36688,6 @@ function playIntro(){
       risers.forEach(n=> n.removeAttribute("data-rise"));
     }catch(e){}
     INTRO_RUNNING = false;
-    /* Written down only once it has actually finished, so a crash or a closed tab
-       half way through does not cost somebody the intro. */
-    if((S.introSeen || 0) < INTRO_GEN){ S.introSeen = INTRO_GEN; save(); }
     /* THE INTRO MOUNTS ITS OWN SCENE, and glassSync compares a key: the screen has not
        changed, so left to itself it returns on the first line and the intro's four
        shapes stay on Today for ever. The key is cleared so the next call rebuilds the
@@ -36749,7 +36699,6 @@ function playIntro(){
   try{
     p = E26Intro.play({
       stage: wrap, legacy, next: stage,
-      hero: stage.querySelector("video.hero-media") || undefined,
       base: "", origin: {x: Math.round(innerWidth / 2), y: Math.round(innerHeight * 0.55)},
       scene: "intro"
     });
