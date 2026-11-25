@@ -16,7 +16,7 @@
   const cfg = () => Object.assign({}, D, window.GLASS_CONFIG || {});
   const rnd = (r) => r[0] + Math.random() * (r[1] - r[0]);
   let items = [], raf = 0, io = null, scrollY = 0;
-  let turnTimer = 0, turnOffset = 0, turnLimit = 3;
+  let turnTimer = 0, turnOffset = 0, bakedHero = false;
   let qualityLimit = 3, sample = 0, lastFrame = 0, frameCount = 0, slowFrames = 0;
   const tilt = { x: 0, y: 0, tx: 0, ty: 0 };
 
@@ -107,7 +107,7 @@
 
   function watchTurns(now) {
     sample = 0;
-    const active = items.filter(item => item.turn?.isConnected).length;
+    const active = items.filter(item => item.turn?.isConnected).length + Number(bakedHero);
     if (document.hidden || active < 3) { lastFrame = frameCount = slowFrames = 0; return; }
     if (lastFrame) {
       frameCount++;
@@ -130,7 +130,7 @@
       item.visible && item.el.dataset.turn && getComputedStyle(item.el).visibility !== 'hidden');
     const hero = eligible.find(item => item.el.hasAttribute('data-glass-hero'));
     const ornaments = eligible.filter(item => item !== hero);
-    const slots = Math.min(turnLimit, qualityLimit) - Number(!!hero);
+    const slots = qualityLimit - Number(bakedHero) - Number(!!hero);
     const offset = turnOffset % Math.max(ornaments.length, 1);
     const selected = new Set(ornaments.concat(ornaments).slice(offset, offset + Math.min(slots, ornaments.length)));
     if (hero) selected.add(hero);
@@ -166,7 +166,7 @@
   }
 
   function mount(root) {
-    turnLimit = (root || document).querySelector("video.hero-media") ? 2 : 3;
+    bakedHero = !!(root || document).querySelector("video.hero-media");
     const fresh = [...(root || document).querySelectorAll('.glass')].map(build).filter(Boolean);
     if (!io) {
       io = new IntersectionObserver((entries) => {
