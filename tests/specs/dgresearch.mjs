@@ -91,6 +91,8 @@ let r = await full.evaluate(()=> ({
 ck("the tab is drawn as a dark glass screen", r.dg === true);
 ck("CONTROL: the seeded feed really is on screen", r.cards === r.n && r.cards > 1,
    r.cards + " cards for " + r.n + " papers");
+ck("paper cards paint without waiting for intersection or an entrance transition",
+   await full.locator('.rs-card').evaluateAll(cards=> cards.every(card=> Number(getComputedStyle(card).opacity) > 0)));
 ck("and the header states the count", r.right === r.n + " papers", r.right);
 
 console.log("\n2. NO HERO MEANS NO SHEET OF GLASS ON THE CONTENT");

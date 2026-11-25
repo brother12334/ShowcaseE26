@@ -48,44 +48,27 @@
                   vec4(ink * rays, opacity), light.a);
     }`;
 
-  function unpackPlane(data, start, width, height) {
-    const pixels = width * height, size = pixels * 4;
-    const lo = new Uint8Array(data, start, size);
-    const hi = new Uint8Array(data, start + size, size);
-    const output = new Uint16Array(size);
-    // Reassemble the planar, row-delta-coded half-float channels for WebGL.
-    for (let channel = 0; channel < 4; channel++) {
-      const base = channel * pixels;
-      for (let row = 0; row < height; row++) {
-        let value = 0;
-        const rowStart = row * width;
-        for (let x = rowStart; x < rowStart + width; x++) {
-          value += lo[base + x] | (hi[base + x] << 8);
-          output[x * 4 + channel] = value;
-        }
-      }
-    }
-    return output;
-  }
+  const workerUrl = new URL('refraction-data.js', document.currentScript.src);
 
-  async function loadRays(url, signal) {
-    const response = await fetch(url, { signal });
-    if (!response.ok || !response.body) throw new Error('Refraction map unavailable');
-    const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
-    const data = await new Response(stream).arrayBuffer();
-    const header = new DataView(data);
-    if (data.byteLength < 12 || header.getUint32(0) !== 0x45323650) {
-      throw new Error('Unsupported refraction map');
-    }
-    const [width, height, frames, columns] = [4, 6, 8, 10].map(i => header.getUint16(i, true));
-    const atlasWidth = width * columns, atlasHeight = height * Math.ceil(frames / columns);
-    const size = atlasWidth * atlasHeight * 4;
-    if (!width || !height || !frames || !columns || data.byteLength !== 12 + 4 * size) {
-      throw new Error('Invalid refraction map');
-    }
-    return { width, height, frames, columns, atlasWidth, atlasHeight,
-      planes: [unpackPlane(data, 12, atlasWidth, atlasHeight),
-        unpackPlane(data, 12 + 2 * size, atlasWidth, atlasHeight)] };
+  function prepare(url) {
+    if (!window.Worker || !window.WebGL2RenderingContext || !window.DecompressionStream) return null;
+    let worker, finish;
+    const rays = new Promise(resolve => {
+      finish = data => {
+        worker?.terminate();
+        worker = null;
+        resolve(data);
+      };
+      try {
+        worker = new Worker(workerUrl);
+        worker.onmessage = event => finish(event.data);
+        worker.onerror = () => finish(null);
+        worker.postMessage(new URL(url, document.baseURI).href);
+      } catch (error) {
+        finish(null);
+      }
+    });
+    return { rays, cancel: () => finish(null) };
   }
 
   function createLens(canvas, rays) {
@@ -206,9 +189,9 @@
     return style.color.match(/[\d.]+/g)?.slice(0, 3).map(value => Number(value) / 255);
   }
 
-  function start(anchor, video, url) {
-    if (!window.DecompressionStream || !video.requestVideoFrameCallback) return null;
-    const controller = new AbortController();
+  function start(anchor, video, prepared, onReady) {
+    let stopped = false;
+    let ready = onReady;
     const canvas = document.createElement('canvas');
     canvas.className = 'glass-refraction';
     canvas.setAttribute('aria-hidden', 'true');
@@ -219,7 +202,9 @@
     let quality = video.getVideoPlaybackQuality?.();
     let qualityAt = performance.now();
     function stop() {
-      controller.abort();
+      stopped = true;
+      ready = null;
+      prepared.cancel();
       video.cancelVideoFrameCallback(request);
       observer?.disconnect();
       number?.removeAttribute('data-glass-lensed');
@@ -227,17 +212,23 @@
       lens?.dispose();
       lens = null;
     }
-    canvas.addEventListener('webglcontextlost', stop, { once: true });
-    Promise.all([loadRays(url, controller.signal), document.fonts.ready]).then(([rays]) => {
-      if (controller.signal.aborted || !video.isConnected) return;
+    function fail() {
+      const reveal = ready;
+      stop();
+      reveal?.();
+    }
+    canvas.addEventListener('webglcontextlost', fail, { once: true });
+    Promise.all([prepared.rays, document.fonts.ready]).then(([rays]) => {
+      if (stopped || !video.isConnected) return;
+      if (!rays) { fail(); return; }
       lens = createLens(canvas, rays);
       rays.planes.length = 0;
       const stage = anchor.closest('#stage');
-      if (!stage) { stop(); return; }
+      if (!stage) { fail(); return; }
       observer = new ResizeObserver(() => { dirty = true; });
       observer.observe(anchor);
       function tick(now, metadata) {
-        if (controller.signal.aborted) return;
+        if (stopped) return;
         if (density > 1 && quality && now - qualityAt > 1000) {
           const current = video.getVideoPlaybackQuality();
           const shown = current.totalVideoFrames - quality.totalVideoFrames;
@@ -258,11 +249,11 @@
           seen = value;
           dirty = false;
           const color = next && paintGlyph(bitmap, canvas, next, anchor, density);
-          if (color?.length !== 3) { stop(); return; }
+          if (color?.length !== 3) { fail(); return; }
           soft.width = bitmap.width;
           soft.height = bitmap.height;
           const ctx = soft.getContext('2d');
-          if (!ctx) { stop(); return; }
+          if (!ctx) { fail(); return; }
           // Match the baked hero's soft transmitted light while keeping
           // the glyph outside the silhouette crisp.
           ctx.filter = `blur(${1.4 * bitmap.width / 390}px)`;
@@ -275,13 +266,17 @@
           previous = frame;
           if (!canvas.isConnected) number.parentElement.append(canvas);
           number.setAttribute('data-glass-lensed', '');
+          const reveal = ready;
+          ready = null;
+          reveal?.();
         }
         request = video.requestVideoFrameCallback(tick);
       }
-      request = video.requestVideoFrameCallback(tick);
-    }).catch(stop);
+      // Paint the paused video pose before the caller reveals and plays it.
+      tick(performance.now(), { mediaTime: video.currentTime });
+    }).catch(fail);
     return stop;
   }
 
-  window.GlassRefraction = { start };
+  window.GlassRefraction = { prepare, start };
 })();

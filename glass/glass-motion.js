@@ -101,7 +101,8 @@
     if (!item.turn) return;
     clearTimeout(item.turnTimeout);
     item.stopRefraction?.();
-    item.stopRefraction = null;
+    item.preparedRefraction?.cancel();
+    item.stopRefraction = item.preparedRefraction = null;
     item.turn.onerror = item.turn.onload = null;
     if (item.turn.tagName === 'VIDEO') {
       item.turn.pause();
@@ -160,9 +161,6 @@
       turn.className = 'glass-turn';
       if (!turn.isConnected) item.el.append(turn);
       item.still.style.visibility = 'hidden';
-      if (turn.tagName === 'VIDEO' && item.el.dataset.refraction) {
-        item.stopRefraction = window.GlassRefraction?.start(item.el, turn, item.el.dataset.refraction);
-      }
       if (!sample && qualityLimit > 2) sample = requestAnimationFrame(watchTurns);
     }
     function attempt(index) {
@@ -199,10 +197,25 @@
       item.turnTimeout = setTimeout(next, 2500);
       item.el.append(video);
       video.src = base + format.extension;
+      if (video.requestVideoFrameCallback && item.el.dataset.refraction) {
+        item.preparedRefraction = window.GlassRefraction?.prepare(item.el.dataset.refraction);
+      }
       video.play().then(() => {
         if (item.turn !== video) return;
-        if (hasVideoAlpha(video)) reveal(video);
-        else next();
+        if (!hasVideoAlpha(video)) { next(); return; }
+        if (!item.preparedRefraction) { reveal(video); return; }
+        clearTimeout(item.turnTimeout);
+        video.pause();
+        const ready = () => {
+          if (item.turn !== video) return;
+          reveal(video);
+          video.play().catch(next);
+        };
+        item.stopRefraction = GlassRefraction.start(item.el, video, item.preparedRefraction, ready);
+        item.turnTimeout = setTimeout(() => {
+          item.stopRefraction?.();
+          ready();
+        }, 2200);
       }, next);
     }
     attempt(0);

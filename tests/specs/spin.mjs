@@ -107,7 +107,35 @@ console.log("\n1b. ALL LIVE GLASS PLACEMENTS HAVE RENDERED TRANSPARENT TURNS");
   ck("none of the active scenes places a sphere", r.spheres === 0, JSON.stringify(r));
   ck("every model and placement has a transparent 3D sequence", r.missing === 0 && r.unmapped === 0, JSON.stringify(r));
 }
-await p.evaluate(()=> boot("history"));
+let releaseMap;
+const mapRequest = new Promise(resolve=> { releaseMap = resolve; });
+const historyMap = /\/assets\/glass-refraction\/history\.rays(?:\?.*)?$/;
+await p.route(historyMap, async route=> {
+  await mapRequest;
+  await route.continue().catch(()=>{});
+});
+const firstPaint = await p.evaluate(()=>{
+  goTab("today");
+  goTab("history");
+  const hero = document.querySelector('#stage [data-glass-hero]');
+  return {tab: document.querySelector('#app [data-dg-screen]')?.dataset.dgScreen,
+    still: hero?.dataset.still, instant: !!hero?.closest('[data-glass-instant]')};
+});
+ck("CONTROL: the tab change draws History", firstPaint.tab === "history", JSON.stringify(firstPaint));
+ck("its artwork is mounted in the same task without a navigation fade",
+   firstPaint.instant && firstPaint.still?.endsWith("overlay-history"), JSON.stringify(firstPaint));
+await p.waitForFunction(()=> document.querySelector('[data-glass-hero] video.glass-turn-loading')?.readyState >= 2);
+const pending = await p.evaluate(()=>({
+  poster:getComputedStyle(document.querySelector('[data-glass-hero] .glass-img')).visibility,
+  playing:!!document.querySelector('[data-glass-hero] video.glass-turn'),
+  lens:!!document.querySelector('.glass-refraction'),
+  readout:document.querySelector('.dg-num')?.textContent
+}));
+ck("CONTROL: the readout is visible during the delayed map request", Number(pending.readout) > 0);
+ck("a ready video keeps its poster until the refraction is ready too",
+   pending.poster === "visible" && !pending.playing && !pending.lens, JSON.stringify(pending));
+releaseMap();
+await p.unroute(historyMap);
 const capsule = p.locator('[data-glass-hero] video.glass-turn');
 await capsule.waitFor();
 const frame = video=>{
