@@ -3,29 +3,9 @@ import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
-/* THE GLASS TURNS, AND NOTHING DECODES A SPRITE ATLAS TO DO IT.
-
-   This spec is the record of a wrong turn, because the wrong turn is the thing that
-   will be taken again. Today's hero is a rendered loop of a real object rotating, so
-   the obvious way to make the other shapes turn was to give each of them the same:
-   a sprite atlas of rendered frames, stepped by changing a background-position.
-
-   It was correct and it was unusable. An atlas is 10 to 50MB decoded and a screen
-   carries three; every shape that has one gets a masked backdrop-filter layer built
-   behind it by glass-motion.js; and stepping the background-position repaints that
-   layer every frame. The owner's phone went from smooth to crawling, and the small
-   ornaments - which had been floating and tilting - stopped doing even that, because
-   a shape with an atlas does not get the float.
-
-   What replaced it costs nothing: the baked art stays one sharp still and the browser
-   turns it on the GPU. Section 1 holds the rule that makes it fast, section 2 that the
-   motion is actually big enough to see, and section 3 the design brief's shape budget.
-
-   SECTION 2 IS THE ONE THAT MATTERS. The transform was already there before any of
-   this, at rotateX 3deg and rotateY 5deg, and the owner reported the small shapes as
-   not animating. They were animating, by a sixteenth of a turn, on a 45 pixel sphere.
-   "There is an animation attached" is exactly the sort of thing a spec will happily
-   confirm while the screen looks frozen, so what is asserted is the ANGLE. */
+/* The tab scenes play transparent images rendered in different 3D poses.
+   The spec verifies the actual moving pixels, the alpha channel, the loaded sources
+   and the maximum number of simultaneous turns. */
 const FX = JSON.parse(readFileSync(appFile('tests/fixtures/state-2026-11-17.json'), 'utf8'));
 const FEED = JSON.parse(readFileSync(appFile('tests/fixtures/research-feed.json'), 'utf8'));
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',

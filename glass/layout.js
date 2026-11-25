@@ -1,25 +1,10 @@
 /* layout.js — where every shape on every screen is placed. Change a number here and the
  * app moves it. Loaded as a plain script; scene.js reads window.GLASS_LAYOUT.
  *
- * SPIN IS OFF EVERYWHERE, and it was measured rather than decided.
- *
- * A spin sheet is 3840x960 holding 36 frames in 12 columns, so ONE FRAME IS 320x320.
- * Program's jack is drawn at 250pt, which on a 3x phone is 750 device pixels asked of a
- * 320 pixel frame — a 2.3x upscale, and that is why the spinning shapes looked soft on
- * the device while the still ones looked sharp. The stills are 500 to 550px square and
- * have pixels to spare at every size used here.
- *
- * The same sheet is about 15 MB decoded, three of them to a screen, which is the other
- * half of the complaint: the shapes were heavy AND blurry, and both came from the same
- * file. Drawing from the still fixes both at once.
- *
- * NOTHING STOPPED MOVING. glass-motion.js animates every shape's float, parallax and
- * tilt whether or not it has frames; `spin` only chooses the sheet over the still. The
- * shapes still drift and bob, they are simply no longer flipping through frames.
- *
- * To put a shape's rotation back, set `spin: true` on it. It will be sharper first if
- * the sheet is re-rendered at 2x (tools/README.md) — at 640px a frame it would be
- * crisp at these sizes.
+ * `turn` points to an animated image rendered from the geometry. `still` is the
+ * artwork shown during loading, outside the playback budget, and in Reduce Motion.
+ * Legacy sheet playback is opt-in through `spin`; the tab scenes use transparent
+ * turns, which are decoded separately by the browser.
  */
 window.GLASS_LAYOUT = {
  "shapes": {
