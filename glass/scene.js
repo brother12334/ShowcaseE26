@@ -64,6 +64,7 @@
     const stagger = ((window.GLASS_CONFIG || {}).entrance || {}).stagger || 60;
     const layer = el('div', 'glass-layer');
     layer.setAttribute('aria-hidden', 'true');
+    if (o.instant) layer.setAttribute('data-glass-instant', '');
     layer.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:visible';
     if (o.hero !== false) hero(layer, S.hero, o);
     (S.shapes || []).forEach((it, i) => {
@@ -87,7 +88,15 @@
   function unmount() {
     if (!root) return;
     GlassMotion.unmount();
-    root.querySelectorAll('.glass-layer').forEach((n) => n.remove());
+    root.querySelectorAll('.glass-layer').forEach(layer => {
+      const video = layer.querySelector('video.hero-media');
+      if (video) {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      }
+      layer.remove();
+    });
     root = null;
   }
   // The stills are shared across tabs. Load two at a time during startup so the

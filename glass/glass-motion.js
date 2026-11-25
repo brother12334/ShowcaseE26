@@ -279,5 +279,5 @@
     if (reduce.matches) items.forEach((it) => { setFrame(it, 0); it.el.style.transform = ''; });
     syncPlayback();
   });
-  window.GlassMotion = { mount, unmount, pulse };
+  window.GlassMotion = { mount, unmount, pulse, refresh: syncPlayback };
 })();

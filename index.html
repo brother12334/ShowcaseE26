@@ -7938,6 +7938,7 @@ body.news-open{overscroll-behavior:contain}
      which is exactly the kind of thing nobody ever reproduces — and it put a running
      transform on a <video> for the whole of that. A plain fade instead. */
   animation:dgHeroIn var(--t-nav) var(--ease-nav) both}
+#stage > .glass-layer[data-glass-instant] > .hero-media{animation:none}
 @keyframes dgHeroIn{from{opacity:0}to{opacity:1}}
 #stage > .glass-layer{position:absolute;left:0;top:0;right:0;height:0;
   overflow:visible;pointer-events:none}
@@ -36492,7 +36493,7 @@ function glassSceneFor(){
   }
   return "";
 }
-function glassSync(){
+function glassSync(instant, artWidth){
   const scene0 = glassSceneFor();
   const stage = document.getElementById("stage");
   /* A LIVE-NUMBER HERO THE SCREEN DECIDED NOT TO DRAW IS 440px OF GLASS ON THE CONTENT.
@@ -36513,21 +36514,27 @@ function glassSync(){
   GLASS_AT = key;
   if(!stage || !window.GlassScene) return;
   GlassScene.unmount();
-  if(!key) return;
+  if(!key){ stage.classList.remove("dg-clip"); glassHeroWatch(stage); return; }
   const [scene, day] = scene0.split(":");
   const layer = GlassScene.mount(stage, scene, {base: "", day: day === "live" ? null : day,
-    hero: day !== "live" && !bandOff});
-  glassShapeScale(stage);
+    hero: day !== "live" && !bandOff, instant});
+  glassShapeScale(stage, artWidth);
   if(scene !== "workout"){
-    requestAnimationFrame(()=>{ if(layer.isConnected) glassAvoidContent(stage, layer); });
+    const front = [...layer.querySelectorAll(".glass.front:not([data-glass-hero])")];
+    front.forEach(shape=> shape.setAttribute("data-glass-positioning", ""));
+    requestAnimationFrame(()=>{
+      if(!layer.isConnected) return;
+      glassAvoidContent(stage, layer, front);
+      front.forEach(shape=> shape.removeAttribute("data-glass-positioning"));
+      if(front.length) GlassMotion.refresh();
+    });
   }
   glassHeroWatch(stage);
 }
 
 /* Place front ornaments clear of live controls and paragraphs. Keep the layout's
    original coordinates when they fit, and keep art out of the final nav clearance. */
-function glassAvoidContent(stage, layer){
-  const shapes = [...layer.querySelectorAll(".glass.front:not([data-glass-hero])")];
+function glassAvoidContent(stage, layer, shapes){
   if(!shapes.length) return;
   const stageBox = stage.getBoundingClientRect();
   const scale = document.getElementById("app").clientWidth / 390;
@@ -36535,8 +36542,11 @@ function glassAvoidContent(stage, layer){
   const content = [...stage.querySelectorAll("#app :is(button,input,select,textarea,a,summary,p,h1,h2,h3)")]
     .map(node=> ({rect:node.getBoundingClientRect(), weight:node.matches("button,input,select,textarea,a,summary") ? 8 : 1}))
     .filter(item=> item.rect.width && item.rect.height);
-  for(const shape of shapes){
-    const box = shape.getBoundingClientRect();
+  const artwork = shapes.map(shape=> ({shape, box:shape.getBoundingClientRect()}));
+  for(const {shape,box} of artwork){
+    const reach = 108 * scale;
+    const nearby = content.filter(({rect})=> rect.bottom > box.top-reach &&
+      rect.top < box.bottom+reach && rect.right > box.left-reach && rect.left < box.right+reach);
     const offsets = [0, -36, 36, -72, 72, -108, 108];
     let best = null;
     for(const dx of offsets) for(const dy of offsets){
@@ -36544,7 +36554,7 @@ function glassAvoidContent(stage, layer){
       const top = box.top + dy * scale, bottom = box.bottom + dy * scale;
       if(bottom > artBottom || top < stageBox.top || right < stageBox.left + 24 || left > stageBox.right - 24) continue;
       let cost = 0;
-      for(const {rect,weight} of content){
+      for(const {rect,weight} of nearby){
         const x = Math.max(0, Math.min(right, rect.right) - Math.max(left, rect.left));
         const y = Math.max(0, Math.min(bottom, rect.bottom) - Math.max(top, rect.top));
         cost += x * y * weight;
@@ -36570,14 +36580,14 @@ function glassAvoidContent(stage, layer){
 }
 /* Preserve the fixed 390-wide design coordinates and resolve them to the app's
    actual width without transforming the video layer. */
-function glassShapeScale(stage){
+function glassShapeScale(stage, artWidth){
   stage.classList.remove("dg-clip");
   const layer = stage.querySelector(".glass-layer");
   if(!layer) return;
   const shapes = [...layer.children].filter(n=> n.classList.contains("glass"));
   if(!shapes.length) return;
   stage.classList.add("dg-clip");
-  stage.style.setProperty("--dg-k", document.getElementById("app").clientWidth / 390);
+  stage.style.setProperty("--dg-k", (artWidth || document.getElementById("app").clientWidth) / 390);
   for(const back of [true,false]){
     const members = shapes.filter(n=> n.classList.contains("back") === back);
     if(!members.length) continue;
@@ -36806,12 +36816,10 @@ function replayIntro(){
                                 save(); return ok; });
 }
 
-let TAB_DRAW = 0;
-function syncTabGlass(){
-  try{ glassSync(); }catch(err){ console.error("Element 26: the glass layer threw", err); }
+function syncTabGlass(instant, artWidth){
+  try{ glassSync(instant, artWidth); }catch(err){ console.error("Element 26: the glass layer threw", err); }
 }
 function render(fastTab){
-  const draw = ++TAB_DRAW;
   const navigating = fastTab === true;
   /* D6b — A SHARE LINK IS NOT THE APP, AND NOTHING MAY REDRAW IT INTO ONE. The viewer
      replaces the page, but the app has timers, visibility handlers and a sync that all
@@ -36901,16 +36909,13 @@ function render(fastTab){
   /* ONE BAD RECORD MUST NOT COST YOU THE SCREEN. Every tab is drawn and wired behind
      renderTabInto(), which shows what threw and an export button rather than leaving a
      tab bar above nothing. See the RESCUE section. */
+  const artWidth = navigating ? app.clientWidth : 0;
   renderTabInto(app, navigating);
   document.body.classList.toggle("nav-flush", TAB === "today" &&
     !!app.querySelector('[data-dg-screen="today"]') && !app.querySelector('[data-today-extra]'));
-  /* THE GLASS LAYER, mounted per SCREEN rather than per render. See glassSync(). */
-  if(navigating && !introDue() && !INTRO_RUNNING){
-    // Mount the warm stills on the destination's first frame. Visibility starts the
-    // heavier turns separately, after the scene is in the document.
-    if(window.GlassScene){ GlassScene.unmount(); GLASS_AT = null; }
-    requestAnimationFrame(()=>{ if(draw === TAB_DRAW) syncTabGlass(); });
-  }else syncTabGlass();
+  /* Ship the destination art with its first paint. The media starts after its
+     still is in the document, and ornaments wait for their safe position. */
+  syncTabGlass(navigating && !INTRO_RUNNING, artWidth);
   /* AND THE INTRO, IF IT IS STILL OWED. Guarded entirely inside introDue(); see the
      note there for why one attempt at startup was not enough. */
   if(introDue()) queueMicrotask(introMaybe);
