@@ -301,26 +301,34 @@ console.log("\n1 - NONE OF THE FIVE FLOOR CUTS  (P0-3)");
    card never showed. The rule now needs real evidence; the test is that on this history
    it finds none for a CUT. */
 const floors = await p.evaluate(()=>{
-  const A = bodyAnalysis();
-  /* tgEvidence() is the per-group detector; tgSuggestion() is the one of them the Body
-     tab offers. Both are asked, because "nothing was offered" and "nothing was found"
-     are different facts and only the second one means the rule declined. */
-  const ev = [];
-  GKEYS.forEach(g=>{
-    let e = null;
-    try{ e = tgEvidence(A, g); }catch(err){ ev.push({g, err: String(err)}); return; }
-    if(e) ev.push({g, dir: e.dir, from: e.mev, to: e.to, why: (e.why||"").slice(0,80)});
-  });
-  let offered = null;
-  try{ offered = tgSuggestion(A); }catch(e){ offered = {err: String(e)}; }
-  /* AND THE PROOF THAT THE DETECTOR RAN AT ALL. It refuses outright under ten sessions
-     and when a group has no volume to speak of, so the window figures it works from are
-     reported: a replay where these came back empty would be a replay where every
-     assertion below is about a function that returned early. */
-  const now = Date.now();
-  const win = windowStats(now - 7*86400000*TGS_WEEKS, now + 1);
-  const seen = GKEYS.filter(g=> (win[g] && win[g].sets) > 0);
-  return {ev, offered, sessions: (S.sessions||[]).length, groupsWithVolume: seen.length};
+  // Use the export date for the audit's six-week windows. A live wall clock
+  // eventually measures a different slice of the same fixed history.
+  const previous = TAB_ANALYSIS;
+  TAB_ANALYSIS = {now: Date.parse("2026-11-15T12:00:00Z"), muscles: new Map(), windows: new Map()};
+  try {
+    const A = bodyAnalysis();
+    /* tgEvidence() is the per-group detector; tgSuggestion() is the one of them the Body
+       tab offers. Both are asked, because "nothing was offered" and "nothing was found"
+       are different facts and only the second one means the rule declined. */
+    const ev = [];
+    GKEYS.forEach(g=>{
+      let e = null;
+      try{ e = tgEvidence(A, g); }catch(err){ ev.push({g, err: String(err)}); return; }
+      if(e) ev.push({g, dir: e.dir, from: e.mev, to: e.to, why: (e.why||"").slice(0,80)});
+    });
+    let offered = null;
+    try{ offered = tgSuggestion(A); }catch(e){ offered = {err: String(e)}; }
+    /* AND THE PROOF THAT THE DETECTOR RAN AT ALL. It refuses outright under ten sessions
+       and when a group has no volume to speak of, so the window figures it works from are
+       reported: a replay where these came back empty would be a replay where every
+       assertion below is about a function that returned early. */
+    const now = analysisTime();
+    const win = windowStats(now - 7*86400000*TGS_WEEKS, now + 1);
+    const seen = GKEYS.filter(g=> (win[g] && win[g].sets) > 0);
+    return {ev, offered, sessions: (S.sessions||[]).length, groupsWithVolume: seen.length};
+  } finally {
+    TAB_ANALYSIS = previous;
+  }
 });
 console.log("    " + floors.sessions + " sessions in, " + floors.groupsWithVolume
   + " muscle groups carrying volume in the window");
