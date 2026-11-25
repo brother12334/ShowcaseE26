@@ -85,8 +85,7 @@ console.log("3 - RESEARCH IS A REAL DESTINATION");
     tab: TAB,
     h1: (document.querySelector('h1')||{}).textContent,
     sub: (document.querySelector('.rs-sub')||{}).textContent,
-    inOrder: TAB_ORDER.indexOf("research") > -1,
-    syncOut: TAB_ORDER.indexOf("sync"),
+    navTabs: [...document.querySelectorAll("nav button[data-tab]")].map(el=>el.dataset.tab),
     icon: !!document.querySelector('nav [data-tab="research"] svg path')
   }));
   ck("the tab opens", r.tab === "research", r.tab);
@@ -100,12 +99,8 @@ console.log("3 - RESEARCH IS A REAL DESTINATION");
      "not on the screen");
   ck("with the subtitle the brief asked for",
      r.sub === "New science for better training.", r.sub);
-  ck("it is in TAB_ORDER, so swipes and view transitions know where it is",
-     r.inOrder === true, "");
-  /* Settings is out of TAB_ORDER on purpose: it has no neighbours any more, so it has no
-     direction to arrive from. */
-  ck("and Settings is out of TAB_ORDER, having no neighbours left", r.syncOut === -1,
-     String(r.syncOut));
+  ck("Research is the last destination in the tab bar", r.navTabs.at(-1) === "research", r.navTabs.join(", "));
+  ck("Settings remains outside the tab bar", !r.navTabs.includes("sync"), r.navTabs.join(", "));
   ck("the nav icon is a drawn SVG, not a glyph or an emoji", r.icon === true, "");
 }
 

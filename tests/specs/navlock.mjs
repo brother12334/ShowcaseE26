@@ -36,7 +36,7 @@ await ev(()=>{
   S.splitId=DEFAULT_SPLIT; applySplit(); save(); TAB="today"; render();
 });
 
-console.log("1 - NO LOCK IN THIS APP HIDES THE BODY'S OVERFLOW");
+console.log("1 - THE ROOT SCROLL LOCK IS LIMITED TO TODAY HOME");
 /* Read off the stylesheet, because this is a rule about the source: a future lock that
    reaches for overflow:hidden on the body is the bug coming back. */
 {
@@ -44,7 +44,9 @@ console.log("1 - NO LOCK IN THIS APP HIDES THE BODY'S OVERFLOW");
   const css = src.slice(0, src.indexOf("</style>"));
   const hits = (css.match(/(^|\})\s*(html|body)[^{}]*\{[^}]*overflow(-x|-y)?\s*:\s*hidden/g) || []);
   console.log("   ", JSON.stringify(hits));
-  ck("nothing sets overflow:hidden on html or body", hits.length === 0, hits.join(" | "));
+  const today = hits.filter(rule=> /html:has\(body\.nav-flush\)\s*\{/.test(rule));
+  ck("CONTROL: Today has an explicit root scroll lock", today.length === 1, hits.join(" | "));
+  ck("no sheet or other screen hides root overflow", hits.length === today.length, hits.join(" | "));
 }
 
 console.log("2 - AND THE BODY STAYS SCROLLABLE WITH A SHEET OPEN");

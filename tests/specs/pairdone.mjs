@@ -116,11 +116,13 @@ ck("and says so in the right numbers",
 console.log("\n4 - IT SHOWS IN THE FINISHED SESSION AND COUNTS TOWARD VOLUME");
 const shown = await p.evaluate(()=>{
   TAB = "history"; render();
-  const txt = document.body.innerText;
   const s = S.sessions[0];
+  const card = [...document.querySelectorAll("#app [data-sess]")].find(el=> el.dataset.sess === s.id);
+  card?.click();
+  const detail = card?.querySelector(".detail");
   const vol = s.entries.reduce((t,e)=> t + sideSetsWorking(e)
     .reduce((u,x)=> u + ((parseFloat(x.weight)||0) * (parseFloat(x.reps)||0) * (x.count||1)), 0), 0);
-  return {listed: /Cable Lateral Raise/.test(document.getElementById("app").innerHTML),
+  return {listed: card?.classList.contains("open") && /Cable Lateral Raise/.test(detail.innerText),
           setCount: typeof sessSets === "function" ? sessSets(s) : null,
           setList: setListHTML(s.entries[0]).replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim(),
           chips: (setListHTML(s.entries[0]).match(/class="side-chip[^"]*"[^>]*>([LR])</g) || [])
