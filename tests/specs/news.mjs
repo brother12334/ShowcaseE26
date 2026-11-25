@@ -51,80 +51,31 @@ await ev(()=>{
   window.__open = ()=> !document.getElementById("newsFull").hidden;
 });
 
-console.log("1 - A NEW PROFILE IS TOLD NOTHING");
-{
-  const r = await ev(()=>{
-    window.__fresh();
-    const aud = newsAudience();
-    const due = whatsNewDue();
-    return {aud, due, stamp: S.seenNews, forV: NEWS_FOR};
-  });
-  ck("it is not in the audience", r.aud === false, JSON.stringify(r));
-  ck("the page is not due", r.due === false, JSON.stringify(r));
-  ck("and the version is stamped silently, so it never arrives later",
-     r.stamp === r.forV, JSON.stringify(r));
-}
-
-console.log("2 - FOUR WAYS TO BE AN EXISTING USER");
-{
-  const r = await ev(()=>{
-    const out = {};
-    window.__existing(); out.session = newsAudience();
-    window.__fresh(); S.planLog = [{at: Date.now(), kind:"x"}]; out.planLog = newsAudience();
-    window.__fresh(); S.importMeta = {at: Date.now()}; out.imported = newsAudience();
-    window.__fresh(); ACCT.createdAt = Date.now() - 3 * DAY_MS; out.oldAcct = newsAudience();
-    return out;
-  });
-  ck("a logged session counts", r.session === true, JSON.stringify(r));
-  ck("an edited plan counts", r.planLog === true, JSON.stringify(r));
-  ck("an imported plan counts", r.imported === true, JSON.stringify(r));
-  ck("an account older than a day counts", r.oldAcct === true, JSON.stringify(r));
-}
-
-console.log("3 - AN EXISTING USER SEES IT, ONCE");
-{
-  const r = await ev(()=>{
-    window.__existing();
-    const due1 = whatsNewDue();
-    openWhatsNew();
-    const open = window.__open();
-    const locked = document.body.classList.contains("news-open");
-    closeWhatsNew();
-    return {due1, open, locked, shut: !window.__open(),
-      stamp: S.seenNews, forV: NEWS_FOR, due2: whatsNewDue()};
-  });
-  ck("the page is due", r.due1 === true, JSON.stringify(r));
-  ck("it opens full page", r.open === true, JSON.stringify(r));
-  ck("and locks the page behind it", r.locked === true, JSON.stringify(r));
-  ck("closing it hides it", r.shut === true, JSON.stringify(r));
-  ck("closing stamps the version", r.stamp === r.forV, JSON.stringify(r));
-  ck("so it is never due again", r.due2 === false, JSON.stringify(r));
-}
-
-console.log("4 - IT IS REACHED FROM THE OPENING PROMPTS, AHEAD OF THEM");
-{
-  const r = await ev(()=>{
-    window.__existing();
-    delete S.active;
+console.log("1 - STARTUP STAMPS NEWS WITHOUT OPENING IT");
+for(const profile of ["__fresh", "__existing"]){
+  const r = await ev(key=>{
+    window[key]();
+    const before = S.seenNews;
+    S.prefs = {...S.prefs, sleepPrompt:false};
     openingPrompts();
-    const open = window.__open();
-    closeWhatsNew();
-    return {open};
-  });
-  ck("openingPrompts opens it", r.open === true, JSON.stringify(r));
+    return {before, open:window.__open(), stamp:S.seenNews, version:NEWS_FOR};
+  }, profile);
+  ck("CONTROL: the profile had an unread version", r.before !== r.version);
+  ck("startup stamps it and keeps the screen closed", !r.open && r.stamp === r.version, JSON.stringify(r));
 }
-{
-  /* Mid-workout is the one time it must not interrupt. */
-  const r = await ev(()=>{
-    window.__existing();
-    S.active = {workoutId: ROTATION[0], startedAt: Date.now(), entries:[]};
-    openingPrompts();
-    const open = window.__open();
-    delete S.active;
-    return {open};
-  });
-  ck("but not in the middle of a workout", r.open === false, JSON.stringify(r));
-}
+
+console.log("2 - SETTINGS HELP STILL OPENS THE FULL PAGE");
+const manual = await ev(()=>{
+  TAB = "sync"; SET_PAGE = "help"; render();
+  const button = document.querySelector("#newsOpen");
+  button?.click();
+  const opened = window.__open();
+  const locked = document.body.classList.contains("news-open");
+  closeWhatsNew();
+  return {button:!!button, opened, locked, closed:!window.__open()};
+});
+ck("CONTROL: Help rendered its release notes button", manual.button);
+ck("the page opens on request and can be closed", manual.opened && manual.locked && manual.closed);
 
 console.log("5 - WHAT THE PAGE ACTUALLY SAYS");
 {
