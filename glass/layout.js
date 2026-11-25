@@ -457,14 +457,15 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "shapes": [
     {
-     "still": "assets/body/chrome-cube",
+     "shape": "capsule-m",
      "x": 252,
      "y": 120,
      "w": 150,
      "h": 153,
      "layer": "back",
+     "depth": 0.4,
      "bob": 4,
-     "video": "assets/shape-video/chrome-cube.mp4"
+     "spin": false
     },
     {
      "shape": "torus-m",
@@ -502,64 +503,70 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "shapes": [
     {
-     "still": "assets/body/chrome-ring",
+     "shape": "torus-m",
      "x": 224,
      "y": 86,
      "w": 174,
      "h": 173,
      "layer": "back",
+     "depth": 0.4,
      "bob": 4,
-     "video": "assets/shape-video/chrome-ring.mp4"
+     "spin": false
     },
     {
-     "still": "assets/body/pearl-bar",
+     "shape": "sphere-xs",
      "x": 24,
      "y": 115,
      "w": 48,
      "h": 48,
      "layer": "back",
+     "depth": 1.1,
      "bob": 4,
-     "video": "assets/shape-video/pearl-bar.mp4"
+     "spin": false
     },
     {
-     "still": "assets/body/pearl-cross",
+     "shape": "blob",
      "x": -55,
      "y": 495,
      "w": 105,
      "h": 119,
      "layer": "back",
+     "depth": 0.7,
      "bob": 4,
-     "video": "assets/shape-video/pearl-cross.mp4"
+     "spin": false
     },
     {
-     "still": "assets/body/chrome-cube",
+     "shape": "rbox-s",
      "x": 314,
      "y": 755,
      "w": 112,
      "h": 114,
      "layer": "back",
+     "depth": 0.7,
      "bob": 4,
-     "video": "assets/shape-video/chrome-cube.mp4"
+     "spin": false
     },
     {
-     "still": "assets/body/pearl-star",
+     "shape": "star",
      "x": 273,
      "y": 1095,
      "w": 166,
      "h": 163,
      "layer": "back",
+     "depth": 0.4,
      "bob": 4,
-     "video": "assets/shape-video/pearl-star.mp4"
+     "spin": false
     },
     {
-     "still": "assets/body/chrome-capsule",
+     "shape": "capsule-xs",
      "x": -40,
      "y": 1390,
      "w": 80,
      "h": 82,
      "layer": "back",
+     "depth": 1.1,
      "bob": 4,
-     "video": "assets/shape-video/chrome-capsule.mp4"
+     "spin": false
     }
    ]
   },

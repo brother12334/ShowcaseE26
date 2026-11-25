@@ -80,24 +80,40 @@ ck("CONTROL: the plan knows which week it is on", r.week > 0, String(r.week));
 ck("and the header states it", r.right === "week " + r.week + (r.of ? " of " + r.of : ""),
    r.right);
 
-console.log("\n1b. THE SUPPLIED IRIDESCENT ART SITS BEHIND BODY");
+/* THIS LOOKED FOR assets/body/, AND THAT FOLDER IS GONE. The expectation was not wrong
+   about anything that matters — Body's decoration must sit behind the content, must not
+   catch a tap, and must have the pixels for a 3x phone — but it named the art by the
+   folder it happened to live in. Body carried six iridescent objects supplied with the
+   design pack, then six I rendered to replace them when the originals could not be made
+   to turn, and the owner's answer to both was that this screen should use the same clear
+   glass as every other one. It does, so the subject is the same and only the source
+   moved. The three real rules are asserted off whatever art the screen actually mounts. */
+console.log("\n1b. BODY'S DECORATION SITS BEHIND IT AND CANNOT BE TAPPED");
 r = await p.evaluate(async ()=>{
   const wrapper = document.querySelector('#stage > .glass-layer > [aria-hidden="true"]');
-  const shapes = [...(wrapper?.querySelectorAll('.glass[data-still^="assets/body/"]') || [])];
+  const shapes = [...(wrapper?.querySelectorAll('.glass[data-still]') || [])];
   const art = await Promise.all(shapes.map(async shape=>{
     const image = new Image();
     image.src = shape.dataset.still + '.webp';
     await image.decode();
-    return shape.classList.contains('back') && getComputedStyle(shape).pointerEvents === 'none' &&
-      image.naturalWidth >= 3 * parseFloat(shape.style.width);
+    return {src: shape.dataset.still.split('/').pop(),
+            back: shape.classList.contains('back'),
+            quiet: getComputedStyle(shape).pointerEvents === 'none',
+            sharp: image.naturalWidth >= 3 * parseFloat(shape.style.width)};
   }));
   return {art, behind: wrapper && getComputedStyle(wrapper).zIndex === '0',
           map: !!document.querySelector('.nb-map .bm-fig')};
 });
 ck("CONTROL: the seeded Body still renders its anatomy map", r.map);
-ck("the six shipped assets decode at phone density and cannot intercept taps",
-   r.art.length === 6 && r.art.every(Boolean));
-ck("the art is behind the Body content", r.behind);
+ck("CONTROL: and it really does mount its six shapes", r.art.length === 6,
+   r.art.map(x=> x.src).join(","));
+ck("none of them can intercept a tap", r.art.every(x=> x.quiet),
+   JSON.stringify(r.art.filter(x=> !x.quiet)));
+ck("each one has the pixels for a 3\u00d7 phone", r.art.every(x=> x.sharp),
+   JSON.stringify(r.art.filter(x=> !x.sharp)));
+ck("every one of them is on the back layer", r.art.every(x=> x.back),
+   JSON.stringify(r.art.filter(x=> !x.back)));
+ck("and the art is behind the Body content", r.behind);
 
 console.log("\n2. THE ANATOMICAL FIGURE IS STILL THE ANATOMICAL FIGURE");
 r = await p.evaluate(()=>{
