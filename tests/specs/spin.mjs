@@ -116,14 +116,18 @@ await p.route(historyMap, async route=> {
 });
 const firstPaint = await p.evaluate(()=>{
   goTab("today");
+  const today = document.querySelector('#stage video.hero-media');
   goTab("history");
   const hero = document.querySelector('#stage [data-glass-hero]');
   return {tab: document.querySelector('#app [data-dg-screen]')?.dataset.dgScreen,
-    still: hero?.dataset.still, instant: !!hero?.closest('[data-glass-instant]')};
+    still: hero?.dataset.still, instant: !!hero?.closest('[data-glass-instant]'),
+    todayPoster:today?.getAttribute("poster"), todaySource:today?.getAttribute("src")};
 });
 ck("CONTROL: the tab change draws History", firstPaint.tab === "history", JSON.stringify(firstPaint));
 ck("its artwork is mounted in the same task without a navigation fade",
    firstPaint.instant && firstPaint.still?.endsWith("overlay-history"), JSON.stringify(firstPaint));
+ck("Today mounts its poster before starting the decoder",
+   !!firstPaint.todayPoster && firstPaint.todaySource === null, JSON.stringify(firstPaint));
 await p.waitForFunction(()=> document.querySelector('[data-glass-hero] video.glass-turn-loading')?.readyState >= 2);
 const pending = await p.evaluate(()=>({
   poster:getComputedStyle(document.querySelector('[data-glass-hero] .glass-img')).visibility,

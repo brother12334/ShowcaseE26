@@ -8865,7 +8865,7 @@ body[class~="nav-flush"] [data-dg-screen="today"] .dg-hero{flex:1 1 auto;min-hei
    That is what makes changing the scheme safe: no code has to understand both. Anything
    that ever DOES need to order them must compare the four numbers, not the strings, or
    build 10 of a day will sort below build 2. */
-const APP_VERSION = "2026.11.25.17";
+const APP_VERSION = "2026.11.25.18";
 /* The version as a person reads it: the same string, minus a build number of 1, which is
    every release except the second and later of a single day. */
 function verLabel(v){ return String(v || APP_VERSION).replace(/\.1$/, ""); }
@@ -28501,8 +28501,9 @@ function goTab(t){
   const changed = TAB !== t;
   TAB = t;
   render(changed);
-  window.scrollTo(0, 0);
-  showNav();
+  if(window.scrollY || window.scrollX) window.scrollTo(0, 0);
+  if(changed && window.GlassMotion) GlassMotion.afterPaint(showNav);
+  else showNav();
 }
 document.querySelectorAll("nav button").forEach(button=>{
   button.onclick = ()=> goTab(button.dataset.tab);
@@ -36633,7 +36634,7 @@ function glassCfg(k, dflt){
 function glassHeroPlay(){
   if(INTRO_RUNNING || !GLASS_HERO_SEEN || document.hidden) return;
   const v = document.querySelector("#stage .glass-layer video.hero-media");
-  if(!v) return;
+  if(!v || !v.hasAttribute("src")) return;
   const rate = Number(glassCfg("heroRate", 1)) || 1;
   if(v.playbackRate !== rate) v.playbackRate = rate;
   if(v.paused) v.play().catch(()=>{});
@@ -36834,6 +36835,7 @@ function render(fastTab){
      now, and from the visibility handler, which is where a launch and a return belong.
      render() is a reader. renderpure.mjs holds it to that. */
   const app = $("#app");
+  const artWidth = navigating ? app.clientWidth : 0;
   /* No account, no app. Signing up comes before everything — the plan, the wizard, the
      tab bar — because every byte the app is about to write belongs to an account, and
      retro-fitting one over data that already exists is how people end up with two. */
@@ -36909,7 +36911,6 @@ function render(fastTab){
   /* ONE BAD RECORD MUST NOT COST YOU THE SCREEN. Every tab is drawn and wired behind
      renderTabInto(), which shows what threw and an export button rather than leaving a
      tab bar above nothing. See the RESCUE section. */
-  const artWidth = navigating ? app.clientWidth : 0;
   renderTabInto(app, navigating);
   document.body.classList.toggle("nav-flush", TAB === "today" &&
     !!app.querySelector('[data-dg-screen="today"]') && !app.querySelector('[data-today-extra]'));
@@ -66638,8 +66639,9 @@ function shareViewHTML(r){
    NEWS_FOR is the version this page describes. Bumping APP_VERSION does not re-show it;
    only changing this does, which is deliberate — a bug fix release should not reopen a
    page about the last big one. */
-const NEWS_FOR = "2026.11.25.17";
+const NEWS_FOR = "2026.11.25.18";
 const NEWS = [
+  {k:"Faster first paint", s:["Tab switches put the page and poster on screen before starting a new hero or releasing the previous one. Research computes just the training signals it needs."]},
   {k:"Quicker, steadier tabs", s:["Tabs show content and artwork together. Research cards are ready to read immediately, and the glass keeps its still visible until the video and refraction can appear together."]},
   {k:"Smoother light through glass", s:["The History and Research counts and Workout clock bend through glass with smoother color, cleaner edges, and refraction that follows the video frame by frame."]},
   {k:"Live text bends through glass", s:["The History and Research counts and the Workout clock now bend and split into color through the moving glass, using the same light paths as the Today cross."]},

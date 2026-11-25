@@ -97,6 +97,33 @@
       raf = requestAnimationFrame(tick);
     }
   }
+  let releaseQueue = [];
+  function afterPaint(task) {
+    releaseQueue.push(task);
+    if (releaseQueue.length !== 1) return;
+    let flushed = false;
+    const flush = () => {
+      if (flushed) return;
+      flushed = true;
+      clearTimeout(timer);
+      cancelAnimationFrame(frame);
+      const batch = releaseQueue;
+      releaseQueue = [];
+      batch.forEach(run => run());
+    };
+    // The timeout also drains releases when the tab becomes hidden.
+    const timer = setTimeout(flush, 100);
+    const frame = requestAnimationFrame(() => setTimeout(flush, 0));
+  }
+
+  function releaseVideo(video) {
+    afterPaint(() => {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    });
+  }
+
   function stopTurn(item) {
     if (!item.turn) return;
     clearTimeout(item.turnTimeout);
@@ -104,12 +131,10 @@
     item.preparedRefraction?.cancel();
     item.stopRefraction = item.preparedRefraction = null;
     item.turn.onerror = item.turn.onload = null;
-    if (item.turn.tagName === 'VIDEO') {
-      item.turn.pause();
-    }
-    item.turn.removeAttribute('src');
-    if (item.turn.tagName === 'VIDEO') item.turn.load();
-    item.turn.remove();
+    const turn = item.turn;
+    turn.remove();
+    if (turn.tagName === 'VIDEO') releaseVideo(turn);
+    else turn.removeAttribute('src');
     item.turn = null;
     item.still.style.visibility = '';
   }
@@ -292,5 +317,5 @@
     if (reduce.matches) items.forEach((it) => { setFrame(it, 0); it.el.style.transform = ''; });
     syncPlayback();
   });
-  window.GlassMotion = { mount, unmount, pulse, refresh: syncPlayback };
+  window.GlassMotion = { mount, unmount, pulse, refresh: syncPlayback, afterPaint, releaseVideo };
 })();

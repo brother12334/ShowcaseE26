@@ -36,8 +36,13 @@
       const v = el('video', 'hero-media');
       v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true; v.setAttribute('aria-hidden', 'true');
       v.poster = o.base + fill(h.poster);
-      v.src = o.base + fill(h.video);
-      container.append(v); v.play().catch(() => {});
+      container.append(v);
+      const play = () => {
+        v.src = o.base + fill(h.video);
+        v.play().catch(() => {});
+      };
+      if (o.instant) GlassMotion.afterPaint(() => { if (v.isConnected) play(); });
+      else play();
       return v;
     }
     // live-number hero: a glass overlay, above the text
@@ -90,12 +95,8 @@
     GlassMotion.unmount();
     root.querySelectorAll('.glass-layer').forEach(layer => {
       const video = layer.querySelector('video.hero-media');
-      if (video) {
-        video.pause();
-        video.removeAttribute('src');
-        video.load();
-      }
       layer.remove();
+      if (video) GlassMotion.releaseVideo(video);
     });
     root = null;
   }

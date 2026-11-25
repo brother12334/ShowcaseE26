@@ -209,8 +209,9 @@
       observer?.disconnect();
       number?.removeAttribute('data-glass-lensed');
       canvas.remove();
-      lens?.dispose();
+      const retired = lens;
       lens = null;
+      if (retired) GlassMotion.afterPaint(() => retired.dispose());
     }
     function fail() {
       const reveal = ready;
