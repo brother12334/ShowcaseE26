@@ -452,12 +452,21 @@ window.GLASS_LAYOUT = {
    "height": 1500,
    "shapes": [
     {
+     "still": "assets/body/pearl-sphere",
+     "x": 252,
+     "y": 120,
+     "w": 150,
+     "h": 153,
+     "layer": "back",
+     "bob": 4
+    },
+    {
      "shape": "torus-m",
      "x": 250,
      "y": 418,
      "w": 225,
      "h": 225,
-     "layer": "front",
+     "layer": "back",
      "depth": 0.4,
      "spin": false
     },
@@ -467,7 +476,7 @@ window.GLASS_LAYOUT = {
      "y": 689,
      "w": 112,
      "h": 112,
-     "layer": "front",
+     "layer": "back",
      "depth": 0.7,
      "spin": false
     },
@@ -477,7 +486,7 @@ window.GLASS_LAYOUT = {
      "y": 365,
      "w": 68,
      "h": 68,
-     "layer": "front",
+     "layer": "back",
      "depth": 1.1,
      "spin": false
     }
