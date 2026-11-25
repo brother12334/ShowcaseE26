@@ -1482,14 +1482,6 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
   color:var(--e26-ink-2)}
 
 /* ---- motion ---- */
-/* CARDS ARRIVE, THEY DO NOT ANIMATE CONTINUOUSLY. One transform and one opacity, 180ms,
-   driven by a class an IntersectionObserver adds once and then stops watching. The
-   staggered delay is capped so the twelfth card is not a third of a second behind the
-   first. */
-.rs-card{opacity:0;transform:translateY(7px)}
-.rs-card.in{opacity:1;transform:none;
-  transition:opacity 180ms ease,transform 180ms ease;
-  transition-delay:calc(min(var(--i,0),6) * 22ms)}
 .rs-save.pop .ico{animation:rsPop 220ms ease}
 @keyframes rsPop{0%{transform:scale(1)}40%{transform:scale(1.28)}100%{transform:scale(1)}}
 .rs-card.is-new .rs-new{animation:rsPulse 2.4s ease-in-out 3}
@@ -1507,7 +1499,6 @@ button.sug-card{display:block;width:100%;text-align:left;font:inherit;cursor:poi
    The cards still appear — they just appear rather than arrive. */
 @media (prefers-reduced-motion:reduce){
   .rs-card{opacity:1;transform:none;transition:none}
-  .rs-card.in{transition:none;transition-delay:0s}
   .rs-save.pop .ico,.rs-card.is-new .rs-new,.sk{animation:none}
   .rs-chip,.rs-card,.rs-save{transition:none}
   .rs-chip:active,.rs-card:active{transform:none}
@@ -27959,6 +27950,11 @@ function dayList(names){
 }
 /* One call, everything the Body tab needs. */
 function bodyAnalysis(){
+  const draw = TAB_ANALYSIS;
+  if(!draw) return computeBodyAnalysis();
+  return draw.body ?? (draw.body = computeBodyAnalysis());
+}
+function computeBodyAnalysis(){
   const now = analysisTime();
   const win    = volWindowInfo(now);
   const wk     = windowStats(win.from, win.to);
@@ -48545,8 +48541,8 @@ function viewResearch(){
   /* A paper and the saved list are their own screens; neither has art yet. */
   if(RESEARCH_PAPER) return researchDetailHTML(RESEARCH_PAPER);
   if(RESEARCH_VIEW === "saved") return researchSavedHTML();
-  const n = (()=>{ try{ const c = researchCacheRead();
-    return c && c.papers ? c.papers.length : 0; }catch(e){ return 0; } })();
+  const cache = researchCacheRead();
+  const n = cache ? cache.papers.length : 0;
   /* THE COUNT IS SAID TWICE, AND THE DESIGN MEANS IT TO BE. The hero is a sheet of
      glass with the number under it \u2014 a bubble sits over the digits, which is the whole
      composition \u2014 so the figure is half-read by design. The header states it in words
@@ -48556,11 +48552,9 @@ function viewResearch(){
     live: true,
     right: n ? `<span>${n} paper${n === 1 ? "" : "s"}</span>` : "",
     heroWord: n ? String(n) : ""},
-    viewResearchBody());
+    viewResearchBody(cache));
 }
-function viewResearchBody(){
-
-  const cache = researchCacheRead();
+function viewResearchBody(cache = researchCacheRead()){
   const papers = cache ? cache.papers : [];
   const f = researchState().filters;
   /* THE SIGNALS ARE READ ONCE PER RENDER, not once per comparison. researchRank() is the
@@ -48627,11 +48621,12 @@ function viewResearchBody(){
   }
 
   const matched = researchSearch(researchFilterList(papers, f), RESEARCH_Q);
-  const sorted = matched.slice().sort((a, b)=> researchRank(b, ctx) - researchRank(a, ctx));
+  const sorted = matched.map(p=> ({p, rank: researchRank(p, ctx)}))
+    .sort((a, b)=> b.rank - a.rank).map(x=> x.p);
 
   /* RELEVANT TO YOUR TRAINING comes first and only when it has something to say. Computed
      on this device; see researchPicks(). */
-  const picks = researchPicks(sorted);
+  const picks = researchPicks(sorted, sig);
   if(picks.length && !RESEARCH_Q && !f.topics.length && !f.types.length){
     h += `<div class="rs-sec">Relevant to your training</div>`;
     picks.forEach((x, i)=>{
@@ -48642,7 +48637,8 @@ function viewResearchBody(){
   const week = Date.now() - 7 * 86400000;
   const fresh = sorted.filter(p=> (p.addedAt || p.publishedAt || 0) >= week
                                   && !picks.some(x=> x.p.id === p.id));
-  const rest = sorted.filter(p=> fresh.indexOf(p) < 0 && !picks.some(x=> x.p.id === p.id));
+  const newPapers = new Set(fresh);
+  const rest = sorted.filter(p=> !newPapers.has(p) && !picks.some(x=> x.p.id === p.id));
 
   if(RESEARCH_Q){
     h += `<div class="rs-sec">${matched.length} result${matched.length === 1 ? "" : "s"}</div>`;
@@ -48904,9 +48900,8 @@ function researchSignals(){
 /* Each rule names the topic it wants and the sentence it would say. Deliberately a small
    explicit table rather than a scorer: a reader should be able to read the reason and
    recognise it as true of their own training. */
-function researchPicks(sorted){
-  if(!researchPersonalOn()) return [];
-  const sig = researchSignals();
+function researchPicks(sorted, sig = researchPersonalOn() ? researchSignals() : null){
+  if(!sig) return [];
   const want = [];
   if(sig.nearFailure != null && sig.nearFailure >= 0.4)
     want.push({topic:"hypertrophy", need:"failure",
@@ -49191,20 +49186,8 @@ function bindResearch(){
   /* READ AT 70% OF THE WAY DOWN, which is the brief's rule and a better proxy for having
      read something than opening it was. */
   if(RESEARCH_PAPER && !researchRead(RESEARCH_PAPER)) researchArmReadWatch(RESEARCH_PAPER);
-  /* Cards fade and rise as they arrive. One observer, disconnected on the next render. */
-  researchObserve();
 }
 let RESEARCH_QT = null;
-let RESEARCH_IO = null;
-function researchObserve(){
-  if(RESEARCH_IO){ try{ RESEARCH_IO.disconnect(); }catch(e){} RESEARCH_IO = null; }
-  if(reducedMotion()) return;
-  if(typeof IntersectionObserver !== "function") return;
-  RESEARCH_IO = new IntersectionObserver(es=> es.forEach(e=>{
-    if(e.isIntersecting){ e.target.classList.add("in"); RESEARCH_IO.unobserve(e.target); }
-  }), {rootMargin: "0px 0px -8% 0px"});
-  document.querySelectorAll(".rs-card").forEach(c=> RESEARCH_IO.observe(c));
-}
 let RESEARCH_RW = null;
 function researchArmReadWatch(id){
   if(RESEARCH_RW){ window.removeEventListener("scroll", RESEARCH_RW); RESEARCH_RW = null; }
