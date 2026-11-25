@@ -17,7 +17,7 @@
   const rnd = (r) => r[0] + Math.random() * (r[1] - r[0]);
   let items = [], raf = 0, io = null, scrollY = 0;
   let turnTimer = 0, turnOffset = 0, turnLimit = 3;
-  let qualityLimit = 3, sample = 0, lastFrame = 0, slowFrames = 0;
+  let qualityLimit = 3, sample = 0, lastFrame = 0, frameCount = 0, slowFrames = 0;
   const tilt = { x: 0, y: 0, tx: 0, ty: 0 };
 
   function build(el) {
@@ -108,13 +108,18 @@
   function watchTurns(now) {
     sample = 0;
     const active = items.filter(item => item.turn?.isConnected).length;
-    if (document.hidden || active < 3) { lastFrame = slowFrames = 0; return; }
-    if (lastFrame) slowFrames = now - lastFrame > 27 ? slowFrames + 1 : Math.max(0, slowFrames - 1);
+    if (document.hidden || active < 3) { lastFrame = frameCount = slowFrames = 0; return; }
+    if (lastFrame) {
+      frameCount++;
+      if (now - lastFrame > 27) slowFrames++;
+    }
     lastFrame = now;
-    if (slowFrames >= 8 && qualityLimit > 2) {
+    if (slowFrames >= 5 && qualityLimit > 2) {
       qualityLimit = 2;
-      slowFrames = 0;
+      frameCount = slowFrames = 0;
       syncTurns();
+    } else if (frameCount >= 48) {
+      frameCount = slowFrames = 0;
     }
     if (!sample && qualityLimit > 2) sample = requestAnimationFrame(watchTurns);
   }
@@ -176,7 +181,7 @@
   function unmount() {
     clearTimeout(turnTimer);
     if (sample) cancelAnimationFrame(sample);
-    sample = 0; lastFrame = slowFrames = 0;
+    sample = 0; lastFrame = frameCount = slowFrames = 0;
     turnOffset = 0;
     for (const it of items) {
       if (io) io.unobserve(it.el);
