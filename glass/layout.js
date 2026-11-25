@@ -14,16 +14,19 @@
  * phone asks 750 device pixels of a 320 pixel frame — a 2.3x upscale, and that is
  * exactly why the spinning shapes once looked soft while the still ones looked sharp.
  *
- * The SMALL shapes have the opposite arithmetic. capsule-xs is placed at 68 to 80pt and
- * x-s at 92 to 112, so the largest on a 3x phone is 336 device pixels against a 320
- * pixel frame — no meaningful upscale at all. They turn at full sharpness with no
- * re-render, which is why they are the ones that turn.
+ * The SMALL shapes have the opposite arithmetic, and all five of them turn: sphere-xs,
+ * sphere-s, capsule-xs, x-s and rbox-s. Each one\'s sheet was rendered or re-rendered
+ * until its frame covers the largest slot it is placed in at 3x — 276px for sphere-xs,
+ * 440 for sphere-s, 380 for rbox-s — which tests/specs/spin.mjs measures rather than
+ * takes on trust. They run at 6fps over 36 frames, so one turn takes six seconds.
  *
- * sphere-xs DOES NOT, and that was measured rather than assumed. A sheet was rendered
- * for it; across a full turn the picture changed by 0.8 of 255, against 37 for
- * capsule-xs and 30 for x-s. A smooth sphere is symmetric about every axis and its
- * highlights come from the environment, not its surface, so turning it is a still
- * frame that costs five megabytes a screen. The sheet was deleted again.
+ * THE SPHERES TURN THE STUDIO INSTEAD OF THEMSELVES. Rotating a ball renders the same
+ * frame every time — the first sphere sheet measured 0.8 of 255 of change over a full
+ * revolution, against 37 for capsule-xs — because a sphere is symmetric about every
+ * axis and its window bars come from the environment rather than its surface. What a
+ * turning ball actually looks like is its highlights travelling across it, so for these
+ * the renderer turns the studio and holds the object still (clear.ENV_ROT). Measured
+ * again afterwards: 28 of 255, the same order as the capsule.
  *
  * RESEARCH'S HERO ORBITS INSTEAD OF SPINNING, for the same reason: it is a bubble. The
  * renderer moves it through the scene between frames so the rim light and refraction
@@ -46,10 +49,16 @@
 window.GLASS_LAYOUT = {
  "shapes": {
   "sphere-s": {
-   "still": "assets/shapes/glass-sphere-s"
+   "still": "assets/shapes/glass-sphere-s",
+   "sheet": "assets/motion/glass-sphere-s",
+   "frames": 36,
+   "cols": 12
   },
   "sphere-xs": {
-   "still": "assets/shapes/glass-sphere-xs"
+   "still": "assets/shapes/glass-sphere-xs",
+   "sheet": "assets/motion/glass-sphere-xs",
+   "frames": 36,
+   "cols": 12
   },
   "links": {
    "still": "assets/shapes/glass-links"
@@ -185,7 +194,8 @@ window.GLASS_LAYOUT = {
      "h": 45,
      "layer": "front",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     },
     {
      "shape": "capsule-xs",
@@ -247,7 +257,8 @@ window.GLASS_LAYOUT = {
      "h": 45,
      "layer": "front",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     },
     {
      "shape": "x-s",
@@ -293,7 +304,8 @@ window.GLASS_LAYOUT = {
      "h": 38,
      "layer": "front",
      "depth": 1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     }
    ]
   },
@@ -338,7 +350,8 @@ window.GLASS_LAYOUT = {
      "h": 66,
      "layer": "front",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     },
     {
      "shape": "capsule-xs",
@@ -404,7 +417,8 @@ window.GLASS_LAYOUT = {
      "h": 48,
      "layer": "front",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     },
     {
      "shape": "capsule-xs",
@@ -430,7 +444,8 @@ window.GLASS_LAYOUT = {
      "h": 138,
      "layer": "front",
      "depth": 0.7,
-     "spin": false
+     "spin": true,
+     "fps": 6
     },
     {
      "shape": "torus-m",
@@ -460,7 +475,8 @@ window.GLASS_LAYOUT = {
      "h": 50,
      "layer": "front",
      "depth": 1.1,
-     "spin": false
+     "spin": true,
+     "fps": 6
     },
     {
      "shape": "x-s",
@@ -505,7 +521,8 @@ window.GLASS_LAYOUT = {
      "h": 112,
      "layer": "back",
      "depth": 0.7,
-     "spin": false
+     "spin": true,
+     "fps": 6
     },
     {
      "shape": "capsule-xs",

@@ -138,7 +138,8 @@ let r = await p.evaluate(async ()=>{
     if(it.spin !== true && it.shape) still.add(it.shape); }));
   return {out, stillKeys: [...still].sort().join(",")};
 });
-ck("CONTROL: some shapes are set to turn", r.out.length >= 2, r.out.map(x=> x.key).join(","));
+ck("CONTROL: every small shape in the vocabulary is set to turn", r.out.length >= 5,
+   r.out.map(x=> x.key).join(","));
 ck("every one of them has a sheet", r.out.every(x=> x.sheet), JSON.stringify(r.out));
 ck("and a frame big enough for its largest slot on a 3× phone",
    r.out.every(x=> x.ok), JSON.stringify(r.out));
@@ -148,16 +149,17 @@ ck("and a frame big enough for its largest slot on a 3× phone",
 ck("CONTROL: the big shapes are still left still",
    /jack/.test(r.stillKeys) && /blob/.test(r.stillKeys) && /star/.test(r.stillKeys),
    r.stillKeys);
-/* AND NO SPHERE HAS A SHEET, which is the finding this spec exists to stop being undone.
-   One was rendered for sphere-xs and then measured: across a full 360-degree turn the
-   picture changed by 0.8 of 255, against 37 for capsule-xs and 30 for x-s. A smooth
-   sphere is symmetric about every axis and its window bars come from the environment
-   rather than its surface, so turning it animates nothing while costing five megabytes
-   a screen of decoded sheet. If a sphere ever gets one again, this says why not. */
+/* THE SPHERES TURN TOO, and getting there took a wrong answer first. Rotating a ball
+   renders the same frame every time: the first sphere sheet changed by 0.8 of 255 over
+   a full revolution against 37 for a capsule, because a sphere is symmetric about every
+   axis and its window bars come from the environment rather than its own surface. The
+   renderer turns the studio for these instead (clear.ENV_ROT), which is what a turning
+   ball looks like and is still rendered rather than faked. Both spheres carry a sheet
+   now, and section 4 proves one of them is stepping on a real screen. */
 const spheres = await p.evaluate(()=> Object.entries(window.GLASS_LAYOUT.shapes)
-  .filter(([k, v])=> /sphere/.test(k)).map(([k, v])=> k + (v.sheet ? ":SHEET" : ":still")));
+  .filter(([k, v])=> /sphere/.test(k)).map(([k, v])=> k + (v.sheet ? ":sheet" : ":STILL")));
 ck("CONTROL: there are spheres in the vocabulary", spheres.length >= 2, spheres.join(","));
-ck("and not one of them is given frames to flip", spheres.every(x=> /:still$/.test(x)),
+ck("and both of them have frames of their own", spheres.every(x=> /:sheet$/.test(x)),
    spheres.join(","));
 
 console.log("\n3. THE DESIGN BRIEF'S LIMIT OF THREE MOVING PIECES A SCREEN");

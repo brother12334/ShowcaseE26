@@ -33,9 +33,21 @@ def _u(v):
     return v / np.linalg.norm(v)
 
 
+# TURN THE STUDIO, NOT THE BALL. A perfect sphere is the same shape from every angle and
+# its highlights come from this environment rather than from its surface, so rotating the
+# object renders an identical frame — measured at 0.8 of 255 over a full turn. Rotating
+# the environment instead sweeps the window panes and the strip light across the glass,
+# which is what a turning object looks like and is still rendered rather than faked with
+# a transform. render_all.py sets this per frame for the shapes in ENVSPIN and clears it
+# afterwards; None means the studio sits still, which is every other render.
+ENV_ROT = None
+
+
 def _env(R):
     """RGB HDR studio: a paned window top-left, a tall strip light right, a cool sky ring on
     top, a warm floor bounce, and a faint horizon gradient."""
+    if ENV_ROT is not None:
+        R = R @ ENV_ROT
     def lobe(v, w):
         return np.exp(-(1 - np.clip(R @ _u(v), -1, 1)) / w)
 

@@ -36,13 +36,20 @@ GLASS_TINT = (0.94, 0.97, 1.0)   # slight cool cast; (1,1,1) is neutral, try (1,
 # kind: sphere capsule torus rbox x jack star blob.  `k` renders k times larger then scales
 # down, which keeps window bars and rims crisp on small shapes (use 3 to 4 under 100px).
 SHAPES = {
-    'sphere-s':      (110, 110, [('sphere', (55, 55), 96, (0, 0, 0), {})], 2.5),
-    'sphere-xs':     (74, 74, [('sphere', (37, 37), 64, (0, 0, 0), {})], 4),
+    # BOX AND BALL DOUBLED TOGETHER so the composition is identical and only the
+    # resolution changes: job_shape writes a frame at twice the padded box whatever k
+    # is, and sphere-s is placed at 138pt, which is 414 device pixels on a 3x phone.
+    # At the old 110 box its frames came out 276 and the sheet was visibly soft.
+    'sphere-s':      (220, 220, [('sphere', (110, 110), 192, (0, 0, 0), {})], 2.5),
+    # Box and ball scaled together, so the composition is identical and only the frame
+    # resolution changes — job_shape always writes a frame at twice the padded box, and
+    # these two are placed larger than a 320px frame covers on a 3x phone.
+    'sphere-xs':     (110, 110, [('sphere', (55, 55), 95, (0, 0, 0), {})], 4),
     'capsule-m':     (200, 200, [('capsule', (100, 100), 180, (-20, 35, -35), dict(thick=0.22))], 1.5),
     'capsule-amber': (150, 150, [('capsule', (75, 75), 130, (15, -30, 40), dict(thick=0.24))], 2),
     'capsule-xs':    (104, 104, [('capsule', (52, 52), 88, (10, 30, 60), dict(thick=0.24))], 3),
     'torus-m':       (200, 200, [('torus', (100, 100), 170, (55, 25, 10), dict(thick=0.17))], 1.5),
-    'rbox-s':        (120, 120, [('rbox', (60, 60), 70, (-25, 35, 20), {})], 2.5),
+    'rbox-s':        (160, 160, [('rbox', (80, 80), 93, (-25, 35, 20), {})], 2.5),
     'jack':          (220, 220, [('jack', (110, 110), 190, (-25, 35, 15), dict(thick=0.14))], 1.5),
     'links':         (240, 200, [('torus', (95, 100), 140, (10, 0, 0), dict(thick=0.15)),
                                  ('torus', (150, 100), 140, (80, 30, 0), dict(thick=0.15))], 1.5),
@@ -61,6 +68,14 @@ SHAPES = {
 SPIN = {'x-s': ('z', 90), 'star': ('z', 60), 'jack': ('z', 90), 'rbox-s': ('z', 90),
         'torus-m': ('x', 180), 'capsule-m': ('z', 180), 'capsule-amber': ('z', 180),
         'capsule-xs': ('z', 180), 'blob': ('y', 360)}
+
+# THE SPHERES TURN THE STUDIO INSTEAD. A ball is symmetric about every axis, so turning
+# the object itself renders the same frame every time; the first attempt at a sphere
+# sheet measured 0.8 of 255 of change over a full revolution against 37 for a capsule.
+# What a turning ball actually looks like is its highlights travelling across it, so for
+# these the environment rotates and the object holds still. See clear.ENV_ROT. Degrees
+# for one seamless loop, about the axis named.
+ENVSPIN = {'sphere-xs': ('y', 360), 'sphere-s': ('y', 360)}
 
 CYCLE_DAYS = {'push-a': ['push', 'a.'], 'push-b': ['push', 'b.'], 'pull-a': ['pull', 'a.'],
               'pull-b': ['pull', 'b.'], 'legs-a': ['legs', 'a.'], 'legs-b': ['legs', 'b.']}
@@ -155,7 +170,15 @@ def job_shape(args):
             turn(o, SPIN[name][0], SPIN[name][1] * i / n)
         objs.append(o)
     tmp = out.replace('.webp', '.tmp.webp')
-    C.render_clear_sprite(tmp, round(W2 * k), round(H2 * k), objs, GLASS_TINT)
+    env = None
+    if n and name in ENVSPIN:
+        ax, deg = ENVSPIN[name]
+        env = axis_rot(ax, deg * i / n)
+    C.ENV_ROT = env
+    try:
+        C.render_clear_sprite(tmp, round(W2 * k), round(H2 * k), objs, GLASS_TINT)
+    finally:
+        C.ENV_ROT = None
     size = (W2 * 2, H2 * 2)
     premul_resize(tmp, size).save(out, 'WEBP', quality=92, method=6)
     m = Image.open(tmp.replace('.webp', '-mask.png')).getchannel('A').resize(size, Image.LANCZOS)
@@ -252,7 +275,7 @@ def build_jobs(OUT, want):
             d = f'{OUT}/overlay-{key}'
             os.makedirs(d, exist_ok=True)
             jobs += [('overlay', (key, i, SHAPE_FRAMES, f'{d}/{i:03d}.webp')) for i in range(SHAPE_FRAMES)]
-        for s in SPIN:
+        for s in list(SPIN) + list(ENVSPIN):
             d = f'{OUT}/glass-{s}'
             os.makedirs(d, exist_ok=True)
             jobs += [('shape', (s, i, SHAPE_FRAMES, f'{d}/{i:03d}.webp')) for i in range(SHAPE_FRAMES)]
@@ -260,7 +283,7 @@ def build_jobs(OUT, want):
         if tag.startswith('hero-') and not os.path.isdir(f'{OUT}/{tag}'):
             os.makedirs(f'{OUT}/{tag}', exist_ok=True)
             jobs += [('hero', (tag[5:], i, HERO_FRAMES, f'{OUT}/{tag}/{i:03d}.webp')) for i in range(HERO_FRAMES)]
-        if tag.startswith('sp-') and tag[3:] in SPIN:
+        if tag.startswith('sp-') and (tag[3:] in SPIN or tag[3:] in ENVSPIN):
             os.makedirs(f'{OUT}/glass-{tag[3:]}', exist_ok=True)
             jobs += [('shape', (tag[3:], i, SHAPE_FRAMES, f'{OUT}/glass-{tag[3:]}/{i:03d}.webp')) for i in range(SHAPE_FRAMES)]
     return jobs

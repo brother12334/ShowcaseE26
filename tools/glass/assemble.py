@@ -20,6 +20,10 @@ COLS = 12
 SHAPE_CAP = 320      # max frame width in a shape sheet (px). Raise for sharper, costs memory.
 OVERLAY_CAP = 390    # legacy workout overlay
 HQ_OVERLAYS = {"overlay-history", "overlay-research"}
+# Shapes placed too large for a 320px frame. sphere-s sits at 138pt on the paper page,
+# which is 414 device pixels on a 3x phone; 440 covers it with room to spare. The cost is
+# a 5280x1320 sheet, about 28 MB decoded, on the one screen that uses it.
+HQ_SHAPES = {"glass-sphere-s": 440, "glass-rbox-s": 380}
 FPS_IN, FPS_OUT = 8, 30   # hero loop: rendered at 8 fps, blended up to 30 fps
 
 
@@ -74,4 +78,4 @@ if __name__ == '__main__':
         print('sheet', name, sheet(name, f'{OUT}/motion/{name}', cap, cols), flush=True)
     for d in sorted(glob.glob(f'{SRC}/glass-*/')):
         name = os.path.basename(d.rstrip('/'))
-        print('sheet', name, sheet(name, f'{OUT}/motion/{name}', SHAPE_CAP), flush=True)
+        print('sheet', name, sheet(name, f'{OUT}/motion/{name}', HQ_SHAPES.get(name, SHAPE_CAP)), flush=True)
